@@ -12,6 +12,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market_admin -d reveal_market"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -20,31 +26,57 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   api:
     build:
       context: ./backend/api
+    restart: unless-stopped
     environment:
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
       RM_REDIS_URL: redis://redis:6379/0
       RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
+      RM_ENVIRONMENT: local
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   worker:
     build:
       context: ./backend/worker
+    restart: unless-stopped
     environment:
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
       RM_REDIS_URL: redis://redis:6379/0
       RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
       RM_WORKER_POLL_INTERVAL: 60
+      RM_POLYMARKET_TIMEOUT_SECONDS: 10
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 45s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   postgres_data:

@@ -1,15 +1,25 @@
+from __future__ import annotations
+
 import os
-from dataclasses import dataclass
+from functools import lru_cache
+
+from pydantic import AnyHttpUrl, BaseSettings, Field
 
 
-@dataclass
-class Settings:
-    database_url: str = os.getenv(
-        "RM_DATABASE_URL", "postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market"
+class Settings(BaseSettings):
+    database_url: str = Field(
+        default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market"
     )
-    redis_url: str = os.getenv("RM_REDIS_URL", "redis://redis:6379/0")
-    polymarket_api_base: str = os.getenv("RM_POLYMARKET_API_BASE", "https://strapi-matic.poly.market/api/markets")
-    poll_interval_seconds: int = int(os.getenv("RM_WORKER_POLL_INTERVAL", "30"))
+    redis_url: str = Field(default="redis://redis:6379/0")
+    polymarket_api_base: AnyHttpUrl = Field(default="https://strapi-matic.poly.market/api/markets")
+    poll_interval_seconds: int = Field(default=30)
+    polymarket_timeout_seconds: float = Field(default=10.0)
+
+    class Config:
+        env_prefix = "RM_"
+        env_file = os.getenv("SETTINGS_FILE", None)
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[arg-type]

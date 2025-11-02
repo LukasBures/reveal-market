@@ -1,7 +1,25 @@
-from datetime import datetime
-from typing import Optional, Any
+from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Any, Dict, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+HealthState = Literal["ok", "degraded", "error"]
+
+
+class HealthComponent(BaseModel):
+    status: HealthState
+    detail: Optional[str] = None
+    latency_ms: Optional[float] = Field(default=None, ge=0)
+
+
+class HealthResponse(BaseModel):
+    status: HealthState
+    service: str
+    version: str
+    timestamp: datetime
+    components: Dict[str, HealthComponent]
 
 
 class MarketBase(BaseModel):
@@ -18,7 +36,7 @@ class MarketBase(BaseModel):
 
 
 class MarketCreate(MarketBase):
-    pass
+    """Payload to insert or replace a market record."""
 
 
 class MarketUpdate(BaseModel):
@@ -35,5 +53,9 @@ class MarketRead(MarketBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MarketStatusBreakdown(BaseModel):
+    status: str
+    count: int

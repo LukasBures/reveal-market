@@ -1,13 +1,18 @@
-from typing import List, Optional
+from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException
+from typing import Annotated, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from . import crud, models, schemas
 from .config import get_settings
 from .database import engine, get_session
-from . import models, schemas, crud
+from .health import build_health_response
 
-app = FastAPI(title="Reveal Market API", version="1.0.0")
+settings = get_settings()
+
+app = FastAPI(title=settings.app_name, version=settings.version)
 
 
 @app.on_event("startup")
@@ -15,30 +20,67 @@ def on_startup() -> None:
     models.Base.metadata.create_all(bind=engine)
 
 
-@app.get("/health", tags=["health"])
-def health_check() -> dict[str, str]:
-    settings = get_settings()
-    return {"status": "ok", "polymarket_api": str(settings.polymarket_api_base)}
+@app.get("/", tags=["meta"])
+def read_root() -> dict[str, str]:
+    cfg = get_settings()
+    return {
+        "service": cfg.app_name,
+        "version": cfg.version,
+        "environment": cfg.environment,
+    }
 
 
-@app.get("/markets", response_model=List[schemas.MarketRead], tags=["markets"])
+@app.get("/health", response_model=schemas.HealthResponse, tags=["health"])
+async def health_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
+    return await build_health_response(session)
+
+
+@app.get("/markets", response_model=list[schemas.MarketRead], tags=["markets"])
 def list_markets(
-    status: Optional[str] = None,
-    limit: int = 100,
+    status: Annotated[Optional[str], Query(default=None, description="Filter markets by status")] = None,
+    category: Annotated[Optional[str], Query(default=None, description="Filter markets by category")] = None,
+    oracle: Annotated[Optional[str], Query(default=None, description="Filter markets by oracle address")] = None,
+    search: Annotated[
+        Optional[str],
+        Query(default=None, min_length=2, max_length=200, description="Case-insensitive search over market titles"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(
+            default=settings.default_page_size,
+            ge=1,
+            le=settings.max_page_size,
+            description="Maximum number of markets to return",
+        ),
+    ] = settings.default_page_size,
+    offset: Annotated[int, Query(default=0, ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
-) -> List[schemas.MarketRead]:
-    return crud.get_markets(session, status=status, limit=limit)
+) -> list[schemas.MarketRead]:
+    return crud.get_markets(
+        session,
+        status=status,
+        category=category,
+        oracle=oracle,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
+def market_stats(session: Session = Depends(get_session)) -> list[schemas.MarketStatusBreakdown]:
+    return crud.get_market_stats(session)
 
 
 @app.get("/markets/{event_id}", response_model=schemas.MarketRead, tags=["markets"])
 def read_market(event_id: str, session: Session = Depends(get_session)) -> schemas.MarketRead:
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
-        raise HTTPException(status_code=404, detail="market_not_found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     return market
 
 
-@app.post("/markets", response_model=schemas.MarketRead, tags=["markets"], status_code=201)
+@app.post("/markets", response_model=schemas.MarketRead, tags=["markets"], status_code=status.HTTP_201_CREATED)
 def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(get_session)) -> schemas.MarketRead:
     market = crud.create_or_update_market(session, market_in)
     session.flush()
@@ -49,7 +91,7 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
 def update_market(event_id: str, update: schemas.MarketUpdate, session: Session = Depends(get_session)) -> schemas.MarketRead:
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
-        raise HTTPException(status_code=404, detail="market_not_found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     crud.patch_market(session, market, update)
     session.flush()
     return market
