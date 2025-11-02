@@ -1,0 +1,20 @@
+name: Contracts CI
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: Run local pipeline
+        run: ./run_local.sh full
