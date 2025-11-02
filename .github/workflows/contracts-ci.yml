@@ -1,20 +1,31 @@
 name: Contracts CI
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'contracts/**'
   pull_request:
     paths:
       - 'contracts/**'
 
 jobs:
   test:
+    name: 🧪 Forge CI
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: contracts
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+
       - name: Run local pipeline
         run: ./run_local.sh full
