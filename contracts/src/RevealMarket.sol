@@ -49,6 +49,7 @@ contract RevealMarket is ReentrancyGuard {
     event OracleUpdated(address indexed previousOracle, address indexed newOracle);
 
     error AlreadyInitialized();
+    error SettlementInProgress();
     error InvalidPhase(Phase expected, Phase current);
     error InvalidTimestamp();
     error InvalidOracle();
@@ -97,6 +98,7 @@ contract RevealMarket is ReentrancyGuard {
     uint256 public paidOut;
 
     bool private _initialized;
+    bool private _settlementInProgress;
 
     mapping(address => Ticket[]) public userTickets;
 
@@ -357,7 +359,7 @@ contract RevealMarket is ReentrancyGuard {
         emit MarketCancelled(msg.sender, reason);
     }
 
-    function emergencySettle(bytes32 outcomeHash, uint256 declaredWinningPool) external {
+    function emergencySettle(bytes32 outcomeHash, uint256 declaredWinningPool) external nonReentrant {
         _checkController();
         if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase);
         winningOutcomeHash = outcomeHash;
@@ -434,6 +436,7 @@ contract RevealMarket is ReentrancyGuard {
         if (declaredWinningPool == 0 || declaredWinningPool > totalPool) revert WinningPoolNotSet();
 
         winningPool = declaredWinningPool;
+        _settlementInProgress = true;
         uint256 netPool = IRakeManager(rakeManager).takeRake(collateral, totalPool);
         uint256 rakeAmount = totalPool - netPool;
         if (rakeAmount > 0) {
@@ -446,6 +449,7 @@ contract RevealMarket is ReentrancyGuard {
         totalPool = netPool;
 
         phase = Phase.Settled;
+        _settlementInProgress = false;
         emit Settled(outcomeHash);
     }
 
@@ -468,6 +472,7 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     function _checkController() internal view {
+        if (_settlementInProgress) revert SettlementInProgress();
         if (msg.sender != factory && msg.sender != guardian) revert NotAuthorized();
     }
 }

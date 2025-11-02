@@ -43,7 +43,7 @@ if [[ "${1:-}" == "full" ]]; then
   echo "=============================="
   echo "🎯  STEP 4: Running extended fuzz tests"
   echo "=============================="
-  forge test --profile ci.fuzz --match-test testFuzz --gas-report || true
+  FOUNDRY_PROFILE=ci.fuzz forge test --match-test testFuzz --gas-report || true
   echo
 
   echo "=============================="

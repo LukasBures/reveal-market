@@ -13,7 +13,7 @@ contract RakeManagerTest is Test {
         manager = new RakeManager(address(this), treasury, 100); // 1% default rake
     }
 
-    function testInitialState() public {
+    function testInitialState() public view {
         assertEq(manager.treasury(), treasury);
         assertEq(manager.rakeBps(), 100);
     }
