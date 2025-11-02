@@ -766,7 +766,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Ignore top-level lib, but allow contracts/lib
+/lib/
+!contracts/lib/
 lib64/
 parts/
 sdist/
