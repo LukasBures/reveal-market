@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: market_admin
+      POSTGRES_PASSWORD: <REDACTED>
+      POSTGRES_DB: reveal_market
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: ./backend/api
+    environment:
+      RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
+      RM_REDIS_URL: redis://redis:6379/0
+      RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./backend/worker
+    environment:
+      RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
+      RM_REDIS_URL: redis://redis:6379/0
+      RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
+      RM_WORKER_POLL_INTERVAL: 60
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
