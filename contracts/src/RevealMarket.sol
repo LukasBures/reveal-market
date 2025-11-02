@@ -32,8 +32,7 @@ contract RevealMarket is ReentrancyGuard {
         uint256 commitDeadline,
         uint256 revealDeadline,
         address collateral,
-        address guardian,
-        string metadataURI
+        address guardian
     );
     event Committed(address indexed user, bytes32 indexed ticketHash, uint256 amount);
     event Locked();
@@ -45,7 +44,6 @@ contract RevealMarket is ReentrancyGuard {
     event GuardianUpdated(address indexed newGuardian);
     event CommitPauseSet(bool paused, address indexed triggeredBy);
     event ClaimPauseSet(bool paused, address indexed triggeredBy);
-    event MetadataUpdated(string metadataURI);
     event MarketCancelled(address indexed triggeredBy, string reason);
     event EmergencySettled(bytes32 outcomeHash, uint256 winningPool, address indexed triggeredBy);
     event OracleUpdated(address indexed previousOracle, address indexed newOracle);
@@ -74,7 +72,6 @@ contract RevealMarket is ReentrancyGuard {
 
     string public eventId;
     Phase public phase;
-    string public metadataURI;
 
     uint256 public commitDeadline;
     uint256 public revealDeadline;
@@ -130,9 +127,9 @@ contract RevealMarket is ReentrancyGuard {
     /// @param oracle_ Oracle authorized to post results.
     /// @param verifier_ Zero-knowledge verifier contract.
     /// @param rakeManager_ Rake manager contract.
+    /// @param treasury_ Treasury that receives rake.
     /// @param collateral_ Collateral token used for staking (address(0) for native ETH).
     /// @param guardian_ Guardian able to pause/emergency-control the market.
-    /// @param metadataURI_ URI describing the market for off-chain indexers.
     function initialize(
         string calldata eventId_,
         uint256 commitDeadline_,
@@ -142,8 +139,7 @@ contract RevealMarket is ReentrancyGuard {
         address rakeManager_,
         address treasury_,
         address collateral_,
-        address guardian_,
-        string calldata metadataURI_
+        address guardian_
     ) external {
         if (_initialized) revert AlreadyInitialized();
         if (oracle_ == address(0)) revert InvalidOracle();
@@ -164,17 +160,14 @@ contract RevealMarket is ReentrancyGuard {
         factory = msg.sender;
         collateral = collateral_;
         guardian = guardian_;
-        metadataURI = metadataURI_;
 
         phase = Phase.Commit;
         _initialized = true;
 
-        emit Initialized(eventId_, oracle_, commitDeadline_, revealDeadline_, collateral_, guardian_, metadataURI_);
+        emit Initialized(eventId_, oracle_, commitDeadline_, revealDeadline_, collateral_, guardian_);
     }
 
     /// @notice Allows users to commit a ticket hash with funds during the commit phase.
-    /// @param ticketHash Commitment hash = keccak256(abi.encodePacked(user, outcomeHash, salt)).
-    /// @param amount Amount of collateral to stake for the ticket.
     function commit(bytes32 ticketHash, uint256 amount) external payable onlyPhase(Phase.Commit) {
         if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
         if (amount == 0) revert InvalidAmount();
@@ -201,7 +194,6 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Oracle posts the resulting outcome hash after commits are locked.
-    /// @param outcomeHash Hashed winning outcome provided by oracle.
     function postResult(bytes32 outcomeHash) external onlyOracle onlyPhase(Phase.Locked) {
         if (winningOutcomeHash != bytes32(0)) revert OutcomeAlreadySet();
         winningOutcomeHash = outcomeHash;
@@ -209,8 +201,6 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Verifies a zero-knowledge proof and settles the market.
-    /// @param proof Serialized proof.
-    /// @param pubSignals Public signals containing winning pool size at index 0.
     function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals) external onlyPhase(Phase.Locked) nonReentrant {
         if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
         if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet();
@@ -224,9 +214,6 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Claims winnings by revealing the committed outcome.
-    /// @param ticketId Index of the ticket in the caller's array.
-    /// @param outcome Plaintext winning outcome string.
-    /// @param salt Random salt used in commit.
     function claim(uint256 ticketId, string calldata outcome, bytes32 salt) external nonReentrant onlyPhase(Phase.Settled) {
         if (winningPool == 0) revert WinningPoolNotSet();
         if (_factoryClaimPaused()) revert ClaimPaused();
@@ -279,7 +266,6 @@ contract RevealMarket is ReentrancyGuard {
         }
 
         if (refundAmount == 0) revert NothingToRefund();
-
         if (phase != Phase.Cancelled && block.timestamp <= revealDeadline) revert InvalidTimestamp();
 
         totalPool -= refundAmount;
@@ -307,8 +293,7 @@ contract RevealMarket is ReentrancyGuard {
         });
     }
 
-    /// @notice Computes the payout a ticket would receive if claimed with the provided reveal data.
-    /// @return payout Expected collateral amount; claimable indicates if reveal criteria are satisfied.
+    /// @notice Computes the payout a ticket would receive if claimed with provided reveal data.
     function payoutPreview(
         address user,
         uint256 ticketId,
@@ -335,12 +320,10 @@ contract RevealMarket is ReentrancyGuard {
         return (payout, true);
     }
 
-    /// @notice Returns the amount of collateral that remains undistributed to winners.
     function remainingPayoutPool() external view returns (uint256) {
         return _collateralBalance();
     }
 
-    /// @notice Updates the guardian controlling emergency pauses.
     function setGuardian(address newGuardian) external {
         _checkController();
         if (newGuardian == address(0)) revert InvalidGuardian();
@@ -348,28 +331,18 @@ contract RevealMarket is ReentrancyGuard {
         emit GuardianUpdated(newGuardian);
     }
 
-    /// @notice Toggles commit pause state.
     function setCommitPaused(bool paused) external {
         _checkController();
         commitsPaused = paused;
         emit CommitPauseSet(paused, msg.sender);
     }
 
-    /// @notice Toggles claim pause state.
     function setClaimPaused(bool paused) external {
         _checkController();
         claimsPaused = paused;
         emit ClaimPauseSet(paused, msg.sender);
     }
 
-    /// @notice Updates the market metadata URI.
-    function updateMetadataURI(string calldata metadataURI_) external {
-        _checkController();
-        metadataURI = metadataURI_;
-        emit MetadataUpdated(metadataURI_);
-    }
-
-    /// @notice Cancels the market allowing participants to refund immediately.
     function cancelMarket(string calldata reason) external {
         _checkController();
         if (phase == Phase.Settled) revert AlreadySettled();
@@ -384,7 +357,6 @@ contract RevealMarket is ReentrancyGuard {
         emit MarketCancelled(msg.sender, reason);
     }
 
-    /// @notice Emergency settlement path used during oracle disputes.
     function emergencySettle(bytes32 outcomeHash, uint256 declaredWinningPool) external {
         _checkController();
         if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase);
@@ -393,7 +365,6 @@ contract RevealMarket is ReentrancyGuard {
         emit EmergencySettled(outcomeHash, declaredWinningPool, msg.sender);
     }
 
-    /// @notice Updates the oracle address.
     function updateOracle(address newOracle) external {
         _checkController();
         if (newOracle == address(0)) revert InvalidOracle();
@@ -402,10 +373,15 @@ contract RevealMarket is ReentrancyGuard {
         emit OracleUpdated(previous, newOracle);
     }
 
-    /// @notice Returns the stored cancellation reason if any.
     function cancellationReason() external view returns (string memory) {
         return _cancellationReason;
     }
+
+    receive() external payable {
+        revert InvalidPhase(Phase.Commit, phase);
+    }
+
+    // ----------------------- internal utils -----------------------
 
     function _onlyPhase(Phase expected) internal view {
         if (phase != expected) revert InvalidPhase(expected, phase);
@@ -445,10 +421,6 @@ contract RevealMarket is ReentrancyGuard {
         Ticket[] storage tickets = userTickets[user];
         if (ticketId >= tickets.length) revert TicketNotFound();
         return tickets[ticketId];
-    }
-
-    receive() external payable {
-        revert InvalidPhase(Phase.Commit, phase);
     }
 
     function _collateralBalance() internal view returns (uint256) {

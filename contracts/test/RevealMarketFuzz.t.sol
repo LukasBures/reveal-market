@@ -18,7 +18,6 @@ contract RevealMarketFuzzTest is Test {
     address payable private constant TREASURY = payable(address(0xF002));
     address private constant USER = address(0xF003);
     address private constant OTHER = address(0xF004);
-    string private constant METADATA_URI = "ipfs://fuzz";
     string private constant OUTCOME = "YES";
     bytes32 private constant LOSE_SALT = bytes32(uint256(999));
 
@@ -31,6 +30,7 @@ contract RevealMarketFuzzTest is Test {
         uint256 commitDeadline = block.timestamp + 2 days;
         uint256 revealDeadline = commitDeadline + 1 days;
 
+        // initialize() now has 9 parameters (removed metadataURI)
         market.initialize(
             "FUZZ",
             commitDeadline,
@@ -40,8 +40,7 @@ contract RevealMarketFuzzTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this),
-            METADATA_URI
+            address(this)
         );
     }
 

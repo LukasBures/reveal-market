@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
@@ -15,7 +16,7 @@ contract MarketFactoryTest is Test {
     RakeManager private rakeManager;
     Verifier private verifier;
     MockERC20 private collateralToken;
-    string private constant DEFAULT_METADATA = "ipfs://factory/default";
+
     string private constant OUTCOME = "TEAM_A";
     bytes32 private constant OUTCOME_HASH = keccak256(bytes(OUTCOME));
     bytes32 private constant WIN_SALT = bytes32(uint256(111));
@@ -43,40 +44,51 @@ contract MarketFactoryTest is Test {
         assertTrue(factory.isCollateralAllowed(address(0)));
     }
 
+    // -----------------------------------------------------------------------
+    // CREATE MARKET
+    // -----------------------------------------------------------------------
     function testCreateMarketDeploysClone() public {
-        uint256 commitDeadline = block.timestamp + 1 days;
-        uint256 revealDeadline = commitDeadline + 1 days;
+    uint256 commitDeadline = block.timestamp + 1 days;
+    uint256 revealDeadline = commitDeadline + 1 days;
 
-        vm.expectEmit(true, true, false, true);
-        emit MarketFactory.MarketCreated(
-            address(0),
-            "E-1",
-            commitDeadline,
-            revealDeadline,
-            address(collateralToken),
-            DEFAULT_METADATA
-        );
-        address market = factory.createMarket(
-            "E-1",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            DEFAULT_METADATA
-        );
+    // Record emitted events during execution
+    vm.recordLogs();
 
-        assertTrue(factory.isMarket(market));
-        assertEq(factory.getMarkets().length, 1);
+    address market = factory.createMarket(
+        "E-1",
+        commitDeadline,
+        revealDeadline,
+        ORACLE,
+        address(collateralToken)
+    );
 
-        RevealMarket clone = RevealMarket(payable(market));
-        assertEq(clone.oracle(), ORACLE);
-        assertEq(uint256(clone.phase()), uint256(RevealMarket.Phase.Commit));
-        assertEq(clone.rakeManager(), address(rakeManager));
-        assertEq(clone.treasury(), TREASURY);
-        assertEq(clone.collateral(), address(collateralToken));
-        assertEq(clone.guardian(), factory.guardian());
-        assertEq(clone.metadataURI(), DEFAULT_METADATA);
+    // Fetch logs and check the MarketCreated event manually
+    Vm.Log[] memory entries = vm.getRecordedLogs();
+    bool found = false;
+    for (uint256 i = 0; i < entries.length; i++) {
+        if (entries[i].topics[0] == keccak256("MarketCreated(address,string,uint256,uint256,address)")) {
+            found = true;
+            // Decode the indexed market address
+            address emittedMarket = address(uint160(uint256(entries[i].topics[1])));
+            assertEq(emittedMarket, market, "MarketCreated event has wrong market param");
+            break;
+        }
     }
+    assertTrue(found, "MarketCreated event not emitted");
+
+    // Validate that factory registered the market
+    assertTrue(factory.isMarket(market));
+    assertEq(factory.getMarkets().length, 1);
+
+    // Validate deployed clone
+    RevealMarket clone = RevealMarket(payable(market));
+    assertEq(clone.oracle(), ORACLE);
+    assertEq(uint256(clone.phase()), uint256(RevealMarket.Phase.Commit));
+    assertEq(clone.rakeManager(), address(rakeManager));
+    assertEq(clone.treasury(), TREASURY);
+    assertEq(clone.collateral(), address(collateralToken));
+    assertEq(clone.guardian(), factory.guardian());
+}
 
     function testCreateMarketRevertsOnInvalidDeadlines() public {
         vm.expectRevert(MarketFactory.InvalidDeadlines.selector);
@@ -85,8 +97,7 @@ contract MarketFactoryTest is Test {
             block.timestamp,
             block.timestamp + 1 days,
             ORACLE,
-            address(collateralToken),
-            DEFAULT_METADATA
+            address(collateralToken)
         );
 
         uint256 commitDeadline = block.timestamp + 1 days;
@@ -96,8 +107,7 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             commitDeadline,
             ORACLE,
-            address(collateralToken),
-            DEFAULT_METADATA
+            address(collateralToken)
         );
     }
 
@@ -110,9 +120,9 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(0),
-            DEFAULT_METADATA
+            address(0)
         );
+
         RevealMarket clone = RevealMarket(payable(market));
         assertEq(clone.collateral(), address(collateralToken));
     }
@@ -126,11 +136,13 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             address(0),
-            address(collateralToken),
-            DEFAULT_METADATA
+            address(collateralToken)
         );
     }
 
+    // -----------------------------------------------------------------------
+    // ADMIN SETTERS
+    // -----------------------------------------------------------------------
     function testAdminSetters() public {
         address newImplementation = address(new RevealMarket());
         factory.setImplementation(newImplementation);
@@ -168,6 +180,9 @@ contract MarketFactoryTest is Test {
         factory.setTreasury(address(0));
     }
 
+    // -----------------------------------------------------------------------
+    // COLLATERAL / ALLOWLIST
+    // -----------------------------------------------------------------------
     function testCreateMarketWithNativeCollateral() public {
         factory.setDefaultCollateral(address(0));
         uint256 commitDeadline = block.timestamp + 2 days;
@@ -178,8 +193,7 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(0),
-            DEFAULT_METADATA
+            address(0)
         );
         RevealMarket clone = RevealMarket(payable(market));
         assertEq(clone.collateral(), address(0));
@@ -259,20 +273,13 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(collateralToken),
-            DEFAULT_METADATA
+            address(collateralToken)
         );
     }
 
-    function testSetMarketMetadata() public {
-        RevealMarket market = _deployDefaultMarket("E-META");
-        string memory newURI = "ipfs://updated";
-        vm.expectEmit(true, false, false, true);
-        emit MarketFactory.MarketMetadataUpdated(address(market), newURI);
-        factory.setMarketMetadata(address(market), newURI);
-        assertEq(market.metadataURI(), newURI);
-    }
-
+    // -----------------------------------------------------------------------
+    // MARKET-SPECIFIC CONTROLS
+    // -----------------------------------------------------------------------
     function testSetMarketGuardian() public {
         RevealMarket market = _deployDefaultMarket("E-GUARD");
         address newGuardian = address(0x9090);
@@ -291,6 +298,9 @@ contract MarketFactoryTest is Test {
         assertTrue(market.claimsPaused());
     }
 
+    // -----------------------------------------------------------------------
+    // GLOBAL PAUSES
+    // -----------------------------------------------------------------------
     function testGlobalCommitPauseBlocksCommit() public {
         RevealMarket market = _deployDefaultMarket("E-GLOBAL-COMMIT");
         factory.setGlobalCommitPaused(true);
@@ -331,15 +341,9 @@ contract MarketFactoryTest is Test {
         assertGt(collateralToken.balanceOf(USER), before);
     }
 
-    function testSetMarketMetadataViaGuardian() public {
-        RevealMarket market = _deployDefaultMarket("E-META-GUARD");
-        address newGuardian = address(0xF00D);
-        factory.setMarketGuardian(address(market), newGuardian);
-        vm.prank(newGuardian);
-        market.updateMetadataURI("ipfs://guardian-update");
-        assertEq(market.metadataURI(), "ipfs://guardian-update");
-    }
-
+    // -----------------------------------------------------------------------
+    // HELPERS
+    // -----------------------------------------------------------------------
     function _deployDefaultMarket(string memory eventId) private returns (RevealMarket) {
         uint256 commitDeadline = block.timestamp + 3 days;
         uint256 revealDeadline = commitDeadline + 1 days;
@@ -348,8 +352,7 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(collateralToken),
-            DEFAULT_METADATA
+            address(collateralToken)
         );
         return RevealMarket(payable(marketAddr));
     }

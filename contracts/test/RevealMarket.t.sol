@@ -27,7 +27,6 @@ contract RevealMarketTest is Test {
     uint256 private commitDeadline;
     uint256 private revealDeadline;
     uint256 private constant STAKE = 100e6; // 100 USDC with 6 decimals
-    string private constant METADATA_URI = "ipfs://market/EVT-1";
 
     function setUp() public {
         market = new RevealMarket();
@@ -47,8 +46,7 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this),
-            METADATA_URI
+            address(this)
         );
     }
 
@@ -64,7 +62,6 @@ contract RevealMarketTest is Test {
 
     function testCommitAndClaimFlow() public {
         assertEq(market.collateral(), address(collateralToken));
-        assertEq(market.metadataURI(), METADATA_URI);
 
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
         _commitTicket(LOSER, LOSE_SALT, keccak256(bytes("TEAM_B")), STAKE);
@@ -234,8 +231,7 @@ contract RevealMarketTest is Test {
             commitDeadline,
             revealDeadline,
             address(collateralToken),
-            address(this),
-            METADATA_URI
+            address(this)
         );
         fresh.initialize(
             eventId,
@@ -246,8 +242,7 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this),
-            METADATA_URI
+            address(this)
         );
 
         vm.expectRevert(RevealMarket.AlreadyInitialized.selector);
@@ -260,8 +255,7 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this),
-            METADATA_URI
+            address(this)
         );
     }
 
@@ -290,13 +284,6 @@ contract RevealMarketTest is Test {
         market.commit(ticketHash, 0);
     }
 
-    function testMetadataUpdate() public {
-        string memory newURI = "ipfs://market/updated";
-        vm.expectEmit(false, false, false, true);
-        emit RevealMarket.MetadataUpdated(newURI);
-        market.updateMetadataURI(newURI);
-        assertEq(market.metadataURI(), newURI);
-    }
 
     function testCancelMarketAllowsImmediateRefund() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
@@ -461,7 +448,6 @@ contract RevealMarketNativeTest is Test {
     uint256 private commitDeadline;
     uint256 private revealDeadline;
     uint256 private constant STAKE = 1 ether;
-    string private constant NATIVE_METADATA_URI = "ipfs://market/native";
 
     function setUp() public {
         market = new RevealMarket();
@@ -471,6 +457,7 @@ contract RevealMarketNativeTest is Test {
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;
 
+        // initialize() now takes 9 args (no metadata URI)
         market.initialize(
             "EVT-NATIVE",
             commitDeadline,
@@ -480,8 +467,7 @@ contract RevealMarketNativeTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(0),
-            address(this),
-            NATIVE_METADATA_URI
+            address(this)
         );
     }
 
@@ -587,13 +573,7 @@ contract RevealMarketNativeTest is Test {
         market.setCommitPaused(false);
     }
 
-    function testNativeMetadataUpdate() public {
-        string memory newURI = "ipfs://market/native-updated";
-        vm.expectEmit(false, false, false, true);
-        emit RevealMarket.MetadataUpdated(newURI);
-        market.updateMetadataURI(newURI);
-        assertEq(market.metadataURI(), newURI);
-    }
+    // 🗑 Removed MetadataUpdated test because metadataURI no longer exists
 
     function testNativeCancelMarketAllowsRefund() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
