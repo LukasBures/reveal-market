@@ -1,6 +1,7 @@
 name: Contracts CI
 
 on:
+  # Auto triggers
   push:
     branches:
       - main
@@ -10,22 +11,37 @@ on:
     paths:
       - 'contracts/**'
 
+  # Manual run from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      run_full:
+        description: 'Run full pipeline (build, test, snapshot, coverage)?'
+        required: false
+        default: 'true'
+
+concurrency:
+  group: contracts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: 🧪 Forge CI
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: contracts
 
     steps:
-      - name: Checkout repository
+      - name: 🧩 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Foundry
+      - name: ⚙️ Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
 
-      - name: Run local pipeline
-        run: ./run_local.sh full
+      - name: 🧪 Run local pipeline
+        run: |
+          chmod +x ./run_local.sh
+          ./run_local.sh full
