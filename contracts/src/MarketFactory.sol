@@ -6,6 +6,7 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 import {RevealMarket} from "./RevealMarket.sol";
+import {IRakeManager} from "./interfaces/IRakeManager.sol";
 
 /// @title MarketFactory
 /// @notice Deploys RevealMarket clones with shared configuration.
@@ -17,7 +18,8 @@ contract MarketFactory is Ownable2Step {
         string indexed eventId,
         uint256 commitDeadline,
         uint256 revealDeadline,
-        address collateral
+        address collateral,
+        uint256 rakeBps
     );
     event CollateralStatusUpdated(address indexed collateral, bool allowed);
     event DefaultCollateralUpdated(address indexed collateral);
@@ -178,7 +180,8 @@ contract MarketFactory is Ownable2Step {
         uint256 commitDeadline,
         uint256 revealDeadline,
         address oracle,
-        address collateral
+        address collateral,
+        uint256 rakeBpsOverride
     ) external onlyOwner returns (address market) {
         if (oracle == address(0)) revert ZeroAddress();
         if (commitDeadline <= block.timestamp || revealDeadline <= commitDeadline) revert InvalidDeadlines();
@@ -186,6 +189,7 @@ contract MarketFactory is Ownable2Step {
         market = implementation.clone();
         address marketCollateral = collateral == address(0) ? defaultCollateral : collateral;
         if (!isCollateralAllowed[marketCollateral]) revert CollateralNotAllowed(marketCollateral);
+        if (rakeBpsOverride > IRakeManager(rakeManager).MAX_RAKE_BPS()) revert InvalidRakeBps();
 
         RevealMarket(payable(market)).initialize(
             eventId,
@@ -196,13 +200,14 @@ contract MarketFactory is Ownable2Step {
             rakeManager,
             treasury,
             marketCollateral,
-            guardian
+            guardian,
+            rakeBpsOverride
         );
 
         _markets.push(market);
         isMarket[market] = true;
 
-        emit MarketCreated(market, eventId, commitDeadline, revealDeadline, marketCollateral);
+        emit MarketCreated(market, eventId, commitDeadline, revealDeadline, marketCollateral, rakeBpsOverride);
     }
 
     // ───────────────────────────────

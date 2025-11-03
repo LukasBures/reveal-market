@@ -47,7 +47,8 @@ contract RevealMarketSecurityTest is Test {
             address(rakeManager),
             TREASURY,
             address(collateral),
-            address(rakeManager)
+            address(rakeManager),
+            0
         );
 
         _commit(WINNER, WIN_SALT, WIN_OUTCOME_HASH, STAKE);

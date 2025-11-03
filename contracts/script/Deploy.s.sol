@@ -63,6 +63,6 @@ contract Deploy is ScriptBase {
         // Example (optional):
         // uint256 commitDeadline = block.timestamp + 3 days;
         // uint256 revealDeadline = commitDeadline + 2 days;
-        // factory.createMarket("EVENT-ID", commitDeadline, revealDeadline, oracle, collateral, metadataURI);
+        // factory.createMarket("EVENT-ID", commitDeadline, revealDeadline, oracle, collateral, 0);
     }
 }

@@ -43,18 +43,24 @@ contract RakeManagerTest is Test {
         uint256 expectedRake = (1 ether * manager.rakeBps()) / 10_000;
         vm.expectEmit(true, false, false, true);
         emit RakeManager.RakeTaken(address(0), 1 ether, expectedRake, treasury);
-        uint256 net = manager.takeRake(address(0), 1 ether);
+        uint256 net = manager.takeRake(address(0), 1 ether, 0);
         assertEq(net, 1 ether - expectedRake);
     }
 
     function testTakeRakeReturnsNetAmountForToken() public {
         uint256 amount = 1_000e6;
-        uint256 expectedRake = (amount * manager.rakeBps()) / 10_000;
+        uint256 overrideBps = 50;
+        uint256 expectedRake = (amount * overrideBps) / 10_000;
         address token = address(0x1234);
         vm.expectEmit(true, false, false, true);
         emit RakeManager.RakeTaken(token, amount, expectedRake, treasury);
-        uint256 net = manager.takeRake(token, amount);
+        uint256 net = manager.takeRake(token, amount, overrideBps);
         assertEq(net, amount - expectedRake);
+    }
+
+    function testTakeRakeRevertsAboveMaxOverride() public {
+        vm.expectRevert(RakeManager.InvalidRakeBps.selector);
+        manager.takeRake(address(0), 1 ether, RakeManager.MAX_RAKE_BPS() + 1);
     }
 
     function testConstructorRevertsZeroTreasury() public {

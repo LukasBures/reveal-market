@@ -30,7 +30,7 @@ contract RevealMarketFuzzTest is Test {
         uint256 commitDeadline = block.timestamp + 2 days;
         uint256 revealDeadline = commitDeadline + 1 days;
 
-        // initialize() now has 9 parameters (removed metadataURI)
+        // initialize() now has 10 parameters (removed metadataURI + rake override)
         market.initialize(
             "FUZZ",
             commitDeadline,
@@ -40,7 +40,8 @@ contract RevealMarketFuzzTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this)
+            address(this),
+            0
         );
     }
 

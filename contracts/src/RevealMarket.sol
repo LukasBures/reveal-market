@@ -47,6 +47,7 @@ contract RevealMarket is ReentrancyGuard {
     event MarketCancelled(address indexed triggeredBy, string reason);
     event EmergencySettled(bytes32 outcomeHash, uint256 winningPool, address indexed triggeredBy);
     event OracleUpdated(address indexed previousOracle, address indexed newOracle);
+    event RakeConfigured(uint256 rakeBps);
 
     error AlreadyInitialized();
     error SettlementInProgress();
@@ -70,6 +71,7 @@ contract RevealMarket is ReentrancyGuard {
     error ClaimPaused();
     error NotAuthorized();
     error MarketAlreadyCancelled();
+    error InvalidRakeBps();
 
     string public eventId;
     Phase public phase;
@@ -99,6 +101,7 @@ contract RevealMarket is ReentrancyGuard {
 
     bool private _initialized;
     bool private _settlementInProgress;
+    uint256 public rakeBpsOverride;
 
     mapping(address => Ticket[]) public userTickets;
 
@@ -141,7 +144,8 @@ contract RevealMarket is ReentrancyGuard {
         address rakeManager_,
         address treasury_,
         address collateral_,
-        address guardian_
+        address guardian_,
+        uint256 rakeBpsOverride_
     ) external {
         if (_initialized) revert AlreadyInitialized();
         if (oracle_ == address(0)) revert InvalidOracle();
@@ -151,6 +155,8 @@ contract RevealMarket is ReentrancyGuard {
         if (guardian_ == address(0)) revert InvalidGuardian();
         if (commitDeadline_ <= block.timestamp) revert InvalidTimestamp();
         if (revealDeadline_ <= commitDeadline_) revert InvalidTimestamp();
+        uint256 maxRake = IRakeManager(rakeManager_).MAX_RAKE_BPS();
+        if (rakeBpsOverride_ > maxRake) revert InvalidRakeBps();
 
         eventId = eventId_;
         commitDeadline = commitDeadline_;
@@ -162,11 +168,15 @@ contract RevealMarket is ReentrancyGuard {
         factory = msg.sender;
         collateral = collateral_;
         guardian = guardian_;
+        rakeBpsOverride = rakeBpsOverride_;
 
         phase = Phase.Commit;
         _initialized = true;
 
         emit Initialized(eventId_, oracle_, commitDeadline_, revealDeadline_, collateral_, guardian_);
+        if (rakeBpsOverride_ > 0) {
+            emit RakeConfigured(rakeBpsOverride_);
+        }
     }
 
     /// @notice Allows users to commit a ticket hash with funds during the commit phase.
@@ -326,6 +336,14 @@ contract RevealMarket is ReentrancyGuard {
         return _collateralBalance();
     }
 
+    function appliedRakeBps() public view returns (uint256) {
+        uint256 overrideBps = rakeBpsOverride;
+        if (overrideBps == 0) {
+            return IRakeManager(rakeManager).rakeBps();
+        }
+        return overrideBps;
+    }
+
     function setGuardian(address newGuardian) external {
         _checkController();
         if (newGuardian == address(0)) revert InvalidGuardian();
@@ -437,7 +455,7 @@ contract RevealMarket is ReentrancyGuard {
 
         winningPool = declaredWinningPool;
         _settlementInProgress = true;
-        uint256 netPool = IRakeManager(rakeManager).takeRake(collateral, totalPool);
+        uint256 netPool = IRakeManager(rakeManager).takeRake(collateral, totalPool, rakeBpsOverride);
         uint256 rakeAmount = totalPool - netPool;
         if (rakeAmount > 0) {
             if (collateral == address(0)) {

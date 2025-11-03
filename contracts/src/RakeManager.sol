@@ -43,8 +43,10 @@ contract RakeManager is Ownable2Step {
     /// @param token Collateral token used for this calculation (address(0) for native ETH).
     /// @param amount Gross pool amount pre-rake.
     /// @return netAmount Net amount remaining after rake deduction.
-    function takeRake(address token, uint256 amount) external returns (uint256 netAmount) {
-        uint256 rakeAmount = (amount * rakeBps) / BPS_DENOMINATOR;
+    function takeRake(address token, uint256 amount, uint256 overrideBps) external returns (uint256 netAmount) {
+        uint256 appliedBps = overrideBps == 0 ? rakeBps : overrideBps;
+        if (appliedBps > MAX_RAKE_BPS) revert InvalidRakeBps();
+        uint256 rakeAmount = (amount * appliedBps) / BPS_DENOMINATOR;
         emit RakeTaken(token, amount, rakeAmount, treasury);
         return amount - rakeAmount;
     }

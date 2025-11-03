@@ -47,7 +47,7 @@ contract ReentrantRakeManager is IRakeManager {
         MARKET.emergencySettle(outcomeHash, declaredWinningPool);
     }
 
-    function takeRake(address, uint256 amount) external override returns (uint256) {
+    function takeRake(address, uint256 amount, uint256) external override returns (uint256) {
         if (_entered) return amount;
         _entered = true;
 
@@ -59,5 +59,13 @@ contract ReentrantRakeManager is IRakeManager {
 
         _entered = false;
         return amount;
+    }
+
+    function MAX_RAKE_BPS() external pure returns (uint256) {
+        return 200;
+    }
+
+    function rakeBps() external pure returns (uint256) {
+        return 100;
     }
 }

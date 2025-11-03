@@ -46,8 +46,10 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this)
+            address(this),
+            0
         );
+        assertEq(market.appliedRakeBps(), rakeManager.rakeBps());
     }
 
     function _commitTicket(address bettor, bytes32 salt, bytes32 outcomeHash, uint256 stake) private {
@@ -86,7 +88,7 @@ contract RevealMarketTest is Test {
         assertEq(uint256(market.phase()), uint256(RevealMarket.Phase.Settled));
         assertEq(market.winningPool(), STAKE);
         uint256 expectedGross = STAKE * 2;
-        uint256 expectedRake = (expectedGross * 100) / 10_000;
+        uint256 expectedRake = (expectedGross * market.appliedRakeBps()) / 10_000;
         assertEq(market.totalPool(), expectedGross - expectedRake);
         assertEq(collateralToken.balanceOf(TREASURY), expectedRake);
         assertEq(market.remainingPayoutPool(), collateralToken.balanceOf(address(market)));
@@ -242,7 +244,8 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this)
+            address(this),
+            0
         );
 
         vm.expectRevert(RevealMarket.AlreadyInitialized.selector);
@@ -255,8 +258,29 @@ contract RevealMarketTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(collateralToken),
-            address(this)
+            address(this),
+            0
         );
+    }
+
+    function testCustomRakeOverrideApplied() public {
+        RevealMarket custom = new RevealMarket();
+        uint256 customRake = 150;
+        vm.expectEmit(false, false, false, true);
+        emit RevealMarket.RakeConfigured(customRake);
+        custom.initialize(
+            "EVT-CUSTOM",
+            block.timestamp + 2 days,
+            block.timestamp + 3 days,
+            ORACLE,
+            address(verifier),
+            address(rakeManager),
+            address(TREASURY),
+            address(collateralToken),
+            address(this),
+            customRake
+        );
+        assertEq(custom.appliedRakeBps(), customRake);
     }
 
     function testPayoutPreviewBeforeSettlementReturnsFalse() public {
@@ -457,7 +481,7 @@ contract RevealMarketNativeTest is Test {
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;
 
-        // initialize() now takes 9 args (no metadata URI)
+        // initialize() now takes 10 args (no metadata URI + rake override)
         market.initialize(
             "EVT-NATIVE",
             commitDeadline,
@@ -467,7 +491,8 @@ contract RevealMarketNativeTest is Test {
             address(rakeManager),
             address(TREASURY),
             address(0),
-            address(this)
+            address(this),
+            0
         );
     }
 

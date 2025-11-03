@@ -59,18 +59,25 @@ contract MarketFactoryTest is Test {
         commitDeadline,
         revealDeadline,
         ORACLE,
-        address(collateralToken)
+        address(collateralToken),
+        0
     );
 
     // Fetch logs and check the MarketCreated event manually
     Vm.Log[] memory entries = vm.getRecordedLogs();
     bool found = false;
     for (uint256 i = 0; i < entries.length; i++) {
-        if (entries[i].topics[0] == keccak256("MarketCreated(address,string,uint256,uint256,address)")) {
+        if (entries[i].topics[0] == keccak256("MarketCreated(address,string,uint256,uint256,address,uint256)")) {
             found = true;
             // Decode the indexed market address
             address emittedMarket = address(uint160(uint256(entries[i].topics[1])));
             assertEq(emittedMarket, market, "MarketCreated event has wrong market param");
+            (uint256 emittedCommit, uint256 emittedReveal, address emittedCollateral, uint256 emittedRake) =
+                abi.decode(entries[i].data, (uint256, uint256, address, uint256));
+            assertEq(emittedCommit, commitDeadline);
+            assertEq(emittedReveal, revealDeadline);
+            assertEq(emittedCollateral, address(collateralToken));
+            assertEq(emittedRake, 0);
             break;
         }
     }
@@ -88,7 +95,40 @@ contract MarketFactoryTest is Test {
     assertEq(clone.treasury(), TREASURY);
     assertEq(clone.collateral(), address(collateralToken));
     assertEq(clone.guardian(), factory.guardian());
+    assertEq(clone.appliedRakeBps(), rakeManager.rakeBps());
 }
+
+    function testCreateMarketWithCustomRakeOverride() public {
+        uint256 commitDeadline = block.timestamp + 2 days;
+        uint256 revealDeadline = commitDeadline + 1 days;
+
+        uint256 customRake = 150;
+        address market = factory.createMarket(
+            "E-CUSTOM",
+            commitDeadline,
+            revealDeadline,
+            ORACLE,
+            address(collateralToken),
+            customRake
+        );
+
+        RevealMarket clone = RevealMarket(payable(market));
+        assertEq(clone.appliedRakeBps(), customRake);
+    }
+
+    function testCreateMarketRevertsWhenRakeAboveMax() public {
+        uint256 commitDeadline = block.timestamp + 1 days;
+        uint256 revealDeadline = commitDeadline + 1 days;
+        vm.expectRevert(MarketFactory.InvalidRakeBps.selector);
+        factory.createMarket(
+            "E-BAD-RAKE",
+            commitDeadline,
+            revealDeadline,
+            ORACLE,
+            address(collateralToken),
+            500
+        );
+    }
 
     function testCreateMarketRevertsOnInvalidDeadlines() public {
         vm.expectRevert(MarketFactory.InvalidDeadlines.selector);
@@ -97,7 +137,8 @@ contract MarketFactoryTest is Test {
             block.timestamp,
             block.timestamp + 1 days,
             ORACLE,
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
 
         uint256 commitDeadline = block.timestamp + 1 days;
@@ -107,7 +148,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             commitDeadline,
             ORACLE,
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
     }
 
@@ -120,7 +162,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(0)
+            address(0),
+            0
         );
 
         RevealMarket clone = RevealMarket(payable(market));
@@ -136,7 +179,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             address(0),
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
     }
 
@@ -193,7 +237,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(0)
+            address(0),
+            0
         );
         RevealMarket clone = RevealMarket(payable(market));
         assertEq(clone.collateral(), address(0));
@@ -273,7 +318,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
     }
 
@@ -352,7 +398,8 @@ contract MarketFactoryTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
         return RevealMarket(payable(marketAddr));
     }

@@ -51,10 +51,12 @@ contract FactoryLifecycleTest is Test {
             commitDeadline,
             revealDeadline,
             ORACLE,
-            address(collateralToken)
+            address(collateralToken),
+            0
         );
 
         RevealMarket market = RevealMarket(payable(marketAddr));
+        assertEq(market.appliedRakeBps(), rakeManager.rakeBps());
 
         // User commits
         _mintAndApprove(market, USER, 100e6);
