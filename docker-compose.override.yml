@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  api:
+    environment:
+      MODE: dev
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./backend/api/app:/app/app
+      - ./backend/shared:/app/shared
+      - ./backend/migrations:/app/migrations
+
+  worker:
+    environment:
+      MODE: dev
+      LOG_LEVEL: DEBUG
+      RM_POLL_INTERVAL_SECONDS: 15
+    volumes:
+      - ./backend/worker/app:/worker/app
+      - ./backend/shared:/worker/shared

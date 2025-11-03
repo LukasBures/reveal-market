@@ -1,26 +1,44 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VERSION=1.8.3 \
-    POETRY_VIRTUALENVS_CREATE=false
-
-ENV PATH="$POETRY_HOME/bin:$PATH"
+    POETRY_VERSION=1.8.3
 
 WORKDIR /worker
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends build-essential curl libpq-dev \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-COPY worker/pyproject.toml pyproject.toml
+COPY worker/pyproject.toml ./pyproject.toml
 COPY shared ./shared
-RUN poetry install --only main --no-interaction --no-ansi --no-root
 
-COPY worker/app ./app
+RUN poetry export --only main --format requirements.txt --output /tmp/requirements.txt --without-hashes
+
+FROM python:3.13-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/worker \
+    MODE=prod
+
+WORKDIR /worker
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+RUN useradd --create-home workeruser
+USER workeruser
+
+COPY --chown=workeruser:workeruser shared ./shared
+COPY --chown=workeruser:workeruser worker/app ./app
+COPY --chown=workeruser:workeruser worker/run.py ./run.py
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -m app.healthcheck
 
-CMD ["python", "-m", "app.main"]
+CMD ["python", "run.py"]

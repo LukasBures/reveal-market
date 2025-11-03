@@ -39,10 +39,12 @@ services:
       dockerfile: api/Dockerfile
     restart: unless-stopped
     environment:
+      MODE: ${MODE:-prod}
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
       RM_REDIS_URL: redis://redis:6379/0
       RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
       RM_ENVIRONMENT: local
+      APP_WORKERS: ${APP_WORKERS:-2}
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,10 +65,11 @@ services:
       dockerfile: worker/Dockerfile
     restart: unless-stopped
     environment:
+      MODE: ${MODE:-prod}
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
       RM_REDIS_URL: redis://redis:6379/0
       RM_POLYMARKET_API_BASE: https://strapi-matic.poly.market/api/markets
-      RM_WORKER_POLL_INTERVAL: 60
+      RM_POLL_INTERVAL_SECONDS: 60
       RM_POLYMARKET_TIMEOUT_SECONDS: 10
     depends_on:
       postgres:

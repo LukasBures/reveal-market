@@ -17,6 +17,7 @@ pydantic = "^2.7.1"
 pydantic-settings = "^2.2.1"
 redis = "^5.0.4"
 python-dotenv = "^1.0.1"
+python-json-logger = "^2.0.7"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.1"

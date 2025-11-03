@@ -20,7 +20,10 @@ class Settings(BaseSettings):
         default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market"
     )
     database_echo: bool = Field(default=False)
+    database_pool_size: int = Field(default=5, ge=1)
+    database_max_overflow: int = Field(default=10, ge=0)
     redis_url: str = Field(default="redis://redis:6379/0")
+    cache_ttl_seconds: int = Field(default=30, ge=1)
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://strapi-matic.poly.market/api/markets")
     polymarket_timeout_seconds: float = Field(default=5.0)

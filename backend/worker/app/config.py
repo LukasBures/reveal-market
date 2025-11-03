@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
     polymarket_page_size: int = Field(default=100, ge=1, le=250)
     polymarket_max_pages: Optional[int] = Field(default=None, ge=1)
+    heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
+    heartbeat_ttl_seconds: int = Field(default=120, ge=10)
 
 
 @lru_cache(maxsize=1)

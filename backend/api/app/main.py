@@ -1,26 +1,92 @@
 from __future__ import annotations
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
-from app import crud, models, schemas
+from app import crud, schemas
 from app.config import get_settings
-from app.database import engine, get_session
+from app.database import get_session, run_migrations
 from app.health import build_health_response
+from prometheus_fastapi_instrumentator import Instrumentator
+from shared.cache import delete, delete_prefix, get_client, get_json, set_json
+from shared.logging import configure_json_logging, log_event, reset_request_id, set_request_id
+
+configure_json_logging("reveal_market.api")
 
 settings = get_settings()
+logger = logging.getLogger("reveal_market.api")
+instrumentator = Instrumentator()
+cache_client = get_client(settings.redis_url)
+
+MARKETS_LIST_PREFIX = "markets:list"
+MARKETS_STATS_KEY = "markets:stats"
+MARKET_DETAIL_PREFIX = "markets:detail"
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    models.Base.metadata.create_all(bind=engine)
+async def lifespan(app: FastAPI):
+    run_migrations()
+    if not getattr(instrumentator, "_instrumented", False):
+        instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
+        instrumentator._instrumented = True  # type: ignore[attr-defined]
     yield
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+app.cache_client = cache_client  # type: ignore[attr-defined]
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid4())
+    token = set_request_id(request_id)
+    start_time = time.perf_counter()
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="http.request.start",
+        message="incoming request",
+        method=request.method,
+        path=request.url.path,
+        client=request.client.host if request.client else None,
+    )
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        log_event(
+            logger,
+            logging.ERROR,
+            event="http.request.error",
+            message="request failed",
+            path=request.url.path,
+            method=request.method,
+            status_code=500,
+            duration_ms=round(duration_ms, 2),
+        )
+        reset_request_id(token)
+        raise exc
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    response.headers["x-request-id"] = request_id
+    log_event(
+        logger,
+        logging.INFO,
+        event="http.request.completed",
+        message="request completed",
+        path=request.url.path,
+        method=request.method,
+        status_code=response.status_code,
+        duration_ms=round(duration_ms, 2),
+    )
+    reset_request_id(token)
+    return response
 
 
 @app.get("/", tags=["meta"])
@@ -58,7 +124,43 @@ def list_markets(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
-    return crud.get_markets(
+    cache_key = _markets_list_cache_key(status, category, oracle, search, limit, offset)
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.list.request",
+        message="processing markets list request",
+        cache_key=cache_key,
+        status=status,
+        category=category,
+        oracle=oracle,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    start = time.perf_counter()
+    cached = get_json(cache_client, cache_key)
+    if cached is not None:
+        duration = (time.perf_counter() - start) * 1000
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.list.cache_hit",
+            message="served markets list from cache",
+            cache_hit=True,
+            duration_ms=round(duration, 2),
+            cache_key=cache_key,
+            status=status,
+            category=category,
+            oracle=oracle,
+            search=search,
+            limit=limit,
+            offset=offset,
+            result_count=len(cached),
+        )
+        return [schemas.MarketRead.model_validate(item) for item in cached]
+
+    markets = crud.get_markets(
         session,
         status=status,
         category=category,
@@ -67,25 +169,113 @@ def list_markets(
         limit=limit,
         offset=offset,
     )
+    market_models = [schemas.MarketRead.model_validate(m) for m in markets]
+    payload = [item.model_dump(mode="json") for item in market_models]
+    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    duration = (time.perf_counter() - start) * 1000
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.list.cache_miss",
+        message="cached fresh markets list",
+        cache_hit=False,
+        duration_ms=round(duration, 2),
+        cache_key=cache_key,
+        status=status,
+        category=category,
+        oracle=oracle,
+        search=search,
+        limit=limit,
+        offset=offset,
+        result_count=len(market_models),
+    )
+    return market_models
 
 
 @app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
 def market_stats(session: Session = Depends(get_session)) -> list[schemas.MarketStatusBreakdown]:
-    return crud.get_market_stats(session)
+    start = time.perf_counter()
+    log_event(logger, logging.DEBUG, "markets.stats.request", "processing market stats request")
+    cached = get_json(cache_client, MARKETS_STATS_KEY)
+    if cached is not None:
+        duration = (time.perf_counter() - start) * 1000
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.stats.cache_hit",
+            message="served market stats from cache",
+            cache_hit=True,
+            duration_ms=round(duration, 2),
+            result_count=len(cached),
+        )
+        return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
+    stats = crud.get_market_stats(session)
+    payload = [jsonable_encoder(item) for item in stats]
+    set_json(cache_client, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
+    duration = (time.perf_counter() - start) * 1000
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.stats.cache_miss",
+        message="cached fresh market stats",
+        cache_hit=False,
+        duration_ms=round(duration, 2),
+        result_count=len(stats),
+    )
+    return stats
 
 
 @app.get("/markets/{event_id}", response_model=schemas.MarketRead, tags=["markets"])
 def read_market(event_id: str, session: Session = Depends(get_session)) -> schemas.MarketRead:
+    cache_key = _market_detail_cache_key(event_id)
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.detail.request",
+        message="processing market detail request",
+        event_id=event_id,
+        cache_key=cache_key,
+    )
+    start = time.perf_counter()
+    cached = get_json(cache_client, cache_key)
+    if cached is not None:
+        duration = (time.perf_counter() - start) * 1000
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.detail.cache_hit",
+            message="served market detail from cache",
+            cache_hit=True,
+            duration_ms=round(duration, 2),
+            event_id=event_id,
+            result_count=1,
+        )
+        return schemas.MarketRead.model_validate(cached)
+
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
-    return market
+    response = schemas.MarketRead.model_validate(market)
+    set_json(cache_client, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
+    duration = (time.perf_counter() - start) * 1000
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.detail.cache_miss",
+        message="cached fresh market detail",
+        cache_hit=False,
+        duration_ms=round(duration, 2),
+        event_id=event_id,
+        result_count=1,
+    )
+    return response
 
 
 @app.post("/markets", response_model=schemas.MarketRead, tags=["markets"], status_code=status.HTTP_201_CREATED)
 def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(get_session)) -> schemas.MarketRead:
     market = crud.create_or_update_market(session, market_in)
     session.flush()
+    _invalidate_market_cache(market.event_id)
     return market
 
 
@@ -96,4 +286,42 @@ def update_market(event_id: str, update: schemas.MarketUpdate, session: Session 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     crud.patch_market(session, market, update)
     session.flush()
+    _invalidate_market_cache(event_id)
     return market
+
+
+def _markets_list_cache_key(
+    status: Optional[str],
+    category: Optional[str],
+    oracle: Optional[str],
+    search: Optional[str],
+    limit: int,
+    offset: int,
+) -> str:
+    parts = [
+        f"status={status or '*'}",
+        f"category={category or '*'}",
+        f"oracle={oracle or '*'}",
+        f"search={search or '*'}",
+        f"limit={limit}",
+        f"offset={offset}",
+    ]
+    return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
+
+
+def _market_detail_cache_key(event_id: str) -> str:
+    return f"{MARKET_DETAIL_PREFIX}:{event_id}"
+
+
+def _invalidate_market_cache(event_id: Optional[str] = None) -> None:
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.cache.invalidate",
+        message="invalidating markets cache",
+        event_id=event_id,
+    )
+    delete_prefix(cache_client, MARKETS_LIST_PREFIX)
+    delete(cache_client, MARKETS_STATS_KEY)
+    if event_id:
+        delete(cache_client, _market_detail_cache_key(event_id))
