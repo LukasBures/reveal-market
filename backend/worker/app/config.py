@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import AnyHttpUrl, Field
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     polymarket_max_pages: Optional[int] = Field(default=None, ge=1)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
     heartbeat_ttl_seconds: int = Field(default=120, ge=10)
+    factory_address: Optional[str] = Field(default=None)
+    rake_manager_address: Optional[str] = Field(default=None)
+    verifier_address: Optional[str] = Field(default=None)
+    rpc_url: Optional[AnyUrl] = Field(default=None)
+    wallet_address: Optional[str] = Field(default=None)
+    wallet_private_key: Optional[SecretStr] = Field(default=None)
+    gas_price_gwei: Optional[float] = Field(default=None, ge=0)
+    max_priority_fee_gwei: Optional[float] = Field(default=None, ge=0)
+    auto_create_onchain_markets: bool = Field(default=False)
+    default_commit_lead_seconds: int = Field(default=86400, ge=60)
+    default_reveal_lead_seconds: int = Field(default=172800, ge=120)
+    max_web3_retries: int = Field(default=3, ge=1)
 
 
 @lru_cache(maxsize=1)

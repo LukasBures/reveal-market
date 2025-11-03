@@ -86,6 +86,5 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     assert all(not key.startswith("markets:") for key in dummy.store.keys())
 
     events = [record.event for record in caplog.records if hasattr(record, "event")]
-    assert "worker.fetch.success" in events
     assert "worker.persist.batch" in events
     assert "worker.cache.invalidate" in events

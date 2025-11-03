@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field, ValidationInfo, field_validator
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
     redis_url: str = Field(default="redis://redis:6379/0")
+    factory_address: str | None = Field(default=None)
+    market_implementation_address: str | None = Field(default=None)
+    rake_manager_address: str | None = Field(default=None)
+    verifier_address: str | None = Field(default=None)
+    rpc_url: AnyUrl | None = Field(default=None)
+    wallet_address: str | None = Field(default=None)
+    wallet_private_key: SecretStr | None = Field(default=None)
+    gas_price_gwei: float | None = Field(default=None, ge=0)
+    max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     cache_ttl_seconds: int = Field(default=30, ge=1)
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://strapi-matic.poly.market/api/markets")

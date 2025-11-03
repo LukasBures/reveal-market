@@ -16,6 +16,7 @@ from redis import Redis
 from shared import cache as shared_cache
 from shared import repository as shared_repository
 from shared.logging import configure_json_logging, log_event
+from .onchain import maybe_create_onchain_market
 
 from .config import get_settings
 from .polymarket import MarketPayload, PolymarketClient
@@ -96,10 +97,11 @@ def fetch_markets_from_polymarket() -> tuple[List[MarketPayload], float]:
     return markets, latency_ms
 
 
-def sync_market(session: Session, market: MarketPayload) -> None:
+def sync_market(session: Session, market: MarketPayload):
     """Upsert a market row using `event_id` as the natural key."""
-    shared_repository.upsert_market(session, market.model_dump())
+    db_market = shared_repository.upsert_market(session, market.model_dump())
     session.flush()
+    return db_market
 
 
 def _calculate_sleep(start_time: float) -> float:
@@ -187,7 +189,8 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         try:
             with session_scope() as session:
                 for market in markets:
-                    sync_market(session, market)
+                    db_market = sync_market(session, market)
+                    maybe_create_onchain_market(settings, db_market, session)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception(
                 "failed to synchronise markets",

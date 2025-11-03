@@ -14,9 +14,11 @@ from app import crud, schemas
 from app.config import get_settings
 from app.database import get_session, run_migrations
 from app.health import build_health_response
+from app.onchain import fetch_factory_markets
 from prometheus_fastapi_instrumentator import Instrumentator
 from shared.cache import delete, delete_prefix, get_client, get_json, set_json
 from shared.logging import configure_json_logging, log_event, reset_request_id, set_request_id
+from shared.onchain import OnChainConfigurationError
 
 configure_json_logging("reveal_market.api")
 
@@ -33,13 +35,13 @@ MARKET_DETAIL_PREFIX = "markets:detail"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()
-    if not getattr(instrumentator, "_instrumented", False):
-        instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
-        instrumentator._instrumented = True  # type: ignore[attr-defined]
     yield
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+if not getattr(app.state, "metrics_instrumented", False):
+    instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
+    app.state.metrics_instrumented = True
 app.cache_client = cache_client  # type: ignore[attr-defined]
 
 
@@ -190,6 +192,26 @@ def list_markets(
         result_count=len(market_models),
     )
     return market_models
+
+
+@app.get("/markets/onchain", tags=["markets"])
+async def list_onchain_markets():
+    settings = get_settings()
+    try:
+        addresses = await fetch_factory_markets(settings)
+    except OnChainConfigurationError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "markets.onchain.unconfigured",
+            "on-chain configuration missing",
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="onchain_not_configured") from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("failed to fetch on-chain markets")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="onchain_query_failed") from exc
+    return {"markets": addresses}
 
 
 @app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])

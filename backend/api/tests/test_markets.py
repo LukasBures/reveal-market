@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import app.main as api_main
 
 from app import models
 
@@ -89,3 +92,24 @@ def test_patch_market_and_stats(client, db_session):
     assert stats_response.status_code == 200
     stats = {entry["status"]: entry["count"] for entry in stats_response.json()}
     assert stats.get("settled") == 1
+
+
+def test_onchain_markets_unconfigured(client):
+    response = client.get("/markets/onchain")
+    assert response.status_code == 503
+
+
+def test_onchain_markets_success(client, monkeypatch):
+    async def fake_fetch(settings):
+        return ["0x1111111111111111111111111111111111111111"]
+
+    monkeypatch.setattr(api_main, "fetch_factory_markets", fake_fetch)
+    monkeypatch.setattr(
+        api_main,
+        "get_settings",
+        lambda: SimpleNamespace(factory_address="0x123", rpc_url="https://unit.test"),
+    )
+
+    response = client.get("/markets/onchain")
+    assert response.status_code == 200
+    assert response.json()["markets"] == ["0x1111111111111111111111111111111111111111"]

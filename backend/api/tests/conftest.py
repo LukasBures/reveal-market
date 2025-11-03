@@ -53,8 +53,6 @@ def test_database(monkeypatch, tmp_path):
         future=True,
     )
 
-    models.Base.metadata.create_all(bind=engine)
-
     monkeypatch.setattr("app.database.engine", engine, raising=False)
     monkeypatch.setattr("app.database.SessionLocal", testing_session_local, raising=False)
     monkeypatch.setattr("app.database.settings", settings, raising=False)
