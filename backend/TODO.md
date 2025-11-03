@@ -13,13 +13,19 @@ This list captures remaining items that would strengthen reliability, developer 
 - **Better error handling around Polymarket API**  
   Add retries with exponential backoff and surfaced metrics for failures/timeouts. Prevents temporary upstream hiccups from generating noisy logs and gives better visibility when the feed degrades.
 
-- **Contract awareness in backend/worker**  
-  Today the backend never touches on-chain state. Add Web3 clients (e.g., `web3.py` with async providers), wire the new `.env` contract variables (`RM_FACTORY_ADDRESS`, etc.), and implement flows to open/monitor markets and handle failures. Ensure all interactions emit structured logs.
+- **Finalize on-chain automation**  
+  The worker can now submit `createMarket` transactions, but it still uses placeholder deadlines/gas values. Hook this into real Polymarket metadata, derive deadlines from source data, persist the on-chain market address in Postgres, and add an option to disable auto-creation per market. Ensure secrets (private keys) are sourced from a secure backend.
+
+- **On-chain event ingestion**  
+  Add a lightweight listener (polling or websockets) that ingests `MarketCreated`, `RakeConfigured`, and future events so the API reflects on-chain state (e.g., backfilling market addresses, rake overrides, guardian changes).
 
 - **More comprehensive tests**  
   Add integration tests that spin up ephemeral Postgres/Redis (via pytest-docker) to cover migrations + caching end-to-end, and property tests for cache key generation. Ensures production-like confidence before shipping changes.
 
 ## Medium Priority
+
+- **Secrets management**  
+  Replace direct use of `RM_WALLET_PRIVATE_KEY` with a pluggable signer abstraction (e.g., HashiCorp Vault, AWS KMS, or Azure Key Vault) so production deployments never load raw keys from plaintext.
 
 - **Config reloading / dynamic tuning**  
   Currently all settings require restarts. Supporting dynamic reload (e.g., SIGHUP to re-read environment or a small admin endpoint) would allow tuning poll intervals or TTLs without downtime.
@@ -40,5 +46,8 @@ This list captures remaining items that would strengthen reliability, developer 
 
 - **Autoscaling hooks**  
   Provide docs or scripts for scaling workers/API containers (CPU-based or backlog-based) should Polymarket ingest rates increase.
+
+- **Rake override surfacing**  
+  Include the newly exposed `appliedRakeBps` value in API responses (and cache keys) so front-ends show accurate fee information. Update `/markets` serialization once the contracts emit overrides.
 
 Each item is valuable, but prioritise “Schema safety for worker”, “Smarter cache invalidation”, and “Polymarket retries” first—they protect correctness and availability as usage grows.

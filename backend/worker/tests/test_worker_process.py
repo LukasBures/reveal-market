@@ -25,18 +25,26 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
         MarketPayload(
             event_id="evt-1",
             title="First",
+            slug="first",
             category="sports",
             metadata_uri=None,
             oracle="polymarket",
             status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.4, 0.6],
+            extra_data={"gamma": {"id": "evt-1"}},
         ),
         MarketPayload(
             event_id="evt-2",
             title="Second",
+            slug="second",
             category="news",
             metadata_uri=None,
             oracle="polymarket",
             status="commit",
+            outcomes=["Up", "Down"],
+            outcome_prices=[0.55, 0.45],
+            extra_data={"gamma": {"id": "evt-2"}},
         ),
     ]
 

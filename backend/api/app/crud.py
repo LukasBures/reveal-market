@@ -47,6 +47,11 @@ def get_market_by_event_id(session: Session, event_id: str) -> Optional[models.M
     return shared_repository.get_market_by_event_id(session, event_id)
 
 
+def get_market_by_condition_id(session: Session, condition_id: str) -> Optional[models.Market]:
+    stmt = select(models.Market).where(models.Market.condition_id == condition_id)
+    return session.scalars(stmt).first()
+
+
 def create_or_update_market(session: Session, market_in: schemas.MarketCreate) -> models.Market:
     return shared_repository.upsert_market(session, market_in.model_dump())
 

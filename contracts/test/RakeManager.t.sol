@@ -59,8 +59,9 @@ contract RakeManagerTest is Test {
     }
 
     function testTakeRakeRevertsAboveMaxOverride() public {
+        uint256 maxBps = manager.maxRakeBps();
         vm.expectRevert(RakeManager.InvalidRakeBps.selector);
-        manager.takeRake(address(0), 1 ether, RakeManager.MAX_RAKE_BPS() + 1);
+        manager.takeRake(address(0), 1 ether, maxBps + 1);
     }
 
     function testConstructorRevertsZeroTreasury() public {

@@ -86,6 +86,7 @@ contract MarketFactory is Ownable2Step {
     error AllowlistPaused();
     error NotGuardianOrOwner();
     error UnknownMarket();
+    error InvalidRakeBps();
 
     // ───────────────────────────────
     // Modifiers
@@ -189,7 +190,7 @@ contract MarketFactory is Ownable2Step {
         market = implementation.clone();
         address marketCollateral = collateral == address(0) ? defaultCollateral : collateral;
         if (!isCollateralAllowed[marketCollateral]) revert CollateralNotAllowed(marketCollateral);
-        if (rakeBpsOverride > IRakeManager(rakeManager).MAX_RAKE_BPS()) revert InvalidRakeBps();
+        if (rakeBpsOverride > IRakeManager(rakeManager).maxRakeBps()) revert InvalidRakeBps();
 
         RevealMarket(payable(market)).initialize(
             eventId,

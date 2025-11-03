@@ -10,7 +10,7 @@ from app.onchain import maybe_create_onchain_market
 
 def test_onchain_creation_skips_when_disabled(monkeypatch):
     settings = Settings()
-    market = SimpleNamespace(event_id="evt", oracle="0xabc", collateral=None, market_address=None)
+    market = SimpleNamespace(event_id="evt", oracle="0xabc", collateral=None, market_address=None, rake_bps=None)
 
     class Session:
         def flush(self):
@@ -24,7 +24,7 @@ def test_onchain_creation_skips_when_disabled(monkeypatch):
 
 def test_onchain_creation_missing_config(monkeypatch):
     data = Settings(auto_create_onchain_markets=True)
-    market = SimpleNamespace(event_id="evt", oracle="0xabc", collateral=None, market_address=None)
+    market = SimpleNamespace(event_id="evt", oracle="0xabc", collateral=None, market_address=None, rake_bps=None)
 
     class Session:
         def flush(self):
@@ -49,6 +49,7 @@ def test_onchain_creation_happy_path(monkeypatch):
         oracle="0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
         collateral=None,
         market_address=None,
+        rake_bps=None,
     )
 
     class Session:

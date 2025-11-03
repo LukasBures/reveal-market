@@ -104,6 +104,8 @@ def client(test_database):
     new_cache = InMemoryCache()
     app.cache_client = new_cache
     api_main.cache_client = new_cache
+    if hasattr(api_main, "_resolution_client"):
+        api_main._resolution_client = None
 
     try:
         with TestClient(app) as test_client:

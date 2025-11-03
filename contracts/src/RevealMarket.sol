@@ -155,7 +155,7 @@ contract RevealMarket is ReentrancyGuard {
         if (guardian_ == address(0)) revert InvalidGuardian();
         if (commitDeadline_ <= block.timestamp) revert InvalidTimestamp();
         if (revealDeadline_ <= commitDeadline_) revert InvalidTimestamp();
-        uint256 maxRake = IRakeManager(rakeManager_).MAX_RAKE_BPS();
+        uint256 maxRake = IRakeManager(rakeManager_).maxRakeBps();
         if (rakeBpsOverride_ > maxRake) revert InvalidRakeBps();
 
         eventId = eventId_;

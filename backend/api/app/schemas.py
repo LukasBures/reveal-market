@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,6 +26,7 @@ class MarketBase(BaseModel):
     event_id: str
     title: str
     category: Optional[str] = None
+    slug: Optional[str] = None
     metadata_uri: Optional[str] = None
     oracle: str
     factory: Optional[str] = None
@@ -33,6 +34,13 @@ class MarketBase(BaseModel):
     status: str = Field(default="commit")
     outcomes: Optional[Any] = None
     extra_data: Optional[Any] = None
+    rake_bps: Optional[int] = None
+    condition_id: Optional[str] = None
+    question_id: Optional[str] = None
+    outcome_prices: Optional[Any] = None
+    image_url: Optional[str] = None
+    closed: Optional[bool] = None
+    uma_resolution_status: Optional[str] = None
 
 
 class MarketCreate(MarketBase):
@@ -46,6 +54,14 @@ class MarketUpdate(BaseModel):
     status: Optional[str] = None
     outcomes: Optional[Any] = None
     extra_data: Optional[Any] = None
+    rake_bps: Optional[int] = None
+    slug: Optional[str] = None
+    condition_id: Optional[str] = None
+    question_id: Optional[str] = None
+    outcome_prices: Optional[Any] = None
+    image_url: Optional[str] = None
+    closed: Optional[bool] = None
+    uma_resolution_status: Optional[str] = None
 
 
 class MarketRead(MarketBase):
@@ -59,3 +75,25 @@ class MarketRead(MarketBase):
 class MarketStatusBreakdown(BaseModel):
     status: str
     count: int
+
+
+class ResolutionWinner(BaseModel):
+    index: int
+    label: Optional[str] = None
+    payout: int
+
+
+class ResolutionSummary(BaseModel):
+    source: str
+    conditionId: str
+    resolved: bool
+    outcomes: List[str] = Field(default_factory=list)
+    payouts: List[int] = Field(default_factory=list)
+    winners: List[ResolutionWinner] = Field(default_factory=list)
+    checkedAt: datetime
+    marketId: Optional[int] = None
+    eventId: Optional[str] = None
+    title: Optional[str] = None
+    slug: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)

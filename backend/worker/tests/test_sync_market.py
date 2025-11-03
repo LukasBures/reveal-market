@@ -33,14 +33,16 @@ def test_sync_market_inserts_and_updates():
         initial = MarketPayload(
             event_id="evt-1",
             title="First Market",
+            slug="first-market",
             category="sports",
             metadata_uri="ipfs://abc",
             oracle="polymarket",
             factory="0xfactory",
             market_address="0xmarket",
             status="commit",
-            outcomes=[{"name": "YES", "price": "0.5"}],
-            extra_data={"foo": "bar"},
+            outcomes=["YES", "NO"],
+            outcome_prices=[0.5, 0.5],
+            extra_data={"gamma": {"id": "evt-1"}},
         )
 
         with TestSession() as session:
@@ -53,7 +55,8 @@ def test_sync_market_inserts_and_updates():
             ).scalar_one()
             assert stored.title == "First Market"
             assert stored.status == "commit"
-            assert stored.outcomes == [{"name": "YES", "price": "0.5"}]
+            assert stored.outcomes == ["YES", "NO"]
+            assert stored.rake_bps is None
 
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
 
@@ -67,5 +70,6 @@ def test_sync_market_inserts_and_updates():
             ).scalar_one()
             assert stored.title == "Updated Market"
             assert stored.status == "settled"
+            assert stored.rake_bps is None
     finally:
         engine.dispose()

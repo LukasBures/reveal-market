@@ -48,55 +48,55 @@ contract MarketFactoryTest is Test {
     // CREATE MARKET
     // -----------------------------------------------------------------------
     function testCreateMarketDeploysClone() public {
-    uint256 commitDeadline = block.timestamp + 1 days;
-    uint256 revealDeadline = commitDeadline + 1 days;
+        uint256 commitDeadline = block.timestamp + 1 days;
+        uint256 revealDeadline = commitDeadline + 1 days;
 
-    // Record emitted events during execution
-    vm.recordLogs();
+        // Record emitted events during execution
+        vm.recordLogs();
 
-    address market = factory.createMarket(
-        "E-1",
-        commitDeadline,
-        revealDeadline,
-        ORACLE,
-        address(collateralToken),
-        0
-    );
+        address market = factory.createMarket(
+            "E-1",
+            commitDeadline,
+            revealDeadline,
+            ORACLE,
+            address(collateralToken),
+            0
+        );
 
-    // Fetch logs and check the MarketCreated event manually
-    Vm.Log[] memory entries = vm.getRecordedLogs();
-    bool found = false;
-    for (uint256 i = 0; i < entries.length; i++) {
-        if (entries[i].topics[0] == keccak256("MarketCreated(address,string,uint256,uint256,address,uint256)")) {
-            found = true;
-            // Decode the indexed market address
-            address emittedMarket = address(uint160(uint256(entries[i].topics[1])));
-            assertEq(emittedMarket, market, "MarketCreated event has wrong market param");
-            (uint256 emittedCommit, uint256 emittedReveal, address emittedCollateral, uint256 emittedRake) =
-                abi.decode(entries[i].data, (uint256, uint256, address, uint256));
-            assertEq(emittedCommit, commitDeadline);
-            assertEq(emittedReveal, revealDeadline);
-            assertEq(emittedCollateral, address(collateralToken));
-            assertEq(emittedRake, 0);
-            break;
+        // Fetch logs and check the MarketCreated event manually
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bool found = false;
+        for (uint256 i = 0; i < entries.length; i++) {
+            if (entries[i].topics[0] == keccak256("MarketCreated(address,string,uint256,uint256,address,uint256)")) {
+                found = true;
+                // Decode the indexed market address
+                address emittedMarket = address(uint160(uint256(entries[i].topics[1])));
+                assertEq(emittedMarket, market, "MarketCreated event has wrong market param");
+                (uint256 emittedCommit, uint256 emittedReveal, address emittedCollateral, uint256 emittedRake) =
+                    abi.decode(entries[i].data, (uint256, uint256, address, uint256));
+                assertEq(emittedCommit, commitDeadline);
+                assertEq(emittedReveal, revealDeadline);
+                assertEq(emittedCollateral, address(collateralToken));
+                assertEq(emittedRake, 0);
+                break;
+            }
         }
+        assertTrue(found, "MarketCreated event not emitted");
+
+        // Validate that factory registered the market
+        assertTrue(factory.isMarket(market));
+        assertEq(factory.getMarkets().length, 1);
+
+        // Validate deployed clone
+        RevealMarket clone = RevealMarket(payable(market));
+        assertEq(clone.oracle(), ORACLE);
+        assertEq(uint256(clone.phase()), uint256(RevealMarket.Phase.Commit));
+        assertEq(clone.rakeManager(), address(rakeManager));
+        assertEq(clone.treasury(), TREASURY);
+        assertEq(clone.collateral(), address(collateralToken));
+        assertEq(clone.guardian(), factory.guardian());
+        assertEq(clone.appliedRakeBps(), rakeManager.rakeBps());
     }
-    assertTrue(found, "MarketCreated event not emitted");
-
-    // Validate that factory registered the market
-    assertTrue(factory.isMarket(market));
-    assertEq(factory.getMarkets().length, 1);
-
-    // Validate deployed clone
-    RevealMarket clone = RevealMarket(payable(market));
-    assertEq(clone.oracle(), ORACLE);
-    assertEq(uint256(clone.phase()), uint256(RevealMarket.Phase.Commit));
-    assertEq(clone.rakeManager(), address(rakeManager));
-    assertEq(clone.treasury(), TREASURY);
-    assertEq(clone.collateral(), address(collateralToken));
-    assertEq(clone.guardian(), factory.guardian());
-    assertEq(clone.appliedRakeBps(), rakeManager.rakeBps());
-}
 
     function testCreateMarketWithCustomRakeOverride() public {
         uint256 commitDeadline = block.timestamp + 2 days;

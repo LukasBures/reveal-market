@@ -4,9 +4,11 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
+import {IRakeManager} from "./interfaces/IRakeManager.sol";
+
 /// @title RakeManager
 /// @notice Handles protocol rake distribution to the treasury.
-contract RakeManager is Ownable2Step {
+contract RakeManager is Ownable2Step, IRakeManager {
     event RakeTaken(address indexed token, uint256 totalAmount, uint256 rakeAmount, address treasury);
 
     uint256 public constant MAX_RAKE_BPS = 200;
@@ -39,11 +41,20 @@ contract RakeManager is Ownable2Step {
         treasury = newTreasury;
     }
 
+    /// @inheritdoc IRakeManager
+    function maxRakeBps() external pure override returns (uint256) {
+        return MAX_RAKE_BPS;
+    }
+
     /// @notice Deducts protocol rake from a contribution amount.
     /// @param token Collateral token used for this calculation (address(0) for native ETH).
     /// @param amount Gross pool amount pre-rake.
     /// @return netAmount Net amount remaining after rake deduction.
-    function takeRake(address token, uint256 amount, uint256 overrideBps) external returns (uint256 netAmount) {
+    function takeRake(address token, uint256 amount, uint256 overrideBps)
+        external
+        override
+        returns (uint256 netAmount)
+    {
         uint256 appliedBps = overrideBps == 0 ? rakeBps : overrideBps;
         if (appliedBps > MAX_RAKE_BPS) revert InvalidRakeBps();
         uint256 rakeAmount = (amount * appliedBps) / BPS_DENOMINATOR;

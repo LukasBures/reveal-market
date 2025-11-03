@@ -131,6 +131,7 @@ After deployment you can optionally call `factory.createMarket(...)` to instanti
   - Deploys minimal proxies of `RevealMarket` and registers them.
   - Maintains global allow list of collateral tokens (including native).
   - `createMarket` accepts an optional rake override (in BPS) alongside the global default.
+  - `MarketCreated` emits `(market, eventId, commitDeadline, revealDeadline, collateral, rakeBps)` so indexers know the fee.
   - Guardian/owner toggles allow pausing all commits/claims, updating metadata URIs, or replacing the implementation/verifier/rake manager.
 
 - **RakeManager**

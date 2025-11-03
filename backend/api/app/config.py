@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
+from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,8 +34,23 @@ class Settings(BaseSettings):
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     cache_ttl_seconds: int = Field(default=30, ge=1)
 
-    polymarket_api_base: AnyHttpUrl = Field(default="https://strapi-matic.poly.market/api/markets")
+    polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)
+    polymarket_order: str = Field(default="id")
+    polymarket_sort_ascending: bool = Field(default=False)
+    polymarket_closed_filter: bool | None = Field(default=None)
+    polygon_rpc_url: AnyUrl | None = Field(
+        default=None,
+        validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),
+    )
+    conditional_tokens_address: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("RM_POLYGON_CTF_ADDRESS", "POLYGON_CTF_ADDRESS"),
+    )
+    clob_host: AnyHttpUrl | None = Field(
+        default=None,
+        validation_alias=AliasChoices("RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
+    )
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)

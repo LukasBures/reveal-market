@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 /// @notice Interface for the fee management contract.
 interface IRakeManager {
-    function MAX_RAKE_BPS() external view returns (uint256);
+    function maxRakeBps() external view returns (uint256);
 
     function rakeBps() external view returns (uint256);
 

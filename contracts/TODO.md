@@ -13,6 +13,9 @@ The MVP contracts are functionally complete for Horizen EVM testnet, but several
 - **Factory deployment tooling**  
   Extend `script/Deploy.s.sol` (or add a separate script) to optionally create a market post-deployment and emit JSON artifacts for front-end / backend consumption. This is needed for repeatable testnet deployments.
 
+- **End-to-end rake override validation**  
+  Expand Foundry tests to cover scenarios where different overrides are applied across multiple markets, and ensure events (`MarketCreated`, `RakeConfigured`) are indexed by indexers/backends. Run a mainnet-style integration test to assert override math during settlement.
+
 - **Invariants & fuzz coverage**  
   Add Foundry `InvariantTest` suites for sums like `claimedWinningStake <= winningPool`, `paidOut + treasury rake <= total pool`, and guardian/cancellation state machines. Invariants catch settlement regressions before audit.
 

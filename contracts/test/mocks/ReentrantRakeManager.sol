@@ -61,7 +61,7 @@ contract ReentrantRakeManager is IRakeManager {
         return amount;
     }
 
-    function MAX_RAKE_BPS() external pure returns (uint256) {
+    function maxRakeBps() external pure returns (uint256) {
         return 200;
     }
 

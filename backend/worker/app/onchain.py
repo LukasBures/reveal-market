@@ -197,6 +197,8 @@ def maybe_create_onchain_market(settings, market, session) -> Optional[str]:
 
     if market_address:
         market.market_address = market_address
+        if getattr(market, "rake_bps", None) is None:
+            market.rake_bps = 0
         session.flush()
         log_event(
             logger,

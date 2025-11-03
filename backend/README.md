@@ -19,6 +19,7 @@ Both services share SQLAlchemy models, repository helpers, and logging utilities
 - `GET /metrics` Prometheus instrumentation (`prometheus-fastapi-instrumentator`)
 - `GET /markets`, `GET /markets/stats`, `GET /markets/{id}`, `POST/PATCH /markets`
 - `GET /markets/onchain` lists market addresses returned by the configured factory contract
+- Responses expose `rake_bps` (basis points) so front-ends can surface protocol fees.
 - Redis-backed cache for markets list, stats, and detail responses with configurable TTL (`RM_CACHE_TTL_SECONDS`).
 - Alembic migrations executed on startup.
 
@@ -27,6 +28,7 @@ Both services share SQLAlchemy models, repository helpers, and logging utilities
 - Idempotent upserts into Postgres using the shared repository.
 - Emits heartbeats to Redis (`RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`) and invalidates cache namespaces.
 - Optional on-chain integration (async web3.py client + retries) can create markets through `MarketFactory` when `RM_AUTO_CREATE_ONCHAIN_MARKETS` is enabled.
+- Persists per-market rake overrides (`rake_bps`) so API consumers see the effective protocol fee.
 - Structured logging for fetch latency, persistence batches, cache invalidation, and heartbeat status.
 
 ---

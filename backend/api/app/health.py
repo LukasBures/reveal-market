@@ -53,7 +53,19 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     http_start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            response = await client.get(settings.polymarket_api_base, timeout=settings.polymarket_timeout_seconds)
+            base = str(settings.polymarket_api_base).rstrip("/")
+            params = {
+                "limit": 1,
+                "order": settings.polymarket_order,
+                "ascending": str(settings.polymarket_sort_ascending).lower(),
+            }
+            if settings.polymarket_closed_filter is not None:
+                params["closed"] = str(settings.polymarket_closed_filter).lower()
+            response = await client.get(
+                f"{base}/markets",
+                params=params,
+                timeout=settings.polymarket_timeout_seconds,
+            )
             response.raise_for_status()
         http_latency = (time.perf_counter() - http_start) * 1000
         components["polymarket_api"] = schemas.HealthComponent(status="ok", latency_ms=http_latency)
