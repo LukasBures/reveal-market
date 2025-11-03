@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, BaseSettings, Field, field_validator
+from pydantic import AnyHttpUrl, Field, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Runtime configuration for the Reveal Market API service."""
+
+    model_config = SettingsConfigDict(env_prefix="RM_")
 
     app_name: str = Field(default="Reveal Market API")
     environment: str = Field(default="development")
@@ -25,14 +28,10 @@ class Settings(BaseSettings):
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)
 
-    class Config:
-        env_prefix = "RM_"
-        env_file = os.getenv("SETTINGS_FILE", None)
-
     @field_validator("max_page_size")
     @classmethod
-    def _validate_page_sizes(cls, value: int, values: dict[str, object]) -> int:
-        default_page_size = values.get("default_page_size", 50)
+    def _validate_page_sizes(cls, value: int, info: ValidationInfo) -> int:
+        default_page_size = info.data.get("default_page_size", 50)
         if isinstance(default_page_size, int) and value < default_page_size:
             raise ValueError("max_page_size must be >= default_page_size")
         return value
@@ -41,4 +40,6 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return a cached configuration instance."""
-    return Settings()  # type: ignore[arg-type]
+    env_file = os.getenv("SETTINGS_FILE")
+    settings_kwargs = {"_env_file": env_file} if env_file else {}
+    return Settings(**settings_kwargs)  # type: ignore[arg-type]

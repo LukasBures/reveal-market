@@ -5,6 +5,8 @@ from typing import List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from shared import repository as shared_repository
+
 from . import models, schemas
 
 
@@ -42,20 +44,11 @@ def get_market_stats(session: Session) -> List[schemas.MarketStatusBreakdown]:
 
 
 def get_market_by_event_id(session: Session, event_id: str) -> Optional[models.Market]:
-    stmt = select(models.Market).where(models.Market.event_id == event_id)
-    return session.scalars(stmt).first()
+    return shared_repository.get_market_by_event_id(session, event_id)
 
 
 def create_or_update_market(session: Session, market_in: schemas.MarketCreate) -> models.Market:
-    payload = market_in.model_dump()
-    market = get_market_by_event_id(session, market_in.event_id)
-    if market is None:
-        market = models.Market(**payload)
-        session.add(market)
-    else:
-        for field, value in payload.items():
-            setattr(market, field, value)
-    return market
+    return shared_repository.upsert_market(session, market_in.model_dump())
 
 
 def patch_market(session: Session, market: models.Market, update: schemas.MarketUpdate) -> models.Market:

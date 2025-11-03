@@ -35,7 +35,8 @@ services:
 
   api:
     build:
-      context: ./backend/api
+      context: ./backend
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     environment:
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
@@ -58,7 +59,8 @@ services:
 
   worker:
     build:
-      context: ./backend/worker
+      context: ./backend
+      dockerfile: worker/Dockerfile
     restart: unless-stopped
     environment:
       RM_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market

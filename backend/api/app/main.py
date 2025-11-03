@@ -1,23 +1,26 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from . import crud, models, schemas
-from .config import get_settings
-from .database import engine, get_session
-from .health import build_health_response
+from app import crud, models, schemas
+from app.config import get_settings
+from app.database import engine, get_session
+from app.health import build_health_response
 
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name, version=settings.version)
 
-
-@app.on_event("startup")
-def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     models.Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
 
 
 @app.get("/", tags=["meta"])
@@ -37,23 +40,22 @@ async def health_check(session: Session = Depends(get_session)) -> schemas.Healt
 
 @app.get("/markets", response_model=list[schemas.MarketRead], tags=["markets"])
 def list_markets(
-    status: Annotated[Optional[str], Query(default=None, description="Filter markets by status")] = None,
-    category: Annotated[Optional[str], Query(default=None, description="Filter markets by category")] = None,
-    oracle: Annotated[Optional[str], Query(default=None, description="Filter markets by oracle address")] = None,
+    status: Annotated[Optional[str], Query(description="Filter markets by status")] = None,
+    category: Annotated[Optional[str], Query(description="Filter markets by category")] = None,
+    oracle: Annotated[Optional[str], Query(description="Filter markets by oracle address")] = None,
     search: Annotated[
         Optional[str],
-        Query(default=None, min_length=2, max_length=200, description="Case-insensitive search over market titles"),
+        Query(min_length=2, max_length=200, description="Case-insensitive search over market titles"),
     ] = None,
     limit: Annotated[
         int,
         Query(
-            default=settings.default_page_size,
             ge=1,
             le=settings.max_page_size,
             description="Maximum number of markets to return",
         ),
     ] = settings.default_page_size,
-    offset: Annotated[int, Query(default=0, ge=0, description="Offset into the result set")] = 0,
+    offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
     return crud.get_markets(

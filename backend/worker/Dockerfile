@@ -15,10 +15,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-COPY pyproject.toml ./
-RUN poetry install --only main --no-interaction --no-ansi
+COPY worker/pyproject.toml pyproject.toml
+COPY shared ./shared
+RUN poetry install --only main --no-interaction --no-ansi --no-root
 
-COPY app ./app
+COPY worker/app ./app
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -m app.healthcheck
 

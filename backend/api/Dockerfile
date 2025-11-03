@@ -15,10 +15,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-COPY pyproject.toml ./
-RUN poetry install --only main --no-interaction --no-ansi
+# Copy project metadata first to leverage Docker layer caching
+COPY api/pyproject.toml pyproject.toml
+COPY api/poetry.lock poetry.lock
+COPY shared ./shared
+RUN poetry install --only main --no-interaction --no-ansi --no-root
 
-COPY app ./app
+COPY api/app ./app
 
 EXPOSE 8000
 

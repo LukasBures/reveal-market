@@ -3,7 +3,10 @@ name = "reveal-market-api"
 version = "0.1.0"
 description = "FastAPI service exposing market data for Reveal Market."
 authors = ["Reveal Market <dev@revealmarket.xyz>"]
-packages = [{ include = "app" }]
+packages = [
+    { include = "app" },
+    { include = "shared", from = ".." },
+]
 
 [tool.poetry.dependencies]
 python = "^3.13"
@@ -12,13 +15,35 @@ uvicorn = {version = "^0.29.0", extras = ["standard"]}
 sqlalchemy = "^2.0.30"
 psycopg2-binary = "^2.9.9"
 pydantic = "^2.7.1"
+pydantic-settings = "^2.2.1"
 redis = "^5.0.4"
 httpx = "^0.27.0"
 python-dotenv = "^1.0.1"
 
 [tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+flake8 = "^7.0.0"
+isort = "^5.13.2"
 pytest = "^8.2.1"
 pytest-asyncio = "^0.23.6"
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip = [".venv", "build", "dist", "logs", "runtime"]
+
+[tool.flake8]
+max-line-length = 120
+max-complexity = 12
+ignore = ["D203", "W503", "E203", "F401", "F403", "F405", "E704"]
+extend-ignore = ["B305"]
+exclude = [".git", "__pycache__", ".venv", "build", "dist", "docs", "old", "tests/data", "logs", "runtime", "treesitter/grammars"]
+per-file-ignores = ["__init__.py:F401,F403,F405"]
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
