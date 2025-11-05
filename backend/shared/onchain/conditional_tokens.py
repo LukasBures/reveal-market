@@ -23,6 +23,17 @@ _CONDITIONAL_TOKENS_ABI: List[Dict[str, Any]] = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "name": "conditionId", "type": "bytes32"},
+            {"indexed": True, "name": "oracle", "type": "address"},
+            {"indexed": True, "name": "questionId", "type": "bytes32"},
+            {"indexed": False, "name": "payoutNumerators", "type": "uint256[]"},
+        ],
+        "name": "ConditionResolution",
+        "type": "event",
+    },
 ]
 
 
@@ -62,15 +73,52 @@ class ConditionalTokensClient:
         if outcome_count == 0 and outcome_count_hint:
             outcome_count = outcome_count_hint
         resolved, numerators = self.read_payout_vector(condition_id_hex, outcome_count)
-        winners = _derive_winners(numerators, outcome_labels) if resolved else []
+        metadata = self._fetch_resolution_event(condition_id_hex) if resolved else {}
+        payouts = metadata.get("payoutNumerators") or numerators
+        winners = _derive_winners(payouts, outcome_labels) if resolved else []
+        checked_at = datetime.now(tz=timezone.utc)
         return {
             "source": "conditional_tokens",
             "conditionId": condition_id_hex,
             "resolved": resolved,
             "outcomes": outcome_labels,
-            "payouts": numerators,
+            "payouts": payouts,
             "winners": winners,
-            "checkedAt": datetime.now(tz=timezone.utc).isoformat(),
+            "checkedAt": checked_at,
+            "oracle": metadata.get("oracle"),
+            "questionId": metadata.get("questionId"),
+            "transactionHash": metadata.get("transactionHash"),
+            "blockNumber": metadata.get("blockNumber"),
+            "blockTimestamp": metadata.get("blockTimestamp"),
+        }
+
+    def _fetch_resolution_event(self, condition_id_hex: str) -> Dict[str, Any]:
+        condition_bytes = Web3.to_bytes(hexstr=condition_id_hex)
+        event = self._contract.events.ConditionResolution()
+        try:
+            logs = event.get_logs(
+                argument_filters={"conditionId": condition_bytes},
+                fromBlock=0,
+                toBlock="latest",
+            )
+        except Exception:  # pragma: no cover - defensive
+            return {}
+        if not logs:
+            return {}
+        latest = logs[-1]
+        block_number = int(latest["blockNumber"])
+        block = self._web3.eth.get_block(block_number)
+        timestamp = datetime.fromtimestamp(block["timestamp"], tz=timezone.utc)
+        args = latest["args"]
+        question_id = args.get("questionId")
+        question_id_hex = question_id.hex() if isinstance(question_id, (bytes, bytearray)) else None
+        return {
+            "oracle": args.get("oracle"),
+            "questionId": question_id_hex,
+            "transactionHash": latest["transactionHash"].hex(),
+            "blockNumber": block_number,
+            "blockTimestamp": timestamp,
+            "payoutNumerators": list(args.get("payoutNumerators", [])),
         }
 
 

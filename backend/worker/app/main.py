@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from shared import cache as shared_cache
 from shared import repository as shared_repository
 from shared.logging import configure_json_logging, log_event
+from shared.migrations import run_migrations as apply_migrations
 
 from .config import get_settings
 from .onchain import maybe_create_onchain_market
@@ -26,6 +27,8 @@ configure_json_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
+
+_schema_checked = False
 
 # Engine/session are module-level singletons so the worker loop can reuse
 # connections without recreating pools on every tick.
@@ -41,6 +44,16 @@ SessionLocal = sessionmaker(
     expire_on_commit=False,
     future=True,
 )
+
+
+def _ensure_schema() -> None:
+    """Apply database migrations once per worker lifecycle if configured."""
+
+    global _schema_checked
+    if _schema_checked or not settings.run_migrations_on_startup:
+        return
+    apply_migrations(settings.database_url)
+    _schema_checked = True
 
 
 @contextmanager
@@ -147,26 +160,92 @@ def _merge_extra_data(existing: Optional[dict], update: dict) -> dict:
     return merged
 
 
-def _apply_resolution(db_market, market: MarketPayload) -> None:
+def _apply_resolution(session: Session, db_market, market: MarketPayload) -> None:
     client = conditional_tokens_client
     condition_id = market.condition_id
     if client is None or not isinstance(condition_id, str) or not condition_id.startswith("0x"):
         return
+
+    normalized_condition_id = condition_id.lower()
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
+    existing = shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
+    now = datetime.now(timezone.utc)
+    refresh_due = existing is None
+
+    if existing is not None:
+        if not existing.resolved:
+            refresh_due = True
+        elif existing.checked_at is None:
+            refresh_due = True
+        else:
+            refresh_due = (now - existing.checked_at).total_seconds() >= settings.resolution_refresh_interval_seconds
+
+    if not refresh_due:
+        return
+
     try:
-        summary = client.resolution_summary(condition_id, market.outcomes or [], outcome_count_hint)
+        summary = client.resolution_summary(normalized_condition_id, market.outcomes or [], outcome_count_hint)
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
             event="worker.resolution.fetch_failed",
             message="failed to read conditional tokens resolution",
-            condition_id=condition_id,
+            condition_id=normalized_condition_id,
             error=str(exc),
         )
         return
-    db_market.extra_data = _merge_extra_data(db_market.extra_data, {"polymarket_resolution": summary})
-    if summary.get("resolved"):
+
+    checked_at = summary.get("checkedAt")
+    if isinstance(checked_at, datetime):
+        checked_at_dt = checked_at
+    elif isinstance(checked_at, str):
+        try:
+            checked_at_dt = datetime.fromisoformat(checked_at)
+        except ValueError:
+            checked_at_dt = now
+    else:
+        checked_at_dt = now
+
+    record_payload = {
+        "condition_id": normalized_condition_id,
+        "source": summary.get("source", "conditional_tokens"),
+        "resolved": bool(summary.get("resolved")),
+        "payouts": summary.get("payouts") or [],
+        "winners": summary.get("winners") or [],
+        "outcomes": summary.get("outcomes") or (market.outcomes or []),
+        "oracle": summary.get("oracle"),
+        "question_id": summary.get("questionId"),
+        "transaction_hash": summary.get("transactionHash"),
+        "block_number": summary.get("blockNumber"),
+        "block_timestamp": summary.get("blockTimestamp"),
+        "checked_at": checked_at_dt,
+    }
+
+    shared_repository.upsert_resolution(session, record_payload)
+
+    log_event(
+        logger,
+        logging.INFO if record_payload["resolved"] else logging.DEBUG,
+        event="worker.resolution.persisted",
+        message="persisted conditional tokens resolution snapshot",
+        condition_id=normalized_condition_id,
+        resolved=record_payload["resolved"],
+        block_number=record_payload["block_number"],
+    )
+
+    db_market.extra_data = _merge_extra_data(
+        db_market.extra_data,
+        {
+            "resolution": {
+                "source": record_payload["source"],
+                "checkedAt": checked_at_dt.isoformat(),
+                "resolved": record_payload["resolved"],
+            }
+        },
+    )
+
+    if record_payload["resolved"]:
         db_market.status = "settled"
         if getattr(db_market, "closed", None) is not True:
             db_market.closed = True
@@ -175,8 +254,9 @@ def _apply_resolution(db_market, market: MarketPayload) -> None:
             logging.INFO,
             event="worker.resolution.detected",
             message="polymarket resolution detected",
-            condition_id=condition_id,
-            winners=summary.get("winners"),
+            condition_id=normalized_condition_id,
+            winners=record_payload["winners"],
+            block_number=record_payload["block_number"],
         )
 
 
@@ -185,10 +265,13 @@ def sync_market(session: Session, market: MarketPayload):
     payload = market.model_dump()
     if payload.get("closed") is None:
         payload["closed"] = False
+    condition_id = payload.get("condition_id")
+    if isinstance(condition_id, str):
+        payload["condition_id"] = condition_id.lower()
     db_market = shared_repository.upsert_market(session, payload)
     if market.rake_bps is not None:
         setattr(db_market, "rake_bps", market.rake_bps)
-    _apply_resolution(db_market, market)
+    _apply_resolution(session, db_market, market)
     session.flush()
     return db_market
 
@@ -266,6 +349,7 @@ def run_worker() -> None:
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
+    _ensure_schema()
     markets, latency_ms = fetch_markets_from_polymarket()
     if markets:
         log_event(
@@ -286,12 +370,20 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
                 extra={"event": "worker.persist.error", "error": str(exc)},
             )
     publish_heartbeat(redis_client, len(markets), latency_ms)
-    shared_cache.delete_prefix(redis_client, "markets:list")
-    shared_cache.delete(redis_client, "markets:stats")
-    for market in markets:
-        shared_cache.delete(redis_client, f"markets:detail:{market.event_id}")
-        if market.condition_id:
-            shared_cache.delete(redis_client, f"markets:resolution:{market.condition_id.lower()}")
+    if redis_client is not None:
+        shared_cache.invalidate_tag(redis_client, "markets:list")
+        shared_cache.invalidate_tag(redis_client, "markets:stats")
+        seen_events: set[str] = set()
+        seen_conditions: set[str] = set()
+        for market in markets:
+            if market.event_id and market.event_id not in seen_events:
+                shared_cache.invalidate_tag(redis_client, f"market:{market.event_id}")
+                seen_events.add(market.event_id)
+            if market.condition_id:
+                condition_id = market.condition_id.lower()
+                if condition_id not in seen_conditions:
+                    shared_cache.invalidate_tag(redis_client, f"resolution:{condition_id}")
+                    seen_conditions.add(condition_id)
     log_event(
         logger,
         logging.DEBUG,

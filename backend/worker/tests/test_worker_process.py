@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from typing import Any
+
+import app.main
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -20,6 +23,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
 
     monkeypatch.setattr("app.main.engine", engine, raising=False)
     monkeypatch.setattr("app.main.SessionLocal", TestSession, raising=False)
+    monkeypatch.setattr(app.main.settings, "run_migrations_on_startup", False, raising=False)
 
     sample_markets = [
         MarketPayload(
@@ -57,7 +61,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
 
     class DummyRedis:
         def __init__(self):
-            self.store: dict[str, str] = {}
+            self.store: dict[str, Any] = {}
 
         def set(self, key, value, ex):  # noqa: D401 - simple stub
             self.store[key] = value
@@ -68,14 +72,24 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
         def get(self, key):
             return self.store.get(key)
 
-        def delete(self, key):
-            self.store.pop(key, None)
+        def delete(self, *keys):
+            for key in keys:
+                self.store.pop(key, None)
 
         def scan_iter(self, match):
             prefix = match[:-1] if match.endswith("*") else match
             for key in list(self.store.keys()):
                 if key.startswith(prefix):
                     yield key
+
+        def sadd(self, key, value):
+            self.store.setdefault(key, set()).add(value)
+
+        def smembers(self, key):
+            members = self.store.get(key)
+            if isinstance(members, set):
+                return set(members)
+            return set()
 
     dummy = DummyRedis()
     caplog.set_level(logging.DEBUG, logger="reveal_market.worker")

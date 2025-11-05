@@ -52,6 +52,11 @@ def get_market_by_condition_id(session: Session, condition_id: str) -> Optional[
     return session.scalars(stmt).first()
 
 
+def get_resolution_by_condition_id(session: Session, condition_id: str) -> Optional[models.Resolution]:
+    stmt = select(models.Resolution).where(models.Resolution.condition_id == condition_id)
+    return session.scalars(stmt).first()
+
+
 def create_or_update_market(session: Session, market_in: schemas.MarketCreate) -> models.Market:
     return shared_repository.upsert_market(session, market_in.model_dump())
 

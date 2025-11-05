@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -10,6 +10,8 @@ from redis.exceptions import RedisError
 from .logging import log_event
 
 logger = logging.getLogger("reveal_market.cache")
+
+_TAG_PREFIX = "cache:tag:"
 
 
 def get_client(url: str) -> Redis | None:
@@ -124,3 +126,57 @@ def iter_scan(client: Redis, pattern: str) -> Iterable[str]:
     """Iterate over keys matching pattern."""
 
     return client.scan_iter(match=pattern)
+
+
+def _tag_storage_key(tag: str) -> str:
+    return f"{_TAG_PREFIX}{tag}"
+
+
+def add_tag(client: Redis | None, tag: str, key: str) -> None:
+    """Associate a cache key with a tag for selective invalidation."""
+
+    if client is None:
+        return
+    try:
+        client.sadd(_tag_storage_key(tag), key)
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.tag.attach_failed",
+            message="failed to register cache tag",
+            tag=tag,
+            key=key,
+            error=str(exc),
+        )
+
+
+def add_tags(client: Redis | None, tags: Sequence[str], key: str) -> None:
+    """Associate a cache key with multiple tags."""
+
+    for tag in tags:
+        add_tag(client, tag, key)
+
+
+def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
+    """Invalidate all cache keys associated with a tag."""
+
+    if client is None:
+        return []
+    storage_key = _tag_storage_key(tag)
+    try:
+        members = list(client.smembers(storage_key))
+        if members:
+            client.delete(*members)
+        client.delete(storage_key)
+        return members
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.tag.invalidate_failed",
+            message="failed to invalidate cache tag",
+            tag=tag,
+            error=str(exc),
+        )
+        return []

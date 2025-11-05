@@ -147,11 +147,12 @@ def test_onchain_markets_success(client, monkeypatch):
 
 
 def test_resolution_endpoint_unconfigured(client):
-    response = client.get("/resolution/0xabc")
-    assert response.status_code == 503
+    condition_id = "0x" + "a" * 64
+    response = client.get(f"/resolution/{condition_id}")
+    assert response.status_code == 404
 
 
-def test_resolution_endpoint_returns_summary(client, db_session, monkeypatch):
+def test_resolution_endpoint_returns_summary(client, db_session):
     market = _make_market(
         "evt-300",
         "Resolved Market",
@@ -160,39 +161,29 @@ def test_resolution_endpoint_returns_summary(client, db_session, monkeypatch):
         status="commit",
     )
     market.condition_id = "0x1111111111111111111111111111111111111111111111111111111111111111"
+    market.condition_id = market.condition_id.lower()
     market.outcomes = ["Yes", "No"]
     market.outcome_prices = [0.45, 0.55]
     db_session.add(market)
     db_session.commit()
 
-    from datetime import datetime, timezone
-
-    class FakeClient:
-        def __init__(self):
-            self.calls = []
-
-        def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
-            self.calls.append((condition_id_hex, outcomes, outcome_count_hint))
-            return {
-                "source": "conditional_tokens",
-                "conditionId": condition_id_hex,
-                "resolved": True,
-                "outcomes": outcomes,
-                "payouts": [0, 1],
-                "winners": [{"index": 1, "label": "No", "payout": 1}],
-                "checkedAt": datetime.now(timezone.utc).isoformat(),
-            }
-
-    fake_client = FakeClient()
-
-    def fake_get_settings():
-        base = api_main.settings
-        base.polygon_rpc_url = "https://unit.test"
-        base.conditional_tokens_address = "0x2222222222222222222222222222222222222222"
-        return base
-
-    monkeypatch.setattr(api_main, "_resolution_client", fake_client, raising=False)
-    monkeypatch.setattr(api_main, "get_settings", fake_get_settings, raising=False)
+    checked_at = datetime.now(timezone.utc)
+    resolution = models.Resolution(
+        condition_id=market.condition_id.lower(),
+        source="conditional_tokens",
+        resolved=True,
+        payouts=[0, 1],
+        winners=[{"index": 1, "label": "No", "payout": 1}],
+        outcomes=["Yes", "No"],
+        oracle="0xfeed",
+        question_id="0x" + "f" * 64,
+        transaction_hash="0x" + "1" * 64,
+        block_number=1234,
+        block_timestamp=checked_at,
+        checked_at=checked_at,
+    )
+    db_session.add(resolution)
+    db_session.commit()
 
     response = client.get(f"/resolution/{market.condition_id}")
     assert response.status_code == 200
@@ -202,15 +193,12 @@ def test_resolution_endpoint_returns_summary(client, db_session, monkeypatch):
     assert payload["marketId"] == market.id
     assert payload["eventId"] == market.event_id
     assert payload["title"] == market.title
-    assert fake_client.calls == [
-        (
-            market.condition_id,
-            ["Yes", "No"],
-            2,
-        )
-    ]
+    assert payload["transactionHash"] == resolution.transaction_hash
+    assert payload["blockNumber"] == resolution.block_number
+    assert payload["oracle"] == resolution.oracle
+    assert datetime.fromisoformat(payload["checkedAt"]) == resolution.checked_at.replace(tzinfo=None)
+    assert datetime.fromisoformat(payload["blockTimestamp"]) == resolution.block_timestamp.replace(tzinfo=None)
 
     # second call should be served from cache
     cached = client.get(f"/resolution/{market.condition_id}")
     assert cached.status_code == 200
-    assert len(fake_client.calls) == 1

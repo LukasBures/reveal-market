@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, JSON, Index
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, JSON, Index
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -45,3 +45,22 @@ class Market(Base):
 Index("ix_markets_status_category", Market.status, Market.category)
 Index("ix_markets_slug", Market.slug)
 Index("ix_markets_condition_id", Market.condition_id)
+
+
+class Resolution(Base):
+    __tablename__ = "resolutions"
+
+    condition_id = Column(String(66), primary_key=True, nullable=False)
+    source = Column(String(32), nullable=False, default="conditional_tokens")
+    resolved = Column(Boolean, nullable=False, default=False)
+    payouts = Column(JSON, nullable=False, default=list)
+    winners = Column(JSON, nullable=True)
+    outcomes = Column(JSON, nullable=True)
+    oracle = Column(String(64), nullable=True)
+    question_id = Column(String(66), nullable=True)
+    transaction_hash = Column(String(66), nullable=True)
+    block_number = Column(BigInteger, nullable=True)
+    block_timestamp = Column(DateTime(timezone=True), nullable=True)
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

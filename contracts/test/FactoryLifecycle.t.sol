@@ -6,14 +6,14 @@ import {Test} from "forge-std/Test.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract FactoryLifecycleTest is Test {
     MarketFactory private factory;
     RevealMarket private implementation;
     RakeManager private rakeManager;
-    Verifier private verifier;
+    MockVerifier private verifier;
     MockERC20 private collateralToken;
 
     address private constant ORACLE = address(0xABCD);
@@ -30,7 +30,7 @@ contract FactoryLifecycleTest is Test {
     function setUp() public {
         implementation = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
-        verifier = new Verifier();
+        verifier = new MockVerifier();
         collateralToken = new MockERC20("USD Coin", "USDC", 6);
         factory = new MarketFactory(
             address(implementation),
@@ -88,8 +88,7 @@ contract FactoryLifecycleTest is Test {
         // Post result & verify proof
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
-        uint256[4] memory pubSignals;
-        pubSignals[0] = 100e6;
+        uint256[4] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
         market.verifyProof(new bytes(0), pubSignals);
 
         // Global claim pause
@@ -118,5 +117,16 @@ contract FactoryLifecycleTest is Test {
         collateralToken.mint(user, amount);
         vm.prank(user);
         collateralToken.approve(address(market), amount);
+    }
+
+    function _buildSignals(
+        RevealMarket market,
+        uint256 winningPool,
+        bytes32 outcomeHash
+    ) internal view returns (uint256[4] memory signals) {
+        signals[0] = winningPool;
+        signals[1] = market.totalPool();
+        signals[2] = uint256(outcomeHash);
+        signals[3] = market.CIRCUIT_VERSION();
     }
 }

@@ -5,13 +5,13 @@ import {Test} from "forge-std/Test.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {RevealMarket} from "../src/RevealMarket.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {ReentrantRakeManager} from "./mocks/ReentrantRakeManager.sol";
 
 contract RevealMarketSecurityTest is Test {
     RevealMarket private market;
-    Verifier private verifier;
+    MockVerifier private verifier;
     MockERC20 private collateral;
     ReentrantRakeManager private rakeManager;
 
@@ -31,7 +31,7 @@ contract RevealMarketSecurityTest is Test {
 
     function setUp() public {
         market = new RevealMarket();
-        verifier = new Verifier();
+        verifier = new MockVerifier();
         collateral = new MockERC20("USD Coin", "USDC", 6);
         rakeManager = new ReentrantRakeManager(market);
 

@@ -5,13 +5,13 @@ import {Test} from "forge-std/Test.sol";
 
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract RevealMarketTest is Test {
     RevealMarket private market;
     RakeManager private rakeManager;
-    Verifier private verifier;
+    MockVerifier private verifier;
     MockERC20 private collateralToken;
 
     address private constant ORACLE = address(0xA11CE);
@@ -31,7 +31,7 @@ contract RevealMarketTest is Test {
     function setUp() public {
         market = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100); // 1% rake
-        verifier = new Verifier();
+        verifier = new MockVerifier();
         collateralToken = new MockERC20("USD Coin", "USDC", 6);
 
         commitDeadline = block.timestamp + 1 days;
@@ -79,8 +79,7 @@ contract RevealMarketTest is Test {
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE;
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
 
         bytes memory proof = "";
         market.verifyProof(proof, pubSignals);
@@ -176,12 +175,59 @@ contract RevealMarketTest is Test {
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE * 2; // greater than total pool
+        uint256[4] memory pubSignals = _buildSignals(STAKE * 2);
 
         bytes memory proof = "";
         vm.expectRevert(RevealMarket.WinningPoolNotSet.selector);
         market.verifyProof(proof, pubSignals);
+    }
+
+    function testVerifyProofRejectsOutcomeMismatch() public {
+        _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
+
+        vm.warp(commitDeadline + 1);
+        market.lock();
+
+        vm.prank(ORACLE);
+        market.postResult(OUTCOME_HASH);
+
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
+        pubSignals[2] = uint256(keccak256("WRONG"));
+
+        vm.expectRevert(RevealMarket.ProofOutcomeMismatch.selector);
+        market.verifyProof(new bytes(0), pubSignals);
+    }
+
+    function testVerifyProofRejectsTotalMismatch() public {
+        _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
+
+        vm.warp(commitDeadline + 1);
+        market.lock();
+
+        vm.prank(ORACLE);
+        market.postResult(OUTCOME_HASH);
+
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
+        pubSignals[1] = STAKE / 2;
+
+        vm.expectRevert(RevealMarket.ProofTotalsMismatch.selector);
+        market.verifyProof(new bytes(0), pubSignals);
+    }
+
+    function testVerifyProofRejectsVersionMismatch() public {
+        _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
+
+        vm.warp(commitDeadline + 1);
+        market.lock();
+
+        vm.prank(ORACLE);
+        market.postResult(OUTCOME_HASH);
+
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
+        pubSignals[3] = market.CIRCUIT_VERSION() + 1;
+
+        vm.expectRevert(RevealMarket.ProofVersionMismatch.selector);
+        market.verifyProof(new bytes(0), pubSignals);
     }
 
     function testClaimRevertsWithWrongSalt() public {
@@ -193,8 +239,7 @@ contract RevealMarketTest is Test {
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE;
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
         bytes memory proof = "";
         market.verifyProof(proof, pubSignals);
 
@@ -345,8 +390,7 @@ contract RevealMarketTest is Test {
         assertEq(uint256(market.phase()), uint256(RevealMarket.Phase.Settled));
         assertEq(market.winningPool(), STAKE);
 
-        uint256[4] memory dummySignals;
-        dummySignals[0] = STAKE;
+        uint256[4] memory dummySignals = _buildSignals(STAKE);
 
         uint256 winnerBalanceBefore = collateralToken.balanceOf(WINNER);
         vm.prank(WINNER);
@@ -402,8 +446,7 @@ contract RevealMarketTest is Test {
         market.lock();
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE;
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
         market.verifyProof(new bytes(0), pubSignals);
 
         market.setClaimPaused(true);
@@ -452,12 +495,19 @@ contract RevealMarketTest is Test {
         _commitTicket(WINNER, bytes32(uint256(3)), OUTCOME_HASH, STAKE);
         assertEq(market.ticketCount(WINNER), 2);
     }
+
+    function _buildSignals(uint256 winningPool) private view returns (uint256[4] memory signals) {
+        signals[0] = winningPool;
+        signals[1] = market.totalPool();
+        signals[2] = uint256(OUTCOME_HASH);
+        signals[3] = market.CIRCUIT_VERSION();
+    }
 }
 
 contract RevealMarketNativeTest is Test {
     RevealMarket private market;
     RakeManager private rakeManager;
-    Verifier private verifier;
+    MockVerifier private verifier;
 
     address private constant ORACLE = address(0xAA11CE);
     address payable private constant TREASURY = payable(address(0xBB0B));
@@ -476,7 +526,7 @@ contract RevealMarketNativeTest is Test {
     function setUp() public {
         market = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
-        verifier = new Verifier();
+        verifier = new MockVerifier();
 
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;
@@ -513,10 +563,8 @@ contract RevealMarketNativeTest is Test {
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE;
-
         uint256 treasuryBefore = TREASURY.balance;
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
         market.verifyProof(new bytes(0), pubSignals);
 
         uint256 expectedGross = STAKE * 2;
@@ -644,8 +692,7 @@ contract RevealMarketNativeTest is Test {
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = STAKE;
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
         market.verifyProof(new bytes(0), pubSignals);
 
         market.setClaimPaused(true);
@@ -658,5 +705,11 @@ contract RevealMarketNativeTest is Test {
         vm.prank(WINNER);
         market.claim(0, OUTCOME, WIN_SALT);
         assertGt(WINNER.balance, winnerBalanceBefore);
+    }
+    function _buildSignals(uint256 winningPool) private view returns (uint256[4] memory signals) {
+        signals[0] = winningPool;
+        signals[1] = market.totalPool();
+        signals[2] = uint256(OUTCOME_HASH);
+        signals[3] = market.CIRCUIT_VERSION();
     }
 }

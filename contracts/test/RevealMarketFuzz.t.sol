@@ -5,13 +5,13 @@ import {Test} from "forge-std/Test.sol";
 
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract RevealMarketFuzzTest is Test {
     RevealMarket private market;
     RakeManager private rakeManager;
-    Verifier private verifier;
+    MockVerifier private verifier;
     MockERC20 private collateralToken;
 
     address private constant ORACLE = address(0xF001);
@@ -24,7 +24,7 @@ contract RevealMarketFuzzTest is Test {
     function setUp() public {
         market = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 50);
-        verifier = new Verifier();
+        verifier = new MockVerifier();
         collateralToken = new MockERC20("USDC", "USDC", 6);
 
         uint256 commitDeadline = block.timestamp + 2 days;
@@ -57,8 +57,7 @@ contract RevealMarketFuzzTest is Test {
         vm.prank(ORACLE);
         market.postResult(keccak256(bytes(OUTCOME)));
 
-        uint256[4] memory pubSignals;
-        pubSignals[0] = stake;
+        uint256[4] memory pubSignals = _buildSignals(stake);
         market.verifyProof(new bytes(0), pubSignals);
 
         uint256 before = collateralToken.balanceOf(USER);
@@ -75,5 +74,12 @@ contract RevealMarketFuzzTest is Test {
         bytes32 ticketHash = keccak256(abi.encodePacked(user, keccak256(bytes(OUTCOME)), salt));
         vm.prank(user);
         market.commit(ticketHash, amount);
+    }
+
+    function _buildSignals(uint256 winningPool) private view returns (uint256[4] memory signals) {
+        signals[0] = winningPool;
+        signals[1] = market.totalPool();
+        signals[2] = uint256(keccak256(bytes(OUTCOME)));
+        signals[3] = market.CIRCUIT_VERSION();
     }
 }

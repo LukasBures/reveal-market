@@ -25,3 +25,23 @@ def upsert_market(session: Session, data: Mapping[str, Any]) -> models.Market:
         for field, value in payload.items():
             setattr(market, field, value)
     return market
+
+
+def get_resolution_by_condition_id(session: Session, condition_id: str) -> Optional[models.Resolution]:
+    """Return a persisted resolution snapshot for the given condition id."""
+    stmt = select(models.Resolution).where(models.Resolution.condition_id == condition_id)
+    return session.scalars(stmt).first()
+
+
+def upsert_resolution(session: Session, data: Mapping[str, Any]) -> models.Resolution:
+    """Insert or update a resolution record."""
+    payload = dict(data)
+    condition_id = payload["condition_id"]
+    record = get_resolution_by_condition_id(session, condition_id)
+    if record is None:
+        record = models.Resolution(**payload)
+        session.add(record)
+    else:
+        for field, value in payload.items():
+            setattr(record, field, value)
+    return record

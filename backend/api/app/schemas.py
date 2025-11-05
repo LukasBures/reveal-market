@@ -95,5 +95,10 @@ class ResolutionSummary(BaseModel):
     eventId: Optional[str] = None
     title: Optional[str] = None
     slug: Optional[str] = None
+    oracle: Optional[str] = None
+    questionId: Optional[str] = None
+    transactionHash: Optional[str] = None
+    blockNumber: Optional[int] = None
+    blockTimestamp: Optional[datetime] = None
 
     model_config = ConfigDict(populate_by_name=True)

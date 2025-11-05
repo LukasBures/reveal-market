@@ -72,6 +72,10 @@ contract RevealMarket is ReentrancyGuard {
     error NotAuthorized();
     error MarketAlreadyCancelled();
     error InvalidRakeBps();
+    error ProofVerificationFailed();
+    error ProofOutcomeMismatch();
+    error ProofTotalsMismatch();
+    error ProofVersionMismatch();
 
     string public eventId;
     Phase public phase;
@@ -102,6 +106,8 @@ contract RevealMarket is ReentrancyGuard {
     bool private _initialized;
     bool private _settlementInProgress;
     uint256 public rakeBpsOverride;
+
+    uint256 public constant CIRCUIT_VERSION = 1;
 
     mapping(address => Ticket[]) public userTickets;
 
@@ -217,11 +223,20 @@ contract RevealMarket is ReentrancyGuard {
         if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
         if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet();
 
+        uint256 declaredWinningPool = pubSignals[0];
+        uint256 proofTotalPool = pubSignals[1];
+        bytes32 proofOutcomeHash = bytes32(pubSignals[2]);
+        uint256 proofVersion = pubSignals[3];
+
+        if (proofOutcomeHash != winningOutcomeHash) revert ProofOutcomeMismatch();
+        if (proofTotalPool != totalPool) revert ProofTotalsMismatch();
+        if (proofVersion != CIRCUIT_VERSION) revert ProofVersionMismatch();
+        if (declaredWinningPool == 0 || declaredWinningPool > proofTotalPool) revert WinningPoolNotSet();
+
         bool success = IVerifier(verifier).verifyProof(proof, pubSignals);
         emit ProofVerified(success);
-        if (!success) revert WinningPoolNotSet();
+        if (!success) revert ProofVerificationFailed();
 
-        uint256 declaredWinningPool = pubSignals[0];
         _finalizeSettlement(winningOutcomeHash, declaredWinningPool);
     }
 

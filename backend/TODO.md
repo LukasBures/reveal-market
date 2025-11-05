@@ -10,8 +10,11 @@ This list captures remaining items that would strengthen reliability, developer 
 - **Cache invalidation granularity**  
   Current invalidation wipes all list caches. Introduce smarter invalidation (e.g., tag-based keys or cache versioning) to avoid evicting every list page when only one market updates. This keeps cache hit rates high as traffic grows.
 
-- **Better error handling around Polymarket API**  
-  Add retries with exponential backoff and surfaced metrics for failures/timeouts. Prevents temporary upstream hiccups from generating noisy logs and gives better visibility when the feed degrades.
+- **Resolution persistence & backfill**  
+  The API now reads Conditional Tokens on demand, but we still do not persist payout vectors or a resolution history table. Add a background task that hydrates on-chain results into Postgres, warms the cache, and exposes audit metadata (block numbers, tx hashes) so /resolution responses are fast and immutable.
+
+- **Worker-driven contract resolution**  
+  We ingest Gamma + Conditional Tokens, yet the worker stops at upserting database rows. Extend the loop to trigger our own market settlement transactions (or enqueue them) once on-chain payoutsAreSet, with guardrails for retries, duplicate suppression, and alerting when resolution fails.
 
 - **Finalize on-chain automation**  
   The worker can now submit `createMarket` transactions, but it still uses placeholder deadlines/gas values. Hook this into real Polymarket metadata, derive deadlines from source data, persist the on-chain market address in Postgres, and add an option to disable auto-creation per market. Ensure secrets (private keys) are sourced from a secure backend.
@@ -29,6 +32,9 @@ This list captures remaining items that would strengthen reliability, developer 
 
 - **Config reloading / dynamic tuning**  
   Currently all settings require restarts. Supporting dynamic reload (e.g., SIGHUP to re-read environment or a small admin endpoint) would allow tuning poll intervals or TTLs without downtime.
+
+- **Robust Polymarket error handling**  
+  Wrap Gamma/Conditional Tokens calls in shared retry + metrics helpers so transient upstream failures are observable and do not drop entire sync cycles. Emit Prometheus counters (timeouts, 4xx, 5xx) for alerting.
 
 - **API rate limiting / request throttling**  
   Consider adding simple rate limits (via Redis or a gateway) once public traffic hits the endpoints to shield the database from unexpected load.
@@ -48,6 +54,9 @@ This list captures remaining items that would strengthen reliability, developer 
   Provide docs or scripts for scaling workers/API containers (CPU-based or backlog-based) should Polymarket ingest rates increase.
 
 - **Rake override surfacing**  
-  Include the newly exposed `appliedRakeBps` value in API responses (and cache keys) so front-ends show accurate fee information. Update `/markets` serialization once the contracts emit overrides.
+  Include the newly exposed `appliedRakeBps` value and any on-chain resolution metadata in API responses (and cache keys) so front-ends show accurate fee and settlement information. Update `/markets` serialization once the contracts emit overrides.
 
 Each item is valuable, but prioritise “Schema safety for worker”, “Smarter cache invalidation”, and “Polymarket retries” first—they protect correctness and availability as usage grows.
+
+
+Implement option to use Horizen ZEN testnet: https://docs.goldsky.com/chains/horizen

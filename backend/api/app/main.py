@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -16,9 +16,9 @@ from app.database import get_session, run_migrations
 from app.health import build_health_response
 from app.onchain import fetch_factory_markets
 from prometheus_fastapi_instrumentator import Instrumentator
-from shared.cache import delete, delete_prefix, get_client, get_json, set_json
+from shared.cache import add_tag, add_tags, get_client, get_json, invalidate_tag, set_json
 from shared.logging import configure_json_logging, log_event, reset_request_id, set_request_id
-from shared.onchain import ConditionalTokensClient, OnChainConfigurationError
+from shared.onchain import OnChainConfigurationError
 
 configure_json_logging("reveal_market.api")
 
@@ -31,9 +31,6 @@ MARKETS_LIST_PREFIX = "markets:list"
 MARKETS_STATS_KEY = "markets:stats"
 MARKET_DETAIL_PREFIX = "markets:detail"
 MARKET_RESOLUTION_PREFIX = "markets:resolution"
-
-
-_resolution_client: ConditionalTokensClient | None = None
 
 
 @asynccontextmanager
@@ -51,21 +48,6 @@ app.cache_client = cache_client  # type: ignore[attr-defined]
 
 def _resolution_cache_key(condition_id: str) -> str:
     return f"{MARKET_RESOLUTION_PREFIX}:{condition_id.lower()}"
-
-
-def _get_conditional_tokens_client() -> ConditionalTokensClient:
-    global _resolution_client
-    settings = get_settings()
-    rpc_url = settings.polygon_rpc_url or settings.rpc_url
-    contract_address = settings.conditional_tokens_address
-    if not (rpc_url and contract_address):
-        raise OnChainConfigurationError("conditional tokens configuration missing")
-    if _resolution_client is None:
-        try:
-            _resolution_client = ConditionalTokensClient(str(rpc_url), contract_address)
-        except Exception as exc:  # pragma: no cover - defensive
-            raise OnChainConfigurationError(str(exc)) from exc
-    return _resolution_client
 
 
 @app.middleware("http")
@@ -197,6 +179,12 @@ def list_markets(
     market_models = [schemas.MarketRead.model_validate(m) for m in markets]
     payload = [item.model_dump(mode="json") for item in market_models]
     set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, "markets:list", cache_key)
+    add_tags(
+        cache_client,
+        [f"market:{item.event_id}" for item in market_models if item.event_id],
+        cache_key,
+    )
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -257,6 +245,7 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
     stats = crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
     set_json(cache_client, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, "markets:stats", MARKETS_STATS_KEY)
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -277,40 +266,47 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
     if cached is not None:
         return schemas.ResolutionSummary.model_validate(cached)
 
-    try:
-        client = _get_conditional_tokens_client()
-    except OnChainConfigurationError as exc:
-        log_event(
-            logger,
-            logging.WARNING,
-            event="markets.resolution.unconfigured",
-            message="resolution configuration missing",
-            condition_id=condition_id_hex,
-        )
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="resolution_not_configured") from exc
+    normalized_condition = condition_id_hex.lower()
+    record = crud.get_resolution_by_condition_id(session, normalized_condition)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
 
-    market = crud.get_market_by_condition_id(session, condition_id_hex)
-    outcomes = market.outcomes if market else None
-    outcome_prices = market.outcome_prices if market else None
-    outcome_count_hint = len(outcome_prices) if isinstance(outcome_prices, list) else None
+    summary: dict[str, Any] = {
+        "source": record.source,
+        "conditionId": record.condition_id,
+        "resolved": record.resolved,
+        "outcomes": record.outcomes or [],
+        "payouts": record.payouts or [],
+        "winners": record.winners or [],
+        "checkedAt": record.checked_at,
+        "oracle": record.oracle,
+        "questionId": record.question_id,
+        "transactionHash": record.transaction_hash,
+        "blockNumber": record.block_number,
+        "blockTimestamp": record.block_timestamp,
+    }
 
-    try:
-        summary = client.resolution_summary(condition_id_hex, outcomes or [], outcome_count_hint)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.exception("failed to query conditional tokens resolution", extra={"condition_id": condition_id_hex})
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="resolution_query_failed") from exc
-
+    market = crud.get_market_by_condition_id(session, normalized_condition)
     if market:
-        summary["marketId"] = market.id
-        summary["eventId"] = market.event_id
-        summary["title"] = market.title
-        summary["slug"] = market.slug
-        summary["outcomes"] = outcomes or []
+        summary.update(
+            {
+                "marketId": market.id,
+                "eventId": market.event_id,
+                "title": market.title,
+                "slug": market.slug,
+                "outcomes": market.outcomes or summary["outcomes"],
+            }
+        )
 
-    set_json(cache_client, cache_key, summary, settings.cache_ttl_seconds)
-    return schemas.ResolutionSummary.model_validate(summary)
+    summary_model = schemas.ResolutionSummary.model_validate(summary)
+    cache_payload = summary_model.model_dump(mode="json")
+    if summary_model.checkedAt is not None:
+        cache_payload["checkedAt"] = summary_model.checkedAt.isoformat()
+    if summary_model.blockTimestamp is not None:
+        cache_payload["blockTimestamp"] = summary_model.blockTimestamp.isoformat()
+    set_json(cache_client, cache_key, cache_payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, f"resolution:{normalized_condition}", cache_key)
+    return summary_model
 
 
 @app.get("/markets/{event_id}", response_model=schemas.MarketRead, tags=["markets"])
@@ -345,6 +341,7 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     response = schemas.MarketRead.model_validate(market)
     set_json(cache_client, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
+    add_tag(cache_client, f"market:{event_id}", cache_key)
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -410,9 +407,9 @@ def _invalidate_market_cache(event_id: Optional[str] = None, condition_id: Optio
         event_id=event_id,
         condition_id=condition_id,
     )
-    delete_prefix(cache_client, MARKETS_LIST_PREFIX)
-    delete(cache_client, MARKETS_STATS_KEY)
+    invalidate_tag(cache_client, "markets:list")
+    invalidate_tag(cache_client, "markets:stats")
     if event_id:
-        delete(cache_client, _market_detail_cache_key(event_id))
+        invalidate_tag(cache_client, f"market:{event_id}")
     if condition_id:
-        delete(cache_client, _resolution_cache_key(condition_id))
+        invalidate_tag(cache_client, f"resolution:{condition_id.lower()}")

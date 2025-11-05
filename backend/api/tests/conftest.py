@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -13,22 +15,32 @@ from app.main import app
 
 class InMemoryCache:
     def __init__(self):
-        self.store: dict[str, str] = {}
+        self.store: dict[str, Any] = {}
 
     def get(self, key: str):
         return self.store.get(key)
 
-    def set(self, key: str, value: str, ex: int | None = None):
+    def set(self, key: str, value: Any, ex: int | None = None):
         self.store[key] = value
 
-    def delete(self, key: str) -> None:
-        self.store.pop(key, None)
+    def delete(self, *keys: str) -> None:
+        for key in keys:
+            self.store.pop(key, None)
 
     def scan_iter(self, match: str):
         prefix = match[:-1] if match.endswith("*") else match
         for key in list(self.store.keys()):
             if key.startswith(prefix):
                 yield key
+
+    def sadd(self, key: str, value: str) -> None:
+        self.store.setdefault(key, set()).add(value)
+
+    def smembers(self, key: str):
+        members = self.store.get(key)
+        if isinstance(members, set):
+            return set(members)
+        return set()
 
 
 @pytest.fixture()

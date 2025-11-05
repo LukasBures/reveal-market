@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     default_commit_lead_seconds: int = Field(default=86400, ge=60)
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
     max_web3_retries: int = Field(default=3, ge=1)
+    resolution_refresh_interval_seconds: int = Field(default=300, ge=60)
+    run_migrations_on_startup: bool = Field(default=True)
 
 
 @lru_cache(maxsize=1)

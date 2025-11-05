@@ -16,6 +16,9 @@ The MVP contracts are functionally complete for Horizen EVM testnet, but several
 - **End-to-end rake override validation**  
   Expand Foundry tests to cover scenarios where different overrides are applied across multiple markets, and ensure events (`MarketCreated`, `RakeConfigured`) are indexed by indexers/backends. Run a mainnet-style integration test to assert override math during settlement.
 
+- **Resolution eventing for indexers**  
+  Emit explicit events (e.g., `MarketResolved`) with the final payout vector and UMA question IDs so off-chain services can subscribe without re-reading storage. Coordinate with the backend to agree on field ordering and versioning.
+
 - **Invariants & fuzz coverage**  
   Add Foundry `InvariantTest` suites for sums like `claimedWinningStake <= winningPool`, `paidOut + treasury rake <= total pool`, and guardian/cancellation state machines. Invariants catch settlement regressions before audit.
 
@@ -47,4 +50,9 @@ The MVP contracts are functionally complete for Horizen EVM testnet, but several
 - **Cross-chain strategy**  
   If Reveal Market will expand beyond Horizen EVM, evaluate how factory registries and oracle addresses are managed across chains (may require bridging or multi-sig controls).
 
+- **Backend-integrated settlement tooling**  
+  Deliver a script or library function that accepts the backend’s Conditional Tokens snapshot and drives the on-chain `postResult/settle` flow end-to-end, so operators have a single command to synchronize markets.
+
 Each item lists why it matters; address the high priority group before attempting a mainnet or public beta release.
+
+Implement option to use Horizen ZEN testnet: https://docs.goldsky.com/chains/horizen

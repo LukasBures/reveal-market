@@ -7,14 +7,14 @@ import {Vm} from "forge-std/Vm.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
-import {Verifier} from "../src/Verifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
 
 contract MarketFactoryTest is Test {
     MarketFactory private factory;
     RevealMarket private implementation;
     RakeManager private rakeManager;
-    Verifier private verifier;
+    MockVerifier private verifier;
     MockERC20 private collateralToken;
 
     string private constant OUTCOME = "TEAM_A";
@@ -30,7 +30,7 @@ contract MarketFactoryTest is Test {
     function setUp() public {
         implementation = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
-        verifier = new Verifier();
+        verifier = new MockVerifier();
         collateralToken = new MockERC20("USD Coin", "USDC", 6);
         factory = new MarketFactory(
             address(implementation),
@@ -196,7 +196,7 @@ contract MarketFactoryTest is Test {
         factory.setRakeManager(newRakeManager);
         assertEq(factory.rakeManager(), newRakeManager);
 
-        address newVerifier = address(new Verifier());
+        address newVerifier = address(new MockVerifier());
         factory.setVerifier(newVerifier);
         assertEq(factory.verifier(), newVerifier);
 
@@ -370,8 +370,7 @@ contract MarketFactoryTest is Test {
         market.lock();
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
-        uint256[4] memory pubSignals;
-        pubSignals[0] = 100e6;
+        uint256[4] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
         market.verifyProof(new bytes(0), pubSignals);
 
         factory.setGlobalClaimPaused(true);
@@ -420,5 +419,16 @@ contract MarketFactoryTest is Test {
         bytes32 loseHash = keccak256(abi.encodePacked(loser, keccak256(bytes("TEAM_B")), LOSE_SALT));
         vm.prank(loser);
         market.commit(loseHash, amount);
+    }
+
+    function _buildSignals(
+        RevealMarket market,
+        uint256 winningPool,
+        bytes32 outcomeHash
+    ) private view returns (uint256[4] memory signals) {
+        signals[0] = winningPool;
+        signals[1] = market.totalPool();
+        signals[2] = uint256(outcomeHash);
+        signals[3] = market.CIRCUIT_VERSION();
     }
 }
