@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run the full test suite (backend API, backend worker, smart contracts).
+# Run backend pytest suites (API + worker) from a single entrypoint.
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 require_command() {
   local cmd="$1"
@@ -35,21 +35,7 @@ run_py_tests() {
   popd >/dev/null
 }
 
-run_contract_tests() {
-  local contracts_dir="$1"
-  echo "==> Running forge build/test in ${contracts_dir}"
-  pushd "${contracts_dir}" >/dev/null
-  if ! command -v forge >/dev/null 2>&1; then
-    echo "Skipping contracts tests: forge not found on PATH"
-  else
-    forge build
-    forge test
-  fi
-  popd >/dev/null
-}
+run_py_tests "${REPO_ROOT}/backend/api"
+run_py_tests "${REPO_ROOT}/backend/worker"
 
-run_py_tests "${ROOT_DIR}/backend/api"
-run_py_tests "${ROOT_DIR}/backend/worker"
-run_contract_tests "${ROOT_DIR}/contracts"
-
-echo "All test suites completed successfully."
+echo "Backend tests completed successfully."

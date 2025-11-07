@@ -3,7 +3,7 @@ name = "reveal-market"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Lukas Bures",email = "burylukas@seznam.cz"}
+    {name = "Lukas Bures, Ph.D.",email = "me@lukasbures.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.13"

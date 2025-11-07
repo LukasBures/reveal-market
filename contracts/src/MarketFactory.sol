@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol"; // Pulls base ownership helpers.
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol"; // Enables two-step ownership transfers.
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol"; // Provides minimal proxy clone helpers.
 
 import {RevealMarket} from "./RevealMarket.sol";
 import {IRakeManager} from "./interfaces/IRakeManager.sol";
@@ -31,19 +31,19 @@ contract MarketFactory is Ownable2Step {
     event MarketGuardianUpdated(address indexed market, address indexed newGuardian);
     event MarketMetadataUpdated(address indexed market, string metadataURI);
 
-    address public implementation;
-    address public rakeManager;
-    address public treasury;
-    address public verifier;
-    address public defaultCollateral;
-    address public guardian;
-    bool public allowlistPaused;
-    bool public globalCommitPaused;
-    bool public globalClaimPaused;
+    address public implementation; // Address of the RevealMarket implementation clone target.
+    address public rakeManager; // Shared rake manager all markets consult.
+    address public treasury; // Treasury that ultimately receives rake flows.
+    address public verifier; // Shared verifier contract address.
+    address public defaultCollateral; // Default collateral token used when none supplied.
+    address public guardian; // Guardian allowed to pause/emergency control.
+    bool public allowlistPaused; // Global switch preventing collateral allowlist edits/usage.
+    bool public globalCommitPaused; // Factory-level flag markets read before accepting commits.
+    bool public globalClaimPaused; // Factory-level flag markets read before allowing claims.
 
-    address[] private _markets;
-    mapping(address => bool) public isMarket;
-    mapping(address => bool) public isCollateralAllowed;
+    address[] private _markets; // Flat list of all markets deployed by this factory.
+    mapping(address => bool) public isMarket; // Quick lookup to ensure an address was factory-deployed.
+    mapping(address => bool) public isCollateralAllowed; // Tracks which collateral tokens are permitted.
 
     constructor(
         address implementation_,
@@ -61,19 +61,19 @@ contract MarketFactory is Ownable2Step {
             verifier_ == address(0)
         ) revert ZeroAddress();
 
-        implementation = implementation_;
-        rakeManager = rakeManager_;
-        treasury = treasury_;
-        verifier = verifier_;
-        defaultCollateral = collateral_;
+        implementation = implementation_; // Set the implementation clone target.
+        rakeManager = rakeManager_; // Wire up the shared rake manager.
+        treasury = treasury_; // Store treasury address for rake flows.
+        verifier = verifier_; // Store the shared verifier.
+        defaultCollateral = collateral_; // Persist the default collateral pointer.
 
         if (collateral_ != address(0)) {
-            isCollateralAllowed[collateral_] = true;
+            isCollateralAllowed[collateral_] = true; // Auto-allow the provided default collateral.
         }
-        isCollateralAllowed[address(0)] = true;
+        isCollateralAllowed[address(0)] = true; // Allow sentinel zero address meaning "use default".
 
-        guardian = msg.sender;
-        emit GuardianUpdated(msg.sender);
+        guardian = msg.sender; // Deploying owner starts as guardian as well.
+        emit GuardianUpdated(msg.sender); // Surface guardian selection on-chain.
     }
 
     // ───────────────────────────────
@@ -120,17 +120,17 @@ contract MarketFactory is Ownable2Step {
     }
 
     function setDefaultCollateral(address collateral_) external onlyOwner {
-        if (allowlistPaused) revert AllowlistPaused();
-        if (!isCollateralAllowed[collateral_]) revert CollateralNotAllowed(collateral_);
-        defaultCollateral = collateral_;
-        emit DefaultCollateralUpdated(collateral_);
+        if (allowlistPaused) revert AllowlistPaused(); // Prevent swaps while the allowlist is frozen.
+        if (!isCollateralAllowed[collateral_]) revert CollateralNotAllowed(collateral_); // Ensure token is whitelisted.
+        defaultCollateral = collateral_; // Swap the default collateral pointer.
+        emit DefaultCollateralUpdated(collateral_); // Announce the change.
     }
 
     function setCollateralStatus(address collateral, bool allowed) external onlyOwner {
         if (allowlistPaused) revert AllowlistPaused();
-        if (!allowed && collateral == defaultCollateral) revert CannotDisableDefaultCollateral();
-        isCollateralAllowed[collateral] = allowed;
-        emit CollateralStatusUpdated(collateral, allowed);
+        if (!allowed && collateral == defaultCollateral) revert CannotDisableDefaultCollateral(); // Protect default.
+        isCollateralAllowed[collateral] = allowed; // Toggle allowlist state.
+        emit CollateralStatusUpdated(collateral, allowed); // Emit event for indexers.
     }
 
     function setGuardian(address newGuardian) external onlyOwner {
@@ -143,7 +143,7 @@ contract MarketFactory is Ownable2Step {
     // Global controls
     // ───────────────────────────────
     function setAllowlistPaused(bool paused) external onlyGuardianOrOwner {
-        allowlistPaused = paused;
+        allowlistPaused = paused; // Store the new allowlist pause state.
         emit AllowlistPauseSet(paused, msg.sender);
     }
 
@@ -161,16 +161,16 @@ contract MarketFactory is Ownable2Step {
     // Per-market controls
     // ───────────────────────────────
     function setMarketPauses(address market, bool commitPaused, bool claimPaused) external onlyGuardianOrOwner {
-        if (!isMarket[market]) revert UnknownMarket();
-        RevealMarket(payable(market)).setCommitPaused(commitPaused);
-        RevealMarket(payable(market)).setClaimPaused(claimPaused);
-        emit MarketPaused(market, commitPaused, claimPaused, msg.sender);
+        if (!isMarket[market]) revert UnknownMarket(); // Only allow factory markets.
+        RevealMarket(payable(market)).setCommitPaused(commitPaused); // Propagate commit pause.
+        RevealMarket(payable(market)).setClaimPaused(claimPaused); // Propagate claim pause.
+        emit MarketPaused(market, commitPaused, claimPaused, msg.sender); // Publish update.
     }
 
     function setMarketGuardian(address market, address newGuardian) external onlyGuardianOrOwner {
-        if (!isMarket[market]) revert UnknownMarket();
-        RevealMarket(payable(market)).setGuardian(newGuardian);
-        emit MarketGuardianUpdated(market, newGuardian);
+        if (!isMarket[market]) revert UnknownMarket(); // Require known market.
+        RevealMarket(payable(market)).setGuardian(newGuardian); // Delegate to market for guardian enforcement.
+        emit MarketGuardianUpdated(market, newGuardian); // Publish the guardian change.
     }
 
     // ───────────────────────────────
@@ -184,13 +184,13 @@ contract MarketFactory is Ownable2Step {
         address collateral,
         uint256 rakeBpsOverride
     ) external onlyOwner returns (address market) {
-        if (oracle == address(0)) revert ZeroAddress();
-        if (commitDeadline <= block.timestamp || revealDeadline <= commitDeadline) revert InvalidDeadlines();
+        if (oracle == address(0)) revert ZeroAddress(); // Oracle must be set.
+        if (commitDeadline <= block.timestamp || revealDeadline <= commitDeadline) revert InvalidDeadlines(); // Validate timing.
 
-        market = implementation.clone();
-        address marketCollateral = collateral == address(0) ? defaultCollateral : collateral;
-        if (!isCollateralAllowed[marketCollateral]) revert CollateralNotAllowed(marketCollateral);
-        if (rakeBpsOverride > IRakeManager(rakeManager).maxRakeBps()) revert InvalidRakeBps();
+        market = implementation.clone(); // Deploy the minimal proxy clone.
+        address marketCollateral = collateral == address(0) ? defaultCollateral : collateral; // Resolve collateral choice.
+        if (!isCollateralAllowed[marketCollateral]) revert CollateralNotAllowed(marketCollateral); // Enforce allowlist.
+        if (rakeBpsOverride > IRakeManager(rakeManager).maxRakeBps()) revert InvalidRakeBps(); // Enforce rake cap.
 
         RevealMarket(payable(market)).initialize(
             eventId,
@@ -205,8 +205,8 @@ contract MarketFactory is Ownable2Step {
             rakeBpsOverride
         );
 
-        _markets.push(market);
-        isMarket[market] = true;
+        _markets.push(market); // Track the deployed market address.
+        isMarket[market] = true; // Mark it as factory-created.
 
         emit MarketCreated(market, eventId, commitDeadline, revealDeadline, marketCollateral, rakeBpsOverride);
     }
@@ -215,7 +215,7 @@ contract MarketFactory is Ownable2Step {
     // View functions
     // ───────────────────────────────
     function getMarkets() external view returns (address[] memory) {
-        return _markets;
+        return _markets; // Return the in-memory copy of deployed market addresses.
     }
 
     // ───────────────────────────────

@@ -17,6 +17,42 @@ During day-to-day development the local overrides enable hot reload automaticall
 docker compose up
 ```
 
+Need a clean rebuild of every image? Use the root helper:
+
+```bash
+./run_local.sh            # docker compose build --no-cache && docker compose up
+```
+
+For production deployments on a VPS, use the detached runner:
+
+```bash
+./run_prod.sh             # docker compose build && docker compose up -d
+```
+
+## Frontend App
+
+The `frontend/` directory hosts a Next.js 14 application that powers:
+
+- The main marketing surface (`https://revealmarket.xyz/`, `/about`)
+- Host-aware documentation (`https://docs.revealmarket.xyz/*`)
+- Future wallet-enabled trading flows (Wagmi + viem scaffold is already in place)
+
+Local development:
+
+```bash
+cd frontend
+npm install        # first run
+npm run dev        # hot reload on http://localhost:3000
+```
+
+CI / smoke tests:
+
+```bash
+frontend/run_tests.sh   # runs lint + production build
+```
+
+The Docker Compose stack now exposes the frontend as the `frontend` service.
+
 ## Required Environment Variables
 
 All runtime settings are prefixed with `RM_` and documented in `.env.example`. Key values:
@@ -38,6 +74,8 @@ Generic knobs:
 | `MODE` | `dev` enables auto reload + debug logging, `prod` enables multi-worker uvicorn. |
 | `LOG_LEVEL` | Override default log level (`INFO`). |
 | `APP_WORKERS` | Number of uvicorn workers in production mode. |
+| `RM_API_BASE_URL` / `NEXT_PUBLIC_API_BASE_URL` | Base URL used by the frontend (serverside / clientside respectively) to reach the FastAPI service. |
+| `DOCS_HOST` | Hostname that should render the documentation routes (default `docs.revealmarket.xyz`). |
 
 ## Observability & Operations
 

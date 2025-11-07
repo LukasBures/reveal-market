@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // Protects against reentrancy on state mutating flows.
+import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol"; // Lightweight transfer helper for ETH and ERC20.
+import {ERC20} from "solmate/tokens/ERC20.sol"; // Minimal ERC20 interface for collateral interactions.
 
-import {IRakeManager} from "./interfaces/IRakeManager.sol";
-import {IVerifier} from "./interfaces/IVerifier.sol";
-import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol";
+import {IRakeManager} from "./interfaces/IRakeManager.sol"; // Interface for deducting rake and reading limits.
+import {IVerifier} from "./interfaces/IVerifier.sol"; // Interface for verifying zero-knowledge proofs.
+import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol"; // Interface allowing markets to read global pauses.
 
 /// @title RevealMarket
 /// @notice Commit-reveal prediction market supporting zero-knowledge settlement.
@@ -77,39 +77,39 @@ contract RevealMarket is ReentrancyGuard {
     error ProofTotalsMismatch();
     error ProofVersionMismatch();
 
-    string public eventId;
-    Phase public phase;
+    string public eventId; // External identifier for the market.
+    Phase public phase; // Current lifecycle phase.
 
-    uint256 public commitDeadline;
-    uint256 public revealDeadline;
+    uint256 public commitDeadline; // Timestamp after which commits close.
+    uint256 public revealDeadline; // Timestamp after which refunds unlock if unsettled.
 
-    address public oracle;
-    address public verifier;
-    address public rakeManager;
-    address public treasury;
-    address public factory;
-    address public collateral;
-    address public guardian;
-    bool public commitsPaused;
-    bool public claimsPaused;
-    uint256 public cancellationTimestamp;
+    address public oracle; // Oracle authorized to post results.
+    address public verifier; // Verifier contract authorized for ZK proofs.
+    address public rakeManager; // Rake manager contract for fee logic.
+    address public treasury; // Treasury receiving rake transfers.
+    address public factory; // Factory that deployed this market.
+    address public collateral; // Collateral token (zero address indicates native).
+    address public guardian; // Guardian empowered to pause/emergency settle.
+    bool public commitsPaused; // Per-market commit pause flag.
+    bool public claimsPaused; // Per-market claim pause flag.
+    uint256 public cancellationTimestamp; // Timestamp of cancellation (if cancelled).
 
-    string private _cancellationReason;
+    string private _cancellationReason; // Human-readable reason supplied during cancellation.
 
-    uint256 public totalPool;
-    uint256 public winningPool;
-    bytes32 public winningOutcomeHash;
+    uint256 public totalPool; // Aggregate collateral currently held (post-rake when settled).
+    uint256 public winningPool; // Total stake attributed to the winning side.
+    bytes32 public winningOutcomeHash; // Hash of the winning outcome string.
 
-    uint256 public claimedWinningStake;
-    uint256 public paidOut;
+    uint256 public claimedWinningStake; // Amount of winning stake that has already claimed.
+    uint256 public paidOut; // Total collateral paid out to claimants.
 
-    bool private _initialized;
-    bool private _settlementInProgress;
-    uint256 public rakeBpsOverride;
+    bool private _initialized; // Tracks whether initialize has already run.
+    bool private _settlementInProgress; // Prevents concurrent controller actions during settlement.
+    uint256 public rakeBpsOverride; // Optional per-market rake override.
 
-    uint256 public constant CIRCUIT_VERSION = 1;
+    uint256 public constant CIRCUIT_VERSION = 1; // Hard-coded version gates proof circuits.
 
-    mapping(address => Ticket[]) public userTickets;
+    mapping(address => Ticket[]) public userTickets; // Each participant’s list of tickets.
 
     modifier onlyPhase(Phase expected) {
         _onlyPhase(expected);
@@ -153,16 +153,16 @@ contract RevealMarket is ReentrancyGuard {
         address guardian_,
         uint256 rakeBpsOverride_
     ) external {
-        if (_initialized) revert AlreadyInitialized();
-        if (oracle_ == address(0)) revert InvalidOracle();
-        if (verifier_ == address(0)) revert InvalidVerifier();
-        if (rakeManager_ == address(0)) revert InvalidRakeManager();
-        if (treasury_ == address(0)) revert InvalidTreasury();
-        if (guardian_ == address(0)) revert InvalidGuardian();
-        if (commitDeadline_ <= block.timestamp) revert InvalidTimestamp();
-        if (revealDeadline_ <= commitDeadline_) revert InvalidTimestamp();
-        uint256 maxRake = IRakeManager(rakeManager_).maxRakeBps();
-        if (rakeBpsOverride_ > maxRake) revert InvalidRakeBps();
+        if (_initialized) revert AlreadyInitialized(); // Guard against double initialization.
+        if (oracle_ == address(0)) revert InvalidOracle(); // Require oracle address.
+        if (verifier_ == address(0)) revert InvalidVerifier(); // Require verifier address.
+        if (rakeManager_ == address(0)) revert InvalidRakeManager(); // Require rake manager address.
+        if (treasury_ == address(0)) revert InvalidTreasury(); // Require treasury destination.
+        if (guardian_ == address(0)) revert InvalidGuardian(); // Require guardian role to be set.
+        if (commitDeadline_ <= block.timestamp) revert InvalidTimestamp(); // Commit window must be in future.
+        if (revealDeadline_ <= commitDeadline_) revert InvalidTimestamp(); // Reveal deadline must follow commit deadline.
+        uint256 maxRake = IRakeManager(rakeManager_).maxRakeBps(); // Fetch allowable cap from manager.
+        if (rakeBpsOverride_ > maxRake) revert InvalidRakeBps(); // Enforce cap.
 
         eventId = eventId_;
         commitDeadline = commitDeadline_;
@@ -176,8 +176,8 @@ contract RevealMarket is ReentrancyGuard {
         guardian = guardian_;
         rakeBpsOverride = rakeBpsOverride_;
 
-        phase = Phase.Commit;
-        _initialized = true;
+        phase = Phase.Commit; // Markets always start in the commit phase.
+        _initialized = true; // Lock initialization path.
 
         emit Initialized(eventId_, oracle_, commitDeadline_, revealDeadline_, collateral_, guardian_);
         if (rakeBpsOverride_ > 0) {
@@ -187,10 +187,10 @@ contract RevealMarket is ReentrancyGuard {
 
     /// @notice Allows users to commit a ticket hash with funds during the commit phase.
     function commit(bytes32 ticketHash, uint256 amount) external payable onlyPhase(Phase.Commit) {
-        if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
-        if (amount == 0) revert InvalidAmount();
-        if (_factoryCommitPaused()) revert CommitPaused();
-        if (commitsPaused) revert CommitPaused();
+        if (block.timestamp >= commitDeadline) revert InvalidTimestamp(); // Deadline guard.
+        if (amount == 0) revert InvalidAmount(); // Require positive stake.
+        if (_factoryCommitPaused()) revert CommitPaused(); // Respect factory pause knobs.
+        if (commitsPaused) revert CommitPaused(); // Respect per-market pause knobs.
 
         if (collateral == address(0)) {
             if (msg.value != amount) revert InvalidPayment();
@@ -199,75 +199,75 @@ contract RevealMarket is ReentrancyGuard {
             SafeTransferLib.safeTransferFrom(ERC20(collateral), msg.sender, address(this), amount);
         }
 
-        userTickets[msg.sender].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false}));
-        totalPool += amount;
+        userTickets[msg.sender].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false})); // Store ticket.
+        totalPool += amount; // Track funds entering the pool.
 
         emit Committed(msg.sender, ticketHash, amount);
     }
 
     /// @notice Locks the market once the commit deadline has elapsed.
     function lock() external onlyPhase(Phase.Commit) onlyAfter(commitDeadline) {
-        phase = Phase.Locked;
+        phase = Phase.Locked; // Transition to locked state so commits halt.
         emit Locked();
     }
 
     /// @notice Oracle posts the resulting outcome hash after commits are locked.
     function postResult(bytes32 outcomeHash) external onlyOracle onlyPhase(Phase.Locked) {
-        if (winningOutcomeHash != bytes32(0)) revert OutcomeAlreadySet();
-        winningOutcomeHash = outcomeHash;
+        if (winningOutcomeHash != bytes32(0)) revert OutcomeAlreadySet(); // Prevent result overwrite.
+        winningOutcomeHash = outcomeHash; // Store the oracle-supplied hash.
         emit ResultPosted(outcomeHash);
     }
 
     /// @notice Verifies a zero-knowledge proof and settles the market.
     function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals) external onlyPhase(Phase.Locked) nonReentrant {
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
-        if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet();
+        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled(); // Prevent settlement on cancelled market.
+        if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet(); // Oracle result must exist.
 
         uint256 declaredWinningPool = pubSignals[0];
         uint256 proofTotalPool = pubSignals[1];
         bytes32 proofOutcomeHash = bytes32(pubSignals[2]);
         uint256 proofVersion = pubSignals[3];
 
-        if (proofOutcomeHash != winningOutcomeHash) revert ProofOutcomeMismatch();
-        if (proofTotalPool != totalPool) revert ProofTotalsMismatch();
-        if (proofVersion != CIRCUIT_VERSION) revert ProofVersionMismatch();
-        if (declaredWinningPool == 0 || declaredWinningPool > proofTotalPool) revert WinningPoolNotSet();
+        if (proofOutcomeHash != winningOutcomeHash) revert ProofOutcomeMismatch(); // Proof outcome must match oracle result.
+        if (proofTotalPool != totalPool) revert ProofTotalsMismatch(); // Guard against mismatched total pool.
+        if (proofVersion != CIRCUIT_VERSION) revert ProofVersionMismatch(); // Ensure proof version compatibility.
+        if (declaredWinningPool == 0 || declaredWinningPool > proofTotalPool) revert WinningPoolNotSet(); // Validate declared stakes.
 
-        bool success = IVerifier(verifier).verifyProof(proof, pubSignals);
-        emit ProofVerified(success);
-        if (!success) revert ProofVerificationFailed();
+        bool success = IVerifier(verifier).verifyProof(proof, pubSignals); // Delegate to verifier contract.
+        emit ProofVerified(success); // Emit event regardless of result.
+        if (!success) revert ProofVerificationFailed(); // Shield against false positives.
 
-        _finalizeSettlement(winningOutcomeHash, declaredWinningPool);
+        _finalizeSettlement(winningOutcomeHash, declaredWinningPool); // Apply settlement state transitions.
     }
 
     /// @notice Claims winnings by revealing the committed outcome.
     function claim(uint256 ticketId, string calldata outcome, bytes32 salt) external nonReentrant onlyPhase(Phase.Settled) {
-        if (winningPool == 0) revert WinningPoolNotSet();
-        if (_factoryClaimPaused()) revert ClaimPaused();
-        if (claimsPaused) revert ClaimPaused();
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
+        if (winningPool == 0) revert WinningPoolNotSet(); // Settlement must have set winning pool.
+        if (_factoryClaimPaused()) revert ClaimPaused(); // Honor factory-level pause.
+        if (claimsPaused) revert ClaimPaused(); // Honor per-market pause.
+        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled(); // Block claims after cancellation.
 
-        Ticket storage ticket = _getTicket(msg.sender, ticketId);
-        if (ticket.claimed) revert TicketAlreadyClaimed();
+        Ticket storage ticket = _getTicket(msg.sender, ticketId); // Load referenced ticket.
+        if (ticket.claimed) revert TicketAlreadyClaimed(); // Avoid double-claims.
 
-        bytes32 outcomeHash = _hashOutcome(outcome);
-        if (outcomeHash != winningOutcomeHash) revert TicketLoses();
+        bytes32 outcomeHash = _hashOutcome(outcome); // Hash revealed outcome.
+        if (outcomeHash != winningOutcomeHash) revert TicketLoses(); // Must match winning hash.
 
-        bytes32 reconstructed = _hashCommit(msg.sender, outcomeHash, salt);
-        if (reconstructed != ticket.commitHash) revert TicketLoses();
+        bytes32 reconstructed = _hashCommit(msg.sender, outcomeHash, salt); // Recreate commit hash.
+        if (reconstructed != ticket.commitHash) revert TicketLoses(); // Ensure reveal tied to commitment.
 
-        ticket.claimed = true;
-        ticket.revealed = true;
+        ticket.claimed = true; // Mark as claimed before transferring.
+        ticket.revealed = true; // Flag that this ticket has been revealed.
 
         uint256 newClaimedStake = claimedWinningStake + ticket.amount;
         uint256 payout;
         if (newClaimedStake >= winningPool) {
-            payout = _collateralBalance();
+            payout = _collateralBalance(); // Final claimer sweeps remainder to avoid rounding dust.
         } else {
-            payout = (ticket.amount * totalPool) / winningPool;
+            payout = (ticket.amount * totalPool) / winningPool; // Otherwise pay proportionally.
         }
-        claimedWinningStake = newClaimedStake;
-        paidOut += payout;
+        claimedWinningStake = newClaimedStake; // Persist running total of claimed stake.
+        paidOut += payout; // Track aggregate payouts for accounting.
 
         if (collateral == address(0)) {
             SafeTransferLib.safeTransferETH(msg.sender, payout);
@@ -279,23 +279,23 @@ contract RevealMarket is ReentrancyGuard {
 
     /// @notice Refunds all tickets if the market was not settled before reveal deadline.
     function refund() external nonReentrant ifNotSettled {
-        Ticket[] storage tickets = userTickets[msg.sender];
-        uint256 length = tickets.length;
-        uint256 refundAmount;
+        Ticket[] storage tickets = userTickets[msg.sender]; // Pull caller tickets into memory pointer.
+        uint256 length = tickets.length; // Cache length for gas.
+        uint256 refundAmount; // Accumulates total refund due.
 
         for (uint256 i = 0; i < length; ++i) {
-            Ticket storage ticket = tickets[i];
+            Ticket storage ticket = tickets[i]; // Inspect each ticket.
             if (!ticket.claimed && ticket.amount > 0) {
-                refundAmount += ticket.amount;
-                ticket.claimed = true;
-                ticket.amount = 0;
+                refundAmount += ticket.amount; // Add refundable stake.
+                ticket.claimed = true; // Prevent future refunds/claims.
+                ticket.amount = 0; // Zero ticket balance to avoid reuse.
             }
         }
 
-        if (refundAmount == 0) revert NothingToRefund();
-        if (phase != Phase.Cancelled && block.timestamp <= revealDeadline) revert InvalidTimestamp();
+        if (refundAmount == 0) revert NothingToRefund(); // Bail out when nothing refundable.
+        if (phase != Phase.Cancelled && block.timestamp <= revealDeadline) revert InvalidTimestamp(); // Ensure refund window open.
 
-        totalPool -= refundAmount;
+        totalPool -= refundAmount; // Reduce pool to account for refunded stake.
         if (collateral == address(0)) {
             SafeTransferLib.safeTransferETH(msg.sender, refundAmount);
         } else {
@@ -327,16 +327,16 @@ contract RevealMarket is ReentrancyGuard {
         string calldata outcome,
         bytes32 salt
     ) external view returns (uint256 payout, bool claimable) {
-        if (phase != Phase.Settled || winningPool == 0) return (0, false);
+        if (phase != Phase.Settled || winningPool == 0) return (0, false); // Only meaningful after settlement.
 
-        Ticket storage ticket = _getTicket(user, ticketId);
-        if (ticket.claimed) return (0, false);
+        Ticket storage ticket = _getTicket(user, ticketId); // Load ticket under inspection.
+        if (ticket.claimed) return (0, false); // Already claimed → cannot claim again.
 
-        bytes32 outcomeHash = _hashOutcome(outcome);
-        if (outcomeHash != winningOutcomeHash) return (0, false);
+        bytes32 outcomeHash = _hashOutcome(outcome); // Hash proposed outcome.
+        if (outcomeHash != winningOutcomeHash) return (0, false); // Must match winning hash.
 
-        bytes32 reconstructed = _hashCommit(user, outcomeHash, salt);
-        if (reconstructed != ticket.commitHash) return (0, false);
+        bytes32 reconstructed = _hashCommit(user, outcomeHash, salt); // Recreate commit.
+        if (reconstructed != ticket.commitHash) return (0, false); // Must match stored commit hash.
 
         uint256 newClaimedStake = claimedWinningStake + ticket.amount;
         if (newClaimedStake >= winningPool) {
@@ -348,94 +348,94 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     function remainingPayoutPool() external view returns (uint256) {
-        return _collateralBalance();
+        return _collateralBalance(); // Mirror helper result (available collateral).
     }
 
     function appliedRakeBps() public view returns (uint256) {
-        uint256 overrideBps = rakeBpsOverride;
+        uint256 overrideBps = rakeBpsOverride; // Cache override to avoid double reads.
         if (overrideBps == 0) {
-            return IRakeManager(rakeManager).rakeBps();
+            return IRakeManager(rakeManager).rakeBps(); // Fall back to shared manager value.
         }
-        return overrideBps;
+        return overrideBps; // Otherwise surface the override.
     }
 
     function setGuardian(address newGuardian) external {
-        _checkController();
-        if (newGuardian == address(0)) revert InvalidGuardian();
-        guardian = newGuardian;
-        emit GuardianUpdated(newGuardian);
+        _checkController(); // Restrict to factory or guardian.
+        if (newGuardian == address(0)) revert InvalidGuardian(); // Disallow zero guardian.
+        guardian = newGuardian; // Store replacement guardian.
+        emit GuardianUpdated(newGuardian); // Emit change for indexers.
     }
 
     function setCommitPaused(bool paused) external {
-        _checkController();
-        commitsPaused = paused;
-        emit CommitPauseSet(paused, msg.sender);
+        _checkController(); // Restrict to factory or guardian.
+        commitsPaused = paused; // Flip commit pause flag.
+        emit CommitPauseSet(paused, msg.sender); // Emit for transparency.
     }
 
     function setClaimPaused(bool paused) external {
-        _checkController();
-        claimsPaused = paused;
-        emit ClaimPauseSet(paused, msg.sender);
+        _checkController(); // Restrict to factory or guardian.
+        claimsPaused = paused; // Flip claim pause flag.
+        emit ClaimPauseSet(paused, msg.sender); // Emit for transparency.
     }
 
     function cancelMarket(string calldata reason) external {
-        _checkController();
-        if (phase == Phase.Settled) revert AlreadySettled();
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
-        phase = Phase.Cancelled;
-        cancellationTimestamp = block.timestamp;
-        _cancellationReason = reason;
-        winningOutcomeHash = bytes32(0);
-        winningPool = 0;
-        commitsPaused = true;
-        claimsPaused = true;
-        emit MarketCancelled(msg.sender, reason);
+        _checkController(); // Restrict to factory or guardian.
+        if (phase == Phase.Settled) revert AlreadySettled(); // Cannot cancel post-settlement.
+        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled(); // Avoid double cancellation.
+        phase = Phase.Cancelled; // Transition to cancelled state.
+        cancellationTimestamp = block.timestamp; // Record timestamp for reference.
+        _cancellationReason = reason; // Persist user-provided reason.
+        winningOutcomeHash = bytes32(0); // Clear winner hash.
+        winningPool = 0; // Clear winner pool.
+        commitsPaused = true; // Freeze commits going forward.
+        claimsPaused = true; // Freeze claims as well.
+        emit MarketCancelled(msg.sender, reason); // Emit event.
     }
 
     function emergencySettle(bytes32 outcomeHash, uint256 declaredWinningPool) external nonReentrant {
-        _checkController();
-        if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase);
-        winningOutcomeHash = outcomeHash;
-        _finalizeSettlement(outcomeHash, declaredWinningPool);
-        emit EmergencySettled(outcomeHash, declaredWinningPool, msg.sender);
+        _checkController(); // Restrict to factory or guardian.
+        if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase); // Only allowed before settlement completes.
+        winningOutcomeHash = outcomeHash; // Override winner hash.
+        _finalizeSettlement(outcomeHash, declaredWinningPool); // Finalize payouts.
+        emit EmergencySettled(outcomeHash, declaredWinningPool, msg.sender); // Emit event for audit trail.
     }
 
     function updateOracle(address newOracle) external {
-        _checkController();
-        if (newOracle == address(0)) revert InvalidOracle();
-        address previous = oracle;
-        oracle = newOracle;
-        emit OracleUpdated(previous, newOracle);
+        _checkController(); // Restrict to factory or guardian.
+        if (newOracle == address(0)) revert InvalidOracle(); // Require non-zero oracle.
+        address previous = oracle; // Snapshot current oracle.
+        oracle = newOracle; // Assign new oracle.
+        emit OracleUpdated(previous, newOracle); // Emit change.
     }
 
     function cancellationReason() external view returns (string memory) {
-        return _cancellationReason;
+        return _cancellationReason; // Provide reason to off-chain callers.
     }
 
     receive() external payable {
-        revert InvalidPhase(Phase.Commit, phase);
+        revert InvalidPhase(Phase.Commit, phase); // Reject stray ETH transfers outside commit().
     }
 
     // ----------------------- internal utils -----------------------
 
     function _onlyPhase(Phase expected) internal view {
-        if (phase != expected) revert InvalidPhase(expected, phase);
+        if (phase != expected) revert InvalidPhase(expected, phase); // Enforce strict phase progression.
     }
 
     function _onlyOracle() internal view {
-        if (msg.sender != oracle) revert InvalidOracle();
+        if (msg.sender != oracle) revert InvalidOracle(); // Restrict call to oracle.
     }
 
     function _onlyAfter(uint256 timestamp) internal view {
-        if (block.timestamp <= timestamp) revert InvalidTimestamp();
+        if (block.timestamp <= timestamp) revert InvalidTimestamp(); // Require timestamp to have elapsed.
     }
 
     function _ifNotSettled() internal view {
-        if (phase == Phase.Settled) revert AlreadySettled();
+        if (phase == Phase.Settled) revert AlreadySettled(); // Disallow when already settled.
     }
 
     function _hashOutcome(string memory outcome) internal pure returns (bytes32 result) {
-        bytes memory data = bytes(outcome);
+        bytes memory data = bytes(outcome); // Load string into bytes for hashing.
         assembly {
             result := keccak256(add(data, 0x20), mload(data))
         }
@@ -443,69 +443,69 @@ contract RevealMarket is ReentrancyGuard {
 
     function _hashCommit(address user, bytes32 outcomeHash, bytes32 salt) internal pure returns (bytes32 result) {
         assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, shl(96, user))
-            mstore(add(ptr, 0x14), outcomeHash)
-            mstore(add(ptr, 0x34), salt)
-            result := keccak256(ptr, 0x54)
-            mstore(0x40, add(ptr, 0x60))
+            let ptr := mload(0x40) // Grab free memory pointer.
+            mstore(ptr, shl(96, user)) // Store address left-aligned to 20 bytes.
+            mstore(add(ptr, 0x14), outcomeHash) // Append outcome hash.
+            mstore(add(ptr, 0x34), salt) // Append salt.
+            result := keccak256(ptr, 0x54) // Hash the 84-byte payload.
+            mstore(0x40, add(ptr, 0x60)) // Advance free memory pointer.
         }
     }
 
     function _getTicket(address user, uint256 ticketId) private view returns (Ticket storage) {
-        Ticket[] storage tickets = userTickets[user];
-        if (ticketId >= tickets.length) revert TicketNotFound();
-        return tickets[ticketId];
+        Ticket[] storage tickets = userTickets[user]; // Fetch user ticket list.
+        if (ticketId >= tickets.length) revert TicketNotFound(); // Bounds check.
+        return tickets[ticketId]; // Return pointer to requested ticket.
     }
 
     function _collateralBalance() internal view returns (uint256) {
         if (collateral == address(0)) {
-            return address(this).balance;
+            return address(this).balance; // When using native collateral, read ETH balance.
         }
-        return ERC20(collateral).balanceOf(address(this));
+        return ERC20(collateral).balanceOf(address(this)); // Otherwise read ERC20 balance.
     }
 
     function _finalizeSettlement(bytes32 outcomeHash, uint256 declaredWinningPool) internal {
-        if (declaredWinningPool == 0 || declaredWinningPool > totalPool) revert WinningPoolNotSet();
+        if (declaredWinningPool == 0 || declaredWinningPool > totalPool) revert WinningPoolNotSet(); // Ensure winning pool bounds.
 
-        winningPool = declaredWinningPool;
-        _settlementInProgress = true;
-        uint256 netPool = IRakeManager(rakeManager).takeRake(collateral, totalPool, rakeBpsOverride);
-        uint256 rakeAmount = totalPool - netPool;
+        winningPool = declaredWinningPool; // Persist winning pool size.
+        _settlementInProgress = true; // Block controller calls until done.
+        uint256 netPool = IRakeManager(rakeManager).takeRake(collateral, totalPool, rakeBpsOverride); // Deduct rake.
+        uint256 rakeAmount = totalPool - netPool; // Determine rake withheld.
         if (rakeAmount > 0) {
             if (collateral == address(0)) {
-                SafeTransferLib.safeTransferETH(treasury, rakeAmount);
+                SafeTransferLib.safeTransferETH(treasury, rakeAmount); // Send ETH rake.
             } else {
-                SafeTransferLib.safeTransfer(ERC20(collateral), treasury, rakeAmount);
+                SafeTransferLib.safeTransfer(ERC20(collateral), treasury, rakeAmount); // Send ERC20 rake.
             }
         }
-        totalPool = netPool;
+        totalPool = netPool; // Update pool to net amount used for payouts.
 
-        phase = Phase.Settled;
-        _settlementInProgress = false;
-        emit Settled(outcomeHash);
+        phase = Phase.Settled; // Record final phase.
+        _settlementInProgress = false; // Re-open controller actions.
+        emit Settled(outcomeHash); // Emit final settlement event.
     }
 
     function _factoryCommitPaused() internal view returns (bool) {
-        if (factory.code.length == 0) return false;
+        if (factory.code.length == 0) return false; // If factory unset, treat as unpaused.
         try IMarketFactoryStatus(factory).globalCommitPaused() returns (bool paused) {
-            return paused;
+            return paused; // Read pause flag when interface call succeeds.
         } catch {
-            return false;
+            return false; // Fail-open to avoid bricking markets if factory unavailable.
         }
     }
 
     function _factoryClaimPaused() internal view returns (bool) {
-        if (factory.code.length == 0) return false;
+        if (factory.code.length == 0) return false; // If factory unset, treat as unpaused.
         try IMarketFactoryStatus(factory).globalClaimPaused() returns (bool paused) {
-            return paused;
+            return paused; // Read pause flag when interface call succeeds.
         } catch {
-            return false;
+            return false; // Fail-open if factory call reverts.
         }
     }
 
     function _checkController() internal view {
-        if (_settlementInProgress) revert SettlementInProgress();
-        if (msg.sender != factory && msg.sender != guardian) revert NotAuthorized();
+        if (_settlementInProgress) revert SettlementInProgress(); // Block controller actions mid-settlement.
+        if (msg.sender != factory && msg.sender != guardian) revert NotAuthorized(); // Require factory or guardian caller.
     }
 }
