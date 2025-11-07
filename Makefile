@@ -1,16 +1,23 @@
-PYTHON ?= python3
+PYTHON ?= $(shell command -v python3.13 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
+COMPOSE ?= docker compose
+INFRA_SERVICES ?= postgres redis
 
-.PHONY: api worker test fmt
+.PHONY: api worker stack down test fmt
 
 api:
-	docker compose up --build api
+	$(COMPOSE) up --build $(INFRA_SERVICES) api
 
 worker:
-	docker compose up --build worker
+	$(COMPOSE) up --build $(INFRA_SERVICES) worker
+
+stack:
+	$(COMPOSE) up --build $(INFRA_SERVICES) api worker frontend
+
+down:
+	$(COMPOSE) down
 
 test:
-	cd backend/api && PYTHONPATH=.. $(PYTHON) -m pytest
-	cd backend/worker && PYTHONPATH=.. $(PYTHON) -m pytest tests
+	./backend/run_tests.sh
 
 fmt:
 	pre-commit run --all-files

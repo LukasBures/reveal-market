@@ -30,7 +30,6 @@ fi
 
 cd "${ROOT_DIR}"
 
-# Leave one CPU free when building on the VPS.
 if command -v nproc >/dev/null 2>&1; then
   PARALLEL_BUILDS="$(nproc --ignore=1)"
 elif [[ "$(uname -s)" == "Darwin" ]]; then

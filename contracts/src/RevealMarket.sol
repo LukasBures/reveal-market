@@ -38,6 +38,9 @@ contract RevealMarket is ReentrancyGuard {
     event Locked();
     event ProofVerified(bool success);
     event Settled(bytes32 indexed winningOutcomeHash);
+    event MarketResolved(
+        bytes32 indexed outcomeHash, uint256 winningStake, uint256 netPayoutPool, uint256 rakePaid, uint256 settledAt
+    );
     event Claimed(address indexed user, uint256 payout);
     event Refunded(address indexed user, uint256 amount);
     event ResultPosted(bytes32 indexed outcomeHash);
@@ -99,6 +102,8 @@ contract RevealMarket is ReentrancyGuard {
     uint256 public totalPool; // Aggregate collateral currently held (post-rake when settled).
     uint256 public winningPool; // Total stake attributed to the winning side.
     bytes32 public winningOutcomeHash; // Hash of the winning outcome string.
+    uint256 public settledAt; // Timestamp when settlement finalized.
+    uint256 public rakePaid; // Amount of rake routed to treasury for this market.
 
     uint256 public claimedWinningStake; // Amount of winning stake that has already claimed.
     uint256 public paidOut; // Total collateral paid out to claimants.
@@ -219,7 +224,11 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Verifies a zero-knowledge proof and settles the market.
-    function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals) external onlyPhase(Phase.Locked) nonReentrant {
+    function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals)
+        external
+        onlyPhase(Phase.Locked)
+        nonReentrant
+    {
         if (phase == Phase.Cancelled) revert MarketAlreadyCancelled(); // Prevent settlement on cancelled market.
         if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet(); // Oracle result must exist.
 
@@ -241,7 +250,11 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Claims winnings by revealing the committed outcome.
-    function claim(uint256 ticketId, string calldata outcome, bytes32 salt) external nonReentrant onlyPhase(Phase.Settled) {
+    function claim(uint256 ticketId, string calldata outcome, bytes32 salt)
+        external
+        nonReentrant
+        onlyPhase(Phase.Settled)
+    {
         if (winningPool == 0) revert WinningPoolNotSet(); // Settlement must have set winning pool.
         if (_factoryClaimPaused()) revert ClaimPaused(); // Honor factory-level pause.
         if (claimsPaused) revert ClaimPaused(); // Honor per-market pause.
@@ -313,20 +326,16 @@ contract RevealMarket is ReentrancyGuard {
     function ticketInfo(address user, uint256 ticketId) external view returns (Ticket memory) {
         Ticket storage ticket = _getTicket(user, ticketId);
         return Ticket({
-            commitHash: ticket.commitHash,
-            amount: ticket.amount,
-            revealed: ticket.revealed,
-            claimed: ticket.claimed
+            commitHash: ticket.commitHash, amount: ticket.amount, revealed: ticket.revealed, claimed: ticket.claimed
         });
     }
 
     /// @notice Computes the payout a ticket would receive if claimed with provided reveal data.
-    function payoutPreview(
-        address user,
-        uint256 ticketId,
-        string calldata outcome,
-        bytes32 salt
-    ) external view returns (uint256 payout, bool claimable) {
+    function payoutPreview(address user, uint256 ticketId, string calldata outcome, bytes32 salt)
+        external
+        view
+        returns (uint256 payout, bool claimable)
+    {
         if (phase != Phase.Settled || winningPool == 0) return (0, false); // Only meaningful after settlement.
 
         Ticket storage ticket = _getTicket(user, ticketId); // Load ticket under inspection.
@@ -349,6 +358,21 @@ contract RevealMarket is ReentrancyGuard {
 
     function remainingPayoutPool() external view returns (uint256) {
         return _collateralBalance(); // Mirror helper result (available collateral).
+    }
+
+    /// @notice Returns settlement metadata for indexers/dashboards.
+    function resolutionSummary()
+        external
+        view
+        returns (
+            bytes32 outcomeHash,
+            uint256 winningStake,
+            uint256 netPool,
+            uint256 rakeAmount,
+            uint256 settledTimestamp
+        )
+    {
+        return (winningOutcomeHash, winningPool, totalPool, rakePaid, settledAt);
     }
 
     function appliedRakeBps() public view returns (uint256) {
@@ -480,10 +504,13 @@ contract RevealMarket is ReentrancyGuard {
             }
         }
         totalPool = netPool; // Update pool to net amount used for payouts.
+        rakePaid = rakeAmount; // Track rake paid out for reporting.
+        settledAt = block.timestamp; // Timestamp settlement completion.
 
         phase = Phase.Settled; // Record final phase.
         _settlementInProgress = false; // Re-open controller actions.
         emit Settled(outcomeHash); // Emit final settlement event.
+        emit MarketResolved(outcomeHash, declaredWinningPool, netPool, rakeAmount, settledAt); // Rich metadata event.
     }
 
     function _factoryCommitPaused() internal view returns (bool) {

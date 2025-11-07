@@ -4,6 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_PY_BIN="${PYTHON_BIN:-$(command -v python3.13 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)}"
 
 require_command() {
   local cmd="$1"
@@ -29,8 +30,11 @@ run_py_tests() {
     require_command poetry
     poetry run pytest
   else
-    require_command python
-    python -m pytest
+    if [[ -z "${DEFAULT_PY_BIN}" ]]; then
+      echo "Error: no python interpreter found (looked for python3.13/python3/python)." >&2
+      exit 1
+    fi
+    "${DEFAULT_PY_BIN}" -m pytest
   fi
   popd >/dev/null
 }

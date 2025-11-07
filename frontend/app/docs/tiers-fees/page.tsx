@@ -7,25 +7,26 @@ export default function TiersFeesPage() {
     <>
       <h1 className="text-3xl font-semibold text-white">Tiers & Fees</h1>
       <p>
-        Rake is configurable per deployment via `RakeManager`. Default cap is 2%
-        (200 bps). Future releases may add tiered fees:
+        Reveal Market rewards early partners with preferential economics. Fee
+        structures adapt to the role you play in the ecosystem.
       </p>
       <ul className="list-disc space-y-3 pl-6">
         <li>
-          <strong>Community</strong> – 1% rake, basic analytics, standard SLAs.
+          <strong>Launch Partners.</strong> Discounted rake, featured placement,
+          co-marketing, and governance seats.
         </li>
         <li>
-          <strong>Pro</strong> – 0.5% rake, priority ingest, custom alerting.
+          <strong>Liquidity Syndicates.</strong> Revenue share from protocol
+          fees plus custom dashboards and automated payouts.
         </li>
         <li>
-          <strong>Enterprise</strong> – bespoke rake, dedicated guardian,
-          private RPC endpoints.
+          <strong>Enterprise.</strong> Bespoke pricing, dedicated guardian
+          instances, and private routing of high-value flows.
         </li>
       </ul>
       <p>
-        Today, adjust rake via `setRakeBps` or a per-market override when calling
-        `createMarket`. Front-end surfaces should display the applied rake (see
-        `RevealMarket.appliedRakeBps()`).
+        Pricing conversations happen with the founding team. Reach out to
+        discuss volume commitments and we’ll tailor the tier to your business.
       </p>
     </>
   );

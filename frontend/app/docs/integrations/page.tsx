@@ -7,36 +7,30 @@ export default function IntegrationsPage() {
     <>
       <h1 className="text-3xl font-semibold text-white">Integrations</h1>
       <p>
-        Developers can integrate with Reveal Market via REST endpoints, on-chain
-        events, or the ingest worker hooks. Common integration paths:
+        Reveal Market is open for business integrations across exchanges, media
+        brands, structured product desks, and analytics providers. Plugging into
+        the protocol exposes live market intelligence and turnkey monetisation.
       </p>
       <ul className="list-disc space-y-3 pl-6">
         <li>
-          <strong>REST API</strong> –{" "}
-          <code className="rounded bg-black/40 px-2 py-1">/markets</code>,{" "}
-          <code className="rounded bg-black/40 px-2 py-1">
-            /markets/
-            {"{event_id}"}
-          </code>
-          ,{" "}
-          <code className="rounded bg-black/40 px-2 py-1">
-            /resolution/
-            {"{condition}"}
-          </code>
-          . Supports filters, search, and stats.
+          <strong>Data/API Access.</strong> Institutional endpoints provide
+          filtered market feeds, liquidity stats, and settlement history for
+          embedding inside trading tools or research portals.
         </li>
         <li>
-          <strong>On-chain events</strong> – Listen for `MarketCreated`,
-          `MarketResolved` (coming soon), and `GuardianUpdated` from the
-          factory/market contracts.
+          <strong>Marketplace SDK.</strong> Launch a branded prediction venue on
+          top of Reveal’s contracts while keeping fee control, UX, and audience.
         </li>
         <li>
-          <strong>Worker hooks</strong> – Extend the ingest loop to publish to
-          Kafka, WebSocket streams, or your own cache layer after each sync.
+          <strong>Liquidity partner APIs.</strong> Programmatically seed or
+          rebalance positions, receive rake-sharing, and access treasury
+          analytics.
         </li>
       </ul>
       <p>
-        For custom partnerships, contact{" "}
+        The integration team handles technical scoping and prioritises
+        partnerships that expand geographic reach or bring novel distribution.
+        Begin the conversation at{" "}
         <a
           href="mailto:hello@revealmarket.xyz"
           className="text-brand-300 underline"

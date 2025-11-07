@@ -5,32 +5,35 @@ export const metadata = {
 export default function ManifestoPage() {
   return (
     <>
-      <h1 className="text-3xl font-semibold text-white">The Reveal Manifesto</h1>
+      <h1 className="text-3xl font-semibold text-white">Manifesto</h1>
       <p>
-        Reveal Market is built around a few simple beliefs: private conviction
-        should be rewarded, zero-knowledge systems should be accessible, and
-        transparency should never come at the cost of user safety. Our manifesto
-        explains the principles guiding the protocol.
+        We believe alpha deserves protection, settlement must be instant, and
+        liquidity should be rewarded without sacrificing privacy. Reveal Market
+        exists to make those principles investable.
       </p>
       <ol className="list-decimal space-y-4 pl-6">
         <li>
-          <strong>Privacy-respecting liquidity.</strong> Commit-reveal
-          interactions allow traders to contribute liquidity without exposing
-          positions until settlement.
+          <strong>Trustless privacy.</strong> Traders express conviction
+          privately via commit/reveal while zero-knowledge proofs audit every
+          outcome. This unlocks institutional flows that will never leak their
+          edge.
         </li>
         <li>
-          <strong>Verifiable fairness.</strong> Every settlement emits
-          verifiable proofs and on-chain events so outcomes remain auditable.
+          <strong>Institution-ready rails.</strong> Compliance dashboards,
+          audited smart contracts, and an API-first approach let exchanges and
+          OTC desks plug in without rearchitecting their stack.
         </li>
         <li>
-          <strong>Composable rails.</strong> APIs, worker daemons, and smart
-          contracts remain modular so builders can integrate parts or the whole
-          stack.
+          <strong>Aligned incentives.</strong> Liquidity providers, guardians,
+          and token holders capture value through fee reductions, governance, and
+          deal flow. Nobody contributes for free.
         </li>
       </ol>
       <p>
-        Whether you are an operator, trader, or auditor, these values shape how
-        Reveal Market will evolve.
+        The opportunity is simple: capture the fastest-growing segment of
+        on-chain prediction volume by offering a product the market actually
+        trusts. Partners that join now shape the governance, product roadmap, and
+        future economics.
       </p>
     </>
   );

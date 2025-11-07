@@ -7,13 +7,14 @@ export default function ReferralsPage() {
     <>
       <h1 className="text-3xl font-semibold text-white">Referrals</h1>
       <p>
-        A referral programme is in development. The goal is to reward front-ends
-        and liquidity partners for onboarding users without compromising privacy.
+        Growth is partner-led. Our referral framework rewards those who bring
+        serious capital, media distribution, or deal flow into Reveal.
       </p>
       <p>
-        Proposed approach: signed referral codes stored off-chain, with rewards
-        calculated from rake share. More details will be announced prior to
-        mainnet launch.
+        Think of it as aligned economics rather than vanity codes: referral
+        partners earn performance-based allocations in $REVEAL, fee rebates, or
+        direct rev share depending on the users or liquidity introduced. The
+        program is live for vetted institutions—contact us to learn more.
       </p>
     </>
   );

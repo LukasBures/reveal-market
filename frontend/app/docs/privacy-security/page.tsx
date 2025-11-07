@@ -7,19 +7,28 @@ export default function PrivacySecurityPage() {
     <>
       <h1 className="text-3xl font-semibold text-white">Privacy & Security</h1>
       <p>
-        Commit-and-reveal flows provide privacy for market entrants; zero-knowledge
-        proofs confirm settlement without revealing underlying commitments. Even so,
-        operators must harden the stack:
+        Privacy is a competitive advantage and a regulatory requirement. Reveal
+        combines zk proofs with institution-grade controls so compliance teams
+        and traders both win.
       </p>
       <ul className="list-disc space-y-3 pl-6">
-        <li>Use HTTPS + Cloudflare to terminate TLS before hitting the VPS.</li>
-        <li>Store private keys in a secure vault (KMS, HashiCorp) rather than environment files.</li>
-        <li>Separate RPC credentials per environment; never embed secrets in Docker images.</li>
-        <li>Rotate Polymarket API keys, DB credentials, and wallet secrets regularly.</li>
+        <li>
+          <strong>Zero-knowledge settlement.</strong> Claims are verified
+          without revealing strategies; proofs are publicly auditable.
+        </li>
+        <li>
+          <strong>Control planes.</strong> Guardians, pause switches, and
+          alerting satisfy operational risk policies.
+        </li>
+        <li>
+          <strong>Compliance-ready hooks.</strong> Optional KYB/KYC modules,
+          sanction screening, and configurable geo-fencing.
+        </li>
       </ul>
       <p>
-        Contract-level security audits and prover circuit reviews remain on the roadmap.
-        Until then, treat the platform as experimental and limit mainnet exposure.
+        Security audits and formal verification are ongoing; investors receive
+        full reports under NDA. The objective is simple: own the world’s most
+        trusted privacy-preserving prediction rails.
       </p>
     </>
   );

@@ -5,30 +5,32 @@ export const metadata = {
 export default function MarketplacePage() {
   return (
     <>
-      <h1 className="text-3xl font-semibold text-white">Sage Marketplace</h1>
+      <h1 className="text-3xl font-semibold text-white">Marketplace Flywheel</h1>
       <p>
-        Reveal Market aspires to host a decentralized marketplace for markets and
-        liquidity providers. Operators can deploy factories with curated lists of
-        markets, while third-party UIs surface them to end users.
+        Reveal Market is building the infrastructure for premium prediction
+        venues. Think of it as a white-label L1 for conviction: partners launch
+        their own experiences while sharing liquidity and trust.
       </p>
       <ul className="list-disc space-y-3 pl-6">
         <li>
-          <strong>Market discovery</strong> – `/markets` endpoint powers listing
-          UIs, filtering by category/oracle/status.
+          <strong>Market discovery.</strong> Curated front-ends, embeddable
+          widgets, and programmatic feeds ensure audiences can tap into the most
+          active markets instantly.
         </li>
         <li>
-          <strong>Liquidity partners</strong> – Treasury addresses and rake
-          managers can be configured per deployment to support different fee
-          structures.
+          <strong>Liquidity partners.</strong> Treasury addresses and rake
+          managers can be configured per deployment, allowing bespoke fee
+          structures and private liquidity pools.
         </li>
         <li>
-          <strong>Analytics</strong> – Stats endpoint summarises open vs. settled
-          markets, rake distribution, and liquidity.
+          <strong>Analytics.</strong> Real-time stats on open vs. settled
+          markets, fee flows, and user cohorts inform product and investment
+          decisions.
         </li>
       </ul>
       <p>
-        Marketplace tooling (curated lists, watchlists, permissioned factories) is
-        on the roadmap. Today, use the API + contracts to build your own explorer.
+        This marketplace layer is the moat: once liquidity and data live atop
+        Reveal, every partner benefits from network effects.
       </p>
     </>
   );

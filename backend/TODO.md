@@ -1,62 +1,59 @@
-# Backend TODOs & Enhancements
+# Backend Growth TODOs
 
-This list captures remaining items that would strengthen reliability, developer experience, or production readiness beyond the current MVP scope.
+Every enhancement below ties directly to investor confidence, liquidity depth, or partner readiness. Prioritize work that amplifies these signals.
 
-## High Priority
+## Pillar 1 – Data Assurance & Transparency (High Priority)
 
-- **End-to-end migrations in worker startup**  
-  The worker assumes migrations have run. Add an optional flag to apply migrations (or at least assert schema version) when the worker starts, preventing subtle schema drift in single-service deployments.
+- **Worker-led schema enforcement**  
+  Allow the worker to verify/run Alembic migrations at startup so single-service deployments cannot drift. Investors gain assurance that reported metrics always reflect the latest schema.
 
-- **Cache invalidation granularity**  
-  Current invalidation wipes all list caches. Introduce smarter invalidation (e.g., tag-based keys or cache versioning) to avoid evicting every list page when only one market updates. This keeps cache hit rates high as traffic grows.
+- **Granular cache invalidation**  
+  Replace blanket Redis flushes with tag-based or versioned caches. Stable SLAs on `/markets` boost trust from exchanges evaluating latency guarantees.
 
-- **Resolution persistence & backfill**  
-  The API now reads Conditional Tokens on demand, but we still do not persist payout vectors or a resolution history table. Add a background task that hydrates on-chain results into Postgres, warms the cache, and exposes audit metadata (block numbers, tx hashes) so /resolution responses are fast and immutable.
+- **Persistent resolution ledger**  
+  Continuously hydrate on-chain payout vectors (block number, tx hash, oracle proof hash) into Postgres and Redis. This unlocks immutable audit trails for diligence teams.
 
-- **Worker-driven contract resolution**  
-  We ingest Gamma + Conditional Tokens, yet the worker stops at upserting database rows. Extend the loop to trigger our own market settlement transactions (or enqueue them) once on-chain payoutsAreSet, with guardrails for retries, duplicate suppression, and alerting when resolution fails.
+- **Resolution automation loop**  
+  Extend the worker to trigger settlement transactions (or queue them) once `payoutsAreSet` is detected. Include retries, duplicate suppression, and escalation logging so partners see proactive ops.
 
-- **Finalize on-chain automation**  
-  The worker can now submit `createMarket` transactions, but it still uses placeholder deadlines/gas values. Hook this into real Polymarket metadata, derive deadlines from source data, persist the on-chain market address in Postgres, and add an option to disable auto-creation per market. Ensure secrets (private keys) are sourced from a secure backend.
+- **On-chain event mirroring**  
+  Stream `MarketCreated`, `RakeConfigured`, and guardian events into the shared database to keep rake economics and addresses perfectly aligned between API and contracts.
 
-- **On-chain event ingestion**  
-  Add a lightweight listener (polling or websockets) that ingests `MarketCreated`, `RakeConfigured`, and future events so the API reflects on-chain state (e.g., backfilling market addresses, rake overrides, guardian changes).
+- **Horizen ZEN testnet switch**  
+  Ship configuration + tooling so regulated partners can trial the stack on the ZEN testnet before moving capital, reducing onboarding friction.
 
-- **More comprehensive tests**  
-  Add integration tests that spin up ephemeral Postgres/Redis (via pytest-docker) to cover migrations + caching end-to-end, and property tests for cache key generation. Ensures production-like confidence before shipping changes.
+## Pillar 2 – Liquidity Automation & Revenue Capture (Medium Priority)
 
-## Medium Priority
+- **Polymarket ingestion resilience**  
+  Centralize retries, backoff, and metrics for all upstream calls. Visibility into timeout/error counters is critical for LPs modeling data freshness.
 
-- **Secrets management**  
-  Replace direct use of `RM_WALLET_PRIVATE_KEY` with a pluggable signer abstraction (e.g., HashiCorp Vault, AWS KMS, or Azure Key Vault) so production deployments never load raw keys from plaintext.
+- **Secrets + signer hardening**  
+  Move `RM_WALLET_PRIVATE_KEY` to a pluggable signer (Vault, KMS, etc.). Institutional partners insist on auditable key custody before enabling auto-market creation.
 
-- **Config reloading / dynamic tuning**  
-  Currently all settings require restarts. Supporting dynamic reload (e.g., SIGHUP to re-read environment or a small admin endpoint) would allow tuning poll intervals or TTLs without downtime.
+- **Config hot-reload**  
+  Introduce a safe mechanism (SIGHUP/admin endpoint) to adjust poll intervals, cache TTLs, and rake defaults without downtime. Enables rapid tuning during liquidity campaigns.
 
-- **Robust Polymarket error handling**  
-  Wrap Gamma/Conditional Tokens calls in shared retry + metrics helpers so transient upstream failures are observable and do not drop entire sync cycles. Emit Prometheus counters (timeouts, 4xx, 5xx) for alerting.
+- **Environment-aware cache namespaces**  
+  Allow multi-environment Redis sharing by prefixing keys, preventing cross-talk when staging and production run simultaneously for partner demos.
 
-- **API rate limiting / request throttling**  
-  Consider adding simple rate limits (via Redis or a gateway) once public traffic hits the endpoints to shield the database from unexpected load.
+- **API request governance**  
+  Add rate limiting/throttling guards to preserve performance as marketing funnels drive more investor traffic toward the metrics endpoints.
 
-- **Dedicated cache namespace per environment**  
-  Introduce an `RM_CACHE_NAMESPACE` env var to prevent key collisions when multiple environments share the same Redis (useful on shared infrastructure or during blue/green deployments).
+## Pillar 3 – Institutional Readiness & Insight (Supporting)
 
-## Low Priority / Nice-to-have
+- **Integration-grade testing**  
+  Spin up pytest-docker suites that boot Postgres + Redis to exercise migrations, cache flows, and worker loops end-to-end—evidence we can meet enterprise QA bars.
 
-- **Structured tracing / OpenTelemetry**  
-  Add request-level tracing (OTLP exporter) to tie together API requests with worker fetch cycles for richer observability.
+- **Structured tracing**  
+  Emit OpenTelemetry spans linking API requests, Redis hits, and worker batches. This supports external observability platforms used by exchanges and compliance desks.
 
-- **Alerting playbooks**  
-  Document how to interpret key logs/metrics (`worker.fetch.empty`, heartbeat misses, cache miss spikes) and recommended responses. Beneficial when handing off to ops teams.
+- **Operational playbooks**  
+  Document log signatures (`worker.fetch.empty`, `heartbeat.stale`) and recommended responses. Investors value teams with clear incident processes.
 
 - **Autoscaling hooks**  
-  Provide docs or scripts for scaling workers/API containers (CPU-based or backlog-based) should Polymarket ingest rates increase.
+  Provide reference scripts/metrics for scaling workers/API containers when poll lag or queue depth increases, ensuring liquidity programs aren’t capped by infrastructure.
 
-- **Rake override surfacing**  
-  Include the newly exposed `appliedRakeBps` value and any on-chain resolution metadata in API responses (and cache keys) so front-ends show accurate fee and settlement information. Update `/markets` serialization once the contracts emit overrides.
+- **Rake visibility in responses**  
+  Surface `appliedRakeBps`, guardian state, and settlement metadata on every `/markets` payload so capital allocators can instantly calculate expected yield.
 
-Each item is valuable, but prioritise “Schema safety for worker”, “Smarter cache invalidation”, and “Polymarket retries” first—they protect correctness and availability as usage grows.
-
-
-Implement option to use Horizen ZEN testnet: https://docs.goldsky.com/chains/horizen
+Focus execution on Pillar 1 items first—they are the clearest signal to potential investors that Reveal Market operates with the discipline of a regulated venue. 

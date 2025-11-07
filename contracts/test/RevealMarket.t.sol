@@ -182,6 +182,44 @@ contract RevealMarketTest is Test {
         market.verifyProof(proof, pubSignals);
     }
 
+    function testResolutionSummaryTracksMetadata() public {
+        _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
+        _commitTicket(LOSER, LOSE_SALT, keccak256(bytes("TEAM_B")), STAKE);
+
+        vm.warp(commitDeadline + 1);
+        market.lock();
+
+        vm.prank(ORACLE);
+        market.postResult(OUTCOME_HASH);
+
+        uint256[4] memory pubSignals = _buildSignals(STAKE);
+        bytes memory proof = "";
+
+        uint256 settleTime = block.timestamp + 5;
+        vm.warp(settleTime);
+
+        uint256 grossPool = STAKE * 2;
+        uint256 expectedRake = (grossPool * market.appliedRakeBps()) / 10_000;
+        uint256 expectedNet = grossPool - expectedRake;
+
+        vm.expectEmit(true, false, false, true);
+        emit RevealMarket.MarketResolved(OUTCOME_HASH, STAKE, expectedNet, expectedRake, settleTime);
+
+        market.verifyProof(proof, pubSignals);
+
+        assertEq(market.settledAt(), settleTime);
+        assertEq(market.rakePaid(), expectedRake);
+
+        (bytes32 outcomeHash, uint256 winningStake, uint256 netPool, uint256 rakeAmount, uint256 settledTimestamp) =
+            market.resolutionSummary();
+
+        assertEq(outcomeHash, OUTCOME_HASH);
+        assertEq(winningStake, STAKE);
+        assertEq(netPool, expectedNet);
+        assertEq(rakeAmount, expectedRake);
+        assertEq(settledTimestamp, settleTime);
+    }
+
     function testVerifyProofRejectsOutcomeMismatch() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
 
@@ -273,12 +311,7 @@ contract RevealMarketTest is Test {
 
         vm.expectEmit(true, true, false, true);
         emit RevealMarket.Initialized(
-            eventId,
-            ORACLE,
-            commitDeadline,
-            revealDeadline,
-            address(collateralToken),
-            address(this)
+            eventId, ORACLE, commitDeadline, revealDeadline, address(collateralToken), address(this)
         );
         fresh.initialize(
             eventId,
@@ -353,7 +386,6 @@ contract RevealMarketTest is Test {
         market.commit(ticketHash, 0);
     }
 
-
     function testCancelMarketAllowsImmediateRefund() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
 
@@ -389,8 +421,6 @@ contract RevealMarketTest is Test {
 
         assertEq(uint256(market.phase()), uint256(RevealMarket.Phase.Settled));
         assertEq(market.winningPool(), STAKE);
-
-        uint256[4] memory dummySignals = _buildSignals(STAKE);
 
         uint256 winnerBalanceBefore = collateralToken.balanceOf(WINNER);
         vm.prank(WINNER);
@@ -706,6 +736,7 @@ contract RevealMarketNativeTest is Test {
         market.claim(0, OUTCOME, WIN_SALT);
         assertGt(WINNER.balance, winnerBalanceBefore);
     }
+
     function _buildSignals(uint256 winningPool) private view returns (uint256[4] memory signals) {
         signals[0] = winningPool;
         signals[1] = market.totalPool();

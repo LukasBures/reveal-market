@@ -1,10 +1,11 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 
-const navLinks = [
+const navLinks: { href: Route; label: string }[] = [
   { href: "/", label: "Markets" },
   { href: "/about", label: "About" },
   { href: "/docs", label: "Docs" },

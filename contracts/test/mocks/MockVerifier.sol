@@ -13,7 +13,7 @@ contract MockVerifier is IVerifier {
     }
 
     /// @inheritdoc IVerifier
-    function verifyProof(bytes calldata, uint256[4] calldata) external override returns (bool success) {
+    function verifyProof(bytes calldata, uint256[4] calldata) external view override returns (bool success) {
         return _shouldVerify;
     }
 }

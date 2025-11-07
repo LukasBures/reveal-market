@@ -18,11 +18,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Sanity-check that Docker is installed.
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required to run the local stack" >&2
   exit 1
 fi
 
+# Compose v2 (docker compose) is preferred; fall back to classic docker-compose.
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=("docker" "compose")
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -35,6 +37,7 @@ fi
 cd "${ROOT_DIR}"
 
 # Determine how many concurrent builds we can run (nproc - 1).
+# Keeps at least one CPU free so the host stays responsive.
 if command -v nproc >/dev/null 2>&1; then
   PARALLEL_BUILDS="$(nproc --ignore=1)"
 elif [[ "$(uname -s)" == "Darwin" ]]; then
@@ -46,6 +49,7 @@ if [[ -z "${PARALLEL_BUILDS}" || "${PARALLEL_BUILDS}" -lt 1 ]]; then
   PARALLEL_BUILDS=1
 fi
 
+# Enable BuildKit + Compose's CLI mode so builds are faster and parallelizable.
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"

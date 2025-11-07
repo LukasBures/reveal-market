@@ -1,165 +1,70 @@
-# Reveal Market Backend
+# Reveal Market Data Infrastructure
 
-This directory contains two Python services that power the Reveal Market MVP:
+The backend is the heartbeat of Reveal Market’s investable ecosystem. It transforms third-party liquidity into institutional-grade intelligence, ensuring every chart, fee accrual, and settlement insight backing our treasury is verifiable in real time.
 
-- **API (`backend/api`)** – a FastAPI application that exposes market data over HTTP, applies migrations on boot, provides Prometheus metrics, and caches read-heavy endpoints in Redis.
-- **Worker (`backend/worker`)** – a background process that periodically ingests markets from the Polymarket feed, writes them into PostgreSQL, invalidates relevant cache keys, and can optionally create markets on-chain via the deployed factory contract.
+## Two Services, One Mission
 
-Both services share SQLAlchemy models, repository helpers, and logging utilities located in `backend/shared/`.
-
----
-
-## Features
-
-### API
-- FastAPI with async lifespan hooks and JSON logging (`event`, `request_id`, `duration_ms`).
-- Endpoints:
-- `GET /` metadata
-- `GET /health` checks Postgres, Redis, and Polymarket reachability
-- `GET /metrics` Prometheus instrumentation (`prometheus-fastapi-instrumentator`)
-- `GET /markets`, `GET /markets/stats`, `GET /markets/{id}`, `POST/PATCH /markets`
-- `GET /markets/onchain` lists market addresses returned by the configured factory contract
-- Responses expose `rake_bps` (basis points) so front-ends can surface protocol fees.
-- Redis-backed cache for markets list, stats, and detail responses with configurable TTL (`RM_CACHE_TTL_SECONDS`).
-- Alembic migrations executed on startup.
-
-### Worker
-- Periodically fetches Polymarket data (`RM_POLL_INTERVAL_SECONDS`, `RM_POLYMARKET_PAGE_SIZE`).
-- Idempotent upserts into Postgres using the shared repository.
-- Emits heartbeats to Redis (`RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`) and invalidates cache namespaces.
-- Optional on-chain integration (async web3.py client + retries) can create markets through `MarketFactory` when `RM_AUTO_CREATE_ONCHAIN_MARKETS` is enabled.
-- Persists per-market rake overrides (`rake_bps`) so API consumers see the effective protocol fee.
-- Structured logging for fetch latency, persistence batches, cache invalidation, and heartbeat status.
-
----
-
-## Getting Started
-
-### 1. Dependencies
-- Python 3.13
-- Poetry (1.8.x) if you want to use the local virtual environments
-- Docker & Docker Compose for containerized workflows
-
-### 2. Environment Variables
-
-Copy `.env.example` to `.env` and adjust as needed:
-
-```bash
-cp .env.example .env
-```
-
-Key variables:
-
-| Variable | Description |
+| Component | Investor Benefit |
 | --- | --- |
-| `MODE` | `dev` enables autoreload + debug logging; `prod` uses multi-worker uvicorn |
-| `RM_DATABASE_URL` | SQLAlchemy DSN for Postgres |
-| `RM_REDIS_URL` | Redis connection string |
-| `RM_POLYMARKET_API_BASE` | Upstream Polymarket feed |
-| `RM_POLYMARKET_TIMEOUT_SECONDS` | HTTP timeout for Polymarket requests |
-| `RM_POLL_INTERVAL_SECONDS` | Worker polling interval |
-| `RM_CACHE_TTL_SECONDS` | TTL for Redis-cached API responses |
-| `RM_HEARTBEAT_KEY` / `RM_HEARTBEAT_TTL_SECONDS` | Worker heartbeat settings |
-| `RM_RPC_URL` | RPC endpoint for Horizen/EVM interactions |
-| `RM_FACTORY_ADDRESS` / `RM_VERIFIER_ADDRESS` / `RM_RAKE_MANAGER_ADDRESS` | Deployed contract addresses |
-| `RM_WALLET_ADDRESS` / `RM_WALLET_PRIVATE_KEY` | Signer used for `MarketFactory.createMarket` (keep private key secret) |
-| `RM_AUTO_CREATE_ONCHAIN_MARKETS` | Enable worker to push markets on-chain (default `false`) |
-| `RM_DEFAULT_COMMIT_LEAD_SECONDS` / `RM_DEFAULT_REVEAL_LEAD_SECONDS` | Deadlines used when creating markets if Polymarket data is missing |
-| `RM_GAS_PRICE_GWEI` / `RM_MAX_PRIORITY_FEE_GWEI` | Optional gas configuration for transactions |
+| **Market API** | Surfaces curated markets, stats, and settlements through a high-availability FastAPI layer backed by Redis caching, structured logging, and Prometheus metrics. Investors see the same latency and transparency they expect from Tier-1 exchanges. |
+| **Ingestion & On-Chain Worker** | Continuously ingests Polymarket and Conditional Tokens data, reconciles it with our PostgreSQL source of truth, sends heartbeats, and can optionally originate on-chain markets via MarketFactory. This keeps treasury projections synchronized with on-chain cash flows. |
 
-All configuration classes live in `backend/api/app/config.py` and `backend/worker/app/config.py`.
+Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
 
----
+## Proof Points For Stakeholders
 
-## Running Locally
+- **Deterministic data lineage** – Every market travels through an audited pipeline: upstream fetch → repository upsert → cache tagging → API exposure. The cycle produces traceable logs and metrics so diligence teams can replay any event.
+- **Heartbeat-driven reliability** – Workers advertise liveness via Redis keys with TTLs. If a heartbeat is missed, alerting fires before stale data reaches investor dashboards.
+- **Smart economics tracking** – API responses expose rake basis points, settlement hashes, and on-chain identifiers. This enables LPs to model expected yield and for treasury to forecast protocol revenue.
+- **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional auto-creation of on-chain markets is gated behind explicit configuration plus secure key storage.
 
-### Using Docker Compose (recommended)
+## Upcoming Enhancements
 
-```bash
-docker compose up --build
-```
+The roadmap prioritizes capabilities that increase investor trust:
 
-- The base `docker-compose.yml` spins up Postgres, Redis, the API, and the worker.
-- `docker-compose.override.yml` (applied automatically) mounts source code for live reload in development and sets `MODE=dev`.
+1. **Resolution persistence** – Hydrate on-chain payout vectors into the database so `/resolution` responses remain fast and auditable, even during RPC turbulence.
+2. **Schema safety for worker-first deployments** – Allow the worker to enforce Alembic head state, preventing schema drift when API nodes are temporarily offline.
+3. **Polymarket resilience** – Shared retry logic and metrics across both services, giving institutional partners real SLAs on data freshness.
+4. **Horizen ZEN testnet option** – Spin up a regulated sandbox for exchanges to trial the stack with real capital on a whitelisted network.
+5. **Secrets hardening** – Vault-backed signer abstraction so custody providers never handle plaintext keys.
 
-Once running:
-- API available at http://localhost:8000
-- Prometheus metrics at http://localhost:8000/metrics
-- Health endpoint at http://localhost:8000/health
+These milestones ladder up to the same thesis: reliable data fuels confident liquidity.
 
-### Using Make targets
+## Partner Takeaways
 
-```bash
-make api      # only API service (compose up)
-make worker   # only worker service
-make test     # run unit/integration tests (requires local Python env)
-make fmt      # run pre-commit hooks (black/isort/flake8)
-```
+- **Integration optionality** – Exchanges can embed only the API, enterprises can operate both API and worker in their own VPC, or sovereign partners can tap our managed service. The shared codebase ensures consistency across every deployment.
+- **Observability built in** – Audit teams receive structured logs (request IDs, cache hit ratios, fetch latency) and Prometheus series capturing every pipeline stage.
+- **Token-aligned upside** – Because protocol fees are captured at the API layer and mirrored on-chain, governance decisions about rake, settlement cadence, and new markets create tangible upside for future token holders.
 
-### Running via Poetry (optional)
+To learn how the backend can power your venue, reach out at hello@revealmarket.xyz or via [X](https://x.com/RevealMarket). We are actively onboarding exchanges, OTC desks, and liquidity programs who want transparent exposure to the next generation of prediction markets.
 
-Install dependencies:
+## Local Validation (Python 3.13)
 
-```bash
-cd backend/api && poetry install --with dev
-cd backend/worker && poetry install --with dev
-```
+Reproducible tests are part of the trust story. The repo now defaults to Python 3.13 for all backend tooling, and the `make test` target simply shells into `backend/run_tests.sh`, which in turn auto-detects project virtual environments or the `python3.13` binary on your PATH.
 
-Then:
+1. **Create per-service virtualenvs (once):**
 
-```bash
-# API (dev mode with reload)
-cd backend/api
-MODE=dev poetry run python run.py
+   ```bash
+   python3.13 -m venv backend/api/.venv
+   python3.13 -m venv backend/worker/.venv
+   ```
 
-# Worker (foreground)
-cd backend/worker
-MODE=dev poetry run python run.py
-```
+2. **Install the pinned dev dependencies exported from Poetry:**
 
----
+   ```bash
+   source backend/api/.venv/bin/activate
+   pip install -r backend/api/requirements-dev.txt
+   deactivate
 
-## Observability & Logging
+   source backend/worker/.venv/bin/activate
+   pip install -r backend/worker/requirements-dev.txt
+   deactivate
+   ```
 
-- Structured JSON logs via `python-json-logger` include `timestamp`, `logger`, `level`, `event`, `request_id`, and optional fields like `cache_hit` or `duration_ms`.
-- API instrumentation adds:
-  - `http.request.start` / `http.request.completed`
-  - `markets.list|stats|detail.cache_{hit,miss}`
-  - `markets.cache.invalidate`
-- Worker instrumentation adds:
-  - `worker.fetch.*`, `worker.persist.batch`, `worker.heartbeat.*`, `worker.cache.invalidate`
-- On-chain operations emit `worker.tx.*` events (submitted/mined/failed) and configuration issues surface as `worker.onchain.*` logs.
-- Cache helpers emit `cache.*` events if Redis operations fail.
-- Prometheus metrics exposed on `/metrics`.
+3. **Run the consolidated test suite:**
 
----
+   ```bash
+   make test          # or ./backend/run_tests.sh
+   ```
 
-## Testing
-
-```bash
-make test
-```
-
-or manually:
-
-```bash
-cd backend/api
-PYTHONPATH=.. poetry run pytest
-
-cd ../worker
-PYTHONPATH=.. poetry run pytest
-```
-
-Tests use SQLite + in-memory Redis stubs so nothing external is required. They cover:
-- API endpoint caching semantics and logging events.
-- Worker processing loop (DB upsert, heartbeat, cache invalidation).
-- Smoke test for `/health` and `/metrics`.
-
----
-
-## Deployment Notes
-
-- Both Dockerfiles use multi-stage builds to export Poetry dependencies and install via `pip --no-cache-dir`. Runtime images run as non-root users.
-- Configuration is driven entirely via environment variables.
-- Ensure migrations run (automatically triggered by the API lifespan) before serving live traffic.
-- For production, set `MODE=prod`, tighten TTLs/environment configuration, and consider long-term metrics storage and log aggregation.
+Both virtual environments are ignored by git, and the requirements files stay in lock-step with the Poetry definitions (regenerate via `poetry export --with dev --without-hashes`). This flow keeps local verification fast while guaranteeing the exact same dependency graph used in CI and Docker images.

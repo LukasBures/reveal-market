@@ -1,59 +1,58 @@
-# Frontend TODO & Roadmap
+# Frontend Investor Roadmap
 
-This document outlines the initial build plan for the Reveal Market front-end. Focus on delivering a functional market explorer tied to the new backend APIs, then layering on richer features and polish.
+The web experience is our public pitch deck. Every sprint should reinforce why Reveal Market is a differentiated investment opportunity and make it effortless for partners to engage.
 
-## Phase 1 – MVP (read-only experience)
+## Phase 1 – Trust & Narrative Foundation
 
-- **Scaffold app shell**  
-  Set up the chosen framework (e.g. Next.js + TypeScript + Tailwind). Include baseline routing, shared layout with header/footer, global styles, and theming tokens.
+- **Hero storytelling refresh**  
+  Craft above-the-fold copy that articulates the value proposition (regulated-grade prediction markets, Horizen moat, zk-enabled settlement). Pair with live traction stats and a persistent CTA toward partnership outreach.
 
-- **Environment + API client plumbing**  
-  Add configuration helpers for backend base URLs and feature flags. Implement a typed API client for `/markets`, `/markets/{id}`, `/markets/stats`, and `/resolution/{condition}` with error handling and request logging (e.g. via React Query/SWR).
+- **Investor proof points section**  
+  Showcase treasury growth, market throughput, and rake distribution in a simple KPI grid. Cite verifiable sources (health endpoints, on-chain stats) to underscore transparency.
 
-- **Markets index page**  
-  Display paginated market cards showing title, status, category, latest prices, rake, image, and resolution status (using the new resolution endpoint). Support filtering by status/category/oracle and text search, reusing backend query params.
+- **Social credibility**  
+  Surface the [@RevealMarket](https://x.com/RevealMarket) feed, earned media quotes, and investor testimonials to signal momentum. Include compliance-friendly disclosure text below each card.
 
-- **Market detail view**  
-  Render full metadata: outcomes with price chart/snapshot, conditional tokens payout vector, commit/reveal deadlines, guardian info, and related links. Surface resolution summary (winner, payouts, checkedAt) prominently once available.
+- **Docs navigation overhaul**  
+  Reorganize `/docs` into investor-relevant narratives: Vision, Roadmap, Tokenomics, Infrastructure, Legal. Ensure each page funnels users toward “Connect With The Team”.
 
-- **Skeleton/loading + error states**  
-  Implement consistent placeholders for list/detail views, and actionable error boundaries for API failures (retry, contact support).
+## Phase 2 – Data Transparency & Conversion
 
-## Phase 2 – Interactivity & user tooling
+- **Interactive metrics hub**  
+  Build a dashboard that consumes `/markets/stats` plus curated worker metrics to visualize liquidity depth, settlement speed, and fee capture. Allow CSV/PDF export so funds can drop data into diligence memos.
 
-- **Watchlist / bookmarks**  
-  Allow users to save markets locally (localStorage) and surface a dedicated “My Markets” view.
+- **Deal-flow CTAs**  
+  Add modular lead forms (Strategic Investment, Liquidity Partnership, Exchange Integration) with CRM hooks. Highlight expected response times and confidentiality statements.
 
-- **On-chain transaction helpers**  
-  Integrate a wallet connector (e.g., wagmi/viem) to provide “commit” and “claim refund” interactions initially, respecting commit/reveal phases. Display gas estimates and success toasts.
+- **Case studies carousel**  
+  Present 2–3 anonymized partner stories showing how Reveal Market improved spreads or unlocked new revenue. Include KPIs (e.g., 30% faster resolution, X bps rake share) and link to deeper dives in docs.
 
-- **Resolution transparency**  
-  Add a timeline component showing Gamma “closed/resolved” markers alongside on-chain payout detection (block number, tx hash). Offer downloadable JSON/CSV of resolution data for auditors.
+- **Localized credibility**  
+  Introduce geo-targeted badges (e.g., “Optimized for EU-compliant venues”) driven by feature flags so regulated partners immediately see relevance.
 
-- **Stats dashboard**  
-  Expand `/markets/stats` into charts (status breakdown, rake distribution), and add high-level metrics (total markets, resolved vs pending).
+## Phase 3 – Partnership Workflows
 
-## Phase 3 – Operational polish
+- **Due-diligence vault**  
+  Create a gated download center for audited smart-contract reports, SOC readiness notes, and technical one-pagers. Gate access via email verification to capture serious leads.
 
-- **Live updates**  
-  Set up SSE/websocket or polling to auto-refresh market cards when the worker sync detects changes, minimizing manual refreshes.
+- **Live ops status**  
+  Integrate status badges for API/worker/contract uptime with direct links to the health endpoints. Investors should see operational excellence at a glance.
 
-- **Admin utilities**  
-  Provide a hidden admin view for operators: manual cache invalidation triggers, resolution diagnostics (show raw Conditional Tokens payout vector), and links to foundry/forge scripts for settlement.
+- **Event & roadmap calendar**  
+  Embed timelines for upcoming launches (Groth16 verifier, Horizen ZEN testnet rollout, token events). Allow users to subscribe via iCal or add to Google Calendar.
 
-- **Internationalization & accessibility**  
-  Internationalize copy, add keyboard navigation, and verify color contrast against accessibility guidelines.
+- **Performance & accessibility hardening**  
+  Hit sub-1s Largest Contentful Paint on global CDNs, ship full accessibility audits, and maintain Lighthouse 90+ so enterprise visitors experience no friction.
 
-- **Testing & CI**  
-  Add Playwright/Cypress flows for market list/detail pages, unit tests for hooks/utilities, and wire the suite into GitHub Actions. Include Lighthouse budget checks to keep performance acceptable.
-
-## Cross-cutting concerns
+## Cross-Cutting Initiatives
 
 - **Design system**  
-  Formalize a UI kit (buttons, chips, cards) to keep the experience consistent across pages, mirroring backend data naming (status, resolution, rake).
+  Maintain a polished, investor-ready component library with consistent typography, gradients, and iconography that echo the financial-services aesthetic.
 
-- **Documentation**  
-  Update the main README with front-end bootstrapping instructions, required env vars (`NEXT_PUBLIC_API_BASE_URL` etc.), and release checklist (run tests, bump snapshots).
+- **Narrative governance**  
+  Keep messaging synchronized with backend/contract milestones so every doc page, footer blurb, and CTA reflects the latest roadmap realities.
 
-Progress through these phases sequentially; ensure Phase 1 is production-stable before enabling user transactions or live updates. Revisit items in `backend/TODO.md` to stay aligned (e.g., resolution persistence, rake override surfacing). 
+- **Experimentation loop**  
+  Instrument pages with privacy-conscious analytics to test CTA placement, social proof ordering, and copy variants aimed at institutional visitors.
 
+The frontend is the loudspeaker for fundraising, partnerships, and liquidity programs—build it with the same rigor as the core protocol so every visit nudges stakeholders closer to engagement. 

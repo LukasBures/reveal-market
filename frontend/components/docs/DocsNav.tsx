@@ -1,12 +1,13 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 
 type NavSection = {
   title: string;
-  pages: { href: string; label: string }[];
+  pages: { href: Route; label: string }[];
 };
 
 const sections: NavSection[] = [

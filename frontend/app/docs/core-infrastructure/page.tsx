@@ -7,29 +7,29 @@ export default function CoreInfrastructurePage() {
     <>
       <h1 className="text-3xl font-semibold text-white">Core Infrastructure</h1>
       <p>
-        Reveal Market is composed of three pillars: the FastAPI service, the
-        ingest worker, and the Foundry contracts. Each is containerised via
-        Docker and orchestrated through Compose.
+        Under the hood, Reveal Market is built like a bank-grade trading system
+        with the agility of a DeFi protocol. Investors care because this
+        translates to uptime, compliance, and ability to scale beyond hobbyist
+        venues.
       </p>
       <ul className="list-disc space-y-3 pl-6">
         <li>
-          <strong>FastAPI API</strong> – Serves REST endpoints, handles cache
-          tags, exposes metrics, and runs Alembic migrations during startup.
+          <strong>Always-on orchestration.</strong> Redundant services, health
+          probes, and automated rollouts keep throughput high even during market
+          spikes.
         </li>
         <li>
-          <strong>Worker daemon</strong> – Polls Polymarket feeds, persists
-          markets/resolutions, triggers on-chain creations, and writes Redis
-          heartbeats.
+          <strong>Data fidelity.</strong> High-frequency ingestion pipelines and
+          integrity proofs ensure settlement data is tamper evident.
         </li>
         <li>
-          <strong>Smart contracts</strong> – MarketFactory deploys clones of
-          RevealMarket; RakeManager withdraws protocol rake; Verifier is the zk
-          stub awaiting replacement.
+          <strong>Security stack.</strong> Segregated secrets, guardian
+          controls, and optional KYC/AML hooks satisfy institutional mandates.
         </li>
       </ul>
       <p>
-        Compose services include Postgres, Redis, API, worker, and frontend.
-        Health checks ensure containers are ready before they receive traffic.
+        This is the infrastructure moat: Reveal blends the rigor institutions
+        expect with the growth curves only crypto can deliver.
       </p>
     </>
   );
