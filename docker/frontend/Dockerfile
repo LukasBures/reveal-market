@@ -1,4 +1,6 @@
 FROM node:20-alpine AS deps
+# node-gyp requirements (utf-8-validate, etc.)
+RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
@@ -6,6 +8,7 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV NODE_ENV=production
+# Copy node_modules from deps stage to reuse caches
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend ./
 RUN npm run build

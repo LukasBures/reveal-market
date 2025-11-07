@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# -----------------------------------------------------------------------------
+# run_local.sh
+# -----------------------------------------------------------------------------
+# Full rebuild + launch script for developers.
+# - Enables BuildKit + parallel builds (leaving one CPU free).
+# - Forces a --no-cache compose build so every layer is fresh.
+# - Starts docker compose in the foreground (logs stream to terminal).
+#
+# Usage: ./run_local.sh [extra docker-compose args]
+#
+# Examples:
+#   ./run_local.sh
+#   ./run_local.sh api worker   # Bring up subset of services after rebuild
+# -----------------------------------------------------------------------------
 
-# Build all containers from scratch (no cache) and bring the stack up.
+set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -21,5 +34,24 @@ fi
 
 cd "${ROOT_DIR}"
 
-"${COMPOSE_CMD[@]}" build --no-cache
+# Determine how many concurrent builds we can run (nproc - 1).
+if command -v nproc >/dev/null 2>&1; then
+  PARALLEL_BUILDS="$(nproc --ignore=1)"
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  PARALLEL_BUILDS="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+else
+  PARALLEL_BUILDS=2
+fi
+if [[ -z "${PARALLEL_BUILDS}" || "${PARALLEL_BUILDS}" -lt 1 ]]; then
+  PARALLEL_BUILDS=1
+fi
+
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
+
+echo "Building images with --no-cache (parallel=${COMPOSE_PARALLEL_LIMIT})..."
+"${COMPOSE_CMD[@]}" build --no-cache --parallel
+
+echo "Starting services..."
 "${COMPOSE_CMD[@]}" up "$@"

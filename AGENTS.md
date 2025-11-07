@@ -42,14 +42,77 @@
 - Prefer Python/ABI helpers already present (e.g., `shared/onchain/`) instead of adding new frameworks.
 
 ## Agent Notes
-- **Architecture snapshot** – Two Python services under `backend/`: FastAPI API (`backend/api/app`) and ingest worker (`backend/worker/app`) share ORM models, cache helpers, and logging in `backend/shared`. Alembic migrations live in `backend/migrations` and are invoked from both services (`app/database.py`, worker `_ensure_schema`).
-- **Data model** – Core tables: `markets` (`backend/shared/models.py`) and `resolutions` for Conditional Tokens snapshots. Natural key is `event_id`; `condition_id` stored lowercase; `extra_data` JSON stores Polymarket payloads plus resolution metadata. Indices on status/category, slug, condition.
-- **API service** – Entry in `backend/api/app/main.py`: runs migrations on lifespan, wires Prometheus instrumentation, structured logging, and request ID middleware. Endpoints cover `/health` (checks Postgres, Redis, Polymarket via `httpx`), `/metrics`, paginated `/markets` with Redis caching keyed by filters, `/markets/stats`, `/markets/{event_id}`, `/resolution/{condition}`, CRUD for markets (POST/PATCH with cache invalidation), and `/markets/onchain` that calls `fetch_factory_markets` (requires `RM_RPC_URL` + `RM_FACTORY_ADDRESS`). Cache tags stored via `shared.cache` helpers.
-- **Worker service** – `backend/worker/app/main.py` polls Polymarket (Gamma) via `PolymarketClient`, upserts markets, emits Redis heartbeats, and invalidates caches. Supports Conditional Tokens resolution refresh with throttling (`resolution_refresh_interval_seconds`) and optional on-chain `createMarket` transactions when `auto_create_onchain_markets` and RPC/wallet config are present (`app/onchain.py` with async web3 + tenacity retries). Worker applies migrations once at startup when `run_migrations_on_startup` true.
-- **Shared utilities** – `backend/shared/cache.py` wraps Redis get/set/tag invalidation, logging via `shared/logging.py` (JSON logs with request ID context), `shared/repository.py` centralises upserts, `shared/onchain` exposes ABI/constants, AsyncWeb3 loader, checksum helpers, and `ConditionalTokensClient` resolution reader.
-- **Configuration surfaces** – Both services use Pydantic `BaseSettings` (settings prefixed `RM_`, `backend/api/app/config.py`, `backend/worker/app/config.py`). Key knobs: database pool sizing, Redis URL, Polymarket pagination/order/filters, cache TTL, resolution refresh interval, worker heartbeat TTL, default commit/reveal leads, optional Polygon RPC/Conditional Tokens addresses, and gas overrides. `SETTINGS_FILE` env enables .env overrides.
-- **Local workflows** – Docker Compose (`docker-compose.yml` + override) provisions Postgres, Redis, API, worker, and the new frontend container; override mounts source and sets dev logs/poll interval. Use `./run_local.sh` when you need a clean build (`--no-cache`) of every image, while `backend/run_local.sh` skips the rebuild for faster backend-only loops. For production deployments run `./run_prod.sh` to build with cache and start the stack detached. `contracts/run_local.sh` handles Foundry build→test→snapshot, and the frontend container runs `npm install && npm run dev` for hot reload. `Makefile` shortcuts: `make api`, `make worker`, `make test`, `make fmt`. `backend/run_tests.sh`, `contracts/run_tests.sh`, and `frontend/run_tests.sh` cover the respective test suites.
-- **Testing strategy** – API tests under `backend/api/tests/` use SQLite + in-memory Redis stubs (see `conftest.py`) to cover caching semantics, filtering, and resolution responses. Worker tests in `backend/worker/tests/` prefer its package path, exercise Polymarket pagination, sync upserts, resolution persistence, on-chain flow (with monkeypatched send), and process heartbeat stats.
-- **Contracts workspace** – Located in `contracts/` (Foundry). Key contracts (`RevealMarket`, `MarketFactory`, `RakeManager`, `Verifier` stub) with extensive tests, deployment script (`script/Deploy.s.sol`), and backlog in `contracts/TODO.md` (notably: integrate real verifier, resolution eventing, invariants). Use `forge build/test`, `contracts/run_local.sh` for build→test→snapshot.
-- **Frontend status** – `frontend/` now hosts a Next.js 14 + Tailwind + React Query + Wagmi app. It serves marketing (`/`, `/about`) and docs (`/docs/*`) routes, with middleware-based host routing for `docs.revealmarket.xyz`. Docker service `frontend` builds the production bundle; devs can run `npm run dev` or rely on the compose override that runs `npm install && npm run dev`.
-- **Operational cautions** – Worker auto-creation depends on private key secrets; ensure these come from secure storage. Resolution caching relies on Conditional Tokens event logs—RPC reliability impacts freshness. TODOs highlight needs: smarter cache invalidation, migrations on worker, Polymarket retry metrics, Horizen ZEN testnet option (per TODO). Keep `.env` secrets out of VCS and align with `RM_` prefix expectations.
+
+### Backend (FastAPI + worker)
+- **Architecture snapshot** – Two Python services live under `backend/`. The API (`backend/api/app`) exposes REST endpoints; the worker (`backend/worker/app`) ingests upstream feeds and optionally transacts on-chain. Both share SQLAlchemy models, caching helpers, logging utilities, and on-chain clients from `backend/shared/`. Alembic migrations are stored in `backend/migrations/` and can be executed from either service (API runs them on lifespan startup; worker can run them once via `_ensure_schema` when `run_migrations_on_startup` is true). `backend/shared/migrations.py` provides a helper so non-Alembic processes can invoke migrations programmatically.
+
+- **Data model** – Defined in `backend/shared/models.py`. Core tables: `markets` (event metadata, commit/reveal deadlines, on-chain addresses, rake overrides) and `resolutions` (Conditional Tokens snapshots). `event_id` acts as the natural key, `condition_id` is always downcased, `extra_data` stores JSON Polymarket payloads plus resolution metadata, and indexes cover status/category/oracle/slug for quick filtering.
+
+- **API service** – `backend/api/app/main.py` configures JSON logging, Prometheus instrumentation (`prometheus_fastapi_instrumentator`), and request-scoped IDs that flow through structured logs. The FastAPI lifespan runs migrations synchronously on boot. Endpoints:
+  - `/` basic metadata (service, version, environment).
+  - `/health` fans out to Postgres, Redis, and Polymarket checks (see `app/health.py` for HTTP + Redis probes).
+  - `/markets` supports filtering (status/category/oracle/search), pagination, and returns cached responses keyed by query params; cache layer uses Redis JSON helpers + tag-based invalidation from `shared.cache`.
+  - `/markets/stats`, `/markets/{event_id}`, and `/resolution/{condition}` cache their payloads with distinct prefixes and tags.
+  - Mutation endpoints (`POST /markets`, `PATCH /markets/{event_id}`) invalidate tagged cache entries. `/markets/onchain` calls `fetch_factory_markets` and requires `RM_RPC_URL` + `RM_FACTORY_ADDRESS`.
+  - `/metrics` exposed via Instrumentator.
+  CRUD logic lives inside `app/crud.py`, Pydantic schemas in `app/schemas.py`, DB session wiring in `app/database.py`.
+  Settings are defined in `app/config.py` (Pydantic `BaseSettings` reading `RM_*` env vars). Key knobs: `RM_DATABASE_URL`, `RM_REDIS_URL`, Polymarket paging (`RM_POLYMARKET_*`), cache TTLs, request limits, `APP_WORKERS`, etc. `.env` overrides are supported via `SETTINGS_FILE`.
+
+- **Worker service** – `backend/worker/app/main.py` continuously:
+  1. Pulls markets from Polymarket/Gamma via `PolymarketClient` (configurable pagination/order/closed filters + timeout).
+  2. Upserts them using `shared.repository` helpers (`upsert_market`, `touch_heartbeat`, etc.).
+  3. Emits Redis heartbeats whose TTL is controlled by `RM_HEARTBEAT_TTL_SECONDS`.
+  4. Optionally enriches markets with Conditional Tokens resolutions (`ConditionalTokensClient`) using throttle interval `resolution_refresh_interval_seconds`.
+  5. Optionally creates on-chain markets via `maybe_create_onchain_market` when `auto_create_onchain_markets` et al. are configured (`RM_RPC_URL`, `RM_WALLET_PRIVATE_KEY`, gas overrides).
+  6. Invalidates API cache tags through `shared.cache.invalidate_tag`.
+  Configuration lives in `backend/worker/app/config.py`. Additional envs: `RM_POLL_INTERVAL_SECONDS`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_MAX_PAGES`, `RM_POLL_INTERVAL_SECONDS`, `RM_POLYMARKET_CLOSED_FILTER`, `RM_HEARTBEAT_KEY` etc.
+
+- **Shared utilities** – `backend/shared/cache.py` supplies typed Redis clients, JSON serde helpers, tag-based invalidation, and TTL handling. `shared/logging.py` defines JSON logging with context (request IDs). `shared/repository.py` centralises DB operations for both services (upserts, resolution persistence, on-chain metadata). `shared/onchain` bundles ABI helpers (factory + reveal market ABIs, AsyncWeb3 loader, checksum utilities, `ConditionalTokensClient`). `shared/migrations.py` wraps Alembic programmatic API to run migrations from Python.
+
+- **Tests** – API tests (`backend/api/tests`) include:
+  - `test_health.py` verifying Postgres/Redis/Polymarket health behaviours.
+  - `test_cache_behavior.py` ensuring list/detail caches, tag invalidation, eviction on mutation.
+  - `test_markets.py` covering filters, search, stats, resolution responses via mocked repositories.
+  - `test_smoke.py` ensures root + basic endpoints respond under test client.
+  Test fixtures (`conftest.py`) spin up SQLite and faker Redis for isolation.
+  Worker tests (`backend/worker/tests`) cover Polymarket client pagination, sync/upsert logic, heartbeat updates, on-chain creation gating, and process orchestration. Many tests monkeypatch HTTP clients / Polymarket feeds to simulate specific scenarios.
+  TODOs for backend live in `backend/TODO.md` (migrations on worker startup, smarter cache invalidation, persisting resolution backfills, Polymarket retry metrics, Horizen ZEN chain support, etc.).
+
+### Contracts (Foundry workspace)
+- Structure: `contracts/src` (core contracts), `contracts/test` (Forge tests), `contracts/script` (deployment), `contracts/lib` (openzeppelin, solmate, forge-std). `foundry.toml` sets 0.8.24 compiler, optimizer, via IR, gas reports. Remappings defined both in `foundry.toml` and `contracts/remappings.txt`.
+- Key contracts:
+  - `RevealMarket.sol`: commit-reveal market with phases, guardian controls, pause toggles, refund logic, zk-proof verification stub calling `IVerifier`. Tracks tickets, payouts, rake overrides. Emits events for every state change (commit, lock, result posted, proofs, settlements, cancellations, guardian changes). Depends on `IRakeManager`, `IVerifier`, `IMarketFactoryStatus` for global pauses. TODO: replace stub verifier, add settlement guards, metadata events.
+  - `MarketFactory.sol`: Ownable2Step factory deploying clones via `Clones.clone`. Maintains collateral allowlist, guardian, default collateral, global commit/claim pauses. Creates markets with references to rake manager, treasury, verifier, guardian. Emits numerous events (MarketCreated, CollateralStatusUpdated, etc.). TODO: implement metadata handling, event indexing.
+  - `RakeManager.sol`: Ownable2Step that holds treasury address and rake basis points (max 200 bps). Provides `takeRake` helper returning net amount + event emission.
+  - `Verifier.sol`: stub contract always returning true (needs replacement with real Groth16/Noir verifier).
+- Tests: `MarketFactory.t.sol`, `RevealMarket.t.sol`, `RevealMarketFuzz.t.sol`, `RevealMarketSecurity.t.sol`, `FactoryLifecycle.t.sol`, `RakeManager.t.sol`, `Verifier.t.sol`. Coverage includes lifecycle flows, fuzzing reveal/claim invariants, guardian controls, pause semantics, and event assertions. Additional mocks under `contracts/test/mocks/`.
+- TODOs tracked in `contracts/TODO.md` (real verifier integration, settlement guards, deployment tooling, invariants, gas regression, cross-chain strategy, etc.).
+
+### Frontend (Next.js app)
+- Stack: Next.js 14 App Router + TypeScript + Tailwind + React Query + Wagmi/Viem. Lives under `frontend/`. `components/` houses layout (nav/footer), marketing sections (hero, markets preview, CTA), docs nav, provider shell hooking Wagmi + React Query. `lib/api.ts` fetches `/markets` from FastAPI with caching, `lib/wagmi.ts` preconfigures Polygon Amoy RPC (placeholder RPC override via env).
+- Routing: `app/` contains `layout.tsx` (global metadata, fonts, nav/footer), root page with hero + markets section, `/about`, `/docs/*` (overview, getting started, architecture, API reference). Docs host rewriting handled via `middleware.ts` which inspects `Host` header (`DOCS_HOST` env) and rewrites to `/docs` namespace for `docs.revealmarket.xyz`. Added `/api/health` route so Docker healthchecks can probe the frontend container directly.
+- Styling: Tailwind config defines brand palette + glow shadows; `app/globals.css` sets dark theme. Components use `clsx` for active states. `Hero`/`MarketsSection` read live backend data (server component fetch + client hydration). `wa` gm config stub ensures wallet integrations can be added later.
+- Tooling: `frontend/run_tests.sh` runs lint + build; `package.json` contains Next lint script; `.dockerignore` prevents node_modules from polluting build context. `TODO.md` outlines frontend roadmap (market detail, wallet interactions, live updates, docs improvements, E2E tests).
+
+### Migrations & shared infrastructure
+- Alembic config lives in `backend/migrations` with `alembic.ini`, `env.py`, and versioned scripts (`backend/migrations/versions/0001_*`, etc.). `backend/shared/migrations.py` exposes `run_migrations` for services. Worker has stub `backend/shared/migrations.py` for future improvements (`backend/shared/migrations.py` is currently tracked separately).
+- Redis is used for caching, tag invalidation, worker heartbeats. Healthcheck commands in Compose use `redis-cli ping`. Postgres 15 stores core data; Compose volume `postgres_data` persists DB state.
+
+### Docker & scripts
+- Dockerfiles relocated under `docker/` with multi-stage builds:
+  - `docker/api/Dockerfile` and `docker/worker/Dockerfile` install Poetry + export requirements in builder stage, then copy only shared/service code plus migrations into slim runtime images (with `curl`, `libpq5`, `build-essential` for compiling deps). Healthchecks hit `/health` (API) and `python -m app.healthcheck` (worker).
+  - `docker/frontend/Dockerfile` builds Next.js standalone bundle and serves via `node server.js`, with healthcheck hitting `/api/health`.
+- Compose services: `postgres`, `redis`, `api`, `worker`, `frontend`. Override file mounts source code for live reload (API/worker) and runs `npm install && npm run dev` for frontend. Root scripts:
+  - `run_local.sh` – full rebuild (`--no-cache`) + `docker compose up`.
+  - `run_prod.sh` – cached `docker compose build` + `up -d` (production deploy).
+  - `backend/run_local.sh` – reuses cached backend images for quick dev loops.
+  Healthchecks are wired both in Dockerfiles and Compose (for Postgres/Redis, etc.).
+
+### Testing status & automation gaps
+- Backend test coverage is strong (unit + integration stubs). TODOs call for end-to-end tests with real Postgres/Redis, plus property tests for cache keys.
+- Contracts have deterministic + fuzz tests, but TODO highlights need for invariants, static analysis (Slither/solhint), and real verifier integration.
+- Frontend currently lacks automated UI/E2E tests; roadmap suggests adding Playwright/Cypress + Lighthouse budgets.
+- `.pre-commit-config.yaml` currently only runs Black/isort/Flake8 for `backend/api`. Consider extending to worker, contracts (`forge fmt`), and frontend (`eslint`/`prettier`).
+
+### Operational cautions
+- Worker auto-creation of markets depends on `RM_WALLET_PRIVATE_KEY` – ensure secrets are stored securely (Vault/KMS) before production. Rate limits + retries for Polymarket should be monitored (`worker.fetch.*` logs). Conditional Tokens RPC reliability affects resolution freshness; metrics/alerting should watch heartbeats and fetch latency. Keep `.env` files out of VCS and ensure `RM_*` envs are set per environment. TODOs mention Horizen ZEN testnet support; verify RPC URLs before enabling cross-chain deployments.

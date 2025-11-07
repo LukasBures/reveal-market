@@ -12,8 +12,23 @@ export function Footer() {
           <Link href="https://docs.revealmarket.xyz" className="hover:text-white">
             Docs
           </Link>
+          <Link href="https://x.com/RevealMarket" className="hover:text-white" rel="noreferrer" target="_blank">
+            X / Twitter
+          </Link>
           <Link href="mailto:hello@revealmarket.xyz" className="hover:text-white">
             Contact
+          </Link>
+          <Link href="/legal/terms" className="hover:text-white">
+            Terms
+          </Link>
+          <Link href="/legal/privacy" className="hover:text-white">
+            Privacy
+          </Link>
+          <Link href="/legal/disclaimer" className="hover:text-white">
+            Disclaimer
+          </Link>
+          <Link href="/legal/cookies" className="hover:text-white">
+            Cookies
           </Link>
         </div>
       </div>

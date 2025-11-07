@@ -32,6 +32,18 @@ export default function DocsOverview() {
           details REST endpoints exposed by the FastAPI service.
         </li>
       </ul>
+      <p className="text-sm text-slate-400">
+        News and release notes land on{" "}
+        <a
+          href="https://x.com/RevealMarket"
+          className="text-brand-300 underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          @RevealMarket
+        </a>{" "}
+        as well.
+      </p>
     </>
   );
 }
