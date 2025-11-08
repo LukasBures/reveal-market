@@ -16,8 +16,8 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: "@", replacement: path.resolve(projectRoot, ".") },
       { find: /^@\//, replacement: `${path.resolve(projectRoot, ".")}/` },
+      { find: "@", replacement: path.resolve(projectRoot, ".") },
     ],
   },
   esbuild: {
