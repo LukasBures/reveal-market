@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
@@ -15,10 +15,10 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: [
-      { find: "@", replacement: path.resolve(__dirname, "./") },
-      { find: /^@\//, replacement: `${path.resolve(__dirname, "./")}/` },
-    ],
+    alias: {
+      "@": path.resolve(projectRoot, "./"),
+      "@/": `${path.resolve(projectRoot, "./")}/`,
+    },
   },
   esbuild: {
     jsx: "automatic",

@@ -5,6 +5,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_PY_BIN="${PYTHON_BIN:-$(command -v python3.13 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)}"
+export PYTHONPATH="${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
 pip_install_requirements() {
   local service_dir="$1"
