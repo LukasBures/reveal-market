@@ -33,11 +33,7 @@ contract FactoryLifecycleTest is Test {
         verifier = new MockVerifier();
         collateralToken = new MockERC20("USD Coin", "USDC", 6);
         factory = new MarketFactory(
-            address(implementation),
-            address(rakeManager),
-            TREASURY,
-            address(verifier),
-            address(collateralToken)
+            address(implementation), address(rakeManager), TREASURY, address(verifier), address(collateralToken)
         );
     }
 
@@ -46,14 +42,8 @@ contract FactoryLifecycleTest is Test {
         uint256 revealDeadline = commitDeadline + 1 days;
 
         // Deploy new market via factory (no metadata arg anymore)
-        address marketAddr = factory.createMarket(
-            EVENT_ID,
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        address marketAddr =
+            factory.createMarket(EVENT_ID, commitDeadline, revealDeadline, ORACLE, address(collateralToken), 0);
 
         RevealMarket market = RevealMarket(payable(marketAddr));
         assertEq(market.appliedRakeBps(), rakeManager.rakeBps());
@@ -119,11 +109,11 @@ contract FactoryLifecycleTest is Test {
         collateralToken.approve(address(market), amount);
     }
 
-    function _buildSignals(
-        RevealMarket market,
-        uint256 winningPool,
-        bytes32 outcomeHash
-    ) internal view returns (uint256[4] memory signals) {
+    function _buildSignals(RevealMarket market, uint256 winningPool, bytes32 outcomeHash)
+        internal
+        view
+        returns (uint256[4] memory signals)
+    {
         signals[0] = winningPool;
         signals[1] = market.totalPool();
         signals[2] = uint256(outcomeHash);

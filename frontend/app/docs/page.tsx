@@ -6,49 +6,57 @@ export const metadata = docsMetadata("overview");
 export default function DocsOverview() {
   return (
     <>
-      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-        Reveal Market
-      </p>
+      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Investor briefing</p>
       <h1 className="text-3xl font-semibold text-white">
-        Where conviction meets privacy.
+        The diligence companion for Reveal Market.
       </h1>
       <p>
-        Reveal Market is a zero-knowledge prediction ecosystem built for
-        institutions, liquidity partners, and power users who demand privately
-        expressed conviction with publicly verifiable settlement. Every section
-        of this briefing is designed to help investors, exchanges, and strategic
-        operators understand the opportunity.
+        This portal reframes the entire stack around the questions LPs, exchanges, and strategic investors ask in data
+        rooms: why privacy matters, how fees accrue, what the roadmap looks like, and which controls keep regulators
+        comfortable. Each section links directly to the underlying systems so your team can verify claims in minutes.
       </p>
       <div className="mt-8 grid gap-6 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <h2 className="text-xl font-semibold text-white">At a glance</h2>
           <ul className="mt-3 space-y-2 text-slate-200">
-            <li>• zk-powered commit/reveal markets with instant finality</li>
-            <li>• Institutional dashboards, API, and compliance tooling</li>
-            <li>• Token utility tying fees, governance, and liquidity mining</li>
-            <li>• Marketplace rails for branded partners</li>
+            <li>• ZK commit/reveal + on-chain attestations for every settlement</li>
+            <li>• Schema-tagged caches & KPIs surfaced via the public API</li>
+            <li>• Tokenomics that tie rake capture, governance, and liquidity rewards</li>
+            <li>• Legal + ops playbooks aligned to institutional diligence</li>
           </ul>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <h2 className="text-xl font-semibold text-white">Read next</h2>
           <ul className="mt-3 space-y-2">
             <li>
-              <Link href="/docs/manifesto" className="text-brand-300">
-                Manifesto – why privacy-first alpha wins.
-              </Link>
-            </li>
-            <li>
-              <Link href="/docs/the-story" className="text-brand-300">
-                The Story – traction, milestones, and roadmap.
+              <Link href="/docs/roadmap" className="text-brand-300">
+                Execution Roadmap – milestones investors are tracking.
               </Link>
             </li>
             <li>
               <Link href="/docs/tokenomics" className="text-brand-300">
-                Tokenomics – incentive design & value capture.
+                Tokenomics – where value accrues across fees & governance.
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/privacy-security" className="text-brand-300">
+                Privacy & Security – controls that keep alpha protected.
               </Link>
             </li>
           </ul>
         </div>
+      </div>
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
+        <p className="text-sm text-slate-300">
+          Need direct access to the data room, KPI exports, or the founding team?
+          <a
+            href="mailto:hello@revealmarket.xyz?subject=Investor%20Docs%20Brief"
+            className="ml-2 text-brand-300 underline"
+          >
+            Connect With The Team
+          </a>{" "}
+          and we will schedule a bespoke diligence walkthrough.
+        </p>
       </div>
       <p className="mt-6 text-sm text-slate-400">
         Daily updates drop on{" "}
@@ -61,10 +69,7 @@ export default function DocsOverview() {
           @RevealMarket
         </a>
         . Reach out via{" "}
-        <a
-          href="mailto:hello@revealmarket.xyz"
-          className="text-brand-300 underline"
-        >
+        <a href="mailto:hello@revealmarket.xyz" className="text-brand-300 underline">
           hello@revealmarket.xyz
         </a>{" "}
         for partner access.

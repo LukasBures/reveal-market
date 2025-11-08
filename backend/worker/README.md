@@ -15,6 +15,7 @@ The worker ingests Polymarket + on-chain data, manages heartbeats, refreshes cac
 | --- | --- |
 | `RM_DATABASE_URL` | Postgres DSN used for persistence. |
 | `RM_REDIS_URL` | Redis instance for cache invalidation + heartbeats. |
+| `RM_SCHEMA_VERSION_KEY` | Redis key that advertises the current Alembic revision for API cache tagging. |
 | `RM_POLYMARKET_API_BASE` / `RM_POLYMARKET_TIMEOUT_SECONDS` | Upstream ingest endpoint + timeout. |
 | `RM_POLYMARKET_PAGE_SIZE` | Pagination size when crawling markets. |
 | `RM_RUN_MIGRATIONS_ON_STARTUP` | Apply Alembic migrations from the worker. |

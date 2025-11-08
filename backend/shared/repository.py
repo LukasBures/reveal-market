@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
+
+DEFAULT_SCHEMA_VERSION_KEY = "core"
 
 
 def get_market_by_event_id(session: Session, event_id: str) -> Optional[models.Market]:
@@ -45,3 +48,25 @@ def upsert_resolution(session: Session, data: Mapping[str, Any]) -> models.Resol
         for field, value in payload.items():
             setattr(record, field, value)
     return record
+
+
+def get_schema_version(session: Session, key: str = DEFAULT_SCHEMA_VERSION_KEY) -> Optional[models.SchemaVersion]:
+    """Fetch the recorded schema version for the provided key."""
+
+    return session.get(models.SchemaVersion, key)
+
+
+def record_schema_version(session: Session, revision: str, key: str = DEFAULT_SCHEMA_VERSION_KEY) -> Optional[str]:
+    """Persist the current schema revision and return the previous value if present."""
+
+    previous_revision: Optional[str] = None
+    record = get_schema_version(session, key)
+    now = datetime.now(timezone.utc)
+    if record is None:
+        record = models.SchemaVersion(key=key, revision=revision, applied_at=now)
+        session.add(record)
+        return None
+    previous_revision = record.revision
+    record.revision = revision
+    record.applied_at = now
+    return previous_revision

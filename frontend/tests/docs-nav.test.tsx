@@ -15,10 +15,18 @@ describe("DocsNav", () => {
   it("highlights the current route and renders all sections", () => {
     render(<DocsNav />);
 
-    expect(screen.getByText("Overview")).toHaveClass("bg-white/15");
-    expect(screen.getByText("Marketplace")).toHaveClass("text-slate-400");
+    expect(screen.getByText("Investor Overview")).toHaveClass("bg-white/15");
+    expect(screen.getByText("Execution Roadmap")).toBeInTheDocument();
 
-    const categories = screen.getAllByText(/Foundation|Platform|Economy/);
-    expect(categories).toHaveLength(3);
+    ["Vision", "Roadmap", "Tokenomics", "Infrastructure", "Legal & FAQ"].forEach((label) => {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    });
+
+    expect(
+      screen.getByRole("link", { name: /Connect With The Team/i })
+    ).toHaveAttribute(
+      "href",
+      "mailto:hello@revealmarket.xyz?subject=Reveal%20Market%20Docs%20Inquiry"
+    );
   });
 });

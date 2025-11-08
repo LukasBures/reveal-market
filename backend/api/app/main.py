@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -35,6 +36,7 @@ MARKETS_LIST_PREFIX = "markets:list"
 MARKETS_STATS_KEY = "markets:stats"
 MARKET_DETAIL_PREFIX = "markets:detail"
 MARKET_RESOLUTION_PREFIX = "markets:resolution"
+SCHEMA_UNKNOWN_TAG = "schema:unknown"
 
 
 @asynccontextmanager
@@ -73,6 +75,25 @@ app.cache_client = cache_client  # type: ignore[attr-defined]
 
 def _resolution_cache_key(condition_id: str) -> str:
     return f"{MARKET_RESOLUTION_PREFIX}:{condition_id.lower()}"
+
+
+def _schema_cache_tag() -> str:
+    if cache_client is None:
+        return SCHEMA_UNKNOWN_TAG
+    try:
+        revision = cache_client.get(settings.schema_version_key)
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.schema_tag.error",
+            message="failed to read schema version key from redis",
+            error=str(exc),
+        )
+        return SCHEMA_UNKNOWN_TAG
+    if isinstance(revision, str) and revision:
+        return f"schema:{revision}"
+    return SCHEMA_UNKNOWN_TAG
 
 
 @app.middleware("http")
@@ -203,7 +224,9 @@ def list_markets(
     )
     market_models = [schemas.MarketRead.model_validate(m) for m in markets]
     payload = [item.model_dump(mode="json") for item in market_models]
+    schema_tag = _schema_cache_tag()
     set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, "markets:list", cache_key)
     add_tags(
         cache_client,
@@ -269,7 +292,9 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
         return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
     stats = crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
+    schema_tag = _schema_cache_tag()
     set_json(cache_client, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, MARKETS_STATS_KEY)
     add_tag(cache_client, "markets:stats", MARKETS_STATS_KEY)
     duration = (time.perf_counter() - start) * 1000
     log_event(
@@ -329,7 +354,9 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         cache_payload["checkedAt"] = summary_model.checkedAt.isoformat()
     if summary_model.blockTimestamp is not None:
         cache_payload["blockTimestamp"] = summary_model.blockTimestamp.isoformat()
+    schema_tag = _schema_cache_tag()
     set_json(cache_client, cache_key, cache_payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, f"resolution:{normalized_condition}", cache_key)
     return summary_model
 
@@ -365,7 +392,9 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     response = schemas.MarketRead.model_validate(market)
+    schema_tag = _schema_cache_tag()
     set_json(cache_client, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, f"market:{event_id}", cache_key)
     duration = (time.perf_counter() - start) * 1000
     log_event(

@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = Field(default=30, ge=1)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
     heartbeat_ttl_seconds: int = Field(default=120, ge=10)
+    schema_version_key: str = Field(default="reveal_market:schema_version")
     factory_address: Optional[str] = Field(default=None)
     rake_manager_address: Optional[str] = Field(default=None)
     verifier_address: Optional[str] = Field(default=None)

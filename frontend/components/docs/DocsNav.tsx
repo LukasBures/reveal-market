@@ -12,31 +12,43 @@ type NavSection = {
 
 const sections: NavSection[] = [
   {
-    title: "Foundation",
+    title: "Vision",
     pages: [
-      { href: "/docs", label: "Overview" },
+      { href: "/docs", label: "Investor Overview" },
       { href: "/docs/manifesto", label: "Manifesto" },
-      { href: "/docs/the-story", label: "The Story So Far" },
+      { href: "/docs/the-story", label: "Traction & Story" },
     ],
   },
   {
-    title: "Platform",
+    title: "Roadmap",
     pages: [
-      { href: "/docs/getting-started", label: "Getting Started" },
+      { href: "/docs/roadmap", label: "Execution Roadmap" },
+      { href: "/docs/marketplace", label: "Marketplace Flywheel" },
+    ],
+  },
+  {
+    title: "Tokenomics",
+    pages: [
+      { href: "/docs/tokenomics", label: "Tokenomics" },
+      { href: "/docs/tiers-fees", label: "Tiers & Fees" },
+      { href: "/docs/referrals", label: "Referral Engine" },
+    ],
+  },
+  {
+    title: "Infrastructure",
+    pages: [
       { href: "/docs/architecture", label: "Architecture" },
       { href: "/docs/core-infrastructure", label: "Core Infrastructure" },
       { href: "/docs/privacy-security", label: "Privacy & Security" },
       { href: "/docs/integrations", label: "Integrations" },
+      { href: "/docs/getting-started", label: "Partner Onboarding" },
     ],
   },
   {
-    title: "Economy",
+    title: "Legal & FAQ",
     pages: [
-      { href: "/docs/marketplace", label: "Marketplace" },
-      { href: "/docs/tokenomics", label: "Tokenomics" },
-      { href: "/docs/tiers-fees", label: "Tiers & Fees" },
-      { href: "/docs/referrals", label: "Referrals" },
       { href: "/docs/faq", label: "FAQ" },
+      { href: "/legal", label: "Legal Center" },
     ],
   },
 ];
@@ -76,6 +88,20 @@ export function DocsNav() {
             </div>
           </div>
         ))}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+            Need answers fast?
+          </p>
+          <p className="mt-2 text-slate-200">
+            Book a diligence call and walk through the stack with the founding team.
+          </p>
+          <a
+            href="mailto:hello@revealmarket.xyz?subject=Reveal%20Market%20Docs%20Inquiry"
+            className="mt-4 inline-flex items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-black"
+          >
+            Connect With The Team
+          </a>
+        </div>
       </div>
     </aside>
   );

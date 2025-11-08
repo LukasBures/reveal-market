@@ -51,14 +51,10 @@ contract MarketFactory is Ownable2Step {
         address treasury_,
         address verifier_,
         address collateral_
-    )
-        Ownable(msg.sender)
-    {
+    ) Ownable(msg.sender) {
         if (
-            implementation_ == address(0) ||
-            rakeManager_ == address(0) ||
-            treasury_ == address(0) ||
-            verifier_ == address(0)
+            implementation_ == address(0) || rakeManager_ == address(0) || treasury_ == address(0)
+                || verifier_ == address(0)
         ) revert ZeroAddress();
 
         implementation = implementation_; // Set the implementation clone target.
@@ -192,18 +188,19 @@ contract MarketFactory is Ownable2Step {
         if (!isCollateralAllowed[marketCollateral]) revert CollateralNotAllowed(marketCollateral); // Enforce allowlist.
         if (rakeBpsOverride > IRakeManager(rakeManager).maxRakeBps()) revert InvalidRakeBps(); // Enforce rake cap.
 
-        RevealMarket(payable(market)).initialize(
-            eventId,
-            commitDeadline,
-            revealDeadline,
-            oracle,
-            verifier,
-            rakeManager,
-            treasury,
-            marketCollateral,
-            guardian,
-            rakeBpsOverride
-        );
+        RevealMarket(payable(market))
+            .initialize(
+                eventId,
+                commitDeadline,
+                revealDeadline,
+                oracle,
+                verifier,
+                rakeManager,
+                treasury,
+                marketCollateral,
+                guardian,
+                rakeBpsOverride
+            );
 
         _markets.push(market); // Track the deployed market address.
         isMarket[market] = true; // Mark it as factory-created.

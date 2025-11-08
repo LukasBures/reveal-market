@@ -19,8 +19,7 @@ interface VmExtended is Vm {
 }
 
 abstract contract ScriptBase {
-    VmExtended internal constant HEVM =
-        VmExtended(address(uint160(uint256(keccak256("hevm cheat code")))));
+    VmExtended internal constant HEVM = VmExtended(address(uint160(uint256(keccak256("hevm cheat code")))));
 }
 
 contract Deploy is ScriptBase {
@@ -41,13 +40,8 @@ contract Deploy is ScriptBase {
         RakeManager rakeManager = new RakeManager(deployer, treasury, rakeBps);
         Verifier verifier = new Verifier();
         RevealMarket implementation = new RevealMarket();
-        MarketFactory factory = new MarketFactory(
-            address(implementation),
-            address(rakeManager),
-            treasury,
-            address(verifier),
-            collateral
-        );
+        MarketFactory factory =
+            new MarketFactory(address(implementation), address(rakeManager), treasury, address(verifier), collateral);
 
         HEVM.stopBroadcast();
 

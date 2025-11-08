@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
     redis_url: str = Field(default="redis://redis:6379/0")
+    schema_version_key: str = Field(default="reveal_market:schema_version")
     factory_address: str | None = Field(default=None)
     market_implementation_address: str | None = Field(default=None)
     rake_manager_address: str | None = Field(default=None)

@@ -6,12 +6,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_PY_BIN="${PYTHON_BIN:-$(command -v python3.13 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)}"
 
-require_command() {
-  local cmd="$1"
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo "Error: '${cmd}' is not installed or not on PATH." >&2
-    exit 1
+pip_install_requirements() {
+  local service_dir="$1"
+  local req_file="${service_dir}/requirements-dev.txt"
+  if [[ ! -f "${req_file}" ]]; then
+    echo "Error: Unable to install dependencies for ${service_dir} (missing requirements-dev.txt)." >&2
+    return 1
   fi
+  if [[ -z "${DEFAULT_PY_BIN}" ]]; then
+    echo "Error: no python interpreter found (looked for python3.13/python3/python)." >&2
+    return 1
+  fi
+  echo "pip install -r ${req_file}"
+  "${DEFAULT_PY_BIN}" -m pip install -r "${req_file}"
 }
 
 run_py_tests() {
@@ -27,8 +34,13 @@ run_py_tests() {
       python -m pytest
     )
   elif [[ -f "poetry.lock" ]]; then
-    require_command poetry
-    poetry run pytest
+    if command -v poetry >/dev/null 2>&1; then
+      poetry run pytest
+    else
+      echo "Warning: 'poetry' not found. Falling back to pip install using requirements-dev.txt."
+      pip_install_requirements "${PWD}"
+      "${DEFAULT_PY_BIN}" -m pytest
+    fi
   else
     if [[ -z "${DEFAULT_PY_BIN}" ]]; then
       echo "Error: no python interpreter found (looked for python3.13/python3/python)." >&2

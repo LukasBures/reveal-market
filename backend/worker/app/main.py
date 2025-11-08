@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterator, List, Optional
 
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from shared import cache as shared_cache
 from shared import repository as shared_repository
 from shared.logging import log_event
-from shared.migrations import run_migrations as apply_migrations
+from shared.migrations import get_current_revision, run_migrations as apply_migrations
 
 from .config import get_settings
 from .logging_config import setup_logging
@@ -30,6 +31,14 @@ logger = logging.getLogger("reveal_market.worker")
 settings = get_settings()
 
 _schema_checked = False
+
+
+@dataclass
+class SchemaSyncResult:
+    changed: bool = False
+    previous_revision: Optional[str] = None
+    current_revision: Optional[str] = None
+
 
 # Engine/session are module-level singletons so the worker loop can reuse
 # connections without recreating pools on every tick.
@@ -47,16 +56,6 @@ SessionLocal = sessionmaker(
 )
 
 
-def _ensure_schema() -> None:
-    """Apply database migrations once per worker lifecycle if configured."""
-
-    global _schema_checked
-    if _schema_checked or not settings.run_migrations_on_startup:
-        return
-    apply_migrations(settings.database_url)
-    _schema_checked = True
-
-
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """Provide a transactional scope around a series of DB operations."""
@@ -69,6 +68,40 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def _ensure_schema() -> SchemaSyncResult:
+    """Apply database migrations once per worker lifecycle if configured."""
+
+    global _schema_checked
+    result = SchemaSyncResult()
+    if _schema_checked or not settings.run_migrations_on_startup:
+        return result
+    apply_migrations(settings.database_url)
+    revision = get_current_revision(settings.database_url)
+    if revision is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.schema.untracked",
+            message="applied migrations but could not resolve Alembic revision",
+        )
+    else:
+        with session_scope() as session:
+            previous_revision = shared_repository.record_schema_version(session, revision)
+        result.current_revision = revision
+        result.previous_revision = previous_revision
+        result.changed = previous_revision != revision
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.schema.synced",
+            message="applied migrations and recorded schema revision",
+            revision=revision,
+            previous_revision=previous_revision,
+        )
+    _schema_checked = True
+    return result
 
 
 polymarket_client = PolymarketClient(
@@ -283,6 +316,48 @@ def _calculate_sleep(start_time: float) -> float:
     return max(settings.poll_interval_seconds - elapsed, 5)
 
 
+def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResult) -> None:
+    """Publish the current schema revision for cache tagging + invalidate stale tags."""
+
+    if redis_client is None or state.current_revision is None:
+        return
+    try:
+        redis_client.set(settings.schema_version_key, state.current_revision)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.schema.version_cache_error",
+            message="failed to write schema revision cache key",
+            error=str(exc),
+        )
+        return
+
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.schema.version_cached",
+        message="published schema revision for cache tagging",
+        revision=state.current_revision,
+    )
+
+    if state.changed:
+        previous_tag = f"schema:{state.previous_revision}" if state.previous_revision else None
+        tags_to_invalidate = ["schema:unknown"]
+        if previous_tag:
+            tags_to_invalidate.append(previous_tag)
+        for tag in tags_to_invalidate:
+            invalidated = shared_cache.invalidate_tag(redis_client, tag)
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.schema.cache_reset",
+                message="invalidated schema-tagged cache entries",
+                tag=tag,
+                keys=len(invalidated),
+            )
+
+
 def publish_heartbeat(redis_client: Redis | None, markets_processed: int, latency_ms: float) -> None:
     """Update a Redis key so external monitors can assert liveness."""
 
@@ -350,7 +425,7 @@ def run_worker() -> None:
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
-    _ensure_schema()
+    schema_state = _ensure_schema()
     markets, latency_ms = fetch_markets_from_polymarket()
     if markets:
         log_event(
@@ -371,6 +446,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
                 extra={"event": "worker.persist.error", "error": str(exc)},
             )
     publish_heartbeat(redis_client, len(markets), latency_ms)
+    _propagate_schema_revision(redis_client, schema_state)
     if redis_client is not None:
         shared_cache.invalidate_tag(redis_client, "markets:list")
         shared_cache.invalidate_tag(redis_client, "markets:stats")

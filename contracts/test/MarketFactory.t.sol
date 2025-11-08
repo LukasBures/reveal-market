@@ -33,11 +33,7 @@ contract MarketFactoryTest is Test {
         verifier = new MockVerifier();
         collateralToken = new MockERC20("USD Coin", "USDC", 6);
         factory = new MarketFactory(
-            address(implementation),
-            address(rakeManager),
-            TREASURY,
-            address(verifier),
-            address(collateralToken)
+            address(implementation), address(rakeManager), TREASURY, address(verifier), address(collateralToken)
         );
         assertEq(factory.defaultCollateral(), address(collateralToken));
         assertTrue(factory.isCollateralAllowed(address(collateralToken)));
@@ -54,14 +50,8 @@ contract MarketFactoryTest is Test {
         // Record emitted events during execution
         vm.recordLogs();
 
-        address market = factory.createMarket(
-            "E-1",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        address market =
+            factory.createMarket("E-1", commitDeadline, revealDeadline, ORACLE, address(collateralToken), 0);
 
         // Fetch logs and check the MarketCreated event manually
         Vm.Log[] memory entries = vm.getRecordedLogs();
@@ -104,12 +94,7 @@ contract MarketFactoryTest is Test {
 
         uint256 customRake = 150;
         address market = factory.createMarket(
-            "E-CUSTOM",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            customRake
+            "E-CUSTOM", commitDeadline, revealDeadline, ORACLE, address(collateralToken), customRake
         );
 
         RevealMarket clone = RevealMarket(payable(market));
@@ -120,51 +105,23 @@ contract MarketFactoryTest is Test {
         uint256 commitDeadline = block.timestamp + 1 days;
         uint256 revealDeadline = commitDeadline + 1 days;
         vm.expectRevert(MarketFactory.InvalidRakeBps.selector);
-        factory.createMarket(
-            "E-BAD-RAKE",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            500
-        );
+        factory.createMarket("E-BAD-RAKE", commitDeadline, revealDeadline, ORACLE, address(collateralToken), 500);
     }
 
     function testCreateMarketRevertsOnInvalidDeadlines() public {
         vm.expectRevert(MarketFactory.InvalidDeadlines.selector);
-        factory.createMarket(
-            "E-2",
-            block.timestamp,
-            block.timestamp + 1 days,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        factory.createMarket("E-2", block.timestamp, block.timestamp + 1 days, ORACLE, address(collateralToken), 0);
 
         uint256 commitDeadline = block.timestamp + 1 days;
         vm.expectRevert(MarketFactory.InvalidDeadlines.selector);
-        factory.createMarket(
-            "E-3",
-            commitDeadline,
-            commitDeadline,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        factory.createMarket("E-3", commitDeadline, commitDeadline, ORACLE, address(collateralToken), 0);
     }
 
     function testCreateMarketFallsBackToDefaultCollateral() public {
         uint256 commitDeadline = block.timestamp + 2 days;
         uint256 revealDeadline = commitDeadline + 1 days;
 
-        address market = factory.createMarket(
-            "E-DEFAULT",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(0),
-            0
-        );
+        address market = factory.createMarket("E-DEFAULT", commitDeadline, revealDeadline, ORACLE, address(0), 0);
 
         RevealMarket clone = RevealMarket(payable(market));
         assertEq(clone.collateral(), address(collateralToken));
@@ -174,14 +131,7 @@ contract MarketFactoryTest is Test {
         uint256 commitDeadline = block.timestamp + 1 days;
         uint256 revealDeadline = commitDeadline + 1 days;
         vm.expectRevert(MarketFactory.ZeroAddress.selector);
-        factory.createMarket(
-            "E-4",
-            commitDeadline,
-            revealDeadline,
-            address(0),
-            address(collateralToken),
-            0
-        );
+        factory.createMarket("E-4", commitDeadline, revealDeadline, address(0), address(collateralToken), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -232,14 +182,7 @@ contract MarketFactoryTest is Test {
         uint256 commitDeadline = block.timestamp + 2 days;
         uint256 revealDeadline = commitDeadline + 1 days;
 
-        address market = factory.createMarket(
-            "E-NATIVE",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(0),
-            0
-        );
+        address market = factory.createMarket("E-NATIVE", commitDeadline, revealDeadline, ORACLE, address(0), 0);
         RevealMarket clone = RevealMarket(payable(market));
         assertEq(clone.collateral(), address(0));
     }
@@ -313,14 +256,7 @@ contract MarketFactoryTest is Test {
         uint256 revealDeadline = commitDeadline + 1 days;
 
         vm.expectRevert(abi.encodeWithSelector(MarketFactory.CollateralNotAllowed.selector, address(collateralToken)));
-        factory.createMarket(
-            "E-BLOCK",
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        factory.createMarket("E-BLOCK", commitDeadline, revealDeadline, ORACLE, address(collateralToken), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -392,14 +328,8 @@ contract MarketFactoryTest is Test {
     function _deployDefaultMarket(string memory eventId) private returns (RevealMarket) {
         uint256 commitDeadline = block.timestamp + 3 days;
         uint256 revealDeadline = commitDeadline + 1 days;
-        address marketAddr = factory.createMarket(
-            eventId,
-            commitDeadline,
-            revealDeadline,
-            ORACLE,
-            address(collateralToken),
-            0
-        );
+        address marketAddr =
+            factory.createMarket(eventId, commitDeadline, revealDeadline, ORACLE, address(collateralToken), 0);
         return RevealMarket(payable(marketAddr));
     }
 
@@ -421,11 +351,11 @@ contract MarketFactoryTest is Test {
         market.commit(loseHash, amount);
     }
 
-    function _buildSignals(
-        RevealMarket market,
-        uint256 winningPool,
-        bytes32 outcomeHash
-    ) private view returns (uint256[4] memory signals) {
+    function _buildSignals(RevealMarket market, uint256 winningPool, bytes32 outcomeHash)
+        private
+        view
+        returns (uint256[4] memory signals)
+    {
         signals[0] = winningPool;
         signals[1] = market.totalPool();
         signals[2] = uint256(outcomeHash);

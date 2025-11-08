@@ -64,3 +64,11 @@ class Resolution(Base):
     checked_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class SchemaVersion(Base):
+    __tablename__ = "schema_versions"
+
+    key = Column(String(64), primary_key=True, nullable=False)
+    revision = Column(String(64), nullable=False)
+    applied_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

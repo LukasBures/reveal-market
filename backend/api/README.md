@@ -28,6 +28,7 @@ Environment variables are prefixed `RM_`. Common ones:
 | --- | --- |
 | `RM_DATABASE_URL` | SQLAlchemy DSN for Postgres. |
 | `RM_REDIS_URL` | Redis URI used by caching layer. |
+| `RM_SCHEMA_VERSION_KEY` | Redis key where the worker publishes the latest Alembic revision for cache tagging. |
 | `RM_ALLOWED_HOSTS` | CSV of hosts for TrustedHost middleware (default `*`). |
 | `RM_CORS_ALLOW_ORIGINS` | CSV allowlist for CORS. |
 | `RM_ENABLE_SECURITY_HEADERS` | Toggle CSP/HSTS middleware (default `true`). |
