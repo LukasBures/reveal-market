@@ -15,10 +15,10 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(projectRoot, "./"),
-      "@/": `${path.resolve(projectRoot, "./")}/`,
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(projectRoot, "./") },
+      { find: /^@\//, replacement: `${path.resolve(projectRoot, "./")}/` },
+    ],
   },
   esbuild: {
     jsx: "automatic",
