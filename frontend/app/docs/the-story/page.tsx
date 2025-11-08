@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "The Story So Far - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("the-story");
 
 export default function StoryPage() {
   return null;

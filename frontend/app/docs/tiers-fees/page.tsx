@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Tiers & Fees - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("tiers-fees");
 
 export default function TiersFeesPage() {
   return (

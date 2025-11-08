@@ -17,6 +17,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Heartbeat-driven reliability** – Workers advertise liveness via Redis keys with TTLs. If a heartbeat is missed, alerting fires before stale data reaches investor dashboards.
 - **Smart economics tracking** – API responses expose rake basis points, settlement hashes, and on-chain identifiers. This enables LPs to model expected yield and for treasury to forecast protocol revenue.
 - **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional auto-creation of on-chain markets is gated behind explicit configuration plus secure key storage.
+- **Perimeter controls baked in** – Trusted-host filters, configurable CORS allowlists, and CSP/HSTS/COOP headers ship with the API. Docker health checks call native Python probes rather than brittle shell scripts.
 
 ## Upcoming Enhancements
 
@@ -29,6 +30,11 @@ The roadmap prioritizes capabilities that increase investor trust:
 5. **Secrets hardening** – Vault-backed signer abstraction so custody providers never handle plaintext keys.
 
 These milestones ladder up to the same thesis: reliable data fuels confident liquidity.
+
+## Service-Level Docs
+
+- [`backend/api/README.md`](./api/README.md) – FastAPI runtime, security headers, health check details, and env vars.
+- [`backend/worker/README.md`](./worker/README.md) – Polymarket ingest, cache invalidation, on-chain automation, and worker config.
 
 ## Partner Takeaways
 
@@ -68,3 +74,7 @@ Reproducible tests are part of the trust story. The repo now defaults to Python�
    ```
 
 Both virtual environments are ignored by git, and the requirements files stay in lock-step with the Poetry definitions (regenerate via `poetry export --with dev --without-hashes`). This flow keeps local verification fast while guaranteeing the exact same dependency graph used in CI and Docker images.
+
+## Logging Consistency
+
+Each service now bootstraps a production-grade logger at process start. The format matches `timestamp | LEVEL | logger | file:line | event | message | request_id=<value>` so API, worker, and scripts emit comparable lines. Control verbosity with `LOG_LEVEL`, and opt into rotating files by setting `LOG_TO_FILE=true` (optional knobs: `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`). All logs still stream to stdout for container aggregation, ensuring Docker/Kubernetes collectors see exactly the same structure across services.

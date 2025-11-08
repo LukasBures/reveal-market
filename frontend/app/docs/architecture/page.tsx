@@ -1,3 +1,7 @@
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("architecture");
+
 export default function ArchitecturePage() {
   return (
     <>

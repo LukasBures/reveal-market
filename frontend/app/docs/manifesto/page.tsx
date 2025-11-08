@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Manifesto - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("manifesto");
 
 export default function ManifestoPage() {
   return (

@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "FAQ - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("faq");
 
 export default function FAQPage() {
   return (

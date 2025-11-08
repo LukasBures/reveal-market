@@ -15,15 +15,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from shared import cache as shared_cache
 from shared import repository as shared_repository
-from shared.logging import configure_json_logging, log_event
+from shared.logging import log_event
 from shared.migrations import run_migrations as apply_migrations
 
 from .config import get_settings
+from .logging_config import setup_logging
 from .onchain import maybe_create_onchain_market
 from .polymarket import MarketPayload, PolymarketClient
 from shared.onchain import ConditionalTokensClient
 
-configure_json_logging("reveal_market.worker")
+setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()

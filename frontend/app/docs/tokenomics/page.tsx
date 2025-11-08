@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Tokenomics - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("tokenomics");
 
 export default function TokenomicsPage() {
   return (

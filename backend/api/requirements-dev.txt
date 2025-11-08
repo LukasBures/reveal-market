@@ -1,5 +1,3 @@
-# Generated via `poetry export --with dev --format requirements.txt --without-hashes`.
-# Regenerate after updating pyproject/poetry.lock.
 aiohappyeyeballs==2.6.1 ; python_version >= "3.13" and python_version < "4.0"
 aiohttp==3.13.2 ; python_version >= "3.13" and python_version < "4.0"
 aiosignal==1.4.0 ; python_version >= "3.13" and python_version < "4.0"

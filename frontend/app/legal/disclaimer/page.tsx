@@ -1,6 +1,11 @@
-export const metadata = {
-  title: "Disclaimer - Reveal Market",
-};
+import { buildMetadata } from "@/lib/seo";
+
+export const metadata = buildMetadata({
+  title: "Reveal Market Disclaimer",
+  description: "Disclosure on informational use, investment risk, and jurisdictional restrictions.",
+  path: "/legal/disclaimer",
+  keywords: ["disclaimer", "investment risk", "legal"],
+});
 
 export default function DisclaimerPage() {
   return (

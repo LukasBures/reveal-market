@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Core Infrastructure - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("core-infrastructure");
 
 export default function CoreInfrastructurePage() {
   return (

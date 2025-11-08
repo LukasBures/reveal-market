@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("overview");
 
 export default function DocsOverview() {
   return (

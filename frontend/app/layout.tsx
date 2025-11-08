@@ -7,25 +7,69 @@ import "./globals.css";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
+import { absoluteUrl } from "@/lib/seo";
 
 const font = Manrope({
   subsets: ["latin"],
   variable: "--font-sans",
 });
 
+const SITE_URL = absoluteUrl("/");
+
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "Reveal Market",
+  url: SITE_URL,
+  logo: absoluteUrl("/opengraph-image"),
+  sameAs: ["https://x.com/RevealMarket"],
+  contactPoint: [
+    {
+      "@type": "ContactPoint",
+      contactType: "Partnerships",
+      email: "hello@revealmarket.xyz",
+    },
+  ],
+};
+
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "Reveal Market",
+  url: SITE_URL,
+  potentialAction: {
+    "@type": "SearchAction",
+    target: `${SITE_URL}?q={search_term_string}`,
+    "query-input": "required name=search_term_string",
+  },
+};
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://revealmarket.xyz"),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Reveal Market",
     template: "%s | Reveal Market",
   },
   description:
     "Zero-knowledge commit-and-reveal prediction markets with a fast FastAPI backend and Foundry contracts.",
+  keywords: [
+    "reveal market",
+    "prediction markets",
+    "zero knowledge",
+    "institutional trading",
+  ],
+  alternates: {
+    canonical: SITE_URL,
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
   openGraph: {
     title: "Reveal Market",
     description:
       "Zero-knowledge prediction markets with a battle-tested backend and wallet-ready frontend.",
-    url: "https://revealmarket.xyz",
+    url: SITE_URL,
     siteName: "Reveal Market",
     images: [
       {
@@ -53,6 +97,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Footer />
           </div>
         </AppProviders>
+        <script
+          type="application/ld+json"
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
+        <script
+          type="application/ld+json"
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+        />
       </body>
     </html>
   );

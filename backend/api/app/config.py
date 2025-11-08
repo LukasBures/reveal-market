@@ -54,6 +54,12 @@ class Settings(BaseSettings):
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS"])
+    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = Field(default=False)
+    enable_security_headers: bool = Field(default=True)
 
     @field_validator("max_page_size")
     @classmethod
@@ -61,6 +67,13 @@ class Settings(BaseSettings):
         default_page_size = info.data.get("default_page_size", 50)
         if isinstance(default_page_size, int) and value < default_page_size:
             raise ValueError("max_page_size must be >= default_page_size")
+        return value
+
+    @field_validator("allowed_hosts", "cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
+    @classmethod
+    def _coerce_csv(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
 

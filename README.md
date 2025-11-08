@@ -1,72 +1,80 @@
-# Reveal Market
+# Reveal Market Platform
 
-Reveal Market delivers the first institutional-grade prediction marketplace built for mainstream investors and regulated venues. We fuse compliant on-chain settlement, provable resolutions, and a familiar Web2-grade API so exchanges, asset managers, and fintechs can offer outcome markets without carrying protocol risk.
+Reveal Market delivers a zero-knowledge prediction stack that regulated venues can actually ship: a FastAPI surface with security hardening, an ingestion/automation worker, investor-grade Next.js experiences, and Groth16-ready Foundry contracts. This mono-repo houses every layer so due diligence, security reviews, and automation live in one place.
 
 Follow progress on X: [@RevealMarket](https://x.com/RevealMarket).
 
-## Investment Thesis
+---
 
-- **Outcome markets as a balance-sheet asset** – Prediction markets finally generate predictable, fee-based yield rather than speculative token inflation, giving treasuries an uncorrelated revenue stream.
-- **Horizen-first strategic moat** – We are the only team shipping zk-powered commit/reveal markets on Horizen’s EVM stack, positioning Reveal Market as the default liquidity layer when the ecosystem opens to CEX integrations.
-- **Compliance-grade infrastructure** – The architecture already compartmentalizes API, worker, and on-chain components, letting partners deploy only what their regulators allow while still tapping the same economic engine.
+## Repository Map
 
-## Why Investors Are Watching
+| Directory | Purpose | Highlights |
+| --- | --- | --- |
+| `backend/api` | FastAPI service for markets, settlements, and partner endpoints. | Trusted-host & CORS controls, CSP/HSTS middleware, Redis caching, pytest suite, docker health probe. |
+| `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, structured logging, Polymarket + on-chain sync, pytest suite. |
+| `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components. |
+| `contracts/` | Foundry workspace (RevealMarket, MarketFactory, etc.). | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
 
-- **Real yield from informational alpha** – Every market routes fees to the treasury and future token holders, aligning return with trading velocity rather than inflationary emissions.
-- **Auditable from day one** – Data is sourced from Polymarket + Conditional Tokens, enriched by our ingestion worker, and hashed on-chain so outcomes can be traced block-by-block.
-- **Horizen-first moat** – zk-powered commit/reveal infrastructure on Horizen keeps us ahead of copycats.
-- **Enterprise-ready** – Containerized services, structured logging, and Prometheus metrics keep diligence simple for compliance desks.
+Additional docs live in each directory’s README.
 
-## Traction Snapshot
+---
 
-- **Live multi-service stack** – Backend API, ingestion worker, and smart-contract factory already operate in lockstep with shared models and caching, demonstrating production readiness.
-- **Investor-focused frontend** – Next.js property targets LPs, exchanges, and treasuries with roadmap clarity, legal pages, and social proof.
-- **Legal + governance groundwork** – Terms, privacy, cookies, and disclaimers are published, enabling regulated conversations without delay.
+## Investment Snapshot
 
-## Product Pillars
+- **Outcome markets as yield** – Treasury-first rake capture and institutional fee-sharing make markets balance-sheet friendly instead of speculative emissions.
+- **Horizen-first + zk moat** – Reveal is the only team operating commit/reveal + Groth16 infrastructure on Horizen’s EVM, giving partners a head start before large CEX integrations land.
+- **Compliance-grade delivery** – Segregated services, JSON logging, Prometheus metrics, and security headers keep regulators and auditors aligned from day one.
 
-| Pillar | What It Unlocks |
-| --- | --- |
-| **Institutional API** | Low-latency FastAPI surface serving curated markets, stats, and resolution data with Redis-backed caching and Prometheus telemetry.|
-| **Autonomous Worker** | Always-on ingestion of Polymarket liquidity plus optional on-chain market creation, ensuring inventory is never stale and rake economics stay predictable. |
-| **zk-Secured Contracts** | Minimal proxy markets deployed through our MarketFactory with guardian safeguards, rake controls, and forthcoming Groth16 verification. |
-| **Investor-Facing Frontend** | A Next.js experience tailored for LPs, market makers, and DAO treasuries that want at-a-glance health metrics, roadmap transparency, and call-to-action moments. |
+### Traction
 
-Each module can operate independently or combine into a turnkey stack for regulated partners.
+- Multi-service Docker stack ships with health checks, migrations, and hardened logging.
+- Investor docs (Next.js) expose sitemap/robots, JSON-LD markup, and legal pages for SEO + AI crawlers.
+- Contracts emit `MarketResolved` telemetry today; Foundry tests cover 70+ cases including fuzz/security.
 
-## Competitive Edge
+---
 
-- **Transparent economics** – Every market carries published rake parameters and settlement metadata so investors can price long-tail liquidity without hidden spreads.
-- **Operational resilience** – Shared caching, structured logging, and worker heartbeats make the system observable for compliance desks and custodians.
-- **On-chain + off-chain harmony** – Data lives simultaneously in PostgreSQL, Redis, and Polygon-compatible contracts, allowing auditors to reconcile every value path.
-- **Regulated-market readiness** – The architecture anticipates segregated deployments (API-only, worker-only, on-chain-only) so partners can slot Reveal Market into existing governance frameworks.
+## Security & Observability
 
-## Go-To-Market Momentum
+- **API/Worker** – Strict HSTS, CSP, COOP/CORP, Referrer-Policy, and Trusted Host filters are enabled by default. Health checks are native Python scripts, not cURL hacks.
+- **Frontend** – Production headers mirror backend policies; sitemap + robots automatically enumerate investor pages. All docs/legal pages declare canonical URLs and metadata via `lib/seo.ts`.
+- **Logging** – Unified formatter across services (`timestamp | LEVEL | logger | file:line | event | request_id`). Optional rotating file output for regulated deployments, structured JSON-LD for site-wide schema.
+- **Tests** – `./backend/run_tests.sh` (pytest), `cd frontend && npm run test` (Vitest), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel.
 
-- **Exchange integrations** – Offering API-only deployments with shared SLA dashboards to let centralized venues pilot markets without touching on-chain ops.
-- **Liquidity programs** – Structuring rake-sharing incentives for strategic LPs who deepen markets in exchange for treasury participation.
-- **Horizen ecosystem alliances** – Coordinating with validator sets and infra partners to make Reveal Market the flagship Horizen application as the network expands.
+---
 
-## Token & Treasury Alignment
+## Quick Start
 
-- **Fee-backed value** – All market fees accrue to the treasury first, creating measurable cash flow before token emissions.
-- **Future token utility** – Planned incentives will pair governance rights with treasury distributions, rewarding stakeholders who help scale liquidity.
-- **Predictable disclosures** – Settlement data, rake overrides, and guardian actions are designed to be fully transparent so funds can evaluate upside with audit-ready evidence.
+```bash
+# Clone & bootstrap
+git clone https://github.com/RevealMarket/reveal-market.git
+cd reveal-market
 
-## Roadmap
+# Backend (Python 3.13)
+python -m venv backend/api/.venv && source backend/api/.venv/bin/activate
+pip install -r backend/api/requirements-dev.txt
+deactivate
+python -m venv backend/worker/.venv && source backend/worker/.venv/bin/activate
+pip install -r backend/worker/requirements-dev.txt
+./backend/run_tests.sh
 
-| Phase | Focus |
-| --- | --- |
-| **Q3 2024** | Persist on-chain resolutions in Postgres, smarter cache invalidation, and optional Horizen ZEN testnet support for early operator pilots. |
-| **Q4 2024** | Deploy Groth16 verifier, emit settlement events for institutional indexers, and light up automated on-chain market creation from curated feeds. |
-| **Early 2025** | Launch investor dashboard with treasury analytics, unlock multi-chain strategy, and finalize token-aligned incentive programs. |
+# Frontend
+cd frontend && npm install && npm run dev
 
-Milestones are calibrated to deliver measurable liquidity growth while maintaining regulatory trust.
+# Contracts
+cd contracts && forge test
+
+# Full docker stack (API, worker, frontend, Postgres, Redis)
+./run_local.sh
+```
+
+Environment variables follow the `RM_` prefix (see each service README). Security headers can be tuned with `RM_ALLOWED_HOSTS`, CORS lists, and CSP overrides.
+
+---
 
 ## Engagement Paths
 
-- **Exchanges & Brokerages** – Embed the API to list curated outcome markets with built-in compliance tooling.
-- **Liquidity Providers** – Access fee-sharing programs and structured data that identifies underpriced markets.
-- **Strategic Investors** – Support treasury expansion, validator partnerships, or geographic licensing efforts.
+- **Exchanges & Brokerages** – Deploy the API-only slice behind your firewall, feed liquidity via our worker, or white-label the Next.js storefront.
+- **Liquidity Providers & DAOs** – Tap fee-sharing programs, structured webhooks, and rake analytics to model outcome-market exposure.
+- **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via `hello@revealmarket.xyz`.
 
-Contact the team via hello@revealmarket.xyz or DM us on [X](https://x.com/RevealMarket) to explore partnerships, validator allocations, or treasury participation opportunities.
+Let’s build prediction markets institutions actually trust.

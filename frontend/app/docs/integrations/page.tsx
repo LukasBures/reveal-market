@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Integrations - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("integrations");
 
 export default function IntegrationsPage() {
   return (

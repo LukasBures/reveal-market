@@ -1,3 +1,7 @@
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("getting-started");
+
 export default function GettingStartedPage() {
   return (
     <>

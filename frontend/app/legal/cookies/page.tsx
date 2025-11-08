@@ -1,6 +1,11 @@
-export const metadata = {
-  title: "Cookie Policy - Reveal Market",
-};
+import { buildMetadata } from "@/lib/seo";
+
+export const metadata = buildMetadata({
+  title: "Reveal Market Cookie Policy",
+  description: "Transparency about tracking technologies used across Reveal Market properties.",
+  path: "/legal/cookies",
+  keywords: ["cookies", "policy", "tracking"],
+});
 
 export default function CookiesPage() {
   return (

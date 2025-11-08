@@ -48,6 +48,7 @@ USER workeruser
 COPY --chown=workeruser:workeruser backend/shared ./shared
 COPY --chown=workeruser:workeruser backend/worker/app ./app
 COPY --chown=workeruser:workeruser backend/worker/run.py ./run.py
+COPY --chown=workeruser:workeruser backend/migrations ./migrations
 
 # Worker healthcheck hits Python entrypoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -m app.healthcheck

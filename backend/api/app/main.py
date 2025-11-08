@@ -8,19 +8,23 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import crud, schemas
 from app.config import get_settings
+from app.logging_config import setup_logging
 from app.database import get_session, run_migrations
 from app.health import build_health_response
 from app.onchain import fetch_factory_markets
+from app.security import SecurityHeadersMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from shared.cache import add_tag, add_tags, get_client, get_json, invalidate_tag, set_json
-from shared.logging import configure_json_logging, log_event, reset_request_id, set_request_id
+from shared.logging import log_event, reset_request_id, set_request_id
 from shared.onchain import OnChainConfigurationError
 
-configure_json_logging("reveal_market.api")
+setup_logging("reveal_market.api")
 
 settings = get_settings()
 logger = logging.getLogger("reveal_market.api")
@@ -40,6 +44,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+if settings.allowed_hosts and settings.allowed_hosts != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=settings.cors_allow_credentials,
+    allow_methods=settings.cors_allow_methods,
+    allow_headers=settings.cors_allow_headers,
+)
+
+if settings.enable_security_headers:
+    api_csp = (
+        "default-src 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'none'; "
+        "base-uri 'none'; "
+        "connect-src 'self';"
+    )
+    app.add_middleware(SecurityHeadersMiddleware, headers={"Content-Security-Policy": api_csp})
+
 if not getattr(app.state, "metrics_instrumented", False):
     instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
     app.state.metrics_instrumented = True

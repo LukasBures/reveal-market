@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Privacy & Security - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("privacy-security");
 
 export default function PrivacySecurityPage() {
   return (

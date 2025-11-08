@@ -1,10 +1,17 @@
 import Link from "next/link";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata = {
+export const metadata = buildMetadata({
   title: "About Reveal Market",
   description:
-    "Learn about the Reveal Market mission, architecture, and roadmap.",
-};
+    "Reveal Market pairs zero-knowledge prediction rails with institution-ready infrastructure and a clear roadmap.",
+  path: "/about",
+  keywords: [
+    "about reveal market",
+    "prediction market team",
+    "institutional infrastructure",
+  ],
+});
 
 export default function AboutPage() {
   return (

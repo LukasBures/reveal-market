@@ -1,6 +1,11 @@
-export const metadata = {
-  title: "Terms of Service - Reveal Market",
-};
+import { buildMetadata } from "@/lib/seo";
+
+export const metadata = buildMetadata({
+  title: "Reveal Market Terms of Service",
+  description: "Understand the legal terms governing access to the Reveal Market website and services.",
+  path: "/legal/terms",
+  keywords: ["terms", "legal", "service", "compliance"],
+});
 
 export default function TermsPage() {
   return (

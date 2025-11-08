@@ -1,6 +1,6 @@
-export const metadata = {
-  title: "Referrals - Reveal Market Docs",
-};
+import { docsMetadata } from "@/lib/seo";
+
+export const metadata = docsMetadata("referrals");
 
 export default function ReferralsPage() {
   return (
