@@ -9,7 +9,7 @@ export function Footer() {
           <Link href="/about" className="hover:text-white">
             About
           </Link>
-          <Link href="https://docs.revealmarket.xyz" className="hover:text-white">
+          <Link href="/docs" className="hover:text-white">
             Docs
           </Link>
           <Link href="https://x.com/RevealMarket" className="hover:text-white" rel="noreferrer" target="_blank">

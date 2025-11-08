@@ -22,9 +22,6 @@ describe("MainNav", () => {
 
   it("includes CTA to docs", () => {
     render(<MainNav />);
-    expect(screen.getByRole("link", { name: /view docs/i })).toHaveAttribute(
-      "href",
-      "https://docs.revealmarket.xyz"
-    );
+    expect(screen.getByRole("link", { name: /view docs/i })).toHaveAttribute("href", "/docs");
   });
 });

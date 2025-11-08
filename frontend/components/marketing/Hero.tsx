@@ -22,7 +22,7 @@ export function Hero() {
           Build on Reveal Market
         </Link>
         <Link
-          href="https://docs.revealmarket.xyz"
+          href="/docs"
           className="rounded-full border border-white/20 px-6 py-3 font-semibold text-white/80 transition hover:border-white hover:text-white"
         >
           Read docs

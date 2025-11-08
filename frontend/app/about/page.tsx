@@ -42,7 +42,7 @@ export default function AboutPage() {
           <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
             <li>Wallet-native onboarding with Wagmi + RainbowKit.</li>
             <li>Horizen and Polygon deployment presets.</li>
-            <li>Full docs site at docs.revealmarket.xyz.</li>
+            <li>Full docs library at revealmarket.xyz/docs.</li>
           </ul>
         </div>
       </div>

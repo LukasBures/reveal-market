@@ -12,7 +12,7 @@ export function CTASection() {
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
         <Link
-          href="https://docs.revealmarket.xyz/architecture"
+          href="/docs/architecture"
           className="rounded-full bg-white px-5 py-2 font-semibold text-brand-600 shadow-lg transition hover:bg-white/90"
         >
           Explore architecture

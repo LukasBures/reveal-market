@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { fetchInvestorKpis } from "@/lib/api";
-import { buildMetadata } from "@/lib/seo";
+import { fetchInvestorKpis } from "../lib/api";
+import { buildMetadata } from "../lib/seo";
 
 export const metadata = buildMetadata({
   title: "Reveal Market | Investor-Grade Prediction Markets",

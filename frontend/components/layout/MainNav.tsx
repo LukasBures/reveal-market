@@ -34,7 +34,7 @@ export function MainNav() {
             </Link>
           ))}
           <Link
-            href="https://docs.revealmarket.xyz"
+            href="/docs"
             className="rounded-full bg-brand-500 px-4 py-1 text-sm font-semibold text-white shadow-glow-brand transition hover:bg-brand-400"
           >
             View Docs
