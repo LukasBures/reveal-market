@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import json
 from datetime import datetime, timezone
 from typing import Dict
 
@@ -47,6 +48,25 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
         component_states.append("error")
     except Exception as exc:  # pragma: no cover - defensive
         components["redis"] = schemas.HealthComponent(status="error", detail=str(exc))
+        component_states.append("error")
+
+    # Worker heartbeat
+    try:
+        redis_client = get_redis_client()
+        heartbeat_raw = redis_client.get(settings.heartbeat_key)
+        if heartbeat_raw:
+            heartbeat = json.loads(heartbeat_raw)
+            components["worker"] = schemas.HealthComponent(
+                status="ok",
+                detail=f"processed {heartbeat.get('markets_processed', 0)} markets",
+                latency_ms=heartbeat.get("latency_ms"),
+            )
+            component_states.append("ok")
+        else:
+            components["worker"] = schemas.HealthComponent(status="degraded", detail="heartbeat missing")
+            component_states.append("degraded")
+    except Exception as exc:
+        components["worker"] = schemas.HealthComponent(status="error", detail=str(exc))
         component_states.append("error")
 
     # External Polymarket API reachability

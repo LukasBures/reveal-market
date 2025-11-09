@@ -34,7 +34,7 @@ export default function RoadmapPage() {
           <h2 className="text-2xl font-semibold text-white">Pillar 2 · Liquidity Automation</h2>
           <ul className="list-disc space-y-3 pl-6">
             <li>
-              <strong>Polymarket ingestion resilience.</strong> Shared retry + metrics stack with alerting on upstream
+              <strong>External feed ingestion resilience.</strong> Shared retry + metrics stack with alerting on upstream
               error ratios.
             </li>
             <li>

@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr
+from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,8 +27,19 @@ class Settings(BaseSettings):
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_closed_filter: Optional[bool] = Field(default=None)
     poll_interval_seconds: int = Field(default=30, ge=1)
+    api_base_url: Optional[str] = Field(default="http://localhost:8000")
+    prime_markets_cache_enabled: bool = Field(default=True)
+    markets_cache_limit: int = Field(default=18, ge=1, le=250)
+    markets_cache_offset: int = Field(default=0, ge=0)
+    markets_cache_ttl_seconds: int = Field(default=30, ge=1)
+    cache_prime_timeout_seconds: float = Field(default=5.0, gt=0)
+    category_cache_limit: int = Field(default=18, ge=1, le=250)
+    tag_cache_limit: int = Field(default=18, ge=1, le=250)
+    suggest_cache_limit: int = Field(default=5, ge=1, le=25)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
     heartbeat_ttl_seconds: int = Field(default=120, ge=10)
+    batch_stats_key: str = Field(default="reveal_market_worker:batch_stats")
+    batch_stats_ttl_seconds: int = Field(default=900, ge=30)
     schema_version_key: str = Field(default="reveal_market:schema_version")
     factory_address: Optional[str] = Field(default=None)
     rake_manager_address: Optional[str] = Field(default=None)
@@ -56,6 +67,18 @@ class Settings(BaseSettings):
     max_web3_retries: int = Field(default=3, ge=1)
     resolution_refresh_interval_seconds: int = Field(default=300, ge=60)
     run_migrations_on_startup: bool = Field(default=True)
+    resolved_retention_seconds: int = Field(default=86400, ge=3600)
+    resolved_retention_dry_run: bool = Field(default=False)
+    featured_categories: list[str] = Field(default_factory=list)
+    featured_tags: list[str] = Field(default_factory=list)
+    featured_suggest_queries: list[str] = Field(default_factory=list)
+
+    @field_validator("featured_categories", "featured_tags", "featured_suggest_queries", mode="before")
+    @classmethod
+    def _parse_csv(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
 
 
 @lru_cache(maxsize=1)

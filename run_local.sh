@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # Full rebuild + launch script for developers.
 # - Enables BuildKit + parallel builds (leaving one CPU free).
-# - Forces a --no-cache compose build so every layer is fresh.
+# - Defaults to a --no-cache compose build so every layer is fresh (use --cache to reuse layers).
 # - Starts docker compose in the foreground (logs stream to terminal).
 #
 # Usage: ./run_local.sh [extra docker-compose args]
@@ -54,8 +54,42 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 
-echo "Building images with --no-cache (parallel=${COMPOSE_PARALLEL_LIMIT})..."
-"${COMPOSE_CMD[@]}" build --no-cache --parallel
+BUILD_FLAG="--no-cache"
+UP_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cache)
+      BUILD_FLAG=""
+      shift
+      ;;
+    --no-cache)
+      BUILD_FLAG="--no-cache"
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: ./run_local.sh [--cache|--no-cache] [compose up args...]"
+      exit 0
+      ;;
+    --)
+      shift
+      UP_ARGS+=("$@")
+      break
+      ;;
+    *)
+      UP_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+BUILD_DESC="${BUILD_FLAG:-cached layers}"
+echo "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})..."
+if [[ -n "${BUILD_FLAG}" ]]; then
+  "${COMPOSE_CMD[@]}" build "${BUILD_FLAG}" --parallel
+else
+  "${COMPOSE_CMD[@]}" build --parallel
+fi
 
 echo "Starting services..."
-"${COMPOSE_CMD[@]}" up "$@"
+"${COMPOSE_CMD[@]}" up "${UP_ARGS[@]}"

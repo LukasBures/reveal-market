@@ -14,6 +14,7 @@ RUN apt-get update \
 
 # Copy dependency metadata and shared libs to keep cache hits high
 COPY backend/api/pyproject.toml ./pyproject.toml
+COPY backend/api/poetry.lock ./poetry.lock
 COPY backend/shared ./shared
 
 # Export runtime deps and pre-install wheels so runtime stays slim

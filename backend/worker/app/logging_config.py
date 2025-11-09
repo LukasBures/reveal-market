@@ -9,10 +9,7 @@ from pathlib import Path
 
 from shared.logging import get_request_id
 
-LOG_FORMAT = (
-    "%(asctime)s | %(levelname)-7s | %(name)s | %(filename)s:%(lineno)d | "
-    "%(event)s | %(message)s | request_id=%(request_id)s"
-)
+LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(filename)s:%(lineno)d | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -20,8 +17,16 @@ class RequestContextFilter(logging.Filter):
     """Attach request/context metadata to worker logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = getattr(record, "request_id", None) or get_request_id() or "-"
-        record.event = getattr(record, "event", record.getMessage())
+        request_id = getattr(record, "request_id", None) or get_request_id() or "-"
+        record.request_id = request_id
+
+        if getattr(record, "_request_appended", False):
+            return True
+
+        message = record.getMessage()
+        record.msg = f"{message} | request_id={request_id}"
+        record.args = None
+        record._request_appended = True
         return True
 
 

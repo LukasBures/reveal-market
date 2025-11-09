@@ -3,7 +3,7 @@ import { buildMetadata } from "@/lib/seo";
 export const metadata = buildMetadata({
   title: "Reveal Market Cookie Policy",
   description: "Transparency about tracking technologies used across Reveal Market properties.",
-  path: "/legal/cookies",
+  path: "/cookies",
   keywords: ["cookies", "policy", "tracking"],
 });
 

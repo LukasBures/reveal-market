@@ -67,6 +67,16 @@ cd contracts && forge test
 ./run_local.sh
 ```
 
+The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no longer runs `npm install` or `npm run dev` on container start. Re-run `./run_local.sh` after frontend changes or use `cd frontend && npm run dev` for hot reload.
+
+### Live market ingestion
+
+- Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com` and `RM_POLYMARKET_CLOSED_FILTER=false` in `.env` (bare metal) or `docker-compose.yml` (containers) so the worker ingests active markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` empty until you want to curate narratives.
+- Keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker auto-applies schema updates (e.g., the `markets.tags` column) before syncing.
+- After changing env, restart the worker (`./run_local.sh worker` or `docker compose restart worker`) so it repulls the Gamma feed, writes fresh rows to Postgres, and refreshes Redis caches the frontend reads.
+- `/markets` search and the `/markets/suggest` endpoint are backed by a Postgres full-text index (`markets_search_vector_idx`). Run `alembic upgrade head` (or restart the worker/API containers) whenever new migrations land so the index stays current.
+- The worker keeps recently resolved markets for 24h (`RM_RESOLVED_RETENTION_SECONDS`) and materializes featured categories/tags into Redis so `/categories/<slug>` and `/tags/<slug>` respond instantly without hitting Gamma/Polygon.
+
 Environment variables follow the `RM_` prefix (see each service README). Security headers can be tuned with `RM_ALLOWED_HOSTS`, CORS lists, and CSP overrides.
 
 ---

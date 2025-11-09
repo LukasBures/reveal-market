@@ -17,7 +17,7 @@ def test_polymarket_client_handles_pagination():
                 "question": "Market One?",
                 "outcomes": ["Yes", "No"],
                 "outcomePrices": ["0.65", "0.35"],
-                "tags": ["sports"],
+                "tags": ["sports", {"name": "macro"}],
                 "conditionId": "0xaaa0000000000000000000000000000000000000000000000000000000000000",
                 "closed": False,
             }
@@ -29,7 +29,7 @@ def test_polymarket_client_handles_pagination():
                 "question": "Second market?",
                 "outcomes": ["Option A", "Option B", "Option C"],
                 "outcomePrices": [0.2, 0.3, 0.5],
-                "tags": [{"slug": "politics"}],
+                "tags": [{"slug": "politics"}, "governance"],
                 "conditionId": "0xbbb0000000000000000000000000000000000000000000000000000000000000",
                 "closed": True,
                 "umaResolutionStatus": "resolved",
@@ -55,6 +55,7 @@ def test_polymarket_client_handles_pagination():
     assert first.slug == "market-one"
     assert first.title == "Market One?"
     assert first.category == "sports"
+    assert first.tags == ["sports", "macro"]
     assert first.status == "commit"
     assert first.outcomes == ["Yes", "No"]
     assert first.outcome_prices == [0.65, 0.35]
@@ -63,6 +64,7 @@ def test_polymarket_client_handles_pagination():
     assert second.event_id == "2"
     assert second.slug == "market-two"
     assert second.category == "politics"
+    assert second.tags == ["politics", "governance"]
     assert second.status == "settled"
     assert second.closed is True
     assert second.outcomes == ["Option A", "Option B", "Option C"]

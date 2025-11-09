@@ -1,27 +1,19 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import { MainNav } from "@/components/layout/MainNav";
-import { vi } from "vitest";
-
-const mockPathname = vi.fn(() => "/about");
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => mockPathname(),
-}));
 
 describe("MainNav", () => {
-  it("renders nav links and highlights active path", () => {
+  it("links the brand to the homepage", () => {
     render(<MainNav />);
-
-    const marketsLink = screen.getByText("Markets");
-    const aboutLink = screen.getByText("About");
-
-    expect(marketsLink).toBeInTheDocument();
-    expect(aboutLink).toHaveClass("text-brand-200");
+    expect(screen.getByRole("link", { name: /reveal market/i })).toHaveAttribute("href", "/");
   });
 
-  it("includes CTA to docs", () => {
+  it("shows only the Log In CTA", () => {
     render(<MainNav />);
-    expect(screen.getByRole("link", { name: /view docs/i })).toHaveAttribute("href", "/docs");
+
+    expect(screen.getByRole("link", { name: /log in/i })).toHaveAttribute("href", "/login");
+    expect(screen.queryByText("Markets")).not.toBeInTheDocument();
+    expect(screen.queryByText("About")).not.toBeInTheDocument();
+    expect(screen.queryByText("Docs")).not.toBeInTheDocument();
   });
 });

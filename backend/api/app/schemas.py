@@ -33,6 +33,7 @@ class MarketBase(BaseModel):
     market_address: Optional[str] = None
     status: str = Field(default="commit")
     outcomes: Optional[Any] = None
+    tags: Optional[List[str]] = None
     extra_data: Optional[Any] = None
     rake_bps: Optional[int] = None
     condition_id: Optional[str] = None
@@ -53,6 +54,7 @@ class MarketUpdate(BaseModel):
     metadata_uri: Optional[str] = None
     status: Optional[str] = None
     outcomes: Optional[Any] = None
+    tags: Optional[List[str]] = None
     extra_data: Optional[Any] = None
     rake_bps: Optional[int] = None
     slug: Optional[str] = None

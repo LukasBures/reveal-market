@@ -3,6 +3,31 @@ from __future__ import annotations
 import logging
 from contextvars import ContextVar, Token
 
+_LOG_RECORD_RESERVED = {
+    "args",
+    "asctime",
+    "created",
+    "exc_info",
+    "exc_text",
+    "filename",
+    "funcName",
+    "levelname",
+    "levelno",
+    "lineno",
+    "module",
+    "msecs",
+    "message",
+    "msg",
+    "name",
+    "pathname",
+    "process",
+    "processName",
+    "relativeCreated",
+    "stack_info",
+    "thread",
+    "threadName",
+}
+
 _request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
@@ -45,8 +70,15 @@ def log_event(
     message: str,
     **fields: object,
 ) -> None:
-    """Emit a structured log with a consistent event field."""
+    """Emit a formatted log message that embeds event metadata."""
 
-    extra = {"event": event}
-    extra.update(fields)
-    logger.log(level, message, extra=extra)
+    structured_fields = dict(fields)
+
+    suffix = ""
+    if structured_fields:
+        serialized = " ".join(f"{key}={value}" for key, value in structured_fields.items())
+        suffix = f" {serialized}"
+
+    extra_fields = {key: value for key, value in structured_fields.items() if key not in _LOG_RECORD_RESERVED}
+    extra_fields["event"] = event
+    logger.log(level, f"[{event}] {message}{suffix}", extra=extra_fields)

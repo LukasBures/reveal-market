@@ -30,6 +30,7 @@ class Market(Base):
     market_address = Column(String(64), unique=True, nullable=True)
     status = Column(String(32), nullable=False, default=MarketStatusEnum.COMMIT.value)
     outcomes = Column(JSON, nullable=True)
+    tags = Column(JSON, nullable=True)
     extra_data = Column(JSON, nullable=True)
     rake_bps = Column(Integer, nullable=True)
     condition_id = Column(String(66), nullable=True)
@@ -38,6 +39,9 @@ class Market(Base):
     image_url = Column(String(512), nullable=True)
     closed = Column(Boolean, nullable=False, default=False)
     uma_resolution_status = Column(String(64), nullable=True)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
+    content_hash = Column(String(128), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

@@ -3,7 +3,7 @@ import { buildMetadata } from "@/lib/seo";
 export const metadata = buildMetadata({
   title: "Reveal Market Privacy Policy",
   description: "How Reveal Market collects, stores, and protects partner and visitor information.",
-  path: "/legal/privacy",
+  path: "/privacy",
   keywords: ["privacy", "policy", "data protection"],
 });
 

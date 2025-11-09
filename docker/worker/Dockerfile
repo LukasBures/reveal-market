@@ -15,6 +15,7 @@ RUN apt-get update \
 
 # Bring in dependency metadata + shared libs
 COPY backend/worker/pyproject.toml ./pyproject.toml
+COPY backend/worker/poetry.lock ./poetry.lock
 COPY backend/shared ./shared
 
 # Export locked deps -> requirements, install wheels, drop temp file

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import app.main
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -48,7 +49,8 @@ def test_sync_market_inserts_and_updates():
         )
 
         with TestSession() as session:
-            sync_market(session, initial)
+            _, outcome = sync_market(session, initial)
+            assert outcome.market_changed is True
             session.commit()
 
         with TestSession() as session:
@@ -63,7 +65,8 @@ def test_sync_market_inserts_and_updates():
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
 
         with TestSession() as session:
-            sync_market(session, updated)
+            _, outcome = sync_market(session, updated)
+            assert outcome.market_changed is True
             session.commit()
 
         with TestSession() as session:
@@ -115,7 +118,8 @@ def test_sync_market_persists_resolution(monkeypatch):
         )
 
         with TestSession() as session:
-            sync_market(session, payload)
+            _, outcome = sync_market(session, payload)
+            assert outcome.resolution_changed is True
             session.commit()
 
         with TestSession() as session:
@@ -127,3 +131,51 @@ def test_sync_market_persists_resolution(monkeypatch):
     finally:
         engine.dispose()
         monkeypatch.setattr("app.main.conditional_tokens_client", None, raising=False)
+
+
+def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
+    engine, TestSession = create_in_memory_db()
+    try:
+        updated_at = datetime.now(timezone.utc)
+        payload = MarketPayload(
+            event_id="evt-skip",
+            title="Skip Market",
+            slug="skip-market",
+            category="science",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.45, 0.55],
+            extra_data={"gamma": {"id": "evt-skip"}},
+            source_updated_at=updated_at,
+            content_hash="hash-1",
+        )
+
+        call_count = 0
+        original_upsert = app.main.shared_repository.upsert_market
+
+        def tracked_upsert(session, data):
+            nonlocal call_count
+            call_count += 1
+            return original_upsert(session, data)
+
+        monkeypatch.setattr("app.main.shared_repository.upsert_market", tracked_upsert, raising=False)
+
+        with TestSession() as session:
+            _, outcome = sync_market(session, payload)
+            assert outcome.market_changed is True
+            assert outcome.resolution_changed is False
+            session.commit()
+
+        identical = MarketPayload(**payload.model_dump())
+
+        with TestSession() as session:
+            _, outcome = sync_market(session, identical)
+            assert outcome.market_changed is False
+            assert outcome.resolution_changed is False
+            session.commit()
+
+        assert call_count == 1
+    finally:
+        engine.dispose()

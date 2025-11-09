@@ -33,7 +33,7 @@ export default function AboutPage() {
           <h3 className="text-xl font-semibold text-white">What’s live</h3>
           <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
             <li>FastAPI read/write surface with Redis-backed caching.</li>
-            <li>Worker daemon syncing Polymarket + on-chain deployments.</li>
+            <li>Worker daemon syncing external feeds alongside on-chain deployments.</li>
             <li>zk-powered RevealMarket + MarketFactory contracts.</li>
           </ul>
         </div>

@@ -12,6 +12,7 @@ from .logging import log_event
 logger = logging.getLogger("reveal_market.cache")
 
 _TAG_PREFIX = "cache:tag:"
+_SCHEMA_UNKNOWN_TAG = "schema:unknown"
 
 
 def get_client(url: str) -> Redis | None:
@@ -180,3 +181,24 @@ def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
             error=str(exc),
         )
         return []
+
+
+def get_schema_tag(client: Redis | None, schema_version_key: str) -> str:
+    """Return the cache tag that represents the current schema revision."""
+
+    if client is None:
+        return _SCHEMA_UNKNOWN_TAG
+    try:
+        revision = client.get(schema_version_key)
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.schema_tag.error",
+            message="failed to read schema version key from redis",
+            error=str(exc),
+        )
+        return _SCHEMA_UNKNOWN_TAG
+    if isinstance(revision, str) and revision:
+        return f"schema:{revision}"
+    return _SCHEMA_UNKNOWN_TAG

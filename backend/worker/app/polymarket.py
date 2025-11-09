@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -25,6 +28,7 @@ class MarketPayload(BaseModel):
     status: str = Field(default="commit")
     outcomes: Optional[List[str]] = None
     outcome_prices: Optional[List[float]] = None
+    tags: Optional[List[str]] = None
     extra_data: Optional[Dict[str, Any]] = None
     rake_bps: Optional[int] = None
     condition_id: Optional[str] = None
@@ -32,6 +36,8 @@ class MarketPayload(BaseModel):
     image_url: Optional[str] = None
     closed: Optional[bool] = None
     uma_resolution_status: Optional[str] = None
+    source_updated_at: Optional[datetime] = None
+    content_hash: Optional[str] = None
 
     @classmethod
     def from_gamma(cls, raw: Dict[str, Any]) -> "MarketPayload":
@@ -55,8 +61,25 @@ class MarketPayload(BaseModel):
         outcome_prices = _extract_prices(raw.get("outcomePrices"))
         category = _derive_category(raw)
         status = _derive_status(closed, uma_status)
+        tags = _extract_tags(raw.get("tags"))
+        updated_at = _extract_updated_at(raw)
 
         extra_data: Dict[str, Any] = {"gamma": raw}
+        hash_payload = {
+            "event_id": str(event_id),
+            "title": str(title),
+            "slug": str(slug) if slug is not None else None,
+            "category": category,
+            "status": status,
+            "outcomes": outcomes,
+            "outcome_prices": outcome_prices,
+            "tags": tags,
+            "closed": bool(closed) if isinstance(closed, bool) else None,
+            "image_url": str(image_url) if image_url is not None else None,
+            "uma_resolution_status": str(uma_status) if uma_status is not None else None,
+            "condition_id": str(condition_id) if condition_id is not None else None,
+            "question_id": str(question_id) if question_id is not None else None,
+        }
 
         return cls(
             event_id=str(event_id),
@@ -68,6 +91,7 @@ class MarketPayload(BaseModel):
             factory=None,
             market_address=None,
             status=status,
+            tags=tags,
             outcomes=outcomes,
             outcome_prices=outcome_prices,
             extra_data=extra_data,
@@ -77,6 +101,8 @@ class MarketPayload(BaseModel):
             image_url=str(image_url) if image_url is not None else None,
             closed=bool(closed) if isinstance(closed, bool) else None,
             uma_resolution_status=str(uma_status) if uma_status is not None else None,
+            source_updated_at=updated_at,
+            content_hash=_compute_market_hash(hash_payload),
         )
 
 
@@ -198,6 +224,22 @@ def _derive_category(raw: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _extract_tags(tags: Any) -> Optional[List[str]]:
+    if not isinstance(tags, list):
+        return None
+    result: List[str] = []
+    for entry in tags:
+        if isinstance(entry, str):
+            cleaned = entry.strip()
+            if cleaned:
+                result.append(cleaned)
+        elif isinstance(entry, dict):
+            candidate = entry.get("slug") or entry.get("name") or entry.get("label")
+            if isinstance(candidate, str) and candidate.strip():
+                result.append(candidate.strip())
+    return result or None
+
+
 def _derive_status(closed: Any, resolution_status: Any) -> str:
     if isinstance(resolution_status, str):
         lowered = resolution_status.lower()
@@ -206,3 +248,63 @@ def _derive_status(closed: Any, resolution_status: Any) -> str:
     if isinstance(closed, bool) and closed:
         return "locked"
     return "commit"
+
+
+def _extract_updated_at(raw: Dict[str, Any]) -> Optional[datetime]:
+    candidate_keys = [
+        "updatedAt",
+        "updated_at",
+        "updatedTime",
+        "updated_time",
+        "lastUpdated",
+        "last_updated",
+        "modified",
+        "modifiedAt",
+    ]
+    for key in candidate_keys:
+        if key in raw:
+            ts = _coerce_timestamp(raw[key])
+            if ts is not None:
+                return ts
+    return None
+
+
+def _coerce_timestamp(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds > 1_000_000_000_000:  # assume milliseconds
+            seconds = seconds / 1000.0
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.isdigit():
+            return _coerce_timestamp(int(candidate))
+        try:
+            normalized = candidate.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            try:
+                numeric = float(candidate)
+            except ValueError:
+                return None
+            return _coerce_timestamp(numeric)
+    return None
+
+
+def _compute_market_hash(payload: Dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    return value

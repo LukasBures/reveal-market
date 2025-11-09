@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { fetchFeaturedMarkets } from "@/lib/api";
+import type { Metadata } from "next";
+import { Suspense } from "react";
 import { MarketFilters } from "@/components/markets/MarketFilters";
-import { MarketGrid } from "@/components/markets/MarketGrid";
+import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
 
-export const metadata = buildMetadata({
+export const metadata: Metadata = buildMetadata({
   title: "Reveal Market | Live Prediction Markets",
   description:
     "Browse institutional-grade prediction markets powered by Reveal Market’s zk-settlement stack.",
@@ -43,13 +44,21 @@ const featuredArticles = [
   },
 ];
 
-export default async function HomePage() {
-  const markets = await fetchFeaturedMarkets(18);
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function HomePage({ searchParams }: PageProps) {
+  const resolvedParams = (await searchParams) ?? {};
+  const searchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
 
   return (
     <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
-        <MarketFilters />
+        <MarketFilters initialSearch={searchQuery} />
+        <Suspense fallback={<FeaturedMarketsSkeleton />}>
+          <FeaturedMarketsSection searchQuery={searchQuery} />
+        </Suspense>
         <section className="grid gap-6 rounded-3xl border border-white/5 bg-slate-900/40 p-6 text-sm text-slate-300 md:grid-cols-4">
           {callouts.map((item) => (
             <div key={item.label} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
@@ -58,7 +67,6 @@ export default async function HomePage() {
             </div>
           ))}
         </section>
-        <MarketGrid markets={markets} />
         <section className="grid gap-4 rounded-3xl border border-white/5 bg-slate-900/50 p-6 text-sm text-slate-300 lg:grid-cols-3">
           {featuredArticles.map((article) => (
             <Link

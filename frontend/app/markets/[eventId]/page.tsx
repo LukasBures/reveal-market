@@ -1,15 +1,37 @@
 import { notFound } from "next/navigation";
-import { fetchMarketByEventId } from "@/lib/api";
+import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 import { MarketDetailSidebar } from "@/components/markets/MarketDetailSidebar";
+import { MarketDetailMetadata } from "@/components/markets/MarketDetailMetadata";
 
-type PageProps = {
-  params: Promise<{ eventId: string }>;
+type MarketDetailParams = {
+  eventId: string;
 };
 
-export default async function MarketDetailPage({ params }: PageProps) {
+type MarketDetailPageProps = {
+  params: Promise<MarketDetailParams>;
+};
+
+export const dynamicParams = true;
+
+export type GenerateStaticParams = () => Promise<MarketDetailParams[]>;
+
+export const generateStaticParams: GenerateStaticParams = async () => {
+  try {
+    const markets = await fetchFeaturedMarkets(12);
+    return markets
+      .map((market) => market.eventId)
+      .filter((eventId): eventId is string => Boolean(eventId && eventId !== "unknown"))
+      .map((eventId) => ({ eventId }));
+  } catch (error) {
+    console.error("Unable to prebuild market detail params", error);
+    return [];
+  }
+};
+
+export default async function MarketDetailPage({ params }: MarketDetailPageProps) {
   const { eventId } = await params;
   const market = await fetchMarketByEventId(eventId);
   if (!market) {
@@ -24,6 +46,7 @@ export default async function MarketDetailPage({ params }: PageProps) {
           <div className="space-y-6">
             <MarketDetailChart />
             <MarketDetailOutcomes market={market} />
+            <MarketDetailMetadata market={market} />
             <section className="rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
               <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
               <p className="mt-3">

@@ -14,12 +14,32 @@ function formatProbability(values?: number[]): string {
 export function MarketCard({ market }: Props) {
   const yesProbability = formatProbability(market.outcomePrices);
   const outcomes = market.outcomes ?? [];
+  const coverImage = market.imageUrl;
 
   return (
     <Link
       href={`/markets/${market.eventId}`}
       className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-900/50 p-4 transition hover:border-brand-400/50 hover:bg-slate-900/80"
     >
+      <div
+        className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-white/5"
+        role="img"
+        aria-label={coverImage ? `Artwork for ${market.title}` : `Placeholder artwork for ${market.title}`}
+      >
+        <div
+          className={`h-full w-full ${coverImage ? "" : "bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950"}`}
+          style={
+            coverImage
+              ? {
+                  backgroundImage: `url(${coverImage})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+          aria-hidden="true"
+        />
+      </div>
       <div className="flex items-center justify-between text-xs uppercase tracking-[0.25em] text-slate-500">
         <span>{market.category ?? "General"}</span>
         <span>{market.status ?? "active"}</span>

@@ -8,6 +8,10 @@ The worker ingests Polymarket + on-chain data, manages heartbeats, refreshes cac
 - **Structured logging** – Same formatter as the API, plus heartbeat/invalidation events (`worker.fetch.*`, `worker.persist.*`, `worker.heartbeat.*`).
 - **On-chain automation** – Optional `RM_AUTO_CREATE_ONCHAIN_MARKETS` flow calls the Foundry-deployed factory with retries. Secrets can come from env or external secret managers.
 - **Health checks** – Docker uses `python -m app.healthcheck` to ensure Postgres connectivity before marking the container healthy.
+- **Cache priming** – After every batch the worker rehydrates `/markets` (limit configurable) and records batch stats in Redis so health checks and dashboards stay warm.
+- **Source-aware deduplication** – Gamma `updated_at`/hash metadata is stored per market so unchanged rows skip database writes and only invalidate the affected cache tags.
+- **Featured slices** – Configure `RM_FEATURED_CATEGORIES` / `RM_FEATURED_TAGS` to precompute `/categories/<slug>` and `/tags/<slug>` responses in Redis. Category/tag caches reuse the same TTL as `/markets`.
+- **Retention guardrails** – With `RM_RESOLVED_RETENTION_SECONDS` the worker trims resolved markets a day after settlement so Postgres stays lean while detail pages remain viewable.
 
 ## Configuration
 
@@ -20,6 +24,16 @@ The worker ingests Polymarket + on-chain data, manages heartbeats, refreshes cac
 | `RM_POLYMARKET_PAGE_SIZE` | Pagination size when crawling markets. |
 | `RM_RUN_MIGRATIONS_ON_STARTUP` | Apply Alembic migrations from the worker. |
 | `RM_AUTO_CREATE_ONCHAIN_MARKETS` | Enable on-chain market creation path (requires RPC + keys). |
+| `RM_API_BASE_URL` | Base URL the worker uses to call the API when priming `/markets`. |
+| `RM_PRIME_MARKETS_CACHE_ENABLED` | Toggle cache priming (set `false` to disable the internal API call). |
+| `RM_MARKETS_CACHE_LIMIT` / `RM_MARKETS_CACHE_OFFSET` | Pagination parameters used for the primed `/markets` payload. |
+| `RM_MARKETS_CACHE_TTL_SECONDS` | TTL assigned to the primed cache entry so it matches API behavior. |
+| `RM_BATCH_STATS_KEY` / `RM_BATCH_STATS_TTL_SECONDS` | Redis key + TTL used to persist the latest batch metrics for observability. |
+| `RM_CATEGORY_CACHE_LIMIT` / `RM_TAG_CACHE_LIMIT` | Limits for the category + tag slices that get prefetched after each sync. |
+| `RM_SUGGEST_CACHE_LIMIT` | Result size used when priming `/markets/suggest`. |
+| `RM_FEATURED_CATEGORIES` / `RM_FEATURED_TAGS` / `RM_FEATURED_SUGGEST_QUERIES` | Comma-separated slugs/queries the worker should warm in Redis (e.g., `politics,sports` or `btc halving`). |
+| `RM_RESOLVED_RETENTION_SECONDS` | How long to keep settled markets in Postgres before cleanup (default 24h). |
+| `RM_RESOLVED_RETENTION_DRY_RUN` | When `true`, log markets eligible for cleanup without deleting them (useful for audits). |
 
 ## Local Usage
 

@@ -30,6 +30,7 @@ def upgrade() -> None:
         sa.Column("market_address", sa.String(length=64), nullable=True, unique=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="commit"),
         sa.Column("outcomes", sa.JSON(), nullable=True),
+        sa.Column("tags", sa.JSON(), nullable=True),
         sa.Column("extra_data", sa.JSON(), nullable=True),
         sa.Column("rake_bps", sa.Integer(), nullable=True),
         sa.Column("condition_id", sa.String(length=66), nullable=True),
@@ -38,6 +39,9 @@ def upgrade() -> None:
         sa.Column("image_url", sa.String(length=512), nullable=True),
         sa.Column("closed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("uma_resolution_status", sa.String(length=64), nullable=True),
+        sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("content_hash", sa.String(length=128), nullable=True),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )

@@ -19,13 +19,4 @@ services:
 
   frontend:
     environment:
-      NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-      RM_API_BASE_URL: http://api:8000
       DOCS_HOST: docs.local.revealmarket.xyz
-      CHOKIDAR_USEPOLLING: "true"
-    command: >
-      sh -c "npm install && npm run dev"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules

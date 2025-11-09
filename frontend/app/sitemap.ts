@@ -18,7 +18,7 @@ const DOC_PATHS = [
   "/docs/faq",
 ];
 
-const STATIC_PATHS = ["/", "/about", "/legal/terms", "/legal/privacy", "/legal/cookies", "/legal/disclaimer"];
+const STATIC_PATHS = ["/", "/about", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date().toISOString();

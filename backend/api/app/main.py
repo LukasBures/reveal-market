@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Optional
 from uuid import uuid4
+from urllib.parse import unquote_plus
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -21,9 +22,35 @@ from app.health import build_health_response
 from app.onchain import fetch_factory_markets
 from app.security import SecurityHeadersMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
-from shared.cache import add_tag, add_tags, get_client, get_json, invalidate_tag, set_json
+from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.logging import log_event, reset_request_id, set_request_id
 from shared.onchain import OnChainConfigurationError
+from shared.cache_keys import (
+    category_cache_key,
+    markets_list_cache_key,
+    resolution_cache_key,
+    suggest_cache_key,
+    tag_cache_key,
+)
+
+CANONICAL_CATEGORIES = {
+    "trending": "Trending",
+    "politics": "Politics",
+    "sports": "Sports",
+    "finance": "Finance",
+    "crypto": "Crypto",
+    "geopolitics": "Geopolitics",
+    "ai-tech": "AI & Tech",
+}
+
+CANONICAL_TAGS = {
+    "gov-shutdown": "Gov shutdown",
+    "fed-policy": "Fed policy",
+    "eu-elections": "EU elections",
+    "btc-halving": "BTC halving",
+    "ai-regulation": "AI regulation",
+    "climate": "Climate",
+}
 
 setup_logging("reveal_market.api")
 
@@ -32,11 +59,9 @@ logger = logging.getLogger("reveal_market.api")
 instrumentator = Instrumentator()
 cache_client = get_client(settings.redis_url)
 
-MARKETS_LIST_PREFIX = "markets:list"
 MARKETS_STATS_KEY = "markets:stats"
 MARKET_DETAIL_PREFIX = "markets:detail"
 MARKET_RESOLUTION_PREFIX = "markets:resolution"
-SCHEMA_UNKNOWN_TAG = "schema:unknown"
 
 
 @asynccontextmanager
@@ -65,7 +90,26 @@ if settings.enable_security_headers:
         "base-uri 'none'; "
         "connect-src 'self';"
     )
-    app.add_middleware(SecurityHeadersMiddleware, headers={"Content-Security-Policy": api_csp})
+    docs_csp = (
+        "default-src 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'none'; "
+        "base-uri 'none'; "
+        "connect-src 'self'; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src 'self' https://cdn.jsdelivr.net data:;"
+    )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        headers={"Content-Security-Policy": api_csp},
+        per_path_overrides={
+            "/docs": {"Content-Security-Policy": docs_csp},
+            "/redoc": {"Content-Security-Policy": docs_csp},
+            "/openapi.json": {"Content-Security-Policy": docs_csp},
+        },
+    )
 
 if not getattr(app.state, "metrics_instrumented", False):
     instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
@@ -73,29 +117,67 @@ if not getattr(app.state, "metrics_instrumented", False):
 app.cache_client = cache_client  # type: ignore[attr-defined]
 
 
-def _resolution_cache_key(condition_id: str) -> str:
-    return f"{MARKET_RESOLUTION_PREFIX}:{condition_id.lower()}"
+def _filter_markets_for_visibility(markets: list[schemas.MarketRead]) -> list[schemas.MarketRead]:
+    category_allow = {item.lower() for item in settings.market_category_allowlist if isinstance(item, str)}
+    tag_allow = {item.lower() for item in settings.market_tag_allowlist if isinstance(item, str)}
+    if not category_allow and not tag_allow:
+        return markets
 
+    filtered: list[schemas.MarketRead] = []
+    for market in markets:
+        category_ok = True
+        if category_allow:
+            category_ok = isinstance(market.category, str) and market.category.lower() in category_allow
 
-def _schema_cache_tag() -> str:
-    if cache_client is None:
-        return SCHEMA_UNKNOWN_TAG
-    try:
-        revision = cache_client.get(settings.schema_version_key)
-    except RedisError as exc:  # pragma: no cover - defensive
+        tags_ok = True
+        if tag_allow:
+            tags = [tag.lower() for tag in (market.tags or []) if isinstance(tag, str)]
+            tags_ok = any(tag in tag_allow for tag in tags)
+
+        if category_ok and tags_ok:
+            filtered.append(market)
+
+    removed = len(markets) - len(filtered)
+    if removed > 0:
         log_event(
             logger,
-            logging.WARNING,
-            event="cache.schema_tag.error",
-            message="failed to read schema version key from redis",
-            error=str(exc),
+            logging.DEBUG,
+            event="markets.list.filtered",
+            message="filtered markets via allowlists",
+            removed=removed,
+            remaining=len(filtered),
+            category_allowlist=list(category_allow),
+            tag_allowlist=list(tag_allow),
         )
-        return SCHEMA_UNKNOWN_TAG
-    if isinstance(revision, str) and revision:
-        return f"schema:{revision}"
-    return SCHEMA_UNKNOWN_TAG
+    return filtered
 
 
+def _decode_slug(value: str) -> str:
+    return unquote_plus(value or "").strip()
+
+
+def _normalize_identifier(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _canonical_category_lookup(raw: str) -> tuple[str, str] | None:
+    slug = _slugify(raw)
+    label = CANONICAL_CATEGORIES.get(slug)
+    if label:
+        return slug, label
+    return None
+
+
+def _canonical_tag_lookup(raw: str) -> tuple[str, str] | None:
+    slug = _slugify(raw)
+    label = CANONICAL_TAGS.get(slug)
+    if label:
+        return slug, label
+    return None
 @app.middleware("http")
 async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid4())
@@ -177,7 +259,7 @@ def list_markets(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
-    cache_key = _markets_list_cache_key(status, category, oracle, search, limit, offset)
+    cache_key = markets_list_cache_key(status, category, oracle, search, limit, offset)
     log_event(
         logger,
         logging.DEBUG,
@@ -211,7 +293,8 @@ def list_markets(
             offset=offset,
             result_count=len(cached),
         )
-        return [schemas.MarketRead.model_validate(item) for item in cached]
+        cached_models = [schemas.MarketRead.model_validate(item) for item in cached]
+        return _filter_markets_for_visibility(cached_models)
 
     markets = crud.get_markets(
         session,
@@ -223,8 +306,9 @@ def list_markets(
         offset=offset,
     )
     market_models = [schemas.MarketRead.model_validate(m) for m in markets]
+    market_models = _filter_markets_for_visibility(market_models)
     payload = [item.model_dump(mode="json") for item in market_models]
-    schema_tag = _schema_cache_tag()
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
     set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, "markets:list", cache_key)
@@ -250,6 +334,66 @@ def list_markets(
         offset=offset,
         result_count=len(market_models),
     )
+    return market_models
+
+
+@app.get("/categories/{category_slug}", response_model=list[schemas.MarketRead], tags=["markets"])
+def list_markets_by_category(
+    category_slug: str,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
+    ] = settings.default_page_size,
+    session: Session = Depends(get_session),
+) -> list[schemas.MarketRead]:
+    category_value = _decode_slug(category_slug)
+    lookup = _canonical_category_lookup(category_value)
+    if lookup is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
+    category_slug_key, category_label = lookup
+    cache_key = category_cache_key(category_slug_key, limit)
+    cached = get_json(cache_client, cache_key)
+    if cached is not None:
+        return [schemas.MarketRead.model_validate(item) for item in cached]
+
+    markets = crud.get_markets(session, category=category_label, limit=limit, offset=0)
+    market_models = _filter_markets_for_visibility([schemas.MarketRead.model_validate(m) for m in markets])
+    payload = [item.model_dump(mode="json") for item in market_models]
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
+    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
+    add_tag(cache_client, "markets:category", cache_key)
+    add_tag(cache_client, f"category:{category_slug_key}", cache_key)
+    return market_models
+
+
+@app.get("/tags/{tag_slug}", response_model=list[schemas.MarketRead], tags=["markets"])
+def list_markets_by_tag(
+    tag_slug: str,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
+    ] = settings.default_page_size,
+    session: Session = Depends(get_session),
+) -> list[schemas.MarketRead]:
+    tag_value = _decode_slug(tag_slug)
+    lookup = _canonical_tag_lookup(tag_value)
+    if lookup is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tag_not_found")
+    tag_slug_key, tag_label = lookup
+    cache_key = tag_cache_key(tag_slug_key, limit)
+    cached = get_json(cache_client, cache_key)
+    if cached is not None:
+        return [schemas.MarketRead.model_validate(item) for item in cached]
+
+    markets = crud.get_markets_by_tag(session, tag_label, limit)
+    market_models = _filter_markets_for_visibility([schemas.MarketRead.model_validate(m) for m in markets])
+    payload = [item.model_dump(mode="json") for item in market_models]
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
+    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
+    add_tag(cache_client, "markets:tag", cache_key)
+    add_tag(cache_client, f"tag:{tag_slug_key}", cache_key)
     return market_models
 
 
@@ -292,7 +436,7 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
         return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
     stats = crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
-    schema_tag = _schema_cache_tag()
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
     set_json(cache_client, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
     add_tag(cache_client, schema_tag, MARKETS_STATS_KEY)
     add_tag(cache_client, "markets:stats", MARKETS_STATS_KEY)
@@ -311,12 +455,12 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
 
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])
 def read_resolution(condition_id_hex: str, session: Session = Depends(get_session)) -> schemas.ResolutionSummary:
-    cache_key = _resolution_cache_key(condition_id_hex)
+    normalized_condition = condition_id_hex.lower()
+    cache_key = resolution_cache_key(normalized_condition)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
         return schemas.ResolutionSummary.model_validate(cached)
 
-    normalized_condition = condition_id_hex.lower()
     record = crud.get_resolution_by_condition_id(session, normalized_condition)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
@@ -354,7 +498,7 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         cache_payload["checkedAt"] = summary_model.checkedAt.isoformat()
     if summary_model.blockTimestamp is not None:
         cache_payload["blockTimestamp"] = summary_model.blockTimestamp.isoformat()
-    schema_tag = _schema_cache_tag()
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
     set_json(cache_client, cache_key, cache_payload, settings.cache_ttl_seconds)
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, f"resolution:{normalized_condition}", cache_key)
@@ -429,23 +573,27 @@ def update_market(event_id: str, update: schemas.MarketUpdate, session: Session 
     return market
 
 
-def _markets_list_cache_key(
-    status: Optional[str],
-    category: Optional[str],
-    oracle: Optional[str],
-    search: Optional[str],
-    limit: int,
-    offset: int,
-) -> str:
-    parts = [
-        f"status={status or '*'}",
-        f"category={category or '*'}",
-        f"oracle={oracle or '*'}",
-        f"search={search or '*'}",
-        f"limit={limit}",
-        f"offset={offset}",
-    ]
-    return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
+@app.get("/markets/suggest", response_model=list[schemas.MarketRead], tags=["markets"])
+def suggest_markets(
+    q: Annotated[str, Query(min_length=2, max_length=200, description="Search term for suggestions")],
+    limit: Annotated[int, Query(ge=1, le=25, description="Maximum number of suggestions to return")] = 5,
+    session: Session = Depends(get_session),
+) -> list[schemas.MarketRead]:
+    normalized_query = q.strip()
+    cache_key = suggest_cache_key(normalized_query, limit)
+    cached = get_json(cache_client, cache_key)
+    if cached is not None:
+        return [schemas.MarketRead.model_validate(item) for item in cached]
+
+    results = crud.search_markets(session, normalized_query, limit)
+    market_models = [schemas.MarketRead.model_validate(m) for m in results]
+    filtered = _filter_markets_for_visibility(market_models)
+    payload = [item.model_dump(mode="json") for item in filtered]
+    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
+    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache_client, schema_tag, cache_key)
+    add_tag(cache_client, "markets:suggest", cache_key)
+    return filtered
 
 
 def _market_detail_cache_key(event_id: str) -> str:
@@ -463,6 +611,9 @@ def _invalidate_market_cache(event_id: Optional[str] = None, condition_id: Optio
     )
     invalidate_tag(cache_client, "markets:list")
     invalidate_tag(cache_client, "markets:stats")
+    invalidate_tag(cache_client, "markets:category")
+    invalidate_tag(cache_client, "markets:tag")
+    invalidate_tag(cache_client, "markets:suggest")
     if event_id:
         invalidate_tag(cache_client, f"market:{event_id}")
     if condition_id:

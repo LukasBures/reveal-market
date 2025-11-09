@@ -11,22 +11,22 @@ export const metadata = buildMetadata({
 
 const legalLinks = [
   {
-    href: "/legal/terms" as const,
+    href: "/terms" as const,
     label: "Terms of Use",
     description: "Rights, responsibilities, and acceptable use of Reveal Market.",
   },
   {
-    href: "/legal/privacy" as const,
+    href: "/privacy" as const,
     label: "Privacy Policy",
     description: "How we process personal data, analytics, and retention practices.",
   },
   {
-    href: "/legal/cookies" as const,
+    href: "/cookies" as const,
     label: "Cookie Notice",
     description: "Details on cookies, tracking tech, and opt-out options.",
   },
   {
-    href: "/legal/disclaimer" as const,
+    href: "/disclaimer" as const,
     label: "Regulatory Disclaimer",
     description: "Risk disclosures for investors, LPs, and exchange partners.",
   },
