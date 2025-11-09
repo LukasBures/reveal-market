@@ -4,8 +4,10 @@
 # -----------------------------------------------------------------------------
 # Full rebuild + launch script for developers.
 # - Enables BuildKit + parallel builds (leaving one CPU free).
-# - Defaults to a --no-cache compose build so every layer is fresh (use --cache to reuse layers).
-# - Starts docker compose in the foreground (logs stream to terminal).
+# - Defaults to a --no-cache + --pull compose build so every layer is fresh (use --cache to reuse layers).
+# - Optional --skip-build for faster iterations when only restarting containers.
+# - Starts docker compose (with --remove-orphans) in the foreground so logs stream to the terminal.
+# - Tip: run `make test` (backend) / `npm run test` (frontend) before calling this to catch errors earlier.
 #
 # Usage: ./run_local.sh [extra docker-compose args]
 #
@@ -36,18 +38,25 @@ fi
 
 cd "${ROOT_DIR}"
 
-# Determine how many concurrent builds we can run (nproc - 1).
-# Keeps at least one CPU free so the host stays responsive.
-if command -v nproc >/dev/null 2>&1; then
-  PARALLEL_BUILDS="$(nproc --ignore=1)"
-elif [[ "$(uname -s)" == "Darwin" ]]; then
-  PARALLEL_BUILDS="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-else
-  PARALLEL_BUILDS=2
-fi
-if [[ -z "${PARALLEL_BUILDS}" || "${PARALLEL_BUILDS}" -lt 1 ]]; then
-  PARALLEL_BUILDS=1
-fi
+calc_parallel_builds() {
+  # Compose refuses to parallelise more builds than CPUs, so detect the host
+  # count once and leave one core idle to keep laptops responsive.
+  local cpus
+  if command -v nproc >/dev/null 2>&1; then
+    cpus="$(nproc 2>/dev/null || echo 1)"
+  elif [[ "$(uname -s)" == "Darwin" ]]; then
+    cpus="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+  else
+    cpus=1
+  fi
+  if [[ -z "${cpus}" || "${cpus}" -lt 2 ]]; then
+    echo 1
+  else
+    echo $((cpus - 1))
+  fi
+}
+
+PARALLEL_BUILDS="$(calc_parallel_builds)"
 
 # Enable BuildKit + Compose's CLI mode so builds are faster and parallelizable.
 export DOCKER_BUILDKIT=1
@@ -55,7 +64,18 @@ export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 
 BUILD_FLAG="--no-cache"
+RUN_BUILD="true"
 UP_ARGS=()
+
+usage() {
+  cat <<EOF
+Usage: ./run_local.sh [--cache|--no-cache] [--skip-build] [compose up args...]
+  --cache        Reuse existing build layers.
+  --no-cache     Force a clean rebuild (default).
+  --skip-build   Skip the docker compose build step entirely.
+  -h, --help     Show this help text.
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -67,8 +87,12 @@ while [[ $# -gt 0 ]]; do
       BUILD_FLAG="--no-cache"
       shift
       ;;
+    --skip-build)
+      RUN_BUILD="false"
+      shift
+      ;;
     --help|-h)
-      echo "Usage: ./run_local.sh [--cache|--no-cache] [compose up args...]"
+      usage
       exit 0
       ;;
     --)
@@ -83,13 +107,35 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-BUILD_DESC="${BUILD_FLAG:-cached layers}"
-echo "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})..."
-if [[ -n "${BUILD_FLAG}" ]]; then
-  "${COMPOSE_CMD[@]}" build "${BUILD_FLAG}" --parallel
+echo "Validating docker compose files..."
+"${COMPOSE_CMD[@]}" config >/dev/null
+
+if [[ "${RUN_BUILD}" == "true" ]]; then
+  BUILD_DESC="${BUILD_FLAG:-cached layers}"
+  echo "Building images (${BUILD_DESC}, pull latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})..."
+  BUILD_OPTS=(--parallel --pull)
+  if [[ -n "${BUILD_FLAG}" ]]; then
+    BUILD_OPTS+=("${BUILD_FLAG}")
+  fi
+  "${COMPOSE_CMD[@]}" build "${BUILD_OPTS[@]}"
 else
-  "${COMPOSE_CMD[@]}" build --parallel
+  echo "Skipping docker compose build step (per --skip-build)."
 fi
 
 echo "Starting services..."
-"${COMPOSE_CMD[@]}" up "${UP_ARGS[@]}"
+UP_CMD=("${COMPOSE_CMD[@]}" up "--remove-orphans")
+if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
+  UP_CMD+=("${UP_ARGS[@]}")
+fi
+"${UP_CMD[@]}"
+
+cat <<'EOF'
+------------------------------------------------------------
+Stack ready. Useful URLs while running locally:
+  • API docs / health:      http://localhost:8000/docs  | http://localhost:8000/health
+  • Frontend / marketing:   http://localhost:3000/
+  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
+  • Redis (CLI):            redis-cli -h localhost -p 6379
+Logs stream in this terminal; press Ctrl+C to stop the stack.
+------------------------------------------------------------
+EOF

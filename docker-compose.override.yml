@@ -1,8 +1,10 @@
 services:
   api:
+    # Override prod-like defaults so local runs get verbose logs + live code reloading.
     environment:
       MODE: dev
       LOG_LEVEL: DEBUG
+    # Bind-mount source directories so edits on the host immediately reflect in the container.
     volumes:
       - ./backend/api/app:/app/app
       - ./backend/shared:/app/shared
@@ -12,11 +14,15 @@ services:
     environment:
       MODE: dev
       LOG_LEVEL: DEBUG
+      # Shorten the poll interval locally so changes show up within ~15s instead of 60s.
       RM_POLL_INTERVAL_SECONDS: 15
     volumes:
       - ./backend/worker/app:/worker/app
       - ./backend/shared:/worker/shared
+      # Mount migrations for parity with the API container (worker can run cleanup scripts).
+      - ./backend/migrations:/worker/migrations
 
   frontend:
+    # Alternate docs hostname used by the marketing site in development.
     environment:
       DOCS_HOST: docs.local.revealmarket.xyz
