@@ -26,6 +26,11 @@ npm run test
 
 Set `NEXT_PUBLIC_SITE_URL` and `NEXT_PUBLIC_API_BASE_URL` so SEO helpers and CSP include the correct domains.
 
+### Running without the backend
+
+Front-end builds fetch markets and health snapshots during SSG. If you only want to lint/build without bringing up the API, export `NEXT_PUBLIC_API_MOCK=true` (or `RM_API_MOCK=true`) before running `npm run build`/`frontend/run_tests.sh`. The `lib/api.ts` helpers will return seeded mock markets, stats, and heartbeat data, eliminating the `Unable to reach backend` noise during tests.
+Running `frontend/run_tests.sh` now defaults these env vars to `true` automatically; unset them (or set to `false`) when you need to hit a live API.
+
 ## Deployment Notes
 
 - Build with `npm run build`; Docker uses the standalone output for slimmer images.

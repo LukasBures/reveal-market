@@ -11,6 +11,13 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 cd "${PROJECT_DIR}"
+
+if [[ "${NEXT_PUBLIC_API_MOCK:-}" != "true" && "${RM_API_MOCK:-}" != "true" ]]; then
+  echo "NOTE: NEXT_PUBLIC_API_MOCK/RM_API_MOCK not set; defaulting to mock API for build."
+  export NEXT_PUBLIC_API_MOCK=true
+  export RM_API_MOCK=true
+fi
+
 npm run lint
 npm run build
 

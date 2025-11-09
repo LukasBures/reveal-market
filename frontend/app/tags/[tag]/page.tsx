@@ -57,7 +57,6 @@ export default async function TagPage({ params }: TagPageProps) {
         </p>
       </div>
       <Suspense fallback={<MarketGridSkeleton />}>
-        {/* @ts-expect-error Async Server Component */}
         <TagMarkets slug={parsed!.slug} />
       </Suspense>
     </div>

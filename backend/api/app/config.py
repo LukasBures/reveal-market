@@ -16,9 +16,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")
     version: str = Field(default="1.0.0")
 
-    database_url: str = Field(
-        default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market"
-    )
+    database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
     database_echo: bool = Field(default=False)
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
@@ -63,6 +61,7 @@ class Settings(BaseSettings):
     enable_security_headers: bool = Field(default=True)
     market_category_allowlist: list[str] = Field(default_factory=list)
     market_tag_allowlist: list[str] = Field(default_factory=list)
+    heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
 
     @field_validator("max_page_size")
     @classmethod

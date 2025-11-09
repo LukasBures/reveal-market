@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+import pytest
 import app.main
+from prometheus_client import REGISTRY
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -22,7 +24,7 @@ from app.polymarket import MarketPayload
 from shared import cache as shared_cache
 from shared.cache_keys import suggest_cache_key
 from shared.models import Base, Market
-from .test_sync_market import create_in_memory_db
+from tests.test_sync_market import create_in_memory_db
 
 
 class DummyRedis:
@@ -135,6 +137,10 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
     caplog.set_level(logging.DEBUG, logger="reveal_market.worker")
 
+    category_before = REGISTRY.get_sample_value(
+        "worker_cache_invalidations_total",
+        labels={"type": "category"},
+    ) or 0
     stats = process_once(dummy)
     assert stats["markets_processed"] == len(sample_markets)
     assert stats["markets_changed"] == len(sample_markets)
@@ -159,13 +165,22 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     events = [record.event for record in caplog.records if hasattr(record, "event")]
     assert "worker.persist.batch" in events
     assert "worker.cache.invalidate" in events
+    category_after = REGISTRY.get_sample_value(
+        "worker_cache_invalidations_total",
+        labels={"type": "category"},
+    ) or 0
+    assert category_after == category_before + 2
 
 
 def test_process_once_publishes_schema_revision(monkeypatch):
     """Ensure schema revisions are broadcast to Redis and tagged caches are invalidated."""
 
     dummy = DummyRedis()
-    schema_state = SchemaSyncResult(changed=True, previous_revision="0002_resolutions", current_revision="0003_schema_versions")
+    schema_state = SchemaSyncResult(
+        changed=True,
+        previous_revision="0002_resolutions",
+        current_revision="0003_schema_versions",
+    )
 
     monkeypatch.setattr("app.main._ensure_schema", lambda: schema_state, raising=False)
     monkeypatch.setattr("app.main.fetch_markets_from_polymarket", lambda: ([], 5.0), raising=False)
@@ -249,6 +264,8 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
     assert payload["markets_processed"] == 12
     assert payload["markets_changed"] == 4
     assert payload["resolutions_changed"] == 1
+    assert payload["categories_changed"] == 2
+    assert payload["tags_changed"] == 3
     assert payload["prime"] == prime_stats
 
 
@@ -333,6 +350,98 @@ def test_prime_featured_views_prefetches_categories_and_tags(monkeypatch):
     assert any("/categories/Politics" in url and "limit=7" in url for url in requests)
     assert any("/tags/BTC+halving" in url and "limit=5" in url for url in requests)
     assert any("/markets/suggest" in url and "limit=4" in url for url in requests)
+
+
+def test_fetch_markets_from_polymarket_retries_before_success(monkeypatch):
+    attempt_counter = {"value": 0}
+    payload = MarketPayload(
+        event_id="evt-retry",
+        title="Retry Market",
+        category="news",
+        oracle="polymarket",
+        status="commit",
+        extra_data={"gamma": {"id": "evt-retry"}},
+    )
+
+    def flaky_fetch(**kwargs):
+        attempt_counter["value"] += 1
+        if attempt_counter["value"] < 3:
+            raise RuntimeError("Temporary failure")
+        return [payload]
+
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", flaky_fetch, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_max_retries", 3, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+
+    markets, _ = app.main.fetch_markets_from_polymarket()
+    assert attempt_counter["value"] == 3
+    assert markets[0].event_id == "evt-retry"
+
+
+def test_fetch_markets_from_polymarket_raises_after_retry_budget(monkeypatch):
+    attempt_counter = {"value": 0}
+
+    def always_fail(**kwargs):
+        attempt_counter["value"] += 1
+        raise RuntimeError("fatal")
+
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", always_fail, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_max_retries", 2, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(RuntimeError):
+        app.main.fetch_markets_from_polymarket()
+    assert attempt_counter["value"] == 2
+
+
+def test_publish_heartbeat_retries_on_failure(monkeypatch):
+    class FlakyRedis:
+        def __init__(self):
+            self.calls = 0
+            self.payloads: list[str] = []
+
+        def set(self, key, value, ex=None):
+            self.calls += 1
+            if self.calls < 2:
+                raise RuntimeError("redis unavailable")
+            self.payloads.append(value)
+            return True
+
+    redis_client = FlakyRedis()
+    monkeypatch.setattr(app.main.settings, "heartbeat_max_retries", 3, raising=False)
+    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+
+    app.main.publish_heartbeat(redis_client, {"markets_processed": 5})
+    assert redis_client.calls == 2
+    assert json.loads(redis_client.payloads[-1])["markets_processed"] == 5
+
+
+def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
+    class BrokenRedis:
+        def __init__(self):
+            self.calls = 0
+
+        def set(self, *args, **kwargs):
+            self.calls += 1
+            raise RuntimeError("still down")
+
+    redis_client = BrokenRedis()
+    monkeypatch.setattr(app.main.settings, "heartbeat_max_retries", 2, raising=False)
+    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+
+    with caplog.at_level(logging.WARNING):
+        app.main.publish_heartbeat(redis_client, {"markets_processed": 1})
+
+    assert redis_client.calls == 2
+    assert any("failed to publish worker heartbeat" in record.message for record in caplog.records)
 
 
 def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):

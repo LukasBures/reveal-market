@@ -22,12 +22,12 @@ def get_async_web3(rpc_url: Optional[str]):
     if not rpc_url:
         raise OnChainConfigurationError("RM_RPC_URL is not configured")
 
-    from web3 import AsyncWeb3
+    from web3 import AsyncWeb3 as _AsyncWeb3
     from web3.middleware import async_geth_poa_middleware
     from web3.providers.async_rpc import AsyncHTTPProvider
 
     provider = AsyncHTTPProvider(rpc_url)
-    web3 = AsyncWeb3(provider)
+    web3 = _AsyncWeb3(provider)
 
     try:
         web3.middleware_onion.inject(async_geth_poa_middleware, layer=0)
@@ -59,8 +59,8 @@ def to_checksum(address: Optional[str]) -> str:
     if not address:
         raise OnChainConfigurationError("Required contract address missing")
     try:
-        from web3 import AsyncWeb3
+        from web3 import AsyncWeb3 as _AsyncWeb3
 
-        return AsyncWeb3.to_checksum_address(address)
+        return _AsyncWeb3.to_checksum_address(address)
     except ValueError as exc:  # pragma: no cover - defensive
         raise OnChainConfigurationError(f"Invalid address: {address}") from exc

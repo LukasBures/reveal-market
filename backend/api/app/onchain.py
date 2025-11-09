@@ -6,7 +6,7 @@ from typing import List
 from shared.logging import log_event
 from shared.onchain import MARKET_FACTORY_ABI, OnChainConfigurationError, get_async_web3, to_checksum
 
-from .config import get_settings, Settings
+from .config import Settings, get_settings
 
 logger = logging.getLogger("reveal_market.api")
 

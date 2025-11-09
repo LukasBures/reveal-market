@@ -22,11 +22,11 @@ repos:
 
       - id: poetry-run-flake8
         name: Lint code with Flake8
-        entry: bash -lc 'cd backend/api && poetry run flake8'
+        entry: bash -lc 'cd backend/api && poetry run flake8 .. --exclude .venv'
         language: system
         pass_filenames: false
         types: [python]
-        files: ^backend/api/.*\.py$
+        files: ^backend/.*\.py$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

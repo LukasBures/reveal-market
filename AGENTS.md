@@ -40,22 +40,29 @@
 - Prefer existing helpers (e.g., `shared/onchain/`, `lib/seo.ts`) over introducing new frameworks.
 - Maintain the unified logging format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
+- Frontend builds can run without the backend by exporting `NEXT_PUBLIC_API_MOCK=true` (or `RM_API_MOCK=true`). The mock dataset lives in `frontend/lib/api.ts`; document any changes to keep partner docs accurate.
+- Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
 
 ## Agent Notes
 
 ### Backend (FastAPI + Worker)
 - **Architecture** – API and worker share SQLAlchemy models, cache helpers, and logging utilities in `backend/shared/`. Alembic migrations live in `backend/migrations/` and can be invoked via `shared/migrations.py`. Docker images copy migrations so health probes can run `_ensure_schema()` safely.
 - **API** – `backend/api/app/main.py` wires structured logging, Prometheus instrumentation, TrustedHost + CORS middleware, and security headers (CSP/HSTS/COOP). Lifespan runs migrations on boot. `/health` returns Postgres/Redis/Polymarket status; `/markets` family uses Redis-tagged caches; mutation endpoints invalidate tags. `app/security.py` manages header defaults.
+- **Health checks** – `app/health.py` now delegates each dependency check (DB, Redis ping, worker heartbeat, Polymarket reachability) to helper functions so flake8 stays green. Keep that structure when adding new dependencies.
 - **Worker** – `backend/worker/app/main.py` pulls Polymarket feeds, writes markets/resolutions, emits Redis heartbeats, and can call `maybe_create_onchain_market`. `worker/app/healthcheck.py` verifies Postgres connectivity for Docker. Logs mirror the API format.
+- **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
+- **Polymarket client** – `backend/worker/app/polymarket.py` still lacks retries/backoff; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
 
 ### Frontend (Next.js)
 - **SEO/AI readiness** – Metadata centralised in `lib/seo.ts`. Every docs/legal/about page imports `docsMetadata` so canonical URLs + keywords stay consistent. `app/sitemap.ts`/`app/robots.ts` update automatically.
 - **Security headers** – Configured in `next.config.mjs` (CSP, HSTS, Referrer/Permissions policies, COOP/CORP). Update the CSP when adding external assets.
 - **Testing** – Vitest + Testing Library cover hero CTA, DocsNav, MainNav, DocsLayout. Keep tests updated when components change.
+- **Live ops badge** – `frontend/components/metrics/HeartbeatBadge.tsx` surfaces worker heartbeats on the homepage by calling the API. Local builds without the backend rely on the mock health snapshot in `lib/api.ts`.
 
 ### Contracts (Foundry)
 - `src/` houses RevealMarket, MarketFactory, RakeManager, Verifier. `test/` contains Forge suites (unit + fuzz). `run_local.sh full` builds/tests/gas-checks/fuzzes; CI runs this via GitHub Actions.
 - Events like `MarketResolved` + `resolutionSummary()` emit settlement metadata for downstream services.
+- MarketFactory/RakeManager use `Ownable2Step`; follow the new TODO guidance to script/t-test ownership transfers when modifying admin logic.
 
 ### CI / Automation
 - `.github/workflows/ci.yml` runs three jobs in parallel:

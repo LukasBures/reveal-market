@@ -9,7 +9,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Any, Iterator, List, Optional
+from typing import Any, Callable, Iterator, List, Optional, TypeVar
 from urllib.parse import quote_plus
 
 import httpx
@@ -22,7 +22,19 @@ from shared import repository as shared_repository
 from shared import models as shared_models
 from shared.logging import log_event
 from shared.migrations import get_current_revision, run_migrations as apply_migrations
-from shared.cache_keys import category_cache_key, markets_list_cache_key, resolution_cache_key, suggest_cache_key, tag_cache_key
+from shared.cache_keys import (
+    category_cache_key,
+    markets_list_cache_key,
+    resolution_cache_key,
+    suggest_cache_key,
+    tag_cache_key,
+)
+from shared.onchain import ConditionalTokensClient
+
+from .config import get_settings
+from .logging_config import setup_logging
+from .onchain import maybe_create_onchain_market
+from .polymarket import MarketPayload, PolymarketClient
 
 try:
     from prometheus_client import Counter
@@ -49,16 +61,17 @@ RETENTION_SKIPPED_COUNTER = Counter(
     ["category"],
 )
 
-from .config import get_settings
-from .logging_config import setup_logging
-from .onchain import maybe_create_onchain_market
-from .polymarket import MarketPayload, PolymarketClient
-from shared.onchain import ConditionalTokensClient
+CACHE_INVALIDATION_COUNTER = Counter(
+    "worker_cache_invalidations_total",
+    "Number of cache invalidations triggered by the worker",
+    ["type"],
+)
 
 setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
+T = TypeVar("T")
 
 _schema_checked = False
 
@@ -127,6 +140,36 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def _run_with_retries(
+    action: Callable[[], T],
+    max_attempts: int,
+    base_backoff: float,
+    max_backoff: Optional[float] = None,
+) -> T:
+    """Execute an action with optional retry semantics using tenacity."""
+
+    if max_attempts <= 1:
+        return action()
+
+    try:
+        from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+    except ModuleNotFoundError:  # pragma: no cover - tenacity optional
+        return action()
+
+    base_delay = base_backoff if base_backoff > 0 else 0.1
+    wait_kwargs = {"multiplier": base_delay, "min": base_delay}
+    if max_backoff is not None and max_backoff > 0:
+        wait_kwargs["max"] = max_backoff
+
+    retryer = Retrying(
+        stop=stop_after_attempt(max_attempts),
+        wait=wait_exponential(**wait_kwargs),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+    return retryer(action)
 
 
 def _ensure_schema() -> SchemaSyncResult:
@@ -219,13 +262,31 @@ def fetch_markets_from_polymarket() -> tuple[List[MarketPayload], float]:
         closed=settings.polymarket_closed_filter,
     )
 
-    markets = polymarket_client.fetch_markets(
-        page_size=settings.polymarket_page_size,
-        max_pages=settings.polymarket_max_pages,
-        order=settings.polymarket_order,
-        ascending=settings.polymarket_sort_ascending,
-        closed=settings.polymarket_closed_filter,
-    )
+    def _invoke() -> list[MarketPayload]:
+        return polymarket_client.fetch_markets(
+            page_size=settings.polymarket_page_size,
+            max_pages=settings.polymarket_max_pages,
+            order=settings.polymarket_order,
+            ascending=settings.polymarket_sort_ascending,
+            closed=settings.polymarket_closed_filter,
+        )
+
+    try:
+        markets = _run_with_retries(
+            _invoke,
+            settings.polymarket_max_retries,
+            settings.polymarket_retry_backoff_seconds,
+            settings.polymarket_retry_backoff_max_seconds,
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.fetch.error",
+            message="failed to fetch markets from polymarket after retries",
+            error=str(exc),
+        )
+        raise
     latency_ms = (time.perf_counter() - start) * 1000
     if markets:
         log_event(
@@ -275,7 +336,7 @@ def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) ->
         counter.labels(category=label).inc(count)
 
 
-def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:
+def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:  # noqa: C901
     client = conditional_tokens_client
     condition_id = market.condition_id
     if client is None or not isinstance(condition_id, str) or not condition_id.startswith("0x"):
@@ -449,7 +510,7 @@ def _markets_match(existing, source_updated_at: Optional[datetime], content_hash
     return False
 
 
-def cleanup_resolved_markets(
+def cleanup_resolved_markets(  # noqa: C901
     session: Session,
     *,
     dry_run: bool = False,
@@ -470,7 +531,16 @@ def cleanup_resolved_markets(
     records = session.execute(stmt).all()
 
     if not records:
-        return CleanupOutcome(set(), set(), set(), set(), deleted_rows=0, eligible_rows=0, dry_run=dry_run, category_counts={})
+        return CleanupOutcome(
+            set(),
+            set(),
+            set(),
+            set(),
+            deleted_rows=0,
+            eligible_rows=0,
+            dry_run=dry_run,
+            category_counts={},
+        )
 
     ids_to_delete: list[int] = []
     event_ids: set[str] = set()
@@ -502,10 +572,23 @@ def cleanup_resolved_markets(
 
     eligible = len(ids_to_delete)
     if eligible == 0:
-        return CleanupOutcome(event_ids, condition_ids, categories, tags, deleted_rows=0, eligible_rows=0, dry_run=dry_run, category_counts=category_counts)
+        return CleanupOutcome(
+            event_ids,
+            condition_ids,
+            categories,
+            tags,
+            deleted_rows=0,
+            eligible_rows=0,
+            dry_run=dry_run,
+            category_counts=category_counts,
+        )
 
     if not dry_run:
-        session.query(shared_models.Market).where(shared_models.Market.id.in_(ids_to_delete)).delete(synchronize_session=False)
+        (
+            session.query(shared_models.Market)
+            .where(shared_models.Market.id.in_(ids_to_delete))
+            .delete(synchronize_session=False)
+        )
     _record_retention_metrics(category_counts, dry_run)
     log_event(
         logger,
@@ -589,11 +672,20 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
         "resolutions_changed": stats.get("resolutions_changed", 0),
         "latency_ms": stats.get("latency_ms"),
     }
-    try:
+    def _publish() -> bool:
         redis_client.set(
             settings.heartbeat_key,
             json.dumps(payload),
             ex=settings.heartbeat_ttl_seconds,
+        )
+        return True
+
+    try:
+        _run_with_retries(
+            _publish,
+            settings.heartbeat_max_retries,
+            settings.heartbeat_retry_backoff_seconds,
+            settings.heartbeat_retry_backoff_max_seconds,
         )
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
@@ -649,7 +741,7 @@ def run_worker() -> None:
         time.sleep(_calculate_sleep(loop_start))
 
 
-def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
+def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  # noqa: C901
     """Fetch markets, persist them, and emit a heartbeat once."""
 
     schema_state = _ensure_schema()
@@ -730,6 +822,10 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
             shared_cache.invalidate_tag(redis_client, f"category:{category_slug}")
         for tag_slug in changed_tags:
             shared_cache.invalidate_tag(redis_client, f"tag:{tag_slug}")
+        if changed_categories:
+            CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(changed_categories))
+        if changed_tags:
+            CACHE_INVALIDATION_COUNTER.labels(type="tag").inc(len(changed_tags))
     log_event(
         logger,
         logging.DEBUG,
@@ -807,7 +903,11 @@ def prime_markets_cache(
     shared_cache.add_tag(redis_client, schema_tag, cache_key)
     shared_cache.add_tag(redis_client, "markets:list", cache_key)
     if isinstance(payload, list):
-        event_tags = [f"market:{item.get('event_id')}" for item in payload if isinstance(item, dict) and item.get("event_id")]
+        event_tags = [
+            f"market:{item.get('event_id')}"
+            for item in payload
+            if isinstance(item, dict) and item.get("event_id")
+        ]
         shared_cache.add_tags(redis_client, event_tags, cache_key)
     log_event(
         logger,
@@ -850,18 +950,18 @@ def prime_featured_views(
                 slug = quote_plus(category)
                 params = {"limit": settings.category_cache_limit}
                 response = client.get(f"{base_url}/categories/{slug}", params=params)
-                if response.ok:
+                if response.is_success:
                     summary["categories_primed"] += 1
             for tag in settings.featured_tags:
                 slug = quote_plus(tag)
                 params = {"limit": settings.tag_cache_limit}
                 response = client.get(f"{base_url}/tags/{slug}", params=params)
-                if response.ok:
+                if response.is_success:
                     summary["tags_primed"] += 1
             for query in settings.featured_suggest_queries:
                 params = {"q": query, "limit": settings.suggest_cache_limit}
                 response = client.get(f"{base_url}/markets/suggest", params=params)
-                if response.ok:
+                if response.is_success:
                     summary["suggestions_primed"] += 1
                     key = suggest_cache_key(query, settings.suggest_cache_limit)
                     ttl = redis_client.ttl(key)
@@ -908,6 +1008,8 @@ def record_batch_stats(
         "markets_processed": sync_stats.get("markets_processed", 0),
         "markets_changed": sync_stats.get("markets_changed", 0),
         "resolutions_changed": sync_stats.get("resolutions_changed", 0),
+        "categories_changed": sync_stats.get("categories_changed", 0),
+        "tags_changed": sync_stats.get("tags_changed", 0),
         "latency_ms": sync_stats.get("latency_ms"),
         "prime": prime_stats,
     }
@@ -919,6 +1021,8 @@ def record_batch_stats(
         message="recorded worker batch stats",
         markets_processed=payload["markets_processed"],
         markets_changed=payload["markets_changed"],
+        categories_changed=payload["categories_changed"],
+        tags_changed=payload["tags_changed"],
         cache_prime_status=prime_stats.get("status"),
         cache_key=prime_stats.get("cache_key"),
     )

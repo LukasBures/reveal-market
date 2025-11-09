@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MarketFilters } from "@/components/markets/MarketFilters";
+import { HeartbeatBadge } from "@/components/metrics/HeartbeatBadge";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
 
@@ -55,7 +56,12 @@ export default async function HomePage({ searchParams }: PageProps) {
   return (
     <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
-        <MarketFilters initialSearch={searchQuery} />
+        <div className="flex flex-col gap-4">
+          <MarketFilters initialSearch={searchQuery} />
+          <Suspense fallback={null}>
+            <HeartbeatBadge />
+          </Suspense>
+        </div>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={searchQuery} />
         </Suspense>

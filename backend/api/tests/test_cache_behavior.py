@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import app.main as api_main
 from app import crud, models
+from shared.cache_keys import markets_list_cache_key
 
 
 def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
@@ -18,7 +19,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     response = client.get("/markets")
     assert response.status_code == 200
 
-    cache_key = api_main._markets_list_cache_key(
+    cache_key = markets_list_cache_key(
         None,
         None,
         None,

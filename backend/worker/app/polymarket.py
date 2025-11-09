@@ -120,7 +120,7 @@ class PolymarketClient:
         self.timeout = timeout
         self._transport = transport
 
-    def fetch_markets(
+    def fetch_markets(  # noqa: C901
         self,
         *,
         page_size: int = 100,

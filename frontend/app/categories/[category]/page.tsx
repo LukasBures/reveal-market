@@ -62,7 +62,6 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         </p>
       </div>
       <Suspense fallback={<MarketGridSkeleton />}>
-        {/* @ts-expect-error Async Server Component */}
         <CategoryMarkets slug={parsed!.slug} />
       </Suspense>
     </div>

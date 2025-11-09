@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import time
 import json
+import time
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Tuple
 
 import httpx
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from . import schemas
 from .cache import get_redis_client
 from .config import get_settings
-from . import schemas
 
 ComponentMap = Dict[str, schemas.HealthComponent]
 
@@ -24,81 +24,16 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     components: ComponentMap = {}
     component_states: list[str] = []
 
-    # Database connectivity
-    db_start = time.perf_counter()
-    try:
-        session.execute(text("SELECT 1"))
-        db_latency = (time.perf_counter() - db_start) * 1000
-        components["database"] = schemas.HealthComponent(status="ok", latency_ms=db_latency)
-        component_states.append("ok")
-    except Exception as exc:  # pragma: no cover - defensive
-        components["database"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
+    checks: list[Tuple[str, schemas.HealthComponent]] = [
+        _check_database(session),
+        _check_redis_connectivity(),
+        _check_worker_heartbeat(settings),
+        await _check_polymarket_api(settings),
+    ]
 
-    # Redis connectivity
-    redis_start = time.perf_counter()
-    try:
-        redis_client = get_redis_client()
-        redis_client.ping()
-        redis_latency = (time.perf_counter() - redis_start) * 1000
-        components["redis"] = schemas.HealthComponent(status="ok", latency_ms=redis_latency)
-        component_states.append("ok")
-    except RedisError as exc:
-        components["redis"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
-    except Exception as exc:  # pragma: no cover - defensive
-        components["redis"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
-
-    # Worker heartbeat
-    try:
-        redis_client = get_redis_client()
-        heartbeat_raw = redis_client.get(settings.heartbeat_key)
-        if heartbeat_raw:
-            heartbeat = json.loads(heartbeat_raw)
-            components["worker"] = schemas.HealthComponent(
-                status="ok",
-                detail=f"processed {heartbeat.get('markets_processed', 0)} markets",
-                latency_ms=heartbeat.get("latency_ms"),
-            )
-            component_states.append("ok")
-        else:
-            components["worker"] = schemas.HealthComponent(status="degraded", detail="heartbeat missing")
-            component_states.append("degraded")
-    except Exception as exc:
-        components["worker"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
-
-    # External Polymarket API reachability
-    http_start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            base = str(settings.polymarket_api_base).rstrip("/")
-            params = {
-                "limit": 1,
-                "order": settings.polymarket_order,
-                "ascending": str(settings.polymarket_sort_ascending).lower(),
-            }
-            if settings.polymarket_closed_filter is not None:
-                params["closed"] = str(settings.polymarket_closed_filter).lower()
-            response = await client.get(
-                f"{base}/markets",
-                params=params,
-                timeout=settings.polymarket_timeout_seconds,
-            )
-            response.raise_for_status()
-        http_latency = (time.perf_counter() - http_start) * 1000
-        components["polymarket_api"] = schemas.HealthComponent(status="ok", latency_ms=http_latency)
-        component_states.append("ok")
-    except httpx.TimeoutException as exc:
-        components["polymarket_api"] = schemas.HealthComponent(status="degraded", detail=str(exc))
-        component_states.append("degraded")
-    except httpx.HTTPError as exc:
-        components["polymarket_api"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
-    except Exception as exc:  # pragma: no cover - defensive
-        components["polymarket_api"] = schemas.HealthComponent(status="error", detail=str(exc))
-        component_states.append("error")
+    for key, component in checks:
+        components[key] = component
+        component_states.append(component.status)
 
     overall_status = _derive_overall_status(component_states)
 
@@ -119,3 +54,75 @@ def _derive_overall_status(states: list[str]) -> str:
     if "degraded" in states:
         return "degraded"
     return "ok"
+
+
+def _check_database(session: Session) -> Tuple[str, schemas.HealthComponent]:
+    db_start = time.perf_counter()
+    try:
+        session.execute(text("SELECT 1"))
+        db_latency = (time.perf_counter() - db_start) * 1000
+        component = schemas.HealthComponent(status="ok", latency_ms=db_latency)
+    except Exception as exc:  # pragma: no cover - defensive
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    return "database", component
+
+
+def _check_redis_connectivity() -> Tuple[str, schemas.HealthComponent]:
+    redis_start = time.perf_counter()
+    try:
+        redis_client = get_redis_client()
+        redis_client.ping()
+        redis_latency = (time.perf_counter() - redis_start) * 1000
+        component = schemas.HealthComponent(status="ok", latency_ms=redis_latency)
+    except RedisError as exc:
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    return "redis", component
+
+
+def _check_worker_heartbeat(settings) -> Tuple[str, schemas.HealthComponent]:
+    try:
+        redis_client = get_redis_client()
+        heartbeat_raw = redis_client.get(settings.heartbeat_key)
+        if heartbeat_raw:
+            heartbeat = json.loads(heartbeat_raw)
+            component = schemas.HealthComponent(
+                status="ok",
+                detail=f"processed {heartbeat.get('markets_processed', 0)} markets",
+                latency_ms=heartbeat.get("latency_ms"),
+            )
+        else:
+            component = schemas.HealthComponent(status="degraded", detail="heartbeat missing")
+    except Exception as exc:
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    return "worker", component
+
+
+async def _check_polymarket_api(settings) -> Tuple[str, schemas.HealthComponent]:
+    http_start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
+            base = str(settings.polymarket_api_base).rstrip("/")
+            params = {
+                "limit": 1,
+                "order": settings.polymarket_order,
+                "ascending": str(settings.polymarket_sort_ascending).lower(),
+            }
+            if settings.polymarket_closed_filter is not None:
+                params["closed"] = str(settings.polymarket_closed_filter).lower()
+            response = await client.get(
+                f"{base}/markets",
+                params=params,
+                timeout=settings.polymarket_timeout_seconds,
+            )
+            response.raise_for_status()
+        http_latency = (time.perf_counter() - http_start) * 1000
+        component = schemas.HealthComponent(status="ok", latency_ms=http_latency)
+    except httpx.TimeoutException as exc:
+        component = schemas.HealthComponent(status="degraded", detail=str(exc))
+    except httpx.HTTPError as exc:
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive
+        component = schemas.HealthComponent(status="error", detail=str(exc))
+    return "polymarket_api", component

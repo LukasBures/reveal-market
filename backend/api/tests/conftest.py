@@ -3,14 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app import models
 from app.config import get_settings
 from app.database import get_session
 from app.main import app
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 class InMemoryCache:

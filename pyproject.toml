@@ -10,6 +10,52 @@ requires-python = ">=3.13"
 dependencies = [
 ]
 
+# ---------------------------------------------------------------------
+# Tool Configurations
+# ---------------------------------------------------------------------
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip = [".venv", "build", "dist"]
+
+[tool.flake8]
+max-line-length = 120
+max-complexity = 12
+ignore = ["D203", "W503", "E203", "F401", "F403", "F405", "E704"]
+extend-ignore = ["B305"]
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "build",
+    "dist",
+    "docs",
+    "old",
+    "tests/data"
+]
+per-file-ignores = ["__init__.py:F401,F403,F405"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "-q",
+    "--color=yes",
+    "--disable-warnings"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests that depend on external systems",
+    "unit: marks pure logic tests"
+]
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

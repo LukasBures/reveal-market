@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Iterator
+
+from shared.migrations import run_migrations as apply_migrations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings
-from shared.migrations import run_migrations as apply_migrations
 
 settings = get_settings()
 engine = create_engine(

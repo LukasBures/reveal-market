@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from shared import repository as shared_repository
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
-
-from shared import repository as shared_repository
 
 from . import models, schemas
 

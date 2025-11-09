@@ -1,0 +1,7 @@
+[flake8]
+ignore = D203,W503,E203,F401,F403,F405,E704
+extend-ignore = B305
+exclude = .git,__pycache__,.venv,build,dist,docs,old,tests/data,logs,runtime,treesitter/grammars
+max-complexity = 12
+max-line-length = 120
+per-file-ignores = __init__.py:F401,F403,F405
