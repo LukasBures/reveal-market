@@ -15,10 +15,17 @@ const sampleMarket = {
 describe("FeaturedMarketsClient", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    class NoopIntersectionObserver {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    (globalThis as any).IntersectionObserver = NoopIntersectionObserver;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete (globalThis as any).IntersectionObserver;
   });
 
   it("renders skeletons when no markets exist yet", () => {
@@ -64,5 +71,49 @@ describe("FeaturedMarketsClient", () => {
       expect(screen.getByText("Second Market")).toBeInTheDocument();
     });
     expect(fetchMock).toHaveBeenCalledWith("/markets?limit=1&offset=1&search=sample", { cache: "no-store" });
+  });
+
+  it("auto-loads additional pages before showing manual button", async () => {
+    let callCount = 0;
+    const fetchMock = global.fetch as unknown as Mock;
+    fetchMock.mockImplementation(() => {
+      callCount += 1;
+      return Promise.resolve({
+        ok: true,
+        json: async () => [
+          {
+            event_id: `evt-auto-${callCount}`,
+            title: `Auto Market ${callCount}`,
+            category: "Auto",
+          },
+        ],
+      });
+    });
+
+    class InstantIntersectionObserver {
+      callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+        // trigger immediately to simulate sentinel in view
+        setTimeout(() => this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as any), 0);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    (globalThis as any).IntersectionObserver = InstantIntersectionObserver;
+
+    render(
+      <FeaturedMarketsClient
+        initialMarkets={[sampleMarket]}
+        pageSize={1}
+        maxItems={6}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
   });
 });

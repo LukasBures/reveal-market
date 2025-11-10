@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { DEFAULT_API_BASE } from "@/lib/api";
+import { DEFAULT_API_BASE, getMockMarkets } from "@/lib/api";
 import { categorySlugs, tagSlugs } from "@/lib/slugs";
 
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
@@ -45,29 +45,40 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...tagSlugs.map((slug) => createEntry(`/tags/${slug}`, 0.65, "weekly")),
   ];
 
+  const pushMarketEntries = (markets: any[]) => {
+    entries.push(
+      ...markets
+        .filter((market) => typeof (market?.event_id ?? market?.eventId) === "string")
+        .map((market) =>
+          createEntry(
+            `/markets/${market.event_id ?? market.eventId}`,
+            0.9,
+            "hourly",
+            market.updated_at ?? market.updatedAt ?? now,
+          ),
+        ),
+    );
+  };
+
+  let dynamicEntriesAdded = false;
   try {
     const response = await fetch(`${DEFAULT_API_BASE}/markets?limit=200`, {
       next: { revalidate: 60 * 30 },
     });
     if (response.ok) {
       const payload = await response.json();
-      if (Array.isArray(payload)) {
-        entries.push(
-          ...payload
-            .filter((market) => typeof market?.event_id === "string")
-            .map((market) =>
-              createEntry(
-                `/markets/${market.event_id}`,
-                0.9,
-                "hourly",
-                market.updated_at ?? market.updatedAt ?? now,
-              ),
-            ),
-        );
-      }
+      const markets = Array.isArray(payload) ? payload : payload?.items ?? [];
+      pushMarketEntries(markets);
+      dynamicEntriesAdded = markets.length > 0;
+    } else {
+      console.warn("Sitemap markets fetch returned non-200", response.status);
     }
   } catch (error) {
-    console.error("Failed to build dynamic sitemap entries", error);
+    console.warn("Failed to build dynamic sitemap entries, falling back to mock data", error);
+  }
+
+  if (!dynamicEntriesAdded) {
+    pushMarketEntries(getMockMarkets());
   }
 
   return entries;

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MarketSummary } from "@/lib/api";
 import { MarketGrid } from "./MarketGrid";
 import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
+
+const AUTO_LOAD_BATCHES = 3;
 
 type ClientProps = {
   initialMarkets: MarketSummary[];
@@ -27,22 +29,42 @@ export function FeaturedMarketsClient({
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
+  const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [isPending, startTransition] = useTransition();
-  const remainingSlots = maxItems - markets.length;
-  const nextLimit = Math.min(pageSize, remainingSlots);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
 
   useEffect(() => {
     setMarkets(initialMarkets);
     setHasMore(initialMarkets.length >= pageSize);
+    setAutoLoadCount(0);
   }, [initialMarkets, pageSize]);
 
-  const handleLoadMore = () => {
-    if (!hasMore || isPending || nextLimit <= 0) return;
-    startTransition(async () => {
-      try {
-        const offset = markets.length;
-        const params = new URLSearchParams({ limit: String(nextLimit), offset: String(offset) });
-        if (searchQuery) {
+  const normalizePayload = (items: any[]): MarketSummary[] =>
+    items.map((item) => ({
+      eventId: item.event_id ?? item.eventId ?? "unknown",
+      title: item.title ?? "Untitled market",
+      category: item.category ?? item.tags?.[0] ?? "General",
+      tags: item.tags ?? [],
+      status: item.status ?? undefined,
+      commitDeadline: item.commit_deadline ?? item.commitDeadline ?? undefined,
+      revealDeadline: item.reveal_deadline ?? item.revealDeadline ?? undefined,
+      liquidityUsd: item.extra_data?.liquidityUsd ?? item.liquidity_usd,
+      outcomes: item.outcomes ?? [],
+      outcomePrices: item.outcome_prices ?? [],
+      imageUrl: item.image_url ?? null,
+    }));
+
+  const handleLoadMore = useCallback(
+    (mode: "auto" | "manual" = "manual") => {
+      const nextLimit = Math.min(pageSize, remainingSlots);
+      if (!hasMore || isPending || nextLimit <= 0) return;
+      startTransition(async () => {
+        try {
+          const offset = markets.length;
+          const params = new URLSearchParams({ limit: String(nextLimit), offset: String(offset) });
+          if (searchQuery) {
           params.set("search", searchQuery);
         }
         if (categoryFilter) {
@@ -62,40 +84,53 @@ export function FeaturedMarketsClient({
           setHasMore(false);
           return;
         }
-        setMarkets((prev) => {
-          const seen = new Set(prev.map((m) => m.eventId));
-          const merged = [...prev];
-          for (const item of payload) {
-            const id = item.event_id ?? item.eventId;
-            if (!id || seen.has(id)) continue;
-            merged.push({
-              eventId: id,
-              title: item.title ?? "Untitled market",
-              category: item.category ?? item.tags?.[0] ?? "General",
-              tags: item.tags ?? [],
-              status: item.status ?? undefined,
-              commitDeadline: item.commit_deadline ?? undefined,
-              revealDeadline: item.reveal_deadline ?? undefined,
-              liquidityUsd: item.extra_data?.liquidityUsd ?? item.liquidity_usd,
-              outcomes: item.outcomes ?? [],
-              outcomePrices: item.outcome_prices ?? [],
-              imageUrl: item.image_url ?? null,
-            });
-            seen.add(id);
-          }
-          if (merged.length >= maxItems) {
-            setHasMore(false);
-          } else if (payload.length < nextLimit) {
-            setHasMore(false);
-          }
-          return merged;
-        });
+        const normalized = normalizePayload(payload);
+        const seen = new Set(markets.map((m) => m.eventId));
+        const additions: MarketSummary[] = [];
+        for (const item of normalized) {
+          if (!item.eventId || seen.has(item.eventId)) continue;
+          seen.add(item.eventId);
+          additions.push(item);
+        }
+        const merged = [...markets, ...additions];
+        const computedHasMore =
+          merged.length < maxItems && additions.length > 0 && normalized.length === nextLimit;
+        setMarkets(merged);
+        setHasMore(computedHasMore);
+        if (mode === "auto" && normalized.length > 0) {
+          setAutoLoadCount((count) => count + 1);
+        }
       } catch (error) {
         console.error("Unable to load additional markets", error);
         setHasMore(false);
       }
     });
-  };
+    },
+    [categoryFilter, hasMore, isPending, markets, maxItems, pageSize, remainingSlots, searchQuery, tagFilter],
+  );
+
+  const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
+
+  useEffect(() => {
+    if (!canAutoLoad || isPending) {
+      return;
+    }
+    const target = sentinelRef.current;
+    if (!target) {
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          observer.disconnect();
+          handleLoadMore("auto");
+          break;
+        }
+      }
+    }, { rootMargin: "200px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [canAutoLoad, handleLoadMore, isPending, markets.length]);
 
   const renderEmptyState = () => {
     if (emptyNotice) {
@@ -121,12 +156,13 @@ export function FeaturedMarketsClient({
       ) : (
         <MarketGrid markets={markets} />
       )}
+      {canAutoLoad && <div ref={sentinelRef} aria-hidden className="h-6 w-full" />}
       {markets.length > 0 && hasMore && (
         <div className="flex items-center justify-center">
           <button
             type="button"
             disabled={!hasMore || isPending}
-            onClick={handleLoadMore}
+            onClick={() => handleLoadMore("manual")}
             className="rounded-full border border-white/20 px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}

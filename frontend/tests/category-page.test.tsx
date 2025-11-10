@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import CategoryPage, { CategoryMarkets } from "@/app/categories/[category]/page";
+import CategoryPage from "@/app/categories/[category]/page";
+import { CategoryMarkets } from "@/app/categories/[category]/CategoryMarkets";
 import { fetchFeaturedMarkets } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({

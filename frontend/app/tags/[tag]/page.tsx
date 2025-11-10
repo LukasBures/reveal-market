@@ -1,17 +1,15 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import { fetchFeaturedMarkets } from "@/lib/api";
-import { MarketGrid } from "@/components/markets/MarketGrid";
-import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 import { buildMetadata } from "@/lib/seo";
 import { parseTagSlug, tagSlugs } from "@/lib/slugs";
+import { TagMarkets } from "@/app/tags/[tag]/TagMarkets";
+import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 
 type TagPageProps = {
   params: Promise<{ tag: string }>;
 };
 
-const MAX_TAG_MARKETS = 60;
 export function generateStaticParams() {
   return tagSlugs.map((tag) => ({ tag }));
 }
@@ -27,18 +25,6 @@ export async function generateMetadata({ params }: TagPageProps): Promise<Metada
     description: `Live prediction markets tagged ${parsed.label}.`,
     path: `/tags/${parsed.slug}`,
   });
-}
-
-export async function TagMarkets({ slug }: { slug: string }) {
-  const markets = await fetchFeaturedMarkets(MAX_TAG_MARKETS, { tag: slug });
-  if (markets.length === 0) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-10 text-center text-slate-400">
-        No markets currently include this tag. Check back soon or try another category.
-      </div>
-    );
-  }
-  return <MarketGrid markets={markets} />;
 }
 
 export default async function TagPage({ params }: TagPageProps) {

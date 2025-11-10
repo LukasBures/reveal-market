@@ -107,17 +107,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-cat <<'EOF'
-------------------------------------------------------------
-Stack ready. Useful URLs while running locally:
-  • API docs / health:      http://localhost:8000/docs  | http://localhost:8000/health
-  • Frontend / marketing:   http://localhost:3000/
-  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
-  • Redis (CLI):            redis-cli -h localhost -p 6379
-Logs stream in this terminal; press Ctrl+C to stop the stack.
-------------------------------------------------------------
-EOF
-
 echo "Validating docker compose files..."
 "${COMPOSE_CMD[@]}" config >/dev/null
 if [[ "${RUN_BUILD}" == "true" ]]; then
@@ -133,19 +122,28 @@ else
 fi
 
 echo "Starting services..."
-UP_CMD=("${COMPOSE_CMD[@]}" up "--remove-orphans")
+UP_CMD=("${COMPOSE_CMD[@]}" up "--remove-orphans" "--detach")
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
 "${UP_CMD[@]}"
 
-cat <<'EOF'
+API_PORT="${API_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:5432/reveal_market}"
+REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
+
+cat <<EOF
 ------------------------------------------------------------
 Stack ready. Useful URLs while running locally:
-  • API docs / health:      http://localhost:8000/docs  | http://localhost:8000/health
-  • Frontend / marketing:   http://localhost:3000/
-  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
-  • Redis (CLI):            redis-cli -h localhost -p 6379
-Logs stream in this terminal; press Ctrl+C to stop the stack.
+  • API docs / health:      http://localhost:${API_PORT}/docs  | http://localhost:${API_PORT}/health
+  • Frontend / marketing:   http://localhost:${FRONTEND_PORT}/
+  • Postgres (psql):        ${POSTGRES_URI}
+  • Redis (CLI):            ${REDIS_CMD}
+------------------------------------------------------------
+📜 Logs will follow (Ctrl+C to stop):
 ------------------------------------------------------------
 EOF
+
+LOG_TARGETS=("${UP_ARGS[@]}")
+"${COMPOSE_CMD[@]}" logs -f "${LOG_TARGETS[@]}"

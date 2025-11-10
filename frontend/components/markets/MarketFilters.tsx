@@ -220,7 +220,7 @@ export function MarketFilters({ initialSearch }: Props) {
         </div>
         <form
           onSubmit={handleSubmit}
-          className="relative w-full md:w-64"
+          className="relative w-full md:w-[28rem]"
         >
           <input
             type="search"
@@ -280,7 +280,7 @@ export function MarketFilters({ initialSearch }: Props) {
                       />
                     </div>
                     <div className="flex flex-col">
-                      <span className="line-clamp-1 font-semibold">{suggestion.title}</span>
+                      <span className="font-semibold leading-snug text-white">{suggestion.title}</span>
                       <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
                         {suggestion.category ?? "General"}
                       </span>

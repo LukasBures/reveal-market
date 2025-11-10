@@ -28,7 +28,8 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
 # Copy only the artifacts required by Next's standalone output. The --chown flag
 # ensures final ownership belongs to the non-root `node` user we switch to later.
@@ -54,6 +55,6 @@ EXPOSE 3000
 # Healthcheck hits the API route exposed by Next so we know the server + routing
 # layer are running, not just the process.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "server.js"]

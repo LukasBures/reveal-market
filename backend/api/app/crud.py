@@ -91,6 +91,14 @@ def _apply_text_search(session: Session, stmt, search: Optional[str]):
     if not search_value:
         return stmt.order_by(models.Market.created_at.desc())
 
+    pattern = f"%{search_value}%"
+    fallback_clause = or_(
+        models.Market.title.ilike(pattern),
+        models.Market.slug.ilike(pattern),
+        models.Market.category.ilike(pattern),
+        models.Market.oracle.ilike(pattern),
+    )
+
     if _supports_full_text(session):
         vector = func.to_tsvector(
             "english",
@@ -103,19 +111,11 @@ def _apply_text_search(session: Session, stmt, search: Optional[str]):
             ),
         )
         query = func.websearch_to_tsquery("english", search_value)
-        stmt = stmt.where(vector.op("@@")(query))
+        stmt = stmt.where(or_(vector.op("@@")(query), fallback_clause))
         rank = func.ts_rank_cd(vector, query)
         return stmt.order_by(rank.desc(), models.Market.created_at.desc())
 
-    pattern = f"%{search_value}%"
-    stmt = stmt.where(
-        or_(
-            models.Market.title.ilike(pattern),
-            models.Market.slug.ilike(pattern),
-            models.Market.category.ilike(pattern),
-            models.Market.oracle.ilike(pattern),
-        )
-    )
+    stmt = stmt.where(fallback_clause)
     return stmt.order_by(models.Market.created_at.desc())
 
 

@@ -50,6 +50,22 @@ def upgrade() -> None:
     op.create_index("ix_markets_condition_id", "markets", ["condition_id"])
     op.create_index("ix_markets_event_id", "markets", ["event_id"], unique=True)
 
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        bind.execute(
+            sa.text(
+                """
+                CREATE INDEX IF NOT EXISTS markets_search_trgm_idx
+                ON markets
+                USING gin (
+                  (coalesce(title,'') || ' ' || coalesce(slug,'') || ' ' ||
+                   coalesce(category,'') || ' ' || coalesce(oracle,'')) gin_trgm_ops
+                )
+                """
+            )
+        )
+
     op.create_table(
         "resolutions",
         sa.Column("condition_id", sa.String(length=66), primary_key=True, nullable=False),
@@ -88,6 +104,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        bind.execute(sa.text("DROP INDEX IF EXISTS markets_search_trgm_idx"))
     op.drop_table("schema_versions")
     op.drop_index("ix_resolutions_block_number", table_name="resolutions")
     op.drop_table("resolutions")

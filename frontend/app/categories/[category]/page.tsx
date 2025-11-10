@@ -1,17 +1,15 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { fetchFeaturedMarkets } from "@/lib/api";
-import { MarketGrid } from "@/components/markets/MarketGrid";
-import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 import { notFound } from "next/navigation";
 import { buildMetadata } from "@/lib/seo";
 import { categorySlugs, parseCategorySlug } from "@/lib/slugs";
+import { CategoryMarkets } from "@/app/categories/[category]/CategoryMarkets";
+import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 
 type CategoryPageProps = {
   params: Promise<{ category: string }>;
 };
 
-const MAX_CATEGORY_MARKETS = 60;
 export function generateStaticParams() {
   return categorySlugs.map((category) => ({ category }));
 }
@@ -31,18 +29,6 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
     description: `Live prediction markets categorized under ${parsed.label}.`,
     path: `/categories/${parsed.slug}`,
   });
-}
-
-export async function CategoryMarkets({ slug }: { slug: string }) {
-  const markets = await fetchFeaturedMarkets(MAX_CATEGORY_MARKETS, { category: slug });
-  if (markets.length === 0) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-10 text-center text-slate-400">
-        No markets are currently listed under this category. Check back soon or try another filter.
-      </div>
-    );
-  }
-  return <MarketGrid markets={markets} />;
 }
 
 export default async function CategoryPage({ params }: CategoryPageProps) {

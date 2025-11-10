@@ -414,6 +414,44 @@ def test_suggest_trims_and_is_case_insensitive(client, db_session):
     assert {item["event_id"] for item in resp.json()} == {"evt-suggest-case"}
 
 
+def test_suggest_supports_partial_word_matches(client, db_session):
+    market = _make_market(
+        "evt-solana",
+        "Solana Validator Adoption",
+        category="crypto",
+        oracle="0xsol",
+        status="commit",
+    )
+    db_session.add(market)
+    db_session.commit()
+
+    resp = client.get("/markets/suggest", params={"q": "sol", "limit": 5})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert any(item["event_id"] == "evt-solana" for item in payload)
+
+
+def test_suggest_capped_at_limit_without_duplicates(client, db_session):
+    markets = [
+        _make_market(
+            f"evt-alpha-{idx}",
+            f"Alpha Signal #{idx}",
+            category="macro",
+            oracle="0xalpha",
+            status="commit",
+        )
+        for idx in range(6)
+    ]
+    db_session.add_all(markets)
+    db_session.commit()
+
+    resp = client.get("/markets/suggest", params={"q": "alpha", "limit": 5})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 5
+    assert len({item["event_id"] for item in payload}) == 5
+
+
 def test_market_allowlists_filter_results(client, db_session):
     market_allowed = _make_market(
         "evt-allowed",
