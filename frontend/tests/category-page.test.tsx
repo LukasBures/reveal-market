@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import CategoryPage from "@/app/categories/[category]/page";
+import CategoryPage, { CategoryMarkets } from "@/app/categories/[category]/page";
 import { fetchFeaturedMarkets } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
@@ -26,7 +26,7 @@ vi.mock("next/navigation", async (importOriginal) => {
 
 describe("CategoryPage", () => {
   it("requests markets for the provided category", async () => {
-    await CategoryPage({ params: Promise.resolve({ category: "ai-tech" }) });
+    await CategoryMarkets({ slug: "ai-tech" });
     expect(fetchFeaturedMarkets).toHaveBeenCalledWith(
       expect.any(Number),
       expect.objectContaining({ category: "ai-tech" }),

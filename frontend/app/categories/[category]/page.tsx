@@ -5,7 +5,7 @@ import { MarketGrid } from "@/components/markets/MarketGrid";
 import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 import { notFound } from "next/navigation";
 import { buildMetadata } from "@/lib/seo";
-import { categoryLabelFromSlug, categorySlugs, parseCategorySlug } from "@/lib/slugs";
+import { categorySlugs, parseCategorySlug } from "@/lib/slugs";
 
 type CategoryPageProps = {
   params: Promise<{ category: string }>;
@@ -33,7 +33,7 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
   });
 }
 
-async function CategoryMarkets({ slug }: { slug: string }) {
+export async function CategoryMarkets({ slug }: { slug: string }) {
   const markets = await fetchFeaturedMarkets(MAX_CATEGORY_MARKETS, { category: slug });
   if (markets.length === 0) {
     return (

@@ -39,7 +39,7 @@ export function MarketFilters({ initialSearch }: Props) {
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
-  const [fetchAbort, setFetchAbort] = useState<AbortController | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const hideTimeout = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -62,9 +62,9 @@ export function MarketFilters({ initialSearch }: Props) {
       clearTimeout(hideTimeout.current);
       hideTimeout.current = null;
     }
-    if (fetchAbort) {
-      fetchAbort.abort();
-      setFetchAbort(null);
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
     }
     const trimmed = search.trim();
     if (trimmed.length < 2 || new Set(trimmed).size === 1) {
@@ -74,7 +74,7 @@ export function MarketFilters({ initialSearch }: Props) {
       return;
     }
     const controller = new AbortController();
-    setFetchAbort(controller);
+    fetchAbortRef.current = controller;
     const debounce = setTimeout(async () => {
       try {
         setLoadingSuggestions(true);
@@ -141,15 +141,19 @@ export function MarketFilters({ initialSearch }: Props) {
         }
       } finally {
         setLoadingSuggestions(false);
-        setFetchAbort((current) => (current === controller ? null : current));
+        if (fetchAbortRef.current === controller) {
+          fetchAbortRef.current = null;
+        }
       }
     }, 200);
     return () => {
       clearTimeout(debounce);
       controller.abort();
-      setFetchAbort((current) => (current === controller ? null : current));
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null;
+      }
     };
-  }, [search, fetchAbort]);
+  }, [search]);
 
   const hideSuggestionsWithDelay = () => {
     hideTimeout.current = setTimeout(() => {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
+import Script from "next/script";
 
 import "./globals.css";
 
@@ -97,6 +98,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Footer />
           </div>
         </AppProviders>
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-MXPV8T1V5K"
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-MXPV8T1V5K');
+          `}
+        </Script>
         <script
           type="application/ld+json"
           suppressHydrationWarning

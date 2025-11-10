@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import TagPage from "@/app/tags/[tag]/page";
+import TagPage, { TagMarkets } from "@/app/tags/[tag]/page";
 import { fetchFeaturedMarkets } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
@@ -26,7 +26,7 @@ vi.mock("next/navigation", async (importOriginal) => {
 
 describe("TagPage", () => {
   it("requests markets for the provided tag", async () => {
-    await TagPage({ params: Promise.resolve({ tag: "btc-halving" }) });
+    await TagMarkets({ slug: "btc-halving" });
     expect(fetchFeaturedMarkets).toHaveBeenCalledWith(
       expect.any(Number),
       expect.objectContaining({ tag: "btc-halving" }),

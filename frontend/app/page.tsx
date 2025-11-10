@@ -12,11 +12,14 @@ export const metadata: Metadata = buildMetadata({
     "Browse institutional-grade prediction markets powered by Reveal Market’s zk-settlement stack.",
   path: "/",
   keywords: [
-    "prediction markets",
-    "zk markets",
-    "crypto markets",
-    "sports prediction",
-    "politics prediction",
+    "institutional prediction markets",
+    "zero knowledge settlement",
+    "onchain derivatives trading",
+    "crypto event forecasting",
+    "sports and politics odds",
+    "Base chain markets",
+    "decentralized risk exchange",
+    "Reveal Market platform",
   ],
 });
 

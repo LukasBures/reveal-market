@@ -36,6 +36,9 @@
     "typescript": "^5.5.3",
     "vitest": "^4.0.8"
   },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-x64": "^4.53.1"
+  },
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"

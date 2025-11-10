@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: TagPageProps): Promise<Metada
   });
 }
 
-async function TagMarkets({ slug }: { slug: string }) {
+export async function TagMarkets({ slug }: { slug: string }) {
   const markets = await fetchFeaturedMarkets(MAX_TAG_MARKETS, { tag: slug });
   if (markets.length === 0) {
     return (

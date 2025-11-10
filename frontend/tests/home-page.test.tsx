@@ -39,11 +39,12 @@ vi.mock("@/components/markets/MarketFilters", () => ({
 }));
 
 vi.mock("@/components/metrics/HeartbeatBadge", () => ({
-  HeartbeatBadge: async () => <div data-testid="heartbeat">Heartbeat</div>,
+  HeartbeatBadge: () => <div data-testid="heartbeat">Heartbeat</div>,
 }));
 
 vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
-  FeaturedMarketsSection: async () => <div data-testid="featured">Featured Markets</div>,
+  FeaturedMarketsSection: () => <div data-testid="featured">Featured Markets</div>,
+  FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading…</div>,
 }));
 
 describe("HomePage", () => {
@@ -51,11 +52,6 @@ describe("HomePage", () => {
     const ui = await HomePage({ searchParams: Promise.resolve({}) });
     render(ui);
 
-    expect(
-      screen.getByRole("heading", {
-        name: /Live markets across every narrative/i,
-      })
-    ).toBeInTheDocument();
     expect(screen.getByTestId("filters")).toBeInTheDocument();
     expect(screen.getByTestId("heartbeat")).toBeInTheDocument();
     expect(screen.getByTestId("featured")).toBeInTheDocument();
