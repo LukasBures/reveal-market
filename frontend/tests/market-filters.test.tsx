@@ -3,12 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketFilters } from "@/components/markets/MarketFilters";
 
 const pushMock = vi.fn();
-const prefetchMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: pushMock,
-    prefetch: prefetchMock,
+    prefetch: vi.fn(),
   }),
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -16,12 +15,11 @@ vi.mock("next/navigation", () => ({
 describe("MarketFilters", () => {
   beforeEach(() => {
     pushMock.mockReset();
-    prefetchMock.mockReset();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("submits search queries via the router", () => {
@@ -35,7 +33,6 @@ describe("MarketFilters", () => {
   });
 
   it("shows autocomplete suggestions and navigates on selection", async () => {
-    vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [
@@ -55,10 +52,7 @@ describe("MarketFilters", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "Al" } });
 
-    await vi.advanceTimersByTimeAsync(250);
-    await waitFor(() => {
-      expect(screen.getByText("Alpha Hedge")).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText("Alpha Hedge")).toBeInTheDocument());
 
     const suggestionButton = screen.getByText("Alpha Hedge").closest("button");
     expect(suggestionButton).not.toBeNull();
@@ -66,5 +60,41 @@ describe("MarketFilters", () => {
 
     expect(pushMock).toHaveBeenCalledWith("/markets/evt-alpha");
     expect(fetchMock).toHaveBeenCalledWith("/markets/suggest?q=Al&limit=5", expect.any(Object));
+  });
+
+  it("falls back to the markets endpoint when suggestions are empty", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            event_id: "evt-beta",
+            title: "Beta Hedge",
+            category: "Crypto",
+          },
+        ],
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketFilters />);
+
+    const input = screen.getByPlaceholderText(/search markets/i);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Bi" } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Beta Hedge")).toBeInTheDocument());
+
+    const suggestionButton = screen.getByText("Beta Hedge").closest("button");
+    fireEvent.mouseDown(suggestionButton!);
+
+    expect(pushMock).toHaveBeenCalledWith("/markets/evt-beta");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/markets?limit=5&search=Bi",
+      expect.any(Object),
+    );
   });
 });

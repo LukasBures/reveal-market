@@ -51,19 +51,23 @@ type PageProps = {
 
 export default async function HomePage({ searchParams }: PageProps) {
   const resolvedParams = (await searchParams) ?? {};
-  const searchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
+  const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
+  const normalizedSearch = rawSearchQuery?.trim() ?? "";
+  const hasShortSearch = normalizedSearch.length > 0 && normalizedSearch.length < 2;
+  const effectiveSearchQuery = hasShortSearch ? undefined : normalizedSearch || undefined;
+  const searchNotice = hasShortSearch ? "Enter at least two characters to search markets." : undefined;
 
   return (
     <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
         <div className="flex flex-col gap-4">
-          <MarketFilters initialSearch={searchQuery} />
+          <MarketFilters initialSearch={rawSearchQuery} />
           <Suspense fallback={null}>
             <HeartbeatBadge />
           </Suspense>
         </div>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
-          <FeaturedMarketsSection searchQuery={searchQuery} />
+          <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
         </Suspense>
         <section className="grid gap-6 rounded-3xl border border-white/5 bg-slate-900/40 p-6 text-sm text-slate-300 md:grid-cols-4">
           {callouts.map((item) => (

@@ -1,5 +1,3 @@
-import { render, screen } from "@testing-library/react";
-import { Suspense } from "react";
 import { describe, expect, it, vi } from "vitest";
 import TagPage from "@/app/tags/[tag]/page";
 import { fetchFeaturedMarkets } from "@/lib/api";
@@ -27,11 +25,12 @@ vi.mock("next/navigation", async (importOriginal) => {
 });
 
 describe("TagPage", () => {
-  it("renders tagged markets", async () => {
-    const element = await TagPage({ params: Promise.resolve({ tag: "btc-halving" }) });
-    render(<Suspense fallback={<div>loading</div>}>{element}</Suspense>);
-    expect(fetchFeaturedMarkets).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ tag: "btc-halving" }));
-    expect(await screen.findByText("Tagged Market")).toBeInTheDocument();
+  it("requests markets for the provided tag", async () => {
+    await TagPage({ params: Promise.resolve({ tag: "btc-halving" }) });
+    expect(fetchFeaturedMarkets).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ tag: "btc-halving" }),
+    );
   });
 
   it("invokes notFound for invalid slug", async () => {

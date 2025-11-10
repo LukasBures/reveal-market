@@ -4,9 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import type { MarketSummary } from "@/lib/api";
 import { MarketGrid } from "./MarketGrid";
 import { Skeleton } from "../ui/Skeleton";
-
-export const DEFAULT_PAGE_SIZE = 18;
-export const DEFAULT_MAX_ITEMS = 60;
+import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 
 type ClientProps = {
   initialMarkets: MarketSummary[];
@@ -15,6 +13,7 @@ type ClientProps = {
   searchQuery?: string;
   categoryFilter?: string;
   tagFilter?: string;
+  emptyNotice?: string;
 };
 
 export function FeaturedMarketsClient({
@@ -24,6 +23,7 @@ export function FeaturedMarketsClient({
   searchQuery,
   categoryFilter,
   tagFilter,
+  emptyNotice,
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
@@ -97,18 +97,31 @@ export function FeaturedMarketsClient({
     });
   };
 
+  const renderEmptyState = () => {
+    if (emptyNotice) {
+      return (
+        <div className="rounded-3xl border border-dashed border-white/10 bg-slate-950/40 p-6 text-center text-sm text-slate-300">
+          {emptyNotice}
+        </div>
+      );
+    }
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-52 rounded-3xl border border-white/5 bg-white/5" />
+        ))}
+      </div>
+    );
+  };
+
   return (
     <section className="space-y-4">
       {markets.length === 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-52 rounded-3xl border border-white/5 bg-white/5" />
-          ))}
-        </div>
+        renderEmptyState()
       ) : (
         <MarketGrid markets={markets} />
       )}
-      {(hasMore || markets.length === 0) && (
+      {markets.length > 0 && hasMore && (
         <div className="flex items-center justify-center">
           <button
             type="button"

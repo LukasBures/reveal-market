@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import type { Mock } from "vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HeartbeatBadge } from "@/components/metrics/HeartbeatBadge";
 import { fetchHealthSnapshot } from "@/lib/api";
@@ -13,13 +14,13 @@ describe("HeartbeatBadge", () => {
   });
 
   it("returns null when no heartbeat is available", async () => {
-    (fetchHealthSnapshot as vi.Mock).mockResolvedValue(null);
+    (fetchHealthSnapshot as Mock).mockResolvedValue(null);
     const element = await HeartbeatBadge();
     expect(element).toBeNull();
   });
 
   it("renders the latest heartbeat timestamp and latency", async () => {
-    (fetchHealthSnapshot as vi.Mock).mockResolvedValue({
+    (fetchHealthSnapshot as Mock).mockResolvedValue({
       status: "ok",
       workerHeartbeat: {
         marketsProcessed: 32,

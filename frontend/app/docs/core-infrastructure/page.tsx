@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("core-infrastructure");
+export const metadata: Metadata = docsMetadata("core-infrastructure");
 
 export default function CoreInfrastructurePage() {
   return (

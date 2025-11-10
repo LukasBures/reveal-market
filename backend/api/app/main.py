@@ -352,15 +352,43 @@ def list_markets_by_category(
     ] = settings.default_page_size,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.category.request",
+        message="processing category listing",
+        category_slug=category_slug,
+        limit=limit,
+    )
     category_value = _decode_slug(category_slug)
     lookup = _canonical_category_lookup(category_value)
     if lookup is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.category.invalid_slug",
+            message="category slug not recognized",
+            category_slug=category_slug,
+            limit=limit,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
     cache_key = category_cache_key(category_slug_key, limit)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        return [schemas.MarketRead.model_validate(item) for item in cached]
+        models_from_cache = [schemas.MarketRead.model_validate(item) for item in cached]
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.category.cache_hit",
+            message="served category markets from cache",
+            category_slug=category_slug_key,
+            limit=limit,
+            result_count=len(models_from_cache),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+        return models_from_cache
 
     markets = crud.get_markets(session, category=category_label, limit=limit, offset=0)
     market_models = _filter_markets_for_visibility([schemas.MarketRead.model_validate(m) for m in markets])
@@ -370,6 +398,16 @@ def list_markets_by_category(
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, "markets:category", cache_key)
     add_tag(cache_client, f"category:{category_slug_key}", cache_key)
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.category.cache_miss",
+        message="cached category markets",
+        category_slug=category_slug_key,
+        limit=limit,
+        result_count=len(market_models),
+        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+    )
     return market_models
 
 
@@ -382,15 +420,43 @@ def list_markets_by_tag(
     ] = settings.default_page_size,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.tag.request",
+        message="processing tag listing",
+        tag_slug=tag_slug,
+        limit=limit,
+    )
     tag_value = _decode_slug(tag_slug)
     lookup = _canonical_tag_lookup(tag_value)
     if lookup is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.tag.invalid_slug",
+            message="tag slug not recognized",
+            tag_slug=tag_slug,
+            limit=limit,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tag_not_found")
     tag_slug_key, tag_label = lookup
     cache_key = tag_cache_key(tag_slug_key, limit)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        return [schemas.MarketRead.model_validate(item) for item in cached]
+        models_from_cache = [schemas.MarketRead.model_validate(item) for item in cached]
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.tag.cache_hit",
+            message="served tag markets from cache",
+            tag_slug=tag_slug_key,
+            limit=limit,
+            result_count=len(models_from_cache),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+        return models_from_cache
 
     markets = crud.get_markets_by_tag(session, tag_label, limit)
     market_models = _filter_markets_for_visibility([schemas.MarketRead.model_validate(m) for m in markets])
@@ -400,6 +466,16 @@ def list_markets_by_tag(
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, "markets:tag", cache_key)
     add_tag(cache_client, f"tag:{tag_slug_key}", cache_key)
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.tag.cache_miss",
+        message="cached tag markets",
+        tag_slug=tag_slug_key,
+        limit=limit,
+        result_count=len(market_models),
+        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+    )
     return market_models
 
 
@@ -465,11 +541,31 @@ def suggest_markets(
     limit: Annotated[int, Query(ge=1, le=25, description="Maximum number of suggestions to return")] = 5,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketRead]:
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.suggest.request",
+        message="processing suggestion request",
+        query=q,
+        limit=limit,
+    )
     normalized_query = q.strip()
     cache_key = suggest_cache_key(normalized_query, limit)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        return [schemas.MarketRead.model_validate(item) for item in cached]
+        models_from_cache = [schemas.MarketRead.model_validate(item) for item in cached]
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.suggest.cache_hit",
+            message="served suggestions from cache",
+            query=normalized_query,
+            limit=limit,
+            result_count=len(models_from_cache),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+        return models_from_cache
 
     results = crud.search_markets(session, normalized_query, limit)
     market_models = [schemas.MarketRead.model_validate(m) for m in results]
@@ -479,19 +575,53 @@ def suggest_markets(
     set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, "markets:suggest", cache_key)
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.suggest.cache_miss",
+        message="cached suggestion results",
+        query=normalized_query,
+        limit=limit,
+        result_count=len(filtered),
+        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+    )
     return filtered
 
 
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])
 def read_resolution(condition_id_hex: str, session: Session = Depends(get_session)) -> schemas.ResolutionSummary:
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="markets.resolution.request",
+        message="fetching resolution summary",
+        condition_id=condition_id_hex,
+    )
     normalized_condition = condition_id_hex.lower()
     cache_key = resolution_cache_key(normalized_condition)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        return schemas.ResolutionSummary.model_validate(cached)
+        summary = schemas.ResolutionSummary.model_validate(cached)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.resolution.cache_hit",
+            message="served resolution summary from cache",
+            condition_id=normalized_condition,
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+        return summary
 
     record = crud.get_resolution_by_condition_id(session, normalized_condition)
     if record is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.resolution.missing",
+            message="resolution not found",
+            condition_id=normalized_condition,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
 
     summary: dict[str, Any] = {
@@ -531,6 +661,14 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
     set_json(cache_client, cache_key, cache_payload, settings.cache_ttl_seconds)
     add_tag(cache_client, schema_tag, cache_key)
     add_tag(cache_client, f"resolution:{normalized_condition}", cache_key)
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.resolution.cache_miss",
+        message="cached resolution summary",
+        condition_id=normalized_condition,
+        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+    )
     return summary_model
 
 
@@ -585,9 +723,29 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
 
 @app.post("/markets", response_model=schemas.MarketRead, tags=["markets"], status_code=status.HTTP_201_CREATED)
 def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(get_session)) -> schemas.MarketRead:
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.create.request",
+        message="creating or updating market",
+        event_id=market_in.event_id,
+        category=market_in.category,
+        oracle=market_in.oracle,
+    )
     market = crud.create_or_update_market(session, market_in)
     session.flush()
     _invalidate_market_cache(market.event_id, getattr(market, "condition_id", None))
+    duration = (time.perf_counter() - start) * 1000
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.create.success",
+        message="market persisted",
+        event_id=market.event_id,
+        category=market.category,
+        duration_ms=round(duration, 2),
+    )
     return market
 
 
@@ -598,9 +756,27 @@ def update_market(
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
+    start = time.perf_counter()
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.update.request",
+        message="patching market",
+        event_id=event_id,
+        fields=list(update.model_dump(exclude_unset=True).keys()),
+    )
     crud.patch_market(session, market, update)
     session.flush()
     _invalidate_market_cache(event_id, getattr(market, "condition_id", None))
+    duration = (time.perf_counter() - start) * 1000
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.update.success",
+        message="market updated",
+        event_id=event_id,
+        duration_ms=round(duration, 2),
+    )
     return market
 
 

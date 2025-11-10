@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("tokenomics");
+export const metadata: Metadata = docsMetadata("tokenomics");
 
 export default function TokenomicsPage() {
   return (

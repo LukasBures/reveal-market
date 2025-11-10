@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState, useTransition } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MarketSummary } from "@/lib/api";
 import { categorySlugFromLabel, tagSlugFromLabel } from "@/lib/slugs";
 
@@ -38,7 +38,10 @@ export function MarketFilters({ initialSearch }: Props) {
   const [suggestions, setSuggestions] = useState<MarketSummary[]>([]);
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+  const [fetchAbort, setFetchAbort] = useState<AbortController | null>(null);
   const hideTimeout = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -59,13 +62,19 @@ export function MarketFilters({ initialSearch }: Props) {
       clearTimeout(hideTimeout.current);
       hideTimeout.current = null;
     }
+    if (fetchAbort) {
+      fetchAbort.abort();
+      setFetchAbort(null);
+    }
     const trimmed = search.trim();
-    if (trimmed.length < 2) {
+    if (trimmed.length < 2 || new Set(trimmed).size === 1) {
       setSuggestions([]);
       setSuggestionsVisible(false);
+      setHighlightedIndex(-1);
       return;
     }
     const controller = new AbortController();
+    setFetchAbort(controller);
     const debounce = setTimeout(async () => {
       try {
         setLoadingSuggestions(true);
@@ -78,24 +87,53 @@ export function MarketFilters({ initialSearch }: Props) {
           return;
         }
         const payload = await response.json();
-        if (!Array.isArray(payload)) {
-          setSuggestions([]);
-          return;
-        }
-        const mapped: MarketSummary[] = payload.map((item: any) => ({
+        const mapToSummary = (item: any): MarketSummary => ({
           eventId: item.event_id ?? item.eventId ?? "unknown",
           title: item.title ?? "Untitled market",
           category: item.category ?? item.tags?.[0] ?? "General",
           tags: item.tags ?? [],
           status: item.status ?? undefined,
-          commitDeadline: item.commit_deadline ?? undefined,
-          revealDeadline: item.reveal_deadline ?? undefined,
+          commitDeadline: item.commit_deadline ?? item.commitDeadline ?? undefined,
+          revealDeadline: item.reveal_deadline ?? item.revealDeadline ?? undefined,
           liquidityUsd: item.extra_data?.liquidityUsd ?? item.liquidity_usd,
           outcomes: item.outcomes ?? [],
           outcomePrices: item.outcome_prices ?? [],
           imageUrl: item.image_url ?? null,
-        }));
-        setSuggestions(mapped);
+        });
+        const dedupeSummaries = (items: MarketSummary[]) => {
+          const seen = new Set<string>();
+          return items.filter((entry) => {
+            if (!entry.eventId || seen.has(entry.eventId)) {
+              return false;
+            }
+            seen.add(entry.eventId);
+            return true;
+          });
+        };
+
+        let deduped: MarketSummary[] = [];
+        if (Array.isArray(payload)) {
+          deduped = dedupeSummaries(payload.map(mapToSummary));
+        }
+
+        if (!deduped.length) {
+          const fallbackResponse = await fetch(
+            `/markets?limit=5&search=${encodeURIComponent(trimmed)}`,
+            { signal: controller.signal, cache: "no-store" },
+          );
+          if (fallbackResponse.ok) {
+            const fallbackPayload = await fallbackResponse.json();
+            const list = Array.isArray(fallbackPayload)
+              ? fallbackPayload
+              : Array.isArray(fallbackPayload?.items)
+                ? fallbackPayload.items
+                : [];
+            deduped = dedupeSummaries(list.map(mapToSummary));
+          }
+        }
+
+        setSuggestions(deduped);
+        setHighlightedIndex(deduped.length ? 0 : -1);
         setSuggestionsVisible(true);
       } catch (error) {
         if ((error as Error).name !== "AbortError") {
@@ -103,19 +141,58 @@ export function MarketFilters({ initialSearch }: Props) {
         }
       } finally {
         setLoadingSuggestions(false);
+        setFetchAbort((current) => (current === controller ? null : current));
       }
     }, 200);
     return () => {
       clearTimeout(debounce);
       controller.abort();
+      setFetchAbort((current) => (current === controller ? null : current));
     };
-  }, [search]);
+  }, [search, fetchAbort]);
 
   const hideSuggestionsWithDelay = () => {
     hideTimeout.current = setTimeout(() => {
       setSuggestionsVisible(false);
+      setHighlightedIndex(-1);
     }, 150);
   };
+
+  const handleKeyboardNavigation = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!suggestionsVisible || suggestions.length === 0) {
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setHighlightedIndex((prev) => {
+          const next = prev + 1;
+          return next >= suggestions.length ? 0 : next;
+        });
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setHighlightedIndex((prev) => {
+          if (prev <= 0) {
+            return suggestions.length - 1;
+          }
+          return prev - 1;
+        });
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        setHighlightedIndex((prev) => {
+          const next = prev + 1;
+          return next >= suggestions.length ? 0 : next;
+        });
+      } else if (event.key === "Enter") {
+        if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
+          event.preventDefault();
+          router.push(`/markets/${suggestions[highlightedIndex].eventId}`);
+          setSuggestionsVisible(false);
+        }
+      }
+    },
+    [highlightedIndex, suggestions, suggestionsVisible, router],
+  );
 
   useEffect(() => {
     categories.slice(0, 4).forEach((category) => {
@@ -148,6 +225,8 @@ export function MarketFilters({ initialSearch }: Props) {
             onChange={(event) => setSearch(event.target.value)}
             onFocus={() => search.trim().length >= 2 && setSuggestionsVisible(true)}
             onBlur={hideSuggestionsWithDelay}
+            onKeyDown={handleKeyboardNavigation}
+            ref={inputRef}
             className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-white outline-none ring-brand-400/50 focus:ring-2"
           />
           <button
@@ -166,15 +245,18 @@ export function MarketFilters({ initialSearch }: Props) {
                 <p className="px-4 py-3 text-slate-400">No matches yet</p>
               )}
               {!loadingSuggestions &&
-                suggestions.map((suggestion) => (
+                suggestions.map((suggestion, index) => (
                   <button
                     key={suggestion.eventId}
                     type="button"
                     onMouseDown={(event) => {
                       event.preventDefault();
                       router.push(`/markets/${suggestion.eventId}`);
+                      setSuggestionsVisible(false);
                     }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/10"
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-left ${
+                      index === highlightedIndex ? "bg-white/15" : "hover:bg-white/10"
+                    }`}
                   >
                     <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg border border-white/10">
                       <div

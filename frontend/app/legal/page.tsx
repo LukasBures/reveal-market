@@ -1,7 +1,8 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
-export const metadata = buildMetadata({
+export const metadata: Metadata = buildMetadata({
   title: "Reveal Market Legal Center",
   description:
     "Centralized access to Reveal Market's terms, privacy policy, cookie disclosures, and regulatory disclaimers for partners and investors.",

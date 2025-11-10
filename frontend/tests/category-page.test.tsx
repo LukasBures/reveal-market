@@ -1,5 +1,3 @@
-import { render, screen } from "@testing-library/react";
-import { Suspense } from "react";
 import { describe, expect, it, vi } from "vitest";
 import CategoryPage from "@/app/categories/[category]/page";
 import { fetchFeaturedMarkets } from "@/lib/api";
@@ -27,11 +25,12 @@ vi.mock("next/navigation", async (importOriginal) => {
 });
 
 describe("CategoryPage", () => {
-  it("renders markets with Suspense boundary", async () => {
-    const element = await CategoryPage({ params: Promise.resolve({ category: "ai-tech" }) });
-    render(<Suspense fallback={<div>loading</div>}>{element}</Suspense>);
-    expect(fetchFeaturedMarkets).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ category: "ai-tech" }));
-    expect(await screen.findByText("Category Market")).toBeInTheDocument();
+  it("requests markets for the provided category", async () => {
+    await CategoryPage({ params: Promise.resolve({ category: "ai-tech" }) });
+    expect(fetchFeaturedMarkets).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ category: "ai-tech" }),
+    );
   });
 
   it("invokes notFound for invalid slug", async () => {

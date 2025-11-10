@@ -1,7 +1,8 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
-export const metadata = buildMetadata({
+export const metadata: Metadata = buildMetadata({
   title: "About Reveal Market",
   description:
     "Reveal Market pairs zero-knowledge prediction rails with institution-ready infrastructure and a clear roadmap.",

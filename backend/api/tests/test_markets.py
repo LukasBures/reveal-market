@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import app.main as api_main
@@ -324,6 +324,94 @@ def test_suggest_endpoint_serves_cache_when_source_removed(client, db_session):
     assert {item["event_id"] for item in second.json()} == {"evt-suggest"}
     cache_key = suggest_cache_key("Alpha", 3)
     assert cache_key in api_main.cache_client.store
+
+
+def test_create_market_invalidates_list_cache(client, db_session):
+    db_session.add(_make_market("evt-cache-base", "Base Market", category="sports", oracle="0xaaa", status="commit"))
+    db_session.commit()
+
+    first = client.get("/markets", params={"limit": 10})
+    assert first.status_code == 200
+    assert {item["event_id"] for item in first.json()} == {"evt-cache-base"}
+
+    payload = {
+        "event_id": "evt-cache-new",
+        "title": "Cached Addition",
+        "category": "sports",
+        "oracle": "0xbbb",
+        "status": "commit",
+    }
+    create_response = client.post("/markets", json=payload)
+    assert create_response.status_code == 201
+
+    second = client.get("/markets", params={"limit": 10})
+    assert second.status_code == 200
+    assert {item["event_id"] for item in second.json()} == {"evt-cache-base", "evt-cache-new"}
+
+
+def test_patch_market_invalidates_detail_cache(client, db_session):
+    market = _make_market("evt-detail-cache", "Detail Cache", category="sports", oracle="0xccc", status="commit")
+    db_session.add(market)
+    db_session.commit()
+
+    detail = client.get(f"/markets/{market.event_id}")
+    assert detail.status_code == 200
+    cache_key = api_main._market_detail_cache_key(market.event_id)
+    assert cache_key in api_main.cache_client.store
+
+    patch = client.patch(
+        f"/markets/{market.event_id}",
+        json={"title": "Updated Detail", "status": "settled"},
+    )
+    assert patch.status_code == 200
+
+    refreshed = client.get(f"/markets/{market.event_id}")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["title"] == "Updated Detail"
+    assert refreshed.json()["status"] == "settled"
+
+
+def test_markets_support_pagination_with_offset(client, db_session):
+    base = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    entries = []
+    for idx in range(3):
+        market = _make_market(
+            f"evt-page-{idx}",
+            f"Market #{idx}",
+            category="sports",
+            oracle="0xpage",
+            status="commit",
+        )
+        market.created_at = base + timedelta(minutes=idx)
+        market.updated_at = market.created_at
+        entries.append(market)
+    db_session.add_all(entries)
+    db_session.commit()
+
+    response = client.get("/markets", params={"limit": 1, "offset": 1})
+    assert response.status_code == 200
+    # Markets are ordered by created_at desc, so offset 1 should return the second newest entry.
+    assert response.json()[0]["event_id"] == "evt-page-1"
+
+
+def test_markets_limit_requires_positive_integer(client):
+    resp = client.get("/markets", params={"limit": 0})
+    assert resp.status_code == 422
+
+
+def test_suggest_requires_min_length(client):
+    resp = client.get("/markets/suggest", params={"q": "a", "limit": 5})
+    assert resp.status_code == 422
+
+
+def test_suggest_trims_and_is_case_insensitive(client, db_session):
+    market = _make_market("evt-suggest-case", "Alpha Forecast", category="news", oracle="0xcase", status="commit")
+    db_session.add(market)
+    db_session.commit()
+
+    resp = client.get("/markets/suggest", params={"q": "  ALpHa  ", "limit": 5})
+    assert resp.status_code == 200
+    assert {item["event_id"] for item in resp.json()} == {"evt-suggest-case"}
 
 
 def test_market_allowlists_filter_results(client, db_session):

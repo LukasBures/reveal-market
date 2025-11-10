@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("integrations");
+export const metadata: Metadata = docsMetadata("integrations");
 
 export default function IntegrationsPage() {
   return (

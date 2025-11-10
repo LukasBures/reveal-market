@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("privacy-security");
+export const metadata: Metadata = docsMetadata("privacy-security");
 
 export default function PrivacySecurityPage() {
   return (

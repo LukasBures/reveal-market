@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("manifesto");
+export const metadata: Metadata = docsMetadata("manifesto");
 
 export default function ManifestoPage() {
   return (

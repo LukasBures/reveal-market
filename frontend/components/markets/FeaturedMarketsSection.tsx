@@ -1,5 +1,6 @@
 import { fetchFeaturedMarkets } from "@/lib/api";
-import { FeaturedMarketsClient, DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./FeaturedMarketsClient";
+import { FeaturedMarketsClient } from "./FeaturedMarketsClient";
+import { DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./constants";
 import { MarketGridSkeleton } from "./MarketGridSkeleton";
 import { Skeleton } from "../ui/Skeleton";
 
@@ -9,6 +10,7 @@ type Props = {
   searchQuery?: string;
   categoryFilter?: string;
   tagFilter?: string;
+  emptyNotice?: string;
 };
 
 export async function FeaturedMarketsSection({
@@ -17,7 +19,8 @@ export async function FeaturedMarketsSection({
   searchQuery,
   categoryFilter,
   tagFilter,
-}: Props) {
+  emptyNotice,
+}: Props = {}) {
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
@@ -32,6 +35,7 @@ export async function FeaturedMarketsSection({
       searchQuery={searchQuery}
       categoryFilter={categoryFilter}
       tagFilter={tagFilter}
+      emptyNotice={emptyNotice}
     />
   );
 }

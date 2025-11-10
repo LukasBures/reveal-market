@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("getting-started");
+export const metadata: Metadata = docsMetadata("getting-started");
 
 export default function GettingStartedPage() {
   return (

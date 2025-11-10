@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
 
@@ -26,6 +27,11 @@ describe("FeaturedMarketsClient", () => {
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
+  it("renders a helpful notice when provided", () => {
+    render(<FeaturedMarketsClient initialMarkets={[]} emptyNotice="Type more to search" />);
+    expect(screen.getByText(/type more to search/i)).toBeInTheDocument();
+  });
+
   it("renders markets and loads more on demand", async () => {
     const nextMarket = {
       eventId: "evt-2",
@@ -35,7 +41,7 @@ describe("FeaturedMarketsClient", () => {
       outcomes: [],
       outcomePrices: [],
     };
-    const fetchMock = global.fetch as unknown as vi.Mock;
+    const fetchMock = global.fetch as unknown as Mock;
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [nextMarket],

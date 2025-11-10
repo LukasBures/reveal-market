@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("roadmap");
+export const metadata: Metadata = docsMetadata("roadmap");
 
 export default function RoadmapPage() {
   return (

@@ -6,6 +6,7 @@ vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
     children,
+    prefetch,
     ...props
   }: {
     children: React.ReactNode;
@@ -13,6 +14,7 @@ vi.mock("next/link", () => ({
     className?: string;
     target?: string;
     rel?: string;
+    prefetch?: boolean;
   }) => <a {...props}>{children}</a>,
 }));
 

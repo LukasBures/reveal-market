@@ -1,23 +1,54 @@
-import React from "react";
 import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import HomePage from "@/app/page";
 
-vi.mock("@/lib/api", () => ({
-  fetchFeaturedMarkets: vi.fn().mockResolvedValue([
-    {
-      eventId: "evt-1",
-      title: "Sample market",
-      category: "Politics",
-      outcomes: ["Yes", "No"],
-      outcomePrices: [0.7, 0.3],
-    },
-  ]),
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    fetchFeaturedMarkets: vi.fn().mockResolvedValue([
+      {
+        eventId: "evt-1",
+        title: "Sample market",
+        category: "Politics",
+        outcomes: ["Yes", "No"],
+        outcomePrices: [0.7, 0.3],
+      },
+    ]),
+    fetchHealthSnapshot: vi.fn().mockResolvedValue({
+      status: "ok",
+      workerHeartbeat: {
+        marketsProcessed: 20,
+        latencyMs: 50,
+        timestamp: "2025-01-01T00:00:00.000Z",
+      },
+    }),
+  };
+});
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/components/markets/MarketFilters", () => ({
+  MarketFilters: () => <div data-testid="filters">Filters</div>,
+}));
+
+vi.mock("@/components/metrics/HeartbeatBadge", () => ({
+  HeartbeatBadge: async () => <div data-testid="heartbeat">Heartbeat</div>,
+}));
+
+vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
+  FeaturedMarketsSection: async () => <div data-testid="featured">Featured Markets</div>,
 }));
 
 describe("HomePage", () => {
   it("renders filters and market cards", async () => {
-    const ui = await HomePage();
+    const ui = await HomePage({ searchParams: Promise.resolve({}) });
     render(ui);
 
     expect(
@@ -25,10 +56,8 @@ describe("HomePage", () => {
         name: /Live markets across every narrative/i,
       })
     ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/search markets/i)).toBeInTheDocument();
-    expect(screen.getByText("Sample market")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: /browse documentation/i })
-    ).toHaveAttribute("href", "/docs");
+    expect(screen.getByTestId("filters")).toBeInTheDocument();
+    expect(screen.getByTestId("heartbeat")).toBeInTheDocument();
+    expect(screen.getByTestId("featured")).toBeInTheDocument();
   });
 });

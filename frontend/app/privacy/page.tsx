@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
-export const metadata = buildMetadata({
+export const metadata: Metadata = buildMetadata({
   title: "Reveal Market Privacy Policy",
   description: "How Reveal Market collects, stores, and protects partner and visitor information.",
   path: "/privacy",

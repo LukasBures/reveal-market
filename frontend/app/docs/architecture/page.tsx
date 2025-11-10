@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("architecture");
+export const metadata: Metadata = docsMetadata("architecture");
 
 export default function ArchitecturePage() {
   return (

@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { docsMetadata } from "@/lib/seo";
 
-export const metadata = docsMetadata("faq");
+export const metadata: Metadata = docsMetadata("faq");
 
 export default function FAQPage() {
   return (

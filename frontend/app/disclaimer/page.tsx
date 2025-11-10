@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
-export const metadata = buildMetadata({
+export const metadata: Metadata = buildMetadata({
   title: "Reveal Market Disclaimer",
   description: "Disclosure on informational use, investment risk, and jurisdictional restrictions.",
   path: "/disclaimer",

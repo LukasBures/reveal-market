@@ -107,9 +107,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+cat <<'EOF'
+------------------------------------------------------------
+Stack ready. Useful URLs while running locally:
+  • API docs / health:      http://localhost:8000/docs  | http://localhost:8000/health
+  • Frontend / marketing:   http://localhost:3000/
+  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
+  • Redis (CLI):            redis-cli -h localhost -p 6379
+Logs stream in this terminal; press Ctrl+C to stop the stack.
+------------------------------------------------------------
+EOF
+
 echo "Validating docker compose files..."
 "${COMPOSE_CMD[@]}" config >/dev/null
-
 if [[ "${RUN_BUILD}" == "true" ]]; then
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
   echo "Building images (${BUILD_DESC}, pull latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})..."

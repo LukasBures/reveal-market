@@ -1,4 +1,23 @@
+# Reveal Market Robots Policy
+
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /health/
+
+# Explicitly allow reputable AI crawlers for content indexing
+User-agent: GPTBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+# Block known scraping bots that ignore rate limits
+User-agent: MJ12bot
+Disallow: /
 
 Sitemap: https://revealmarket.xyz/sitemap.xml
+Host: https://revealmarket.xyz
