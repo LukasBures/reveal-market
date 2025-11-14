@@ -69,7 +69,7 @@ All environment variables begin with `RM_`. Notable groups:
 | --- | --- |
 | `RM_DATABASE_URL` | Postgres DSN (same DB as the API). |
 | `RM_REDIS_URL` | Redis URI used for cache invalidation, schema tags, heartbeat storage. |
-| `RM_POLL_INTERVAL_SECONDS` | How often to pull Polymarket (default 30s). |
+| `RM_POLL_INTERVAL_SECONDS` | How often to pull Polymarket (default 60s). |
 | `RM_RUN_MIGRATIONS_ON_STARTUP` | If true, apply Alembic migrations before syncing. |
 | `RM_SCHEMA_VERSION_KEY` | Redis key where `_propagate_schema_revision` stores the current Alembic revision. |
 | `RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`, `RM_HEARTBEAT_MAX_RETRIES`, `RM_HEARTBEAT_RETRY_BACKOFF_SECONDS` | Heartbeat publishing behavior. |

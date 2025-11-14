@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -115,10 +116,19 @@ class PolymarketClient:
         *,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
+        request_max_attempts: int = 1,
+        request_backoff_seconds: float = 0.2,
+        request_backoff_max_seconds: float | None = None,
     ) -> None:
         self.base_url = str(base_url).rstrip("/")
         self.timeout = timeout
         self._transport = transport
+        self._request_max_attempts = max(1, int(request_max_attempts))
+        self._request_backoff_seconds = request_backoff_seconds if request_backoff_seconds > 0 else 0.1
+        self._request_backoff_max_seconds = (
+            request_backoff_max_seconds if request_backoff_max_seconds and request_backoff_max_seconds > 0 else None
+        )
+        self._retryer = None
 
     def fetch_markets(  # noqa: C901
         self,
@@ -150,12 +160,11 @@ class PolymarketClient:
 
                 url = f"{self.base_url}/markets"
                 try:
-                    response = client.get(url, params=params)
-                    response.raise_for_status()
+                    response = self._send_with_retry(lambda: _request_page(client, url, params))
                     payload = response.json()
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
-                    break
+                    raise
 
                 if not isinstance(payload, list) or not payload:
                     break
@@ -177,6 +186,52 @@ class PolymarketClient:
                     break
 
         return markets
+
+    def _send_with_retry(self, action: Callable[[], httpx.Response]) -> httpx.Response:
+        retryer = self._build_retryer()
+        if retryer is None:
+            return action()
+        return retryer(action)
+
+    def _build_retryer(self):
+        if self._request_max_attempts <= 1:
+            return None
+        if self._retryer is not None:
+            return self._retryer
+        try:
+            from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+        except ModuleNotFoundError:  # pragma: no cover - defensive
+            return None
+
+        wait_kwargs = {"multiplier": self._request_backoff_seconds, "min": self._request_backoff_seconds}
+        if self._request_backoff_max_seconds:
+            wait_kwargs["max"] = self._request_backoff_max_seconds
+
+        def _log_retry(retry_state):
+            exc = retry_state.outcome.exception() if retry_state.outcome else None
+            logger.warning(
+                "retrying polymarket request",
+                extra={
+                    "attempt": retry_state.attempt_number,
+                    "max_attempts": self._request_max_attempts,
+                    "error": str(exc) if exc else None,
+                },
+            )
+
+        self._retryer = Retrying(
+            stop=stop_after_attempt(self._request_max_attempts),
+            wait=wait_exponential(**wait_kwargs),
+            retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+            before_sleep=_log_retry,
+            reraise=True,
+        )
+        return self._retryer
+
+
+def _request_page(client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:
+    response = client.get(url, params=params)
+    response.raise_for_status()
+    return response
 
 
 def _extract_outcomes(outcomes: Any) -> list[str] | None:

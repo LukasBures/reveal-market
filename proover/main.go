@@ -41,7 +41,7 @@ var (
 	lastHeartbeat    atomic.Value
 	proverVersion    = getenv("PROVER_VERSION", "dev")
 	circuitHash      = getenv("PROVER_CIRCUIT_HASH", "0x0")
-	heartbeatSeconds = intEnv("PROVER_HEARTBEAT_SECONDS", 30)
+	heartbeatSeconds = intEnv("PROVER_HEARTBEAT_SECONDS", 60)
 	listenAddr       = getenv("PROVER_LISTEN_ADDR", "0.0.0.0:8085")
 )
 

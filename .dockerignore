@@ -23,5 +23,7 @@
 **/*.pyd
 **/.pytest_cache/
 **/.mypy_cache/
+**/.venv/
+**/venv/
 **/node_modules/
 **/.DS_Store

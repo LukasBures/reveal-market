@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)
-    poll_interval_seconds: int = Field(default=30, ge=1)
+    poll_interval_seconds: int = Field(default=60, ge=1)
     api_base_url: str | None = Field(default="http://localhost:8000")
     prime_markets_cache_enabled: bool = Field(default=True)
     markets_cache_limit: int = Field(default=18, ge=1, le=250)

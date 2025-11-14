@@ -71,6 +71,12 @@ CACHE_INVALIDATION_COUNTER = Counter(
     ["type"],
 )
 
+POLYMARKET_FETCH_COUNTER = Counter(
+    "worker_polymarket_fetch_total",
+    "Outcome of Polymarket fetch attempts",
+    ["outcome"],
+)
+
 setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
@@ -220,6 +226,9 @@ def _ensure_schema() -> SchemaSyncResult:
 polymarket_client = PolymarketClient(
     str(settings.polymarket_api_base),
     timeout=settings.polymarket_timeout_seconds,
+    request_max_attempts=settings.polymarket_max_retries,
+    request_backoff_seconds=settings.polymarket_retry_backoff_seconds,
+    request_backoff_max_seconds=settings.polymarket_retry_backoff_max_seconds,
 )
 
 
@@ -273,23 +282,16 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         closed=settings.polymarket_closed_filter,
     )
 
-    def _invoke() -> list[MarketPayload]:
-        return polymarket_client.fetch_markets(
+    try:
+        markets = polymarket_client.fetch_markets(
             page_size=settings.polymarket_page_size,
             max_pages=settings.polymarket_max_pages,
             order=settings.polymarket_order,
             ascending=settings.polymarket_sort_ascending,
             closed=settings.polymarket_closed_filter,
         )
-
-    try:
-        markets = _run_with_retries(
-            _invoke,
-            settings.polymarket_max_retries,
-            settings.polymarket_retry_backoff_seconds,
-            settings.polymarket_retry_backoff_max_seconds,
-        )
     except Exception as exc:
+        POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
         log_event(
             logger,
             logging.ERROR,
@@ -300,6 +302,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         raise
     latency_ms = (time.perf_counter() - start) * 1000
     if markets:
+        POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()
         log_event(
             logger,
             logging.INFO,
@@ -309,6 +312,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             latency_ms=round(latency_ms, 2),
         )
     else:
+        POLYMARKET_FETCH_COUNTER.labels(outcome="empty").inc()
         log_event(
             logger,
             logging.DEBUG,

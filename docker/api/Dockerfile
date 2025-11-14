@@ -24,6 +24,7 @@ RUN apt-get update -qq \
  && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    build-essential \
     libpq-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
@@ -72,7 +73,7 @@ RUN apt-get update -qq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-COPY --from=builder /app/.venv /.venv
+COPY --from=builder /app/.venv ./.venv
 
 RUN useradd --create-home appuser
 USER appuser

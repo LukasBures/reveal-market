@@ -136,7 +136,7 @@ services:
     restart: unless-stopped
     environment:
       PROVER_LISTEN_ADDR: 0.0.0.0:8085
-      PROVER_HEARTBEAT_SECONDS: 20
+      PROVER_HEARTBEAT_SECONDS: 60
       PROVER_VERSION: ${PROVER_VERSION:-dev}
       PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH:-0x0}
     ports:

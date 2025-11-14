@@ -21,7 +21,7 @@ from app.main import (
 from app.main import (
     settings as worker_settings,
 )
-from app.polymarket import MarketPayload
+from app.polymarket import MarketPayload, PolymarketClient
 from app.prover_client import SettlementProofResponse
 from prometheus_client import REGISTRY
 from shared import cache as shared_cache
@@ -379,50 +379,39 @@ def test_prime_featured_views_prefetches_categories_and_tags(monkeypatch):
     assert any("/markets/suggest" in url and "limit=4" in url for url in requests)
 
 
-def test_fetch_markets_from_polymarket_retries_before_success(monkeypatch):
-    attempt_counter = {"value": 0}
+def _fetch_counter(outcome: str) -> float:
+    value = REGISTRY.get_sample_value("worker_polymarket_fetch_total", {"outcome": outcome})
+    return value or 0.0
+
+
+def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     payload = MarketPayload(
-        event_id="evt-retry",
-        title="Retry Market",
-        category="news",
+        event_id="evt-success",
+        title="OK",
+        category="sports",
         oracle="polymarket",
         status="commit",
-        extra_data={"gamma": {"id": "evt-retry"}},
+        extra_data={"gamma": {"id": "evt-success"}},
     )
 
-    def flaky_fetch(**kwargs):
-        attempt_counter["value"] += 1
-        if attempt_counter["value"] < 3:
-            raise RuntimeError("Temporary failure")
-        return [payload]
-
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", flaky_fetch, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_max_retries", 3, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_seconds", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_max_seconds", 0, raising=False)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", lambda **kwargs: [payload], raising=False)
+    before = _fetch_counter("success")
 
     markets, _ = app.main.fetch_markets_from_polymarket()
-    assert attempt_counter["value"] == 3
-    assert markets[0].event_id == "evt-retry"
+
+    assert markets[0].event_id == "evt-success"
+    assert _fetch_counter("success") == before + 1
 
 
-def test_fetch_markets_from_polymarket_raises_after_retry_budget(monkeypatch):
-    attempt_counter = {"value": 0}
-
+def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     def always_fail(**kwargs):
-        attempt_counter["value"] += 1
-        raise RuntimeError("fatal")
+        raise RuntimeError("fatal failure")
 
     monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", always_fail, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_max_retries", 2, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_seconds", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_retry_backoff_max_seconds", 0, raising=False)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-
+    before = _fetch_counter("error")
     with pytest.raises(RuntimeError):
         app.main.fetch_markets_from_polymarket()
-    assert attempt_counter["value"] == 2
+    assert _fetch_counter("error") == before + 1
 
 
 def test_publish_heartbeat_retries_on_failure(monkeypatch):
@@ -581,3 +570,55 @@ def test_maybe_generate_settlement_proof(monkeypatch):
     )
     assert fake_prover.called_with is not None
     assert redis_client.last_set is not None
+
+
+def test_polymarket_client_retries_failed_requests(monkeypatch):
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise httpx.ReadTimeout("timeout", request=request)
+        return httpx.Response(
+            status_code=200,
+            json=[{"id": "evt-123", "question": "Will it work?", "category": "AI"}],
+        )
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    client = PolymarketClient(
+        "https://gamma.polymarket.example",
+        timeout=0.1,
+        transport=transport,
+        request_max_attempts=3,
+        request_backoff_seconds=0,
+        request_backoff_max_seconds=0,
+    )
+
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+
+    assert attempts["count"] == 3
+    assert markets[0].event_id == "evt-123"
+
+
+def test_polymarket_client_raises_after_request_retry_budget(monkeypatch):
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    client = PolymarketClient(
+        "https://gamma.polymarket.example",
+        timeout=0.1,
+        transport=transport,
+        request_max_attempts=2,
+        request_backoff_seconds=0,
+        request_backoff_max_seconds=0,
+    )
+
+    with pytest.raises(httpx.ReadTimeout):
+        client.fetch_markets(page_size=1, max_pages=1)
+    assert attempts["count"] == 2

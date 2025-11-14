@@ -178,7 +178,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 ## Logging & Docker Observability
 
-- `frontend/lib/logging.ts` exposes structured `logger` helpers. Logs default to INFO, include JSON metadata, and the Docker console gets a heartbeat message (`"I am still here"`) every `HEARTBEAT_INTERVAL_MS` milliseconds (override with `NEXT_PUBLIC_HEARTBEAT_INTERVAL_MS` or `HEARTBEAT_INTERVAL_MS`).
+- `frontend/lib/logging.ts` exposes structured `logger` helpers. Logs default to INFO, include JSON metadata, and the Docker console gets a heartbeat message (`"I am still here"`) every `HEARTBEAT_INTERVAL_MS` milliseconds (defaults to 60s; override with `NEXT_PUBLIC_HEARTBEAT_INTERVAL_MS` or `HEARTBEAT_INTERVAL_MS`).
 - Every fetch helper logs success/error states (`fetchFeaturedMarkets:success`, `fetchProofReceipts:error`, etc.) so you can correlate frontend issues with backend traces.
 - `ensureHeartbeat()` runs in `RootLayout`, so every container (dev server, `next start`, Docker standalone) proves liveness even when traffic is idle.
 - When running under Docker, `docker/frontend/Dockerfile` uses a multi-stage build: `npm ci` runs in a deps layer, source is copied from the repo (no host `node_modules` bind mounts), and the final image serves the standalone output as a non-root user.

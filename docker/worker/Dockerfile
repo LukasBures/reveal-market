@@ -75,7 +75,7 @@ RUN apt-get update -qq \
  && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-COPY --from=builder /worker/.venv /.venv
+COPY --from=builder /worker/.venv ./.venv
 
 RUN useradd --create-home workeruser
 USER workeruser

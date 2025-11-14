@@ -14,8 +14,8 @@ services:
     environment:
       MODE: dev
       LOG_LEVEL: DEBUG
-      # Shorten the poll interval locally so changes show up within ~15s instead of 60s.
-      RM_POLL_INTERVAL_SECONDS: 15
+      # Mirror production heartbeat cadence so diagnostics fire once per minute.
+      RM_POLL_INTERVAL_SECONDS: 60
     volumes:
       - ./backend/worker/app:/worker/app
       - ./backend/shared:/worker/shared
