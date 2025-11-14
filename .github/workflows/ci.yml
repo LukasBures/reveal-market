@@ -45,16 +45,16 @@ jobs:
         with:
           version: nightly
 
-      - name: Format check
+      - name: Contracts pipeline
         working-directory: contracts
-        run: forge fmt --check
-
-      - name: Forge tests
-        working-directory: contracts
-        run: forge test --gas-report
+        run: ./run_local.sh full
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      RM_API_BASE_URL: http://api:8000
+      NODE_ENV: production
     steps:
       - uses: actions/checkout@v4
 
@@ -62,9 +62,29 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Start backend stack
+        run: docker compose up -d postgres redis proover api worker
+
+      - name: Wait for API
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in time" >&2
+          exit 1
+
       - name: Install dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci
 
       - name: Lint
         working-directory: frontend
@@ -73,3 +93,11 @@ jobs:
       - name: Unit tests
         working-directory: frontend
         run: npm run test
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Shutdown stack
+        if: always()
+        run: docker compose down

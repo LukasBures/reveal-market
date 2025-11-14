@@ -12,8 +12,9 @@ Follow progress on X: [@RevealMarket](https://x.com/RevealMarket).
 | --- | --- | --- |
 | `backend/api` | FastAPI service for markets, settlements, and partner endpoints. | Trusted-host & CORS controls, CSP/HSTS middleware, Redis caching, pytest suite, docker health probe. |
 | `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, structured logging, Polymarket + on-chain sync, pytest suite. |
-| `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components. |
+| `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components, zero mock fallbacks. |
 | `contracts/` | Foundry workspace (RevealMarket, MarketFactory, etc.). | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
+| `proover/` | Mock prover + Groth16 circuit artifacts. | Deterministic “proof” responses for demos, heartbeat endpoint, scripts for generating real proving/verifying keys when upgrading beyond the mock. |
 
 Additional docs live in each directory’s README.
 
@@ -36,9 +37,9 @@ Additional docs live in each directory’s README.
 ## Security & Observability
 
 - **API/Worker** – Strict HSTS, CSP, COOP/CORP, Referrer-Policy, and Trusted Host filters are enabled by default. Health checks are native Python scripts, not cURL hacks.
-- **Frontend** – Production headers mirror backend policies; sitemap + robots automatically enumerate investor pages. All docs/legal pages declare canonical URLs and metadata via `lib/seo.ts`.
+- **Frontend** – Production headers mirror backend policies; sitemap + robots automatically enumerate investor pages. All docs/legal pages declare canonical URLs and metadata via `lib/seo.ts`. The App Router fetchers now always hit the live API; there are no mock toggles in production.
 - **Logging** – Unified formatter across services (`timestamp | LEVEL | logger | file:line | event | request_id`). Optional rotating file output for regulated deployments, structured JSON-LD for site-wide schema.
-- **Tests** – `./backend/run_tests.sh` (pytest), `cd frontend && npm run test` (Vitest), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel.
+- **Tests** – `./backend/run_tests.sh` (pytest), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests.
 
 ---
 
@@ -60,7 +61,7 @@ cd frontend && npm install && npm run dev
 # Contracts
 cd contracts && forge test
 
-# Full docker stack (API, worker, frontend, Postgres, Redis)
+# Full docker stack (API, worker, frontend, Postgres, Redis, mock prover)
 ./run_local.sh
 ```
 
@@ -71,7 +72,7 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 - Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com` and `RM_POLYMARKET_CLOSED_FILTER=false` in `.env` (bare metal) or `docker-compose.yml` (containers) so the worker ingests active markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` empty until you want to curate narratives.
 - Keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker auto-applies schema updates (e.g., the `markets.tags` column) before syncing.
 - After changing env, restart the worker (`./run_local.sh worker` or `docker compose restart worker`) so it repulls the Gamma feed, writes fresh rows to Postgres, and refreshes Redis caches the frontend reads.
-- `/markets` search and the `/markets/suggest` endpoint are backed by a Postgres full-text index (`markets_search_vector_idx`). Run `alembic upgrade head` (or restart the worker/API containers) whenever new migrations land so the index stays current.
+- `/markets` search and the `/markets/suggest` endpoint are backed by a Postgres full-text index (`markets_search_vector_idx`). Run `alembic upgrade head` (or restart the worker/API containers) whenever new migrations land so the index stays current. Client-side search suggestions now flow through a Next.js API route that reuses this backend endpoint, so missing indexes immediately show up in the UI.
 - The worker keeps recently resolved markets for 24h (`RM_RESOLVED_RETENTION_SECONDS`) and materializes featured categories/tags into Redis so `/categories/<slug>` and `/tags/<slug>` respond instantly without hitting Gamma/Polygon.
 
 Environment variables follow the `RM_` prefix (see each service README). Security headers can be tuned with `RM_ALLOWED_HOSTS`, CORS lists, and CSP overrides.
@@ -80,8 +81,8 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 
 ## Engagement Paths
 
-- **Exchanges & Brokerages** – Deploy the API-only slice behind your firewall, feed liquidity via our worker, or white-label the Next.js storefront.
+- **Exchanges & Brokerages** – Deploy the API-only slice behind your firewall, feed liquidity via our worker, or white-label the Next.js storefront. All tiers ship with the same server action + cache tagging strategy the marketing site uses in production.
 - **Liquidity Providers & DAOs** – Tap fee-sharing programs, structured webhooks, and rake analytics to model outcome-market exposure.
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via `hello@revealmarket.xyz`.
 
-Let’s build prediction markets institutions actually trust.
+Let’s build prediction markets institutions actually trust. The prover bundled in this repo still returns deterministic hashes for demonstration purposes; production integrations should replace it with the Groth16 artifacts generated under `proover/circuits/`.

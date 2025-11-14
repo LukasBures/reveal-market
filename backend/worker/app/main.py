@@ -77,6 +77,12 @@ POLYMARKET_FETCH_COUNTER = Counter(
     ["outcome"],
 )
 
+POLYMARKET_RETRY_COUNTER = Counter(
+    "worker_polymarket_retry_total",
+    "Retry outcomes for individual Polymarket HTTP requests",
+    ["outcome"],
+)
+
 setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
@@ -229,6 +235,7 @@ polymarket_client = PolymarketClient(
     request_max_attempts=settings.polymarket_max_retries,
     request_backoff_seconds=settings.polymarket_retry_backoff_seconds,
     request_backoff_max_seconds=settings.polymarket_retry_backoff_max_seconds,
+    retry_counter=POLYMARKET_RETRY_COUNTER,
 )
 
 

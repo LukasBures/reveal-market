@@ -1,6 +1,6 @@
 # Groth16 Settlement Circuit
 
-This directory hosts the reference circuit and helper scripts needed to generate the Groth16 proving/verification keys consumed by both the `proover` microservice and the Solidity verifier.
+This directory hosts the reference circuit and helper scripts needed to generate the Groth16 proving/verification keys consumed by both the `proover` microservice and the Solidity verifier. The `proover` shipped in this repo is a deterministic mock; once you generate keys via this workflow you can replace the mock with a real prover.
 
 > **Prerequisites**
 >

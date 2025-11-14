@@ -14,9 +14,6 @@ const envLevel =
 
 const activeLevel: LogLevel = ORDER[envLevel] ? envLevel : "info";
 
-const formatMeta = (meta?: Record<string, unknown>) =>
-  meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
-
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
 const resolveHeartbeatInterval = () => {
@@ -31,22 +28,30 @@ const resolveHeartbeatInterval = () => {
 
 const HEARTBEAT_INTERVAL_MS = resolveHeartbeatInterval();
 
+const formatLine = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
+  const timestamp =
+    typeof Date !== "undefined" ? new Date().toISOString() : "0000-00-00T00:00:00.000Z";
+  const payload =
+    meta && Object.keys(meta).length > 0 ? JSON.stringify(meta) : "{}";
+  return `${timestamp} | ${level.toUpperCase()} | frontend | ${message} | ${payload}`;
+};
+
 const baseLogger = {
   debug(message: string, meta?: Record<string, unknown>) {
     if (ORDER[activeLevel] <= ORDER.debug) {
-      console.debug(`[frontend][DEBUG] ${message}${formatMeta(meta)}`);
+      console.debug(formatLine("debug", message, meta));
     }
   },
   info(message: string, meta?: Record<string, unknown>) {
     if (ORDER[activeLevel] <= ORDER.info) {
-      console.info(`[frontend][INFO] ${message}${formatMeta(meta)}`);
+      console.info(formatLine("info", message, meta));
     }
   },
   warn(message: string, meta?: Record<string, unknown>) {
-    console.warn(`[frontend][WARN] ${message}${formatMeta(meta)}`);
+    console.warn(formatLine("warn", message, meta));
   },
   error(message: string, meta?: Record<string, unknown>) {
-    console.error(`[frontend][ERROR] ${message}${formatMeta(meta)}`);
+    console.error(formatLine("error", message, meta));
   },
 };
 
@@ -65,7 +70,7 @@ export function ensureHeartbeat(intervalMs = HEARTBEAT_INTERVAL_MS) {
   };
 
   setInterval(() => {
-    baseLogger.info("I am still here", {
+    baseLogger.info("heartbeat", {
       heartbeatIntervalMs: intervalMs,
       uptimeSeconds: getUptime(),
     });

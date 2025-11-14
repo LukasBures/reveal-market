@@ -1,26 +1,26 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import type { MarketSummary } from "@/lib/api-types";
-import { fetchMarketsViaProxy } from "@/lib/marketProxy";
+import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 
 type Props = {
   initialMarkets: MarketSummary[];
 };
 
 export function MarketsPreviewClient({ initialMarkets }: Props) {
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ["markets", "preview"],
-    queryFn: () => fetchMarketsViaProxy(6),
+  const { data, refetch, isFetching } = useFeaturedMarkets({
+    limit: 6,
     initialData: initialMarkets,
-    refetchInterval: 30_000,
   });
 
   useEffect(() => {
-    // Prefetch as soon as component mounts to keep SSR/cache fresh.
     void refetch();
+    const timer = setInterval(() => {
+      void refetch();
+    }, 30_000);
+    return () => clearInterval(timer);
   }, [refetch]);
 
   const markets = data ?? [];

@@ -59,42 +59,40 @@ describe("MarketFilters", () => {
     fireEvent.mouseDown(suggestionButton!);
 
     expect(pushMock).toHaveBeenCalledWith("/markets/evt-alpha");
-    expect(fetchMock).toHaveBeenCalledWith("/markets/suggest?q=Al&limit=5", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/markets/suggest?limit=5&q=Al", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
-  it("falls back to the markets endpoint when suggestions are empty", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
+  it("caches successful suggestion queries", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => [
           {
-            event_id: "evt-beta",
-            title: "Beta Hedge",
-            category: "Crypto",
+            event_id: "evt-cache",
+            title: "Cache Hit Market",
+            category: "Politics",
           },
         ],
       });
-    vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketFilters />);
+      render(<MarketFilters />);
 
-    const input = screen.getByPlaceholderText(/search markets/i);
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: "Bi" } });
+      const input = screen.getByPlaceholderText(/search markets/i);
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "Cache" } });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByText("Beta Hedge")).toBeInTheDocument());
+      vi.advanceTimersByTime(220);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
-    const suggestionButton = screen.getByText("Beta Hedge").closest("button");
-    fireEvent.mouseDown(suggestionButton!);
-
-    expect(pushMock).toHaveBeenCalledWith("/markets/evt-beta");
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/markets?limit=5&search=Bi",
-      expect.any(Object),
-    );
+      // Trigger the same trimmed query again; cache should be used (no extra fetch).
+      fireEvent.change(input, { target: { value: "Cache " } });
+      vi.advanceTimersByTime(220);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

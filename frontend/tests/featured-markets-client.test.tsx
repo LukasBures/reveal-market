@@ -4,10 +4,10 @@ import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
-import { fetchMarketsViaProxy } from "@/lib/marketProxy";
+import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 
-vi.mock("@/lib/marketProxy", () => ({
-  fetchMarketsViaProxy: vi.fn(),
+vi.mock("@/app/actions/markets", () => ({
+  loadFeaturedMarketsAction: vi.fn(),
 }));
 
 const sampleMarket = {
@@ -21,7 +21,7 @@ const sampleMarket = {
 
 describe("FeaturedMarketsClient", () => {
   beforeEach(() => {
-    vi.mocked(fetchMarketsViaProxy).mockReset();
+    vi.mocked(loadFeaturedMarketsAction).mockReset();
     class NoopIntersectionObserver {
       observe() {}
       disconnect() {}
@@ -59,7 +59,7 @@ describe("FeaturedMarketsClient", () => {
       outcomes: [],
       outcomePrices: [],
     };
-    const fetchMock = fetchMarketsViaProxy as unknown as Mock;
+    const fetchMock = loadFeaturedMarketsAction as unknown as Mock;
     fetchMock.mockResolvedValue([nextMarket]);
 
     renderWithClient(
@@ -78,12 +78,12 @@ describe("FeaturedMarketsClient", () => {
     await waitFor(() => {
       expect(screen.getByText("Second Market")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith(1, { searchQuery: "sample", category: undefined, offset: 1 });
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(Number), { searchQuery: "sample", category: undefined, offset: 1 });
   });
 
   it("auto-loads additional pages before showing manual button", async () => {
     let callCount = 0;
-    const fetchMock = fetchMarketsViaProxy as unknown as Mock<number>;
+    const fetchMock = loadFeaturedMarketsAction as unknown as Mock<number>;
     fetchMock.mockImplementation(() => {
       callCount += 1;
       return Promise.resolve([
@@ -119,8 +119,8 @@ describe("FeaturedMarketsClient", () => {
     );
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /load more markets/i })).not.toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ export type MarketSummary = {
   outcomePrices?: number[];
   imageUrl?: string | null;
   rakeBps?: number | null;
+  extraData?: Record<string, any> | null;
 };
 
 export type MarketDetail = MarketSummary & {

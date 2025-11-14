@@ -17,6 +17,8 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | AI enrichment | Queue summary jobs whenever a market lacks a narrative and process them via `app.summary_worker`. |
 | Proof receipts | When enabled, call the `proover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
 
+> The default `proover` container included with this repo is a deterministic mock that hashes request payloads. Treat the emitted receipts as demo artifacts until you mount real proving/verifying keys generated from `proover/circuits/`.
+
 ---
 
 ## 2. Architecture Overview
@@ -196,7 +198,7 @@ uv run --project . --extra dev ruff check backend/worker
 | Signal | Implementation |
 | --- | --- |
 | Logging | `logging_config.setup_logging("reveal_market.worker")` emits `timestamp | LEVEL | logger | file:line | event | request_id`. Key events: `worker.fetch.*`, `worker.persist.*`, `worker.heartbeat.*`, `worker.cache.*`, `worker.schema.*`. Use `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES` to tune output. |
-| Metrics | `RETENTION_*`, `CACHE_INVALIDATION_COUNTER`, plus Prometheus counters exported by the API (worker updates hit those indirectly). If you need direct worker metrics, wrap the loop with `prometheus_client` exposition. |
+| Metrics | `RETENTION_*`, `CACHE_INVALIDATION_COUNTER`, `worker_polymarket_fetch_total`, `worker_polymarket_retry_total`, plus Prometheus counters exported by the API (worker updates hit those indirectly). If you need direct worker metrics, wrap the loop with `prometheus_client` exposition. |
 | Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency. API `/health` uses this to flag worker outages. |
 | Batch stats | Stored at `RM_BATCH_STATS_KEY` with TTL; use `redis-cli GET reveal_market_worker:batch_stats | jq` for quick diagnostics. |
 | Summary queue | `worker.summary.*` logs trace queue depth, requeue/dead-letter activity, and successful enrichments. |

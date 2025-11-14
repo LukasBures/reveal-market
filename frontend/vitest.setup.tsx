@@ -20,5 +20,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/image", () => ({
   __esModule: true,
-  default: (props: React.ComponentProps<"img">) => <img {...props} />,
+  default: ({ fill, priority, ...props }: React.ComponentProps<"img"> & { fill?: boolean; priority?: boolean }) => (
+    <img {...props} data-fill={fill ? "true" : undefined} data-priority={priority ? "true" : undefined} />
+  ),
 }));

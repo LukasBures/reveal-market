@@ -40,8 +40,9 @@
 - Prefer existing helpers (e.g., `shared/onchain/`, `lib/seo.ts`) over introducing new frameworks.
 - Maintain the unified logging format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
-- Frontend builds can run without the backend by exporting `NEXT_PUBLIC_API_MOCK=true` (or `RM_API_MOCK=true`). The mock dataset lives in `frontend/lib/api.ts`; document any changes to keep partner docs accurate.
+- Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
+- The bundled `proover` service is a deterministic mock that hashes request payloads for demo proofs. Mount real Groth16 proving/verifying keys (see `proover/circuits/`) before representing the stack as production-grade zk.
 
 ## Agent Notes
 
@@ -51,13 +52,15 @@
 - **Health checks** – `app/health.py` now delegates each dependency check (DB, Redis ping, worker heartbeat, Polymarket reachability) to helper functions so flake8 stays green. Keep that structure when adding new dependencies.
 - **Worker** – `backend/worker/app/main.py` pulls Polymarket feeds, writes markets/resolutions, emits Redis heartbeats, and can call `maybe_create_onchain_market`. `worker/app/healthcheck.py` verifies Postgres connectivity for Docker. Logs mirror the API format.
 - **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
-- **Polymarket client** – `backend/worker/app/polymarket.py` still lacks retries/backoff; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
+- **Polymarket client** – `backend/worker/app/polymarket.py` now captures loop variables safely, but still lacks robust retries/backoff for the entire sync; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
+- **Prover reality** – The `proover` container remains a deterministic mock. Treat proof receipts as demo artifacts until you generate real Groth16 keys and wire them into both the worker and Solidity verifier.
 
 ### Frontend (Next.js)
 - **SEO/AI readiness** – Metadata centralised in `lib/seo.ts`. Every docs/legal/about page imports `docsMetadata` so canonical URLs + keywords stay consistent. `app/sitemap.ts`/`app/robots.ts` update automatically.
-- **Security headers** – Configured in `next.config.mjs` (CSP, HSTS, Referrer/Permissions policies, COOP/CORP). Update the CSP when adding external assets.
-- **Testing** – Vitest + Testing Library cover hero CTA, DocsNav, MainNav, DocsLayout. Keep tests updated when components change.
-- **Live ops badge** – The homepage no longer surfaces worker heartbeats or sync badges; data freshness stays internal even though mock health helpers still exist in `lib/api.ts`.
+- **Security headers** – Configured in `next.config.mjs` (CSP, HSTS, Referrer/Permissions policies, COOP/CORP). GA/gtag origins are only allowed in production; update the CSP when adding external assets.
+- **Testing** – Vitest + Testing Library cover hero CTA, DocsNav, MainNav, DocsLayout, featured markets pagination, search suggestions, and market cards. Keep tests updated when components change.
+- **Data fetching** – `lib/api.ts` only fetches from FastAPI. Server actions (`app/actions/markets.ts`) power “Load more”, keeping cache tags intact. `/app/api/markets/suggest` proxies suggestions so client keystrokes never hit the backend twice.
+- **Live ops badge** – The homepage no longer surfaces worker heartbeats or sync badges; data freshness stays internal even though structured logs still emit `fetchFeaturedMarkets:*` events for observability.
 
 ### Contracts (Foundry)
 - `src/` houses RevealMarket, MarketFactory, RakeManager, Verifier. `test/` contains Forge suites (unit + fuzz). `run_local.sh full` builds/tests/gas-checks/fuzzes; CI runs this via GitHub Actions.
@@ -68,7 +71,7 @@
 - `.github/workflows/ci.yml` runs three jobs in parallel:
   - **backend**: setup Python 3.12 + uv, cache the uv resolver, run `./backend/run_tests.sh`.
   - **contracts**: install Foundry via `foundryup`, execute `./contracts/run_local.sh full`.
-  - **frontend**: setup Node 20, `npm install`, `npm run build` (ready for lint/test when expanded).
+  - **frontend**: setup Node 20, boot the Docker backend stack (Postgres/Redis/proover/api/worker), install deps, then run `npm run lint`, `npm run test`, and `npm run build` against the live API.
 - `.github/workflows/contracts-ci.yml` exists for legacy Forge-only runs; keep it unless instructed otherwise.
 
 ---

@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { MarketCard } from "@/components/markets/MarketCard";
 
 vi.mock("next/image", () => ({
-  default: ({ alt }: { alt?: string }) => <img alt={alt} />,
+  default: ({ alt, src }: { alt?: string; src?: string }) => (
+    <img alt={alt} src={typeof src === "string" ? src : undefined} data-testid="market-image" />
+  ),
 }));
 
 const baseMarket = {
@@ -23,15 +25,40 @@ describe("MarketCard", () => {
     render(<MarketCard market={{ ...baseMarket, imageUrl: "https://cdn.example/cover.jpg" }} />);
 
     expect(screen.getByRole("link", { name: /card coverage/i })).toHaveAttribute("href", "/markets/evt-card");
-    expect(screen.getByRole("img", { name: /artwork for card coverage/i })).toBeInTheDocument();
+    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.example/cover.jpg");
     expect(screen.getAllByText("72%").length).toBeGreaterThan(0);
     expect(screen.getByText("$125,000")).toBeInTheDocument();
   });
 
-  it("falls back gracefully when no image exists", () => {
+  it("falls back to placeholder when no image exists", () => {
     render(<MarketCard market={{ ...baseMarket, imageUrl: undefined }} />);
-    expect(screen.getByRole("link", { name: /card coverage/i })).toBeInTheDocument();
-    expect(screen.getByText("Yes")).toBeInTheDocument();
-    expect(screen.getByText("No")).toBeInTheDocument();
+    const img = screen.getByTestId("market-image");
+    expect(img.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+  });
+
+  it("uses extraData image_url when provided", () => {
+    render(
+      <MarketCard
+        market={{
+          ...baseMarket,
+          imageUrl: undefined,
+          extraData: { image_url: "https://cdn.example/extra.jpg" },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.example/extra.jpg");
+  });
+
+  it("falls back to gamma image metadata", () => {
+    render(
+      <MarketCard
+        market={{
+          ...baseMarket,
+          imageUrl: undefined,
+          extraData: { gamma: { image_url: "https://cdn.gamma/example.png" } },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.gamma/example.png");
   });
 });

@@ -7,6 +7,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 import httpx
@@ -119,6 +120,7 @@ class PolymarketClient:
         request_max_attempts: int = 1,
         request_backoff_seconds: float = 0.2,
         request_backoff_max_seconds: float | None = None,
+        retry_counter: Any | None = None,
     ) -> None:
         self.base_url = str(base_url).rstrip("/")
         self.timeout = timeout
@@ -129,6 +131,7 @@ class PolymarketClient:
             request_backoff_max_seconds if request_backoff_max_seconds and request_backoff_max_seconds > 0 else None
         )
         self._retryer = None
+        self._retry_counter = retry_counter
 
     def fetch_markets(  # noqa: C901
         self,
@@ -159,8 +162,9 @@ class PolymarketClient:
                     params.update({k: v for k, v in extra_params.items() if v is not None})
 
                 url = f"{self.base_url}/markets"
+                request_callable = partial(_request_page, client, url, params.copy())
                 try:
-                    response = self._send_with_retry(lambda url=url, params=params: _request_page(client, url, params))
+                    response = self._send_with_retry(request_callable)
                     payload = response.json()
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
@@ -189,9 +193,16 @@ class PolymarketClient:
 
     def _send_with_retry(self, action: Callable[[], httpx.Response]) -> httpx.Response:
         retryer = self._build_retryer()
-        if retryer is None:
-            return action()
-        return retryer(action)
+        try:
+            if retryer is None:
+                response = action()
+            else:
+                response = retryer(action)
+            self._record_retry_metric("success")
+            return response
+        except Exception:
+            self._record_retry_metric("failed")
+            raise
 
     def _build_retryer(self):
         if self._request_max_attempts <= 1:
@@ -209,6 +220,7 @@ class PolymarketClient:
 
         def _log_retry(retry_state):
             exc = retry_state.outcome.exception() if retry_state.outcome else None
+            self._record_retry_metric("retry")
             logger.warning(
                 "retrying polymarket request",
                 extra={
@@ -226,6 +238,15 @@ class PolymarketClient:
             reraise=True,
         )
         return self._retryer
+
+    def _record_retry_metric(self, outcome: str) -> None:
+        counter = self._retry_counter
+        if counter is None:
+            return
+        try:
+            counter.labels(outcome=outcome).inc()
+        except Exception:  # pragma: no cover - metrics failures should not break ingestion
+            logger.debug("failed to record polymarket retry metric", extra={"metric_outcome": outcome})
 
 
 def _request_page(client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { MarketFilters } from "@/components/markets/MarketFilters";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
+import { fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
 
 export const metadata: Metadata = buildMetadata({
   title: "Reveal Market | Live Prediction Markets",
@@ -21,13 +22,6 @@ export const metadata: Metadata = buildMetadata({
     "Reveal Market platform",
   ],
 });
-
-const callouts = [
-  { label: "Markets live", value: "120+" },
-  { label: "Protocols mirrored", value: "5+" },
-  { label: "Avg. settlement time", value: "< 30s" },
-  { label: "Audit-ready proofs", value: "Groth16" },
-];
 
 const featuredArticles = [
   {
@@ -52,6 +46,17 @@ type PageProps = {
 };
 
 export default async function HomePage({ searchParams }: PageProps) {
+  const [stats, kpis] = await Promise.all([fetchMarketStatsBreakdown(), fetchInvestorKpis()]);
+  const totalMarkets = stats.reduce((sum, stat) => sum + stat.count, 0);
+  const liveMarkets = stats
+    .filter((stat) => ["commit", "locked"].includes(stat.status))
+    .reduce((sum, stat) => sum + stat.count, 0);
+  const callouts = [
+    { label: "Markets live", value: liveMarkets > 0 ? liveMarkets.toLocaleString() : "—" },
+    { label: "Total markets tracked", value: totalMarkets > 0 ? totalMarkets.toLocaleString() : "—" },
+    { label: "Audit-ready proofs", value: "Groth16" },
+  ];
+
   const resolvedParams = (await searchParams) ?? {};
   const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
   const normalizedSearch = rawSearchQuery?.trim() ?? "";
@@ -63,7 +68,11 @@ export default async function HomePage({ searchParams }: PageProps) {
     <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
         <div className="flex flex-col gap-4">
-          <MarketFilters initialSearch={rawSearchQuery} />
+          <MarketFilters
+            initialSearch={rawSearchQuery}
+            liveMarketsCount={liveMarkets}
+            totalMarketsCount={totalMarkets}
+          />
         </div>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />

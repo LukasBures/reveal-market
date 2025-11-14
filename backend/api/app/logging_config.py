@@ -7,26 +7,19 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from shared.logging import get_request_id
-
-LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(filename)s:%(lineno)d | %(message)s"
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+from shared.logging import StructuredFormatter, get_request_id
 
 
 class RequestContextFilter(logging.Filter):
     """Attach request-scoped metadata to every log record."""
 
+    def __init__(self, service_name: str) -> None:
+        super().__init__()
+        self.service_name = service_name
+
     def filter(self, record: logging.LogRecord) -> bool:
-        request_id = getattr(record, "request_id", None) or get_request_id() or "-"
-        record.request_id = request_id
-
-        if getattr(record, "_request_appended", False):
-            return True
-
-        message = record.getMessage()
-        record.msg = f"{message} | request_id={request_id}"
-        record.args = None
-        record._request_appended = True
+        record.request_id = getattr(record, "request_id", None) or get_request_id() or "-"
+        record.service_name = getattr(record, "service_name", self.service_name)
         return True
 
 
@@ -39,8 +32,8 @@ def setup_logging(service_name: str) -> None:
     max_bytes = int(os.getenv("LOG_MAX_BYTES", "5000000"))
     backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
-    formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
-    context_filter = RequestContextFilter()
+    formatter = StructuredFormatter(service_name)
+    context_filter = RequestContextFilter(service_name)
 
     handlers: list[logging.Handler] = []
 

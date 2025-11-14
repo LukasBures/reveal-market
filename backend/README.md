@@ -11,6 +11,12 @@ The backend is the heartbeat of Reveal Market’s investable ecosystem. It trans
 
 Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
 
+> **Reality check**
+>
+> - The bundled `proover` service is still a deterministic mock. It hashes request payloads to emit “proofs” while we iterate on the Groth16 circuit. Swap in the real proving keys under `proover/circuits/` before claiming production-grade zk support.
+> - Worker ingestion targets Polymarket’s Gamma API; when the upstream dataset returns `image_url = null`, the frontend falls back to deterministic placeholders. Populate `extra_data.image_url` via the worker once you negotiate richer feeds.
+> - All environments, including local Docker, rely on the live backend—mock API toggles have been removed from the frontend.
+
 ## Proof Points For Stakeholders
 
 - **Deterministic data lineage** – Every market travels through an audited pipeline: upstream fetch → repository upsert → cache tagging → API exposure. The cycle produces traceable logs and metrics so diligence teams can replay any event.

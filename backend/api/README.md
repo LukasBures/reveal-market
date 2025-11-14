@@ -15,6 +15,8 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
 | AI narratives | Surfaces pre-generated `summary`/`summary_source`/`summary_model` fields produced by the enrichment worker so clients never call the LLM synchronously |
 
+> **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The default `proover` container is a deterministic mock; swap in real Groth16 keys once you are ready for production-grade proofs.
+
 ---
 
 ## 2. Architecture & Request Lifecycle

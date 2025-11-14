@@ -9,15 +9,14 @@ This directory hosts the marketing + investor documentation experience for Revea
 1. [Stack & Directory Map](#stack--directory-map)
 2. [Environment Variables](#environment-variables)
 3. [Getting Started](#getting-started)
-4. [Mock Data & Offline Workflow](#mock-data--offline-workflow)
-5. [Data Fetching & Caching](#data-fetching--caching)
-6. [Styling & Design System](#styling--design-system)
-7. [Responsive UX Guidelines](#responsive-ux-guidelines)
-8. [Testing & Quality Gates](#testing--quality-gates)
-9. [Performance & Speed Playbook](#performance--speed-playbook)
-10. [Logging & Docker Observability](#logging--docker-observability)
-11. [Deployment Checklist](#deployment-checklist)
-12. [Troubleshooting](#troubleshooting)
+4. [Data Fetching & Caching](#data-fetching--caching)
+5. [Styling & Design System](#styling--design-system)
+6. [Responsive UX Guidelines](#responsive-ux-guidelines)
+7. [Testing & Quality Gates](#testing--quality-gates)
+8. [Performance & Speed Playbook](#performance--speed-playbook)
+9. [Logging & Docker Observability](#logging--docker-observability)
+10. [Deployment Checklist](#deployment-checklist)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -47,8 +46,8 @@ Set these in `.env.local` (copy from `.env.example`):
 | Variable | Purpose |
 | -------- | ------- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
-| `NEXT_PUBLIC_API_BASE_URL` | Base URL for hitting the FastAPI backend. |
-| `NEXT_PUBLIC_API_MOCK` / `RM_API_MOCK` | When `true`, `lib/api.ts` returns seeded mock markets/stats for offline builds/tests. |
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (e.g., `http://localhost:8000` when running Docker locally). |
+| `RM_API_BASE_URL` | Internal base URL for server-side fetches. Defaults to `http://api:8000` inside Docker networks. |
 
 When deploying, ensure these values align with the CDN or reverse proxy domain so CSP/HSTS headers reference the correct origin.
 
@@ -72,36 +71,17 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 
 ---
 
-## Mock Data & Offline Workflow
-
-During SSG, the app fetches featured markets, stats, and health snapshots. To avoid backend dependencies:
-
-```bash
-export NEXT_PUBLIC_API_MOCK=true    # or RM_API_MOCK=true
-npm run build
-```
-
-With the mock flag set, `lib/api.ts`:
-
-- Returns seeded `MarketSummary`/`MarketDetail` objects (see `MOCK_MARKETS`).
-- Provides deterministic stats + health snapshots.
-- Keeps caching logic intact so components behave exactly as they would against the live API.
-
-`frontend/run_tests.sh` enables the mock env vars automatically, so CI/local test runs are hermetic.
-
-Unset the flag (or set to `false`) whenever you need real data.
-
----
-
 ## Data Fetching & Caching
 
-`lib/api.ts` centralizes all network access:
+`lib/api.ts` centralizes all network access. Every call hits the live FastAPI backend (no mock toggles remain in production):
 
 - `fetchFeaturedMarkets(limit, { category, searchQuery, offset })` – Hits `/markets` or `/categories/[slug]` and respects App Router cache tags (`markets:list`, `category:<slug>`). The homepage and category pages rely on this for SSG.
-- `useFeaturedMarkets({ limit, searchQuery, category, initialData })` – React Query hook that provides stale-while-revalidate behavior to `FeaturedMarketsClient` so search/category views update gently after hydration.
+- `loadFeaturedMarketsAction(limit, options)` – A server action used by `FeaturedMarketsClient` and other client entry points so “Load more” reuses the same fetcher/cache tags that SSR used.
+- `useFeaturedMarkets({ limit, searchQuery, category, initialData })` – React Query hook that wraps the server action and provides stale-while-revalidate behavior to client components.
 - `fetchMarketByEventId(eventId)` – Loads detail data and merges backend-provided metadata with Gamma-derived extras (`clob_pair_id`, `resolution_source`, etc.).
 - `fetchMarketStatsBreakdown()` / `fetchHealthSnapshot()` – Used for KPI cards, doc callouts, and investor narratives.
 - `fetchProofReceipts(limit, { offset })` – Backed by the `/proofs` API and used by `/proofs`’ infinite scroll client to keep the page lightweight.
+- `fetchMarketSuggestions(query, limit)` – Powers `/app/api/markets/suggest` so the global search dropdown hits a cached Next.js route instead of calling the backend twice per keystroke.
 
 Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast while still respecting backend invalidation tags that the worker publishes.
 
@@ -134,7 +114,7 @@ All major pages were tuned for mobile-first:
 
 - Navigation collapses into a “Menu” pill on phones (`MainNav`).
 - Hero + KPI sections center text and shrink paddings under `sm:` breakpoints.
-- `MarketGrid` switches to `xl:grid-cols-4` on desktops but stays two-up on tablets.
+- `MarketGrid` caps at three columns on desktops (`xl:grid-cols-3`) and stays two-up on tablets.
 - Tables (e.g., `MarketDetailOutcomes`) sit inside `overflow-x-auto` containers so they’re usable on narrow screens.
 
 If you introduce new components, test at these breakpoints:
@@ -152,7 +132,7 @@ If you introduce new components, test at these breakpoints:
 
 - **Unit/UI tests**: `npm run test`. Key suites:
   - `market-filters.test.tsx` – Search input, router interactions, suggestion fallback.
-  - `home-page.test.tsx` – Ensures hero + featured section render with mocked data.
+  - `home-page.test.tsx` – Ensures hero + featured sections render with deterministic fixtures.
   - `category-page.test.tsx` – Validates slug parsing and data fetch logic.
   - `market-detail-metadata.test.tsx` – Confirms metadata panel hydration + clipboard actions.
 - **Linting**: `npm run lint` follows the Next.js recommended config plus project-specific rules.
@@ -160,6 +140,7 @@ If you introduce new components, test at these breakpoints:
   1. `npm run lint`
   2. `npm run test`
   3. Manually inspect `/`, `/categories/politics`, `/markets/<eventId>` in responsive mode.
+  4. For CI parity run `./frontend/run_tests.sh`, which verifies the API at `NEXT_PUBLIC_API_BASE_URL` is reachable before linting/building.
 
 CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
@@ -169,9 +150,9 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 - **Critical-path bundle** – Large client panels (`DocsNav`, `MarketDetailMetadata`, `MarketDetailSidebar`, `/proofs`) ship via `next/dynamic` with lightweight skeletons so Core Web Vitals stay healthy even on mobile connections.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
-- **Image & grid density** – Market cards now use a 16:9 art ratio plus responsive `grid-cols-4/5` so more markets fit above the fold on desktop without sacrificing tap targets on mobile.
+- **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Mock-friendly builds** – `frontend/run_tests.sh` forces the mock dataset, so `next build` and Vitest never stall on a missing backend. Set `NEXT_PUBLIC_API_MOCK=false` when you want to profile against real endpoints.
+- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the Dockerized API is reachable at `NEXT_PUBLIC_API_BASE_URL`. Keep `docker compose up` running locally (or point the env var at a staging host) before invoking the script.
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ---
@@ -205,7 +186,7 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | Set `NEXT_PUBLIC_API_MOCK=true`, or ensure the FastAPI service is reachable from your environment. |
+| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis proover api worker`) so the API answers at `NEXT_PUBLIC_API_BASE_URL` before running `npm run build`. |
 | CSP violations in dev | Update `next.config.mjs` to include any new external domains (fonts, analytics, etc.). |
 | Scroll layouts jitter on mobile | Confirm `body` retains `scrollbar-gutter` and that new sections don’t override `overflow`. |
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |

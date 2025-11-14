@@ -1,4 +1,5 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'https://api.revealmarket.xyz';
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const GA_ORIGINS = [
   "https://www.googletagmanager.com",
@@ -6,17 +7,24 @@ const GA_ORIGINS = [
   "https://region1.google-analytics.com",
 ];
 
+const scriptSrc = ["'self'", "'unsafe-inline'"];
+const connectSrc = ["'self'", API_BASE];
+if (IS_PRODUCTION) {
+  scriptSrc.push(...GA_ORIGINS);
+  connectSrc.push(...GA_ORIGINS);
+}
+
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline' ${GA_ORIGINS.join(" ")}`,
+  `script-src ${scriptSrc.join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  `connect-src 'self' ${API_BASE} ${GA_ORIGINS.join(" ")}`,
+  `connect-src ${connectSrc.join(" ")}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
-].join('; ');
+].join("; ");
 
 const securityHeaders = [
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
@@ -39,6 +47,7 @@ const nextConfig = {
       { protocol: 'https', hostname: 'images.revealmarket.xyz' },
       { protocol: 'https', hostname: 'cdn.revealmarket.xyz' },
       { protocol: 'https', hostname: '*.polymarket.com' },
+      { protocol: 'https', hostname: 'polymarket-upload.s3.us-east-2.amazonaws.com' },
       { protocol: 'https', hostname: '*.cloudfront.net' },
     ],
   },

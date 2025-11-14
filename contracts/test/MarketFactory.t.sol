@@ -306,6 +306,17 @@ contract MarketFactoryTest is Test {
         assertEq(markets[1], address(second));
     }
 
+    function testSetGuardianUpdatesAndRejectsZero() public {
+        vm.expectRevert(MarketFactory.ZeroAddress.selector);
+        factory.setGuardian(address(0));
+
+        address newGuardian = address(0xBEEF);
+        vm.expectEmit(true, false, false, false);
+        emit MarketFactory.GuardianUpdated(newGuardian);
+        factory.setGuardian(newGuardian);
+        assertEq(factory.guardian(), newGuardian);
+    }
+
     // -----------------------------------------------------------------------
     // GLOBAL PAUSES
     // -----------------------------------------------------------------------

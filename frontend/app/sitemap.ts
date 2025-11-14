@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { DEFAULT_API_BASE, getMockMarkets } from "@/lib/api";
+import { DEFAULT_API_BASE } from "@/lib/api";
 import { categorySlugs } from "@/lib/slugs";
 
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
@@ -59,7 +59,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     );
   };
 
-  let dynamicEntriesAdded = false;
   try {
     const response = await fetch(`${DEFAULT_API_BASE}/markets?limit=200`, {
       next: { revalidate: 60 * 30 },
@@ -68,16 +67,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       const payload = await response.json();
       const markets = Array.isArray(payload) ? payload : payload?.items ?? [];
       pushMarketEntries(markets);
-      dynamicEntriesAdded = markets.length > 0;
     } else {
       console.warn("Sitemap markets fetch returned non-200", response.status);
     }
   } catch (error) {
-    console.warn("Failed to build dynamic sitemap entries, falling back to mock data", error);
-  }
-
-  if (!dynamicEntriesAdded) {
-    pushMarketEntries(getMockMarkets());
+    console.warn("Failed to build dynamic sitemap entries", error);
   }
 
   return entries;

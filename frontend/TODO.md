@@ -33,9 +33,6 @@ The web experience is our public pitch deck. Every sprint should reinforce why R
 - **Interactive metrics hub**
   Build a dashboard that consumes `/markets/stats` plus curated worker metrics to visualize liquidity depth, settlement speed, and fee capture. Allow CSV/PDF export so funds can drop data into diligence memos.
 
-- **Mocked data controls**
-  Document and expose the new mock API toggle (`NEXT_PUBLIC_API_MOCK`) inside developer docs/settings UI so partner teams can run the app without the backend. Right now this knowledge only lives in code comments.
-
 - **Deal-flow CTAs**
   Add modular lead forms (Strategic Investment, Liquidity Partnership, Exchange Integration) with CRM hooks. Highlight expected response times and confidentiality statements.
 

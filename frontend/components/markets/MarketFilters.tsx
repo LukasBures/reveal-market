@@ -5,7 +5,6 @@ import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MarketSummary } from "@/lib/api-types";
-import { fetchMarketsViaProxy } from "@/lib/marketProxy";
 import { categorySlugFromLabel } from "@/lib/slugs";
 
 const categories = [
@@ -20,11 +19,13 @@ const categories = [
 
 type Props = {
   initialSearch?: string;
+  liveMarketsCount?: number;
+  totalMarketsCount?: number;
 };
 
 const windowSuggestionCache = new Map<string, MarketSummary[]>();
 
-export function MarketFilters({ initialSearch }: Props) {
+export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCount }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const [search, setSearch] = useState(initialSearch ?? "");
@@ -37,6 +38,20 @@ export function MarketFilters({ initialSearch }: Props) {
   const fetchAbortRef = useRef<AbortController | null>(null);
   const hideTimeout = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const heroStats = useMemo(
+    () => [
+      {
+        label: "Live markets",
+        value: typeof liveMarketsCount === "number" && liveMarketsCount > 0 ? liveMarketsCount.toLocaleString() : "—",
+      },
+      {
+        label: "Total markets tracked",
+        value:
+          typeof totalMarketsCount === "number" && totalMarketsCount > 0 ? totalMarketsCount.toLocaleString() : "—",
+      },
+    ],
+    [liveMarketsCount, totalMarketsCount],
+  );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -68,10 +83,10 @@ export function MarketFilters({ initialSearch }: Props) {
       setHighlightedIndex(-1);
       return;
     }
-    const controller = new AbortController();
-    fetchAbortRef.current = controller;
     const cacheKey = `${trimmed.toLowerCase()}|5`;
     const cache = windowSuggestionCache;
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     const debounce = setTimeout(async () => {
       try {
         setLoadingSuggestions(true);
@@ -79,15 +94,25 @@ export function MarketFilters({ initialSearch }: Props) {
           const cached = cache.get(cacheKey)!;
           setSuggestions(cached);
           setHighlightedIndex(cached.length ? 0 : -1);
-          setSuggestionsVisible(true);
           return;
         }
 
-        const results = await fetchMarketsViaProxy(5, { searchQuery: trimmed });
+        const params = new URLSearchParams();
+        params.set("limit", "5");
+        params.set("q", trimmed);
+        const response = await fetch(`/api/markets/suggest?${params.toString()}`, {
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        if (!response.ok) {
+          throw new Error(`suggestions failed (${response.status})`);
+        }
+        const results = (await response.json()) as MarketSummary[];
         cache.set(cacheKey, results);
         setSuggestions(results);
         setHighlightedIndex(results.length ? 0 : -1);
-        setSuggestionsVisible(true);
       } catch (error) {
         if ((error as Error).name !== "AbortError") {
           console.error("Failed to fetch suggestions", error);
@@ -160,6 +185,11 @@ export function MarketFilters({ initialSearch }: Props) {
     });
   }, [router]);
 
+  useEffect(() => {
+    const trimmed = deferredSearch.trim();
+    setSuggestionsVisible(trimmed.length >= 2 && (loadingSuggestions || suggestions.length > 0));
+  }, [suggestions, deferredSearch, loadingSuggestions]);
+
   return (
     <section className="glass-panel relative overflow-hidden px-4 py-8 shadow-2xl shadow-black/40 sm:px-6 md:px-10">
       <div className="pointer-events-none absolute -top-24 right-0 h-64 w-64 rounded-full bg-brand-400/20 blur-3xl" />
@@ -173,13 +203,12 @@ export function MarketFilters({ initialSearch }: Props) {
               Search instantly or jump straight into a category.
             </p>
           </div>
-          <div className="flex flex-wrap justify-center gap-4 text-xs uppercase tracking-[0.4em] text-slate-500 lg:justify-start">
-            <span className="text-white/80">
-              ≈ <strong className="text-white">120</strong> live markets
-            </span>
-            <span className="text-white/80">
-              SLA <strong className="text-white">30s</strong> settlement
-            </span>
+          <div className="flex flex-wrap justify-center gap-4 text-xs uppercase tracking-[0.35em] text-slate-500 lg:justify-start">
+            {heroStats.map((stat) => (
+              <span key={stat.label} className="text-white/80">
+                {stat.label}: <strong className="text-white">{stat.value}</strong>
+              </span>
+            ))}
           </div>
         </div>
         <form onSubmit={handleSubmit} aria-label="Search markets" className="relative w-full max-w-xl">
@@ -275,7 +304,7 @@ export function MarketFilters({ initialSearch }: Props) {
               prefetch
               className="group rounded-full border border-white/10 bg-slate-900/30 px-4 py-2 text-sm text-slate-100 transition hover:border-brand-400/60 hover:text-white"
             >
-              <span className="text-xs uppercase tracking-[0.4em] text-slate-400">#{slug}</span>
+              <span className="text-xs uppercase tracking-[0.4em] text-slate-400">{category}</span>
             </Link>
           );
         })}

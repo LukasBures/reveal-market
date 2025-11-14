@@ -7,7 +7,8 @@ import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
-import { fetchMarketsViaProxy } from "@/lib/marketProxy";
+import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import { categorySlugFromLabel } from "@/lib/slugs";
 
 const AUTO_LOAD_BATCHES = 3;
 
@@ -35,13 +36,16 @@ export function FeaturedMarketsClient({
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const hasAppendedRef = useRef(false);
 
+  const DEFAULT_BATCH = 20;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}`;
+
+  const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
   const { data: refreshedMarkets } = useFeaturedMarkets({
     limit: pageSize,
     searchQuery,
-    category: categoryFilter,
+    category: normalizedCategory,
     initialData: initialMarkets,
   });
 
@@ -57,18 +61,18 @@ export function FeaturedMarketsClient({
       return;
     }
     setMarkets(refreshedMarkets);
-    setHasMore(refreshedMarkets.length >= pageSize);
-  }, [refreshedMarkets, pageSize]);
+    setHasMore(true);
+  }, [refreshedMarkets]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
-      const nextLimit = Math.min(pageSize, remainingSlots);
-      if (!hasMore || isPending || nextLimit <= 0) return;
+      if (!hasMore || isPending || remainingSlots <= 0) return;
+      const nextLimit = DEFAULT_BATCH;
       startTransition(async () => {
         try {
-          const additions = await fetchMarketsViaProxy(nextLimit, {
+          const additions = await loadFeaturedMarketsAction(nextLimit, {
             searchQuery,
-            category: categoryFilter,
+            category: normalizedCategory,
             offset: markets.length,
           });
           if (additions.length === 0) {
@@ -82,15 +86,17 @@ export function FeaturedMarketsClient({
             seen.add(item.eventId);
             filtered.push(item);
           }
-          const merged = [...markets, ...filtered];
+          const allowed = Math.max(0, maxItems - markets.length);
+          const nextItems = allowed > 0 ? filtered.slice(0, allowed) : [];
+          const merged = [...markets, ...nextItems];
           const computedHasMore =
-            merged.length < maxItems && filtered.length > 0 && additions.length === nextLimit;
+            merged.length < maxItems && nextItems.length > 0 && additions.length === nextLimit;
           setMarkets(merged);
           setHasMore(computedHasMore);
-          if (mode === "auto" && filtered.length > 0) {
+          if (mode === "auto" && nextItems.length > 0) {
             setAutoLoadCount((count) => count + 1);
           }
-          if (filtered.length > 0) {
+          if (nextItems.length > 0) {
             hasAppendedRef.current = true;
           }
         } catch (error) {
@@ -99,7 +105,7 @@ export function FeaturedMarketsClient({
         }
       });
     },
-    [categoryFilter, hasMore, isPending, markets, maxItems, pageSize, remainingSlots, searchQuery],
+    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;

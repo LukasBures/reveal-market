@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextvars import ContextVar, Token
+from datetime import datetime
 from threading import Event, Thread
 
 _LOG_RECORD_RESERVED = {
@@ -83,6 +85,32 @@ def log_event(
     extra_fields = {key: value for key, value in structured_fields.items() if key not in _LOG_RECORD_RESERVED}
     extra_fields["event"] = event
     logger.log(level, f"[{event}] {message}{suffix}", extra=extra_fields)
+
+
+class StructuredFormatter(logging.Formatter):
+    """Formatter that emits unified log lines."""
+
+    def __init__(self, service_name: str):
+        super().__init__()
+        self.service_name = service_name
+
+    def format(self, record: logging.LogRecord) -> str:
+        timestamp = datetime.utcnow().isoformat()
+        level = record.levelname.upper()
+        event = getattr(record, "event", record.getMessage() or "log")
+        payload: dict[str, object] = {}
+        for key, value in record.__dict__.items():
+            if key in _LOG_RECORD_RESERVED:
+                continue
+            payload[key] = value
+        if "message" not in payload and record.getMessage():
+            payload["message"] = record.getMessage()
+        if "request_id" not in payload and hasattr(record, "request_id"):
+            payload["request_id"] = record.request_id
+        if not payload:
+            payload = {"message": record.getMessage() or ""}
+        serialized = json.dumps(payload, default=str)
+        return f"{timestamp} | {level} | {self.service_name} | {event} | {serialized}"
 
 
 def start_heartbeat_logger(

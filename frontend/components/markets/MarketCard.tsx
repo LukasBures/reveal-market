@@ -21,40 +21,67 @@ function formatLiquidity(value?: number | null): string {
   return currencyFormatter.format(value);
 }
 
+const FALLBACK_COLORS: Record<string, string> = {
+  politics: "#1d2c9f",
+  sports: "#0c1346",
+  finance: "#2a3ed1",
+  crypto: "#3b5cff",
+  geopolitics: "#6a8bff",
+  "ai & tech": "#0f172a",
+  trending: "#4c1d95",
+};
+
+const buildPlaceholderDataUrl = (label: string) => {
+  const base = label.trim().charAt(0).toUpperCase() || "?";
+  const background = FALLBACK_COLORS[label.toLowerCase()] ?? "#0f172a";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="12" fill="${background}"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Manrope, Arial" font-size="28" fill="#ffffff">${base}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+};
+
 export function MarketCard({ market }: Props) {
   const yesProbability = formatProbability(market.outcomePrices);
   const outcomes = market.outcomes ?? [];
-  const coverImage = market.imageUrl;
+  const categoryLabel = market.category ?? "General";
+  const extraImage =
+    market.extraData && typeof market.extraData === "object"
+      ? (market.extraData as Record<string, any>).image_url ??
+        (market.extraData as Record<string, any>).imageUrl ??
+        (market.extraData as Record<string, any>).gamma?.image_url ??
+        (market.extraData as Record<string, any>).gamma?.imageUrl ??
+        (market.extraData as Record<string, any>).gamma?.cover_image ??
+        (market.extraData as Record<string, any>).gamma?.coverImage
+      : null;
+  const coverImage = market.imageUrl ?? extraImage ?? buildPlaceholderDataUrl(categoryLabel);
 
   return (
     <Link
       href={`/markets/${market.eventId}`}
       className="group relative flex h-full flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-xl shadow-black/30 transition duration-200 hover:-translate-y-1 hover:border-brand-400/60 hover:bg-white/10"
     >
-      <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-white/5">
-        {coverImage ? (
-          <Image
-            src={coverImage}
-            alt={`Artwork for ${market.title}`}
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 25vw"
-            className="object-cover transition duration-500 group-hover:scale-105"
-            priority={false}
-            loading="lazy"
-          />
-        ) : (
-          <div className="h-full w-full bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950" aria-hidden="true" />
-        )}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-        <span className="absolute left-4 top-4 rounded-full bg-white/10 px-3 py-1 text-xs uppercase tracking-[0.3em] text-white/80">
-          {market.category ?? "General"}
-        </span>
+      <div className="flex items-center gap-4">
+        <div className="relative h-16 w-16 overflow-hidden rounded-xl border border-white/10 bg-slate-800/60">
+          {coverImage ? (
+            <Image
+              src={coverImage}
+              alt={`Artwork for ${market.title}`}
+              fill
+              sizes="64px"
+              className="object-cover"
+              priority={false}
+              loading="lazy"
+            />
+          ) : (
+            <div className="h-full w-full bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950" aria-hidden="true" />
+          )}
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{market.category ?? "General"}</p>
+          <h3 className="mt-1 text-lg font-semibold text-white">{market.title}</h3>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+            {market.commitDeadline ? new Date(market.commitDeadline).toLocaleDateString() : "Commit window"}
+          </p>
+        </div>
       </div>
-      <div className="flex items-center justify-between text-[0.65rem] uppercase tracking-[0.35em] text-slate-500">
-        <span>{market.status ?? "active"}</span>
-        <span>{market.commitDeadline ? new Date(market.commitDeadline).toLocaleDateString() : "Commit window"}</span>
-      </div>
-      <h3 className="text-lg font-semibold text-white">{market.title}</h3>
       <div className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-2 text-sm">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>

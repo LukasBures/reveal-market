@@ -13,13 +13,13 @@ fi
 
 cd "${PROJECT_DIR}"
 
-# When developing locally we rarely have the API running, so default to the mock
-# dataset unless the caller already exported either mock flag.
-if [[ "${NEXT_PUBLIC_API_MOCK:-}" != "true" && "${RM_API_MOCK:-}" != "true" ]]; then
-  echo "NOTE: NEXT_PUBLIC_API_MOCK/RM_API_MOCK not set; defaulting to mock API for build."
-  export NEXT_PUBLIC_API_MOCK=true
-  export RM_API_MOCK=true
+# Require the backend API to be reachable so SSR/SSG calls succeed.
+API_BASE="${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}"
+if ! curl -fsS "${API_BASE%/}/health" >/dev/null 2>&1; then
+  echo "Frontend requires the API at ${API_BASE}; make sure the backend stack is running." >&2
+  exit 1
 fi
+export RM_API_BASE_URL="${RM_API_BASE_URL:-${API_BASE}}"
 
 # Run lint before build to fail fast on lint errors. Build runs `next build`,
 # which also validates types and static props.

@@ -45,6 +45,14 @@ var (
 	listenAddr       = getenv("PROVER_LISTEN_ADDR", "0.0.0.0:8085")
 )
 
+func logLine(level, event string, fields map[string]any) {
+	if fields == nil {
+		fields = make(map[string]any)
+	}
+	payload, _ := json.Marshal(fields)
+	log.Printf("%s | %s | proover | %s | %s", time.Now().UTC().Format(time.RFC3339), strings.ToUpper(level), event, payload)
+}
+
 func main() {
 	lastHeartbeat.Store(time.Now())
 	go heartbeatLoop()
@@ -53,9 +61,13 @@ func main() {
 	http.HandleFunc("/heartbeat", heartbeatHandler)
 	http.HandleFunc("/api/v1/proofs/settlement", proofHandler)
 
-	log.Printf("proover listening on %s (version=%s)", listenAddr, proverVersion)
+	logLine("info", "proover.start", map[string]any{
+		"listenAddr": listenAddr,
+		"version":    proverVersion,
+	})
 	if err := http.ListenAndServe(listenAddr, nil); err != nil {
-		log.Fatalf("proover failed: %v", err)
+		logLine("error", "proover.shutdown", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 }
 
@@ -65,7 +77,9 @@ func heartbeatLoop() {
 	for range ticker.C {
 		now := time.Now()
 		lastHeartbeat.Store(now)
-		log.Printf("proover heartbeat at %s", now.Format(time.RFC3339))
+		logLine("info", "proover.heartbeat", map[string]any{
+			"heartbeat_at": now.Format(time.RFC3339),
+		})
 	}
 }
 
@@ -174,7 +188,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		logLine("error", "proover.encode_failed", map[string]any{"error": err.Error()})
 	}
 }
 
@@ -192,7 +206,7 @@ func intEnv(key string, fallback int) int {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil {
-		log.Printf("invalid %s=%s, using default %d", key, value, fallback)
+		logLine("warn", "proover.invalid_env", map[string]any{"key": key, "value": value, "fallback": fallback})
 		return fallback
 	}
 	if n <= 0 {
