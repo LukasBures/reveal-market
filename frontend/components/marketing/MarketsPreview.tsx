@@ -3,7 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { fetchFeaturedMarkets, type MarketSummary } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
+import { fetchMarketsViaProxy } from "@/lib/marketProxy";
 
 type Props = {
   initialMarkets: MarketSummary[];
@@ -12,7 +13,7 @@ type Props = {
 export function MarketsPreviewClient({ initialMarkets }: Props) {
   const { data, refetch, isFetching } = useQuery({
     queryKey: ["markets", "preview"],
-    queryFn: () => fetchFeaturedMarkets(6),
+    queryFn: () => fetchMarketsViaProxy(6),
     initialData: initialMarkets,
     refetchInterval: 30_000,
   });

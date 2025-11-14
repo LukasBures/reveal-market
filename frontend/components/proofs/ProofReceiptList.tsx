@@ -1,4 +1,4 @@
-import type { ProofReceipt } from "@/lib/api";
+import type { ProofReceipt } from "@/lib/api-types";
 
 type Props = {
   receipts: ProofReceipt[];

@@ -1,4 +1,4 @@
-import type { MarketSummary } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -41,7 +41,6 @@ export function MarketCard({ market }: Props) {
             className="object-cover transition duration-500 group-hover:scale-105"
             priority={false}
             loading="lazy"
-            unoptimized
           />
         ) : (
           <div className="h-full w-full bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950" aria-hidden="true" />

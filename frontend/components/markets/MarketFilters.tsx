@@ -4,7 +4,8 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { MarketSummary } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
+import { fetchMarketsViaProxy } from "@/lib/marketProxy";
 import { categorySlugFromLabel } from "@/lib/slugs";
 
 const categories = [
@@ -20,6 +21,8 @@ const categories = [
 type Props = {
   initialSearch?: string;
 };
+
+const windowSuggestionCache = new Map<string, MarketSummary[]>();
 
 export function MarketFilters({ initialSearch }: Props) {
   const router = useRouter();
@@ -67,65 +70,23 @@ export function MarketFilters({ initialSearch }: Props) {
     }
     const controller = new AbortController();
     fetchAbortRef.current = controller;
+    const cacheKey = `${trimmed.toLowerCase()}|5`;
+    const cache = windowSuggestionCache;
     const debounce = setTimeout(async () => {
       try {
         setLoadingSuggestions(true);
-        const response = await fetch(`/markets/suggest?q=${encodeURIComponent(trimmed)}&limit=5`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          setSuggestions([]);
+        if (cache.has(cacheKey)) {
+          const cached = cache.get(cacheKey)!;
+          setSuggestions(cached);
+          setHighlightedIndex(cached.length ? 0 : -1);
+          setSuggestionsVisible(true);
           return;
         }
-        const payload = await response.json();
-        const mapToSummary = (item: any): MarketSummary => ({
-          eventId: item.event_id ?? item.eventId ?? "unknown",
-          title: item.title ?? "Untitled market",
-          category: item.category ?? item.tags?.[0] ?? "General",
-          tags: item.tags ?? [],
-          status: item.status ?? undefined,
-          commitDeadline: item.commit_deadline ?? item.commitDeadline ?? undefined,
-          revealDeadline: item.reveal_deadline ?? item.revealDeadline ?? undefined,
-          liquidityUsd: item.extra_data?.liquidityUsd ?? item.liquidity_usd,
-          outcomes: item.outcomes ?? [],
-          outcomePrices: item.outcome_prices ?? [],
-          imageUrl: item.image_url ?? null,
-        });
-        const dedupeSummaries = (items: MarketSummary[]) => {
-          const seen = new Set<string>();
-          return items.filter((entry) => {
-            if (!entry.eventId || seen.has(entry.eventId)) {
-              return false;
-            }
-            seen.add(entry.eventId);
-            return true;
-          });
-        };
 
-        let deduped: MarketSummary[] = [];
-        if (Array.isArray(payload)) {
-          deduped = dedupeSummaries(payload.map(mapToSummary));
-        }
-
-        if (!deduped.length) {
-          const fallbackResponse = await fetch(
-            `/markets?limit=5&search=${encodeURIComponent(trimmed)}`,
-            { signal: controller.signal, cache: "no-store" },
-          );
-          if (fallbackResponse.ok) {
-            const fallbackPayload = await fallbackResponse.json();
-            const list = Array.isArray(fallbackPayload)
-              ? fallbackPayload
-              : Array.isArray(fallbackPayload?.items)
-                ? fallbackPayload.items
-                : [];
-            deduped = dedupeSummaries(list.map(mapToSummary));
-          }
-        }
-
-        setSuggestions(deduped);
-        setHighlightedIndex(deduped.length ? 0 : -1);
+        const results = await fetchMarketsViaProxy(5, { searchQuery: trimmed });
+        cache.set(cacheKey, results);
+        setSuggestions(results);
+        setHighlightedIndex(results.length ? 0 : -1);
         setSuggestionsVisible(true);
       } catch (error) {
         if ((error as Error).name !== "AbortError") {
@@ -315,7 +276,6 @@ export function MarketFilters({ initialSearch }: Props) {
               className="group rounded-full border border-white/10 bg-slate-900/30 px-4 py-2 text-sm text-slate-100 transition hover:border-brand-400/60 hover:text-white"
             >
               <span className="text-xs uppercase tracking-[0.4em] text-slate-400">#{slug}</span>
-              <span className="ml-2 font-semibold">{category}</span>
             </Link>
           );
         })}

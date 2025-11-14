@@ -116,11 +116,16 @@ services:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
+      args:
+        RM_API_BASE_URL: http://api:8000
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        RUNNING_IN_DOCKER: "true"
     restart: unless-stopped
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       RM_API_BASE_URL: http://api:8000
+      RUNNING_IN_DOCKER: "true"
       DOCS_HOST: docs.revealmarket.xyz
     depends_on:
       api:

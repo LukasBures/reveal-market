@@ -1,16 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProofsClient } from "@/components/proofs/ProofsClient";
-import type { ProofReceipt } from "@/lib/api";
-import { fetchProofReceipts } from "@/lib/api";
-
-vi.mock("@/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return {
-    ...actual,
-    fetchProofReceipts: vi.fn(),
-  };
-});
+import type { ProofReceipt } from "@/lib/api-types";
 
 const baseReceipt: ProofReceipt = {
   proofNonce: "0xabc",
@@ -27,10 +19,10 @@ const baseReceipt: ProofReceipt = {
 };
 
 describe("ProofsClient", () => {
-  const mockFetch = vi.mocked(fetchProofReceipts);
-
+  let fetchMock: Mock;
   beforeEach(() => {
-    mockFetch.mockReset();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     class NoopIntersectionObserver {
       constructor() {}
       observe() {}
@@ -44,7 +36,8 @@ describe("ProofsClient", () => {
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    delete (globalThis as any).IntersectionObserver;
   });
 
   it("renders provided receipts and the manual pagination control", () => {
@@ -61,20 +54,26 @@ describe("ProofsClient", () => {
       marketAddress: "0xAnother",
       transactionHash: "0xNewTx",
     };
-    mockFetch.mockResolvedValueOnce([nextReceipt]);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [nextReceipt],
+    });
 
     render(<ProofsClient initialReceipts={[baseReceipt]} pageSize={1} />);
 
     fireEvent.click(screen.getByRole("button", { name: /load more receipts/i }));
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(1, { offset: 1 });
+      expect(fetchMock).toHaveBeenCalledWith("/api/proofs?limit=1&offset=1", { cache: "no-store" });
       expect(screen.getByText(/0xdef/i)).toBeInTheDocument();
     });
   });
 
   it("stops paginating when the API returns no additional data", async () => {
-    mockFetch.mockResolvedValueOnce([]);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    });
 
     render(<ProofsClient initialReceipts={[baseReceipt]} pageSize={1} />);
 

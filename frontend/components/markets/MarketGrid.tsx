@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { MarketSummary } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
 import { MarketCard } from "./MarketCard";
 
 type Props = {

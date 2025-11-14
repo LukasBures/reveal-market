@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
-import type { MarketDetail } from "@/lib/api";
+import type { MarketDetail } from "@/lib/api-types";
 
 const baseDetail: MarketDetail = {
   eventId: "evt-detail",

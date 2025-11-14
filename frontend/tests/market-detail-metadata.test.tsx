@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
 import { MarketDetailMetadata } from "@/components/markets/MarketDetailMetadata";
-import type { MarketDetail } from "@/lib/api";
+import type { MarketDetail } from "@/lib/api-types";
 
 const baseMarket: MarketDetail = {
   eventId: "evt-1",

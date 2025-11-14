@@ -105,6 +105,10 @@ pyvenv.cfg
 .venv
 pip-selfcheck.json
 
+# Allow frontend shared code
+!frontend/lib/
+!frontend/lib/**
+
 ### Solidity template
 # Logs
 logs

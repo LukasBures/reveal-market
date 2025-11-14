@@ -6,10 +6,11 @@ import Script from "next/script";
 import "./globals.css";
 
 import { AppProviders } from "@/components/providers/AppProviders";
+import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
 import { absoluteUrl } from "@/lib/seo";
-import { ensureHeartbeat, logger } from "@/lib/logging";
+import { logger } from "@/lib/logging";
 
 const font = Manrope({
   subsets: ["latin"],
@@ -17,6 +18,7 @@ const font = Manrope({
 });
 
 const SITE_URL = absoluteUrl("/");
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ??
   process.env.RM_API_BASE_URL ??
@@ -100,7 +102,6 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
-  ensureHeartbeat();
   logger.info("Rendering RootLayout", {
     route: "app/layout",
     nodeEnv: process.env.NODE_ENV,
@@ -114,24 +115,29 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="bg-[#030712] text-white antialiased">
         <AppProviders>
+          <HeartbeatClient />
           <div className="flex min-h-screen flex-col">
             <MainNav />
             <main className="flex-1">{children}</main>
             <Footer />
           </div>
         </AppProviders>
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-MXPV8T1V5K"
-          strategy="afterInteractive"
-        />
-        <Script id="gtag-init" strategy="afterInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-MXPV8T1V5K');
-          `}
-        </Script>
+        {IS_PRODUCTION ? (
+          <>
+            <Script
+              src="https://www.googletagmanager.com/gtag/js?id=G-MXPV8T1V5K"
+              strategy="afterInteractive"
+            />
+            <Script id="gtag-init" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', 'G-MXPV8T1V5K');
+              `}
+            </Script>
+          </>
+        ) : null}
         <script
           type="application/ld+json"
           suppressHydrationWarning

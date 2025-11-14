@@ -9,9 +9,11 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 ARG RM_API_BASE_URL=http://api:8000
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ARG RUNNING_IN_DOCKER=false
 ENV NODE_ENV=production \
     RM_API_BASE_URL=${RM_API_BASE_URL} \
     NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
+    RUNNING_IN_DOCKER=${RUNNING_IN_DOCKER} \
     NEXT_TELEMETRY_DISABLED=1
 # Reuse node_modules from deps stage so builds never reinstall packages twice.
 COPY --from=deps /app/node_modules ./node_modules
@@ -21,11 +23,13 @@ COPY ./frontend ./
 RUN npm run build && rm -rf .next/cache
 
 FROM node:20-alpine AS runner
+ARG RUNNING_IN_DOCKER=false
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    RUNNING_IN_DOCKER=${RUNNING_IN_DOCKER}
 
 # Copy only what the standalone server needs: the server bundle itself and the
 # compiled assets. No node_modules are required at runtime because the

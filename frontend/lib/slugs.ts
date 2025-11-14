@@ -1,0 +1,34 @@
+const CATEGORY_MAP: Record<string, string> = {
+  trending: "Trending",
+  politics: "Politics",
+  sports: "Sports",
+  finance: "Finance",
+  crypto: "Crypto",
+  geopolitics: "Geopolitics",
+  "ai-tech": "AI & Tech",
+};
+
+export const categoryLabels = Object.values(CATEGORY_MAP);
+export const categorySlugs = Object.keys(CATEGORY_MAP);
+
+export function slugify(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export function parseCategorySlug(input: string): { slug: string; label: string } | null {
+  const slug = slugify(input);
+  const label = CATEGORY_MAP[slug];
+  if (!label) {
+    return null;
+  }
+  return { slug, label };
+}
+
+export function categorySlugFromLabel(label: string): string | null {
+  const slug = slugify(label);
+  return CATEGORY_MAP[slug] ? slug : null;
+}
+
+export function categoryLabelFromSlug(slug: string): string | null {
+  return CATEGORY_MAP[slug] ?? null;
+}

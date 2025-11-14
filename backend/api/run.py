@@ -10,7 +10,9 @@ def main() -> None:
     if mode == "dev":
         os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
-    host_default = "127.0.0.1" if mode == "dev" else "0.0.0.0"
+    # Bind to 0.0.0.0 in containers so health checks can reach the API; safe because
+    # Docker publishes explicit ports.
+    host_default = "127.0.0.1" if mode == "dev" else "0.0.0.0"  # noqa: S104
     host = os.getenv("HOST") or host_default
     port = int(os.getenv("PORT", "8000"))
     workers = int(os.getenv("APP_WORKERS", "2"))

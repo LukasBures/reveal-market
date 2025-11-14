@@ -160,7 +160,7 @@ class PolymarketClient:
 
                 url = f"{self.base_url}/markets"
                 try:
-                    response = self._send_with_retry(lambda: _request_page(client, url, params))
+                    response = self._send_with_retry(lambda url=url, params=params: _request_page(client, url, params))
                     payload = response.json()
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)

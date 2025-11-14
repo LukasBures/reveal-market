@@ -4,6 +4,11 @@ import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
+import { fetchMarketsViaProxy } from "@/lib/marketProxy";
+
+vi.mock("@/lib/marketProxy", () => ({
+  fetchMarketsViaProxy: vi.fn(),
+}));
 
 const sampleMarket = {
   eventId: "evt-1",
@@ -16,7 +21,7 @@ const sampleMarket = {
 
 describe("FeaturedMarketsClient", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    vi.mocked(fetchMarketsViaProxy).mockReset();
     class NoopIntersectionObserver {
       observe() {}
       disconnect() {}
@@ -26,7 +31,6 @@ describe("FeaturedMarketsClient", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     delete (globalThis as any).IntersectionObserver;
   });
 
@@ -55,11 +59,8 @@ describe("FeaturedMarketsClient", () => {
       outcomes: [],
       outcomePrices: [],
     };
-    const fetchMock = global.fetch as unknown as Mock;
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => [nextMarket],
-    });
+    const fetchMock = fetchMarketsViaProxy as unknown as Mock;
+    fetchMock.mockResolvedValue([nextMarket]);
 
     renderWithClient(
       <FeaturedMarketsClient
@@ -77,24 +78,23 @@ describe("FeaturedMarketsClient", () => {
     await waitFor(() => {
       expect(screen.getByText("Second Market")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith("/markets?limit=1&offset=1&search=sample", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith(1, { searchQuery: "sample", category: undefined, offset: 1 });
   });
 
   it("auto-loads additional pages before showing manual button", async () => {
     let callCount = 0;
-    const fetchMock = global.fetch as unknown as Mock;
+    const fetchMock = fetchMarketsViaProxy as unknown as Mock<number>;
     fetchMock.mockImplementation(() => {
       callCount += 1;
-      return Promise.resolve({
-        ok: true,
-        json: async () => [
-          {
-            event_id: `evt-auto-${callCount}`,
-            title: `Auto Market ${callCount}`,
-            category: "Auto",
-          },
-        ],
-      });
+      return Promise.resolve([
+        {
+          eventId: `evt-auto-${callCount}`,
+          title: `Auto Market ${callCount}`,
+          category: "Auto",
+          outcomes: [],
+          outcomePrices: [],
+        },
+      ]);
     });
 
     class InstantIntersectionObserver {

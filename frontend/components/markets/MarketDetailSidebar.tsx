@@ -1,6 +1,6 @@
 "use client";
 
-import type { MarketDetail } from "@/lib/api";
+import type { MarketDetail } from "@/lib/api-types";
 import Link from "next/link";
 
 type Props = {

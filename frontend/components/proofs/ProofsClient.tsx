@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import type { ProofReceipt } from "@/lib/api";
-import { fetchProofReceipts } from "@/lib/api";
+import type { ProofReceipt } from "@/lib/api-types";
 import { logger } from "@/lib/logging";
 import { ProofReceiptList } from "./ProofReceiptList";
 
@@ -10,6 +9,26 @@ type Props = {
   initialReceipts: ProofReceipt[];
   pageSize?: number;
 };
+
+async function fetchNextReceipts(limit: number, offset: number): Promise<ProofReceipt[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  const response = await fetch(`/api/proofs?${params.toString()}`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch proof receipts (${response.status})`);
+  }
+  const payload = await response.json();
+  if (Array.isArray(payload)) {
+    return payload as ProofReceipt[];
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data as ProofReceipt[];
+  }
+  return [];
+}
 
 export function ProofsClient({ initialReceipts, pageSize = 24 }: Props) {
   const [receipts, setReceipts] = useState(initialReceipts);
@@ -25,7 +44,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24 }: Props) {
       }
       startTransition(async () => {
         try {
-          const next = await fetchProofReceipts(pageSize, { offset: offsetRef.current });
+          const next = await fetchNextReceipts(pageSize, offsetRef.current);
           if (!next.length) {
             setHasMore(false);
             return;

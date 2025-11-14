@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { MarketSummary } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
 import { MarketGrid } from "./MarketGrid";
 import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
+import { fetchMarketsViaProxy } from "@/lib/marketProxy";
 
 const AUTO_LOAD_BATCHES = 3;
 
@@ -59,63 +60,37 @@ export function FeaturedMarketsClient({
     setHasMore(refreshedMarkets.length >= pageSize);
   }, [refreshedMarkets, pageSize]);
 
-  const normalizePayload = (items: any[]): MarketSummary[] =>
-    items.map((item) => ({
-      eventId: item.event_id ?? item.eventId ?? "unknown",
-      title: item.title ?? "Untitled market",
-      category: item.category ?? item.tags?.[0] ?? "General",
-      tags: item.tags ?? [],
-      status: item.status ?? undefined,
-      commitDeadline: item.commit_deadline ?? item.commitDeadline ?? undefined,
-      revealDeadline: item.reveal_deadline ?? item.revealDeadline ?? undefined,
-      liquidityUsd: item.extra_data?.liquidityUsd ?? item.liquidity_usd,
-      outcomes: item.outcomes ?? [],
-      outcomePrices: item.outcome_prices ?? [],
-      imageUrl: item.image_url ?? null,
-    }));
-
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
       const nextLimit = Math.min(pageSize, remainingSlots);
       if (!hasMore || isPending || nextLimit <= 0) return;
       startTransition(async () => {
         try {
-          const offset = markets.length;
-          const params = new URLSearchParams({ limit: String(nextLimit), offset: String(offset) });
-          if (searchQuery) {
-            params.set("search", searchQuery);
-          }
-          if (categoryFilter) {
-            params.set("category", categoryFilter);
-          }
-          const response = await fetch(`/markets?${params.toString()}`, { cache: "no-store" });
-          if (!response.ok) {
-            logger.error("FeaturedMarketsClient:loadMore_http_error", { status: response.status });
+          const additions = await fetchMarketsViaProxy(nextLimit, {
+            searchQuery,
+            category: categoryFilter,
+            offset: markets.length,
+          });
+          if (additions.length === 0) {
             setHasMore(false);
             return;
           }
-          const payload = await response.json();
-          if (!Array.isArray(payload) || payload.length === 0) {
-            setHasMore(false);
-            return;
-          }
-          const normalized = normalizePayload(payload);
           const seen = new Set(markets.map((m) => m.eventId));
-          const additions: MarketSummary[] = [];
-          for (const item of normalized) {
+          const filtered: MarketSummary[] = [];
+          for (const item of additions) {
             if (!item.eventId || seen.has(item.eventId)) continue;
             seen.add(item.eventId);
-            additions.push(item);
+            filtered.push(item);
           }
-          const merged = [...markets, ...additions];
+          const merged = [...markets, ...filtered];
           const computedHasMore =
-            merged.length < maxItems && additions.length > 0 && normalized.length === nextLimit;
+            merged.length < maxItems && filtered.length > 0 && additions.length === nextLimit;
           setMarkets(merged);
           setHasMore(computedHasMore);
-          if (mode === "auto" && normalized.length > 0) {
+          if (mode === "auto" && filtered.length > 0) {
             setAutoLoadCount((count) => count + 1);
           }
-          if (additions.length > 0) {
+          if (filtered.length > 0) {
             hasAppendedRef.current = true;
           }
         } catch (error) {

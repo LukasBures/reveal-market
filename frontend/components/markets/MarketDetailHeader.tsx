@@ -1,4 +1,4 @@
-import type { MarketDetail } from "@/lib/api";
+import type { MarketDetail } from "@/lib/api-types";
 
 type Props = {
   market: MarketDetail;

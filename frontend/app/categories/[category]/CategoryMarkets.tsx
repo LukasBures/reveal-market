@@ -1,4 +1,5 @@
-import { fetchFeaturedMarkets, type MarketSummary } from "@/lib/api";
+import { fetchFeaturedMarkets } from "@/lib/api";
+import type { MarketSummary } from "@/lib/api-types";
 import { MarketGrid } from "@/components/markets/MarketGrid";
 import { slugify } from "@/lib/slugs";
 
