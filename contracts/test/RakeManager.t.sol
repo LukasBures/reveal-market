@@ -73,4 +73,13 @@ contract RakeManagerTest is Test {
         vm.expectRevert(RakeManager.InvalidRakeBps.selector);
         new RakeManager(address(this), treasury, 400);
     }
+
+    function testFuzzTakeRake(uint96 amountRaw, uint16 overrideRaw) public {
+        uint256 amount = bound(uint256(amountRaw), 1, 1e30);
+        uint256 overrideBps = bound(uint256(overrideRaw), 0, manager.MAX_RAKE_BPS());
+        uint256 applied = overrideBps == 0 ? manager.rakeBps() : overrideBps;
+        uint256 net = manager.takeRake(address(0), amount, overrideBps);
+        uint256 rakeAmount = (amount * applied) / 10_000;
+        assertEq(net + rakeAmount, amount);
+    }
 }

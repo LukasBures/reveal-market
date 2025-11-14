@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,8 +10,8 @@ HealthState = Literal["ok", "degraded", "error"]
 
 class HealthComponent(BaseModel):
     status: HealthState
-    detail: Optional[str] = None
-    latency_ms: Optional[float] = Field(default=None, ge=0)
+    detail: str | None = None
+    latency_ms: float | None = Field(default=None, ge=0)
 
 
 class HealthResponse(BaseModel):
@@ -19,29 +19,34 @@ class HealthResponse(BaseModel):
     service: str
     version: str
     timestamp: datetime
-    components: Dict[str, HealthComponent]
+    components: dict[str, HealthComponent]
 
 
 class MarketBase(BaseModel):
     event_id: str
     title: str
-    category: Optional[str] = None
-    slug: Optional[str] = None
-    metadata_uri: Optional[str] = None
+    category: str | None = None
+    slug: str | None = None
+    metadata_uri: str | None = None
     oracle: str
-    factory: Optional[str] = None
-    market_address: Optional[str] = None
+    factory: str | None = None
+    market_address: str | None = None
     status: str = Field(default="commit")
-    outcomes: Optional[Any] = None
-    tags: Optional[List[str]] = None
-    extra_data: Optional[Any] = None
-    rake_bps: Optional[int] = None
-    condition_id: Optional[str] = None
-    question_id: Optional[str] = None
-    outcome_prices: Optional[Any] = None
-    image_url: Optional[str] = None
-    closed: Optional[bool] = None
-    uma_resolution_status: Optional[str] = None
+    outcomes: Any | None = None
+    tags: list[str] | None = None
+    extra_data: Any | None = None
+    rake_bps: int | None = None
+    condition_id: str | None = None
+    question_id: str | None = None
+    outcome_prices: Any | None = None
+    image_url: str | None = None
+    closed: bool | None = None
+    uma_resolution_status: str | None = None
+    summary: str | None = None
+    summary_source: str | None = None
+    summary_model: str | None = None
+    summary_metadata: dict[str, Any] | None = None
+    summary_checked_at: datetime | None = None
 
 
 class MarketCreate(MarketBase):
@@ -49,21 +54,21 @@ class MarketCreate(MarketBase):
 
 
 class MarketUpdate(BaseModel):
-    title: Optional[str] = None
-    category: Optional[str] = None
-    metadata_uri: Optional[str] = None
-    status: Optional[str] = None
-    outcomes: Optional[Any] = None
-    tags: Optional[List[str]] = None
-    extra_data: Optional[Any] = None
-    rake_bps: Optional[int] = None
-    slug: Optional[str] = None
-    condition_id: Optional[str] = None
-    question_id: Optional[str] = None
-    outcome_prices: Optional[Any] = None
-    image_url: Optional[str] = None
-    closed: Optional[bool] = None
-    uma_resolution_status: Optional[str] = None
+    title: str | None = None
+    category: str | None = None
+    metadata_uri: str | None = None
+    status: str | None = None
+    outcomes: Any | None = None
+    tags: list[str] | None = None
+    extra_data: Any | None = None
+    rake_bps: int | None = None
+    slug: str | None = None
+    condition_id: str | None = None
+    question_id: str | None = None
+    outcome_prices: Any | None = None
+    image_url: str | None = None
+    closed: bool | None = None
+    uma_resolution_status: str | None = None
 
 
 class MarketRead(MarketBase):
@@ -74,6 +79,13 @@ class MarketRead(MarketBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MarketResponse(MarketRead):
+    description: str | None = None
+    resolution_source: str | None = None
+    clob_pair_id: str | None = None
+    clob_token_ids: list[str] | None = None
+
+
 class MarketStatusBreakdown(BaseModel):
     status: str
     count: int
@@ -81,26 +93,26 @@ class MarketStatusBreakdown(BaseModel):
 
 class ResolutionWinner(BaseModel):
     index: int
-    label: Optional[str] = None
+    label: str | None = None
     payout: int
 
 
 class ResolutionSummary(BaseModel):
     source: str
-    conditionId: str
+    condition_id: str = Field(alias="conditionId")
     resolved: bool
-    outcomes: List[str] = Field(default_factory=list)
-    payouts: List[int] = Field(default_factory=list)
-    winners: List[ResolutionWinner] = Field(default_factory=list)
-    checkedAt: datetime
-    marketId: Optional[int] = None
-    eventId: Optional[str] = None
-    title: Optional[str] = None
-    slug: Optional[str] = None
-    oracle: Optional[str] = None
-    questionId: Optional[str] = None
-    transactionHash: Optional[str] = None
-    blockNumber: Optional[int] = None
-    blockTimestamp: Optional[datetime] = None
+    outcomes: list[str] = Field(default_factory=list)
+    payouts: list[int] = Field(default_factory=list)
+    winners: list[ResolutionWinner] = Field(default_factory=list)
+    checked_at: datetime = Field(alias="checkedAt")
+    market_id: int | None = Field(default=None, alias="marketId")
+    event_id: str | None = Field(default=None, alias="eventId")
+    title: str | None = None
+    slug: str | None = None
+    oracle: str | None = None
+    question_id: str | None = Field(default=None, alias="questionId")
+    transaction_hash: str | None = Field(default=None, alias="transactionHash")
+    block_number: int | None = Field(default=None, alias="blockNumber")
+    block_timestamp: datetime | None = Field(default=None, alias="blockTimestamp")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, allow_population_by_field_name=True)

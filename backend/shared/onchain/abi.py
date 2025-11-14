@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
-MARKET_FACTORY_ABI: List[dict] = [
+MARKET_FACTORY_ABI: list[dict] = [
     {
         "inputs": [
             {"internalType": "string", "name": "eventId", "type": "string"},
@@ -39,6 +37,6 @@ MARKET_FACTORY_ABI: List[dict] = [
     },
 ]
 
-MARKET_FACTORY_EVENT_MAP: Dict[str, dict] = {
+MARKET_FACTORY_EVENT_MAP: dict[str, dict] = {
     entry["name"]: entry for entry in MARKET_FACTORY_ABI if entry["type"] == "event"
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar, Token
+from threading import Event, Thread
 
 _LOG_RECORD_RESERVED = {
     "args",
@@ -82,3 +83,39 @@ def log_event(
     extra_fields = {key: value for key, value in structured_fields.items() if key not in _LOG_RECORD_RESERVED}
     extra_fields["event"] = event
     logger.log(level, f"[{event}] {message}{suffix}", extra=extra_fields)
+
+
+def start_heartbeat_logger(
+    logger: logging.Logger,
+    service_name: str,
+    *,
+    interval_seconds: int = 60,
+    message: str | None = None,
+) -> Event:
+    """Start a background thread that logs a heartbeat every interval seconds."""
+
+    stop_event: Event = Event()
+
+    def _run() -> None:
+        while not stop_event.is_set():
+            log_event(
+                logger,
+                logging.INFO,
+                event="service.heartbeat",
+                message=message or f"{service_name} is alive",
+                service=service_name,
+                interval=interval_seconds,
+            )
+            if stop_event.wait(interval_seconds):
+                break
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="service.heartbeat.stop",
+            message="heartbeat logger stopping",
+            service=service_name,
+        )
+
+    thread = Thread(target=_run, name=f"{service_name}-heartbeat", daemon=True)
+    thread.start()
+    return stop_event

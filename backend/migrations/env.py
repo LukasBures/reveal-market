@@ -23,9 +23,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = context.get_x_argument(as_dictionary=True).get("db_url") or config.get_main_option(
-        "sqlalchemy.url"
-    )
+    url = context.get_x_argument(as_dictionary=True).get("db_url") or config.get_main_option("sqlalchemy.url")
     if not url:
         url = os.getenv("RM_DATABASE_URL", "")
         config.set_main_option("sqlalchemy.url", url)

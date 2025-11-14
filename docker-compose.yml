@@ -62,6 +62,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      proover:
+        condition: service_healthy
     # Expose FastAPI on the host so docs + frontend can talk to it directly.
     ports:
       - "8000:8000"
@@ -90,6 +92,8 @@ services:
       RM_POLYMARKET_TIMEOUT_SECONDS: 10
       RM_API_BASE_URL: http://api:8000
       RM_MARKETS_CACHE_LIMIT: 18
+      RM_PROVER_ENABLED: ${RM_PROVER_ENABLED:-false}
+      RM_PROVER_BASE_URL: http://proover:8085
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,6 +128,25 @@ services:
     # Public entrypoint for the stack. Keep host mapping so preview builds work.
     ports:
       - "3000:3000"
+
+  proover:
+    build:
+      context: .
+      dockerfile: docker/proover/Dockerfile
+    restart: unless-stopped
+    environment:
+      PROVER_LISTEN_ADDR: 0.0.0.0:8085
+      PROVER_HEARTBEAT_SECONDS: 20
+      PROVER_VERSION: ${PROVER_VERSION:-dev}
+      PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH:-0x0}
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   # Named volumes keep state between docker compose up/down cycles.

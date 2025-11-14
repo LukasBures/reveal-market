@@ -1,55 +1,71 @@
-# `Verifier.sol` line-by-line guide
+# `Verifier.sol` walkthrough
 
-Line 1 — `// SPDX-License-Identifier: MIT`
-Declares the MIT license to satisfy SPDX tooling.
+The Groth16 verifier now deployed with Reveal Market is configurable, replay-safe, and auditable. This guide highlights the important sections rather than enumerating every line of code.
 
-Line 2 — `pragma solidity ^0.8.24;`
-Pins the compiler to Solidity 0.8.24-compatible versions.
+## Imports & Interfaces
 
-Line 3 — *(blank line)*
-Spacer between pragma and contract description.
+* `Ownable2Step` — allows the team to rotate the verifying key through a two-step process (transfer + accept).
+* `IVerifier` — shared interface consumed by `RevealMarket`.
+* `Pairing` — BN254 helper library (addition, scalar multiplication, pairing checks).
 
-Line 4 — `/// @title Verifier`
-NatSpec title naming the contract.
+## State
 
-Line 5 — `/// @notice Stub verifier that always approves provided proofs.`
-NatSpec notice describing that this is a placeholder verifier.
+```solidity
+StoredVerifyingKey private _vk;
+Pairing.G1Point[] private _ic;
+bytes32 public circuitHash;
+uint256 public immutable expectedInputs;
+```
 
-Line 6 — `contract Verifier {`
-Begins the simple verifier contract.
+* `_vk` holds `α`, `β`, `γ`, `δ`.
+* `_ic` stores the commitment vector used to derive `vk_x`.
+* `circuitHash` is a 32-byte fingerprint for the circuit / verifying key.
+* `expectedInputs` is immutable (currently `6`) and keeps the Solidity contract in lockstep with the circuit.
 
-Line 7 — `    event ProofChecked(bool success, address indexed sender);`
-Defines an event emitted whenever the stub “verifies” a proof.
+## Constructor & Key Rotation
 
-Line 8 — *(blank line)*
-Spacer before function documentation.
+```solidity
+constructor(..., uint256 expectedInputs_) Ownable(msg.sender) {
+    require(expectedInputs_ <= 6);
+    expectedInputs = expectedInputs_;
+    _setVerifyingKey(...);
+}
 
-Line 9 — `    /// @notice Verifies a proof. Always returns true for MVP.`
-NatSpec summary explaining the stub behavior.
+function setVerifyingKey(...) external onlyOwner {
+    _setVerifyingKey(...);
+}
+```
 
-Line 10 — `    /// @param proof Serialized proof blob (unused for stub).`
-NatSpec parameter description for the `proof` bytes argument.
+* Rejects deployments with zero inputs or more than six public signals.
+* `_setVerifyingKey` validates IC length (`expectedInputs + 1`), range-checks coordinates, replaces the stored points, updates `circuitHash`, and emits `VerifyingKeyUpdated`.
 
-Line 11 — `    /// @param pubSignals Public signals array (unused for stub).`
-NatSpec parameter description for the `pubSignals` argument.
+## Proof Verification
 
-Line 12 — `    function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals) external returns (bool success) {`
-Defines the verifier function signature that matches the interface expected by `RevealMarket`.
+```solidity
+function verifyProof(bytes calldata proofData, uint256[6] calldata pubSignals) external view returns (bool)
+```
 
-Line 13 — `        proof;`
-Explicitly references the `proof` argument to silence unused-variable warnings.
+1. Ensures a verifying key is configured and that the caller supplied exactly `expectedInputs` public signals.
+2. Decodes `proofData` into the `(A, B, C)` triple (256 bytes total).
+3. Validates all G1/G2 coordinates are either the point at infinity or within the BN254 field.
+4. Computes `vk_x = IC[0] + Σ (pubSignals[i] * IC[i+1])`.
+5. Executes the pairing product check and returns the result.
 
-Line 14 — `        pubSignals;`
-Explicitly references `pubSignals` for the same reason.
+The verifier purposely does **not** reject public inputs that exceed the field modulus; the Groth16 proof already reduces them modulo `r`, and `RevealMarket` expects the raw `bytes32` outcome hash.
 
-Line 15 — `        emit ProofChecked(true, msg.sender);`
-Emits the event noting the call succeeded and who invoked it.
+## Helper Functions
 
-Line 16 — `        return true;`
-Always returns `true`, signaling the proof “verified”.
+* `_decodeProof` — ABI-decodes the proof blob and reuses `_buildG1` / `_buildG2`.
+* `_validateFieldElement` — bounds-checks coordinates to prevent invalid-curve attacks.
+* `_buildG1` / `_buildG2` — convenience wrappers that perform validation and construct structs.
 
-Line 17 — `    }`
-Ends `verifyProof`.
+## Events & Errors
 
-Line 18 — `}`
-Ends the contract.
+* `VerifyingKeyUpdated(bytes32 circuitHash, uint256 inputs)` is emitted whenever the key changes.
+* Errors guard unsupported input lengths, missing verifying keys, malformed proofs, and field overflows.
+
+## Stub Verifier
+
+The previous always-true stub now lives at `contracts/src/verifiers/VerifierStub.sol`. It still implements `IVerifier` and emits `ProofChecked`, but should only be used for local development (`USE_STUB_VERIFIER=1` in the deploy script).
+
+For an end-to-end description of the circuit signals and replay guards, see [`docs/settlement-circuit.md`](./settlement-circuit.md).

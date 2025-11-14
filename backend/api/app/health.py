@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
-from typing import Dict, Tuple
+from datetime import UTC, datetime
 
 import httpx
 from redis.exceptions import RedisError
@@ -14,7 +13,7 @@ from . import schemas
 from .cache import get_redis_client
 from .config import get_settings
 
-ComponentMap = Dict[str, schemas.HealthComponent]
+ComponentMap = dict[str, schemas.HealthComponent]
 
 
 async def build_health_response(session: Session) -> schemas.HealthResponse:
@@ -24,7 +23,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     components: ComponentMap = {}
     component_states: list[str] = []
 
-    checks: list[Tuple[str, schemas.HealthComponent]] = [
+    checks: list[tuple[str, schemas.HealthComponent]] = [
         _check_database(session),
         _check_redis_connectivity(),
         _check_worker_heartbeat(settings),
@@ -41,7 +40,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
         status=overall_status,
         service=settings.app_name,
         version=settings.version,
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         components=components,
     )
 
@@ -56,7 +55,7 @@ def _derive_overall_status(states: list[str]) -> str:
     return "ok"
 
 
-def _check_database(session: Session) -> Tuple[str, schemas.HealthComponent]:
+def _check_database(session: Session) -> tuple[str, schemas.HealthComponent]:
     db_start = time.perf_counter()
     try:
         session.execute(text("SELECT 1"))
@@ -67,7 +66,7 @@ def _check_database(session: Session) -> Tuple[str, schemas.HealthComponent]:
     return "database", component
 
 
-def _check_redis_connectivity() -> Tuple[str, schemas.HealthComponent]:
+def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
     redis_start = time.perf_counter()
     try:
         redis_client = get_redis_client()
@@ -81,7 +80,7 @@ def _check_redis_connectivity() -> Tuple[str, schemas.HealthComponent]:
     return "redis", component
 
 
-def _check_worker_heartbeat(settings) -> Tuple[str, schemas.HealthComponent]:
+def _check_worker_heartbeat(settings) -> tuple[str, schemas.HealthComponent]:
     try:
         redis_client = get_redis_client()
         heartbeat_raw = redis_client.get(settings.heartbeat_key)
@@ -99,7 +98,7 @@ def _check_worker_heartbeat(settings) -> Tuple[str, schemas.HealthComponent]:
     return "worker", component
 
 
-async def _check_polymarket_api(settings) -> Tuple[str, schemas.HealthComponent]:
+async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]:
     http_start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:

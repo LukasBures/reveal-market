@@ -9,7 +9,6 @@ type Props = {
   maxItems?: number;
   searchQuery?: string;
   categoryFilter?: string;
-  tagFilter?: string;
   emptyNotice?: string;
 };
 
@@ -18,13 +17,11 @@ export async function FeaturedMarketsSection({
   maxItems = DEFAULT_MAX_ITEMS,
   searchQuery,
   categoryFilter,
-  tagFilter,
   emptyNotice,
 }: Props = {}) {
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
-    tag: tagFilter,
   });
 
   return (
@@ -34,7 +31,6 @@ export async function FeaturedMarketsSection({
       maxItems={maxItems}
       searchQuery={searchQuery}
       categoryFilter={categoryFilter}
-      tagFilter={tagFilter}
       emptyNotice={emptyNotice}
     />
   );

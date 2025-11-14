@@ -44,27 +44,22 @@ These milestones ladder up to the same thesis: reliable data fuels confident liq
 
 To learn how the backend can power your venue, reach out at hello@revealmarket.xyz or via [X](https://x.com/RevealMarket). We are actively onboarding exchanges, OTC desks, and liquidity programs who want transparent exposure to the next generation of prediction markets.
 
-## Local Validation (Python 3.13)
+## Local Validation (Python 3.12 + uv)
 
-Reproducible tests are part of the trust story. The repo now defaults to Python 3.13 for all backend tooling, and the `make test` target simply shells into `backend/run_tests.sh`, which in turn auto-detects project virtual environments or the `python3.13` binary on your PATH.
+Reproducible tests are part of the trust story. Backend services now target Python 3.12, and the `make test` target simply shells into `backend/run_tests.sh`, which prefers `uv run` so every environment obeys the same `uv.lock`.
 
-1. **Create per-service virtualenvs (once):**
+1. **Sync per-service environments (once):**
 
    ```bash
-   python3.13 -m venv backend/api/.venv
-   python3.13 -m venv backend/worker/.venv
+   uv sync --project backend/api --extra dev --no-install-project
+   uv sync --project backend/worker --extra dev --no-install-project
    ```
 
-2. **Install the pinned dev dependencies exported from Poetry:**
+2. **Keep the envs up-to-date:**
 
    ```bash
-   source backend/api/.venv/bin/activate
-   pip install -r backend/api/requirements-dev.txt
-   deactivate
-
-   source backend/worker/.venv/bin/activate
-   pip install -r backend/worker/requirements-dev.txt
-   deactivate
+   uv sync --project backend/api --extra dev --no-install-project --frozen
+   uv sync --project backend/worker --extra dev --no-install-project --frozen
    ```
 
 3. **Run the consolidated test suite:**
@@ -73,7 +68,7 @@ Reproducible tests are part of the trust story. The repo now defaults to Python�
    make test          # or ./backend/run_tests.sh
    ```
 
-Both virtual environments are ignored by git, and the requirements files stay in lock-step with the Poetry definitions (regenerate via `poetry export --with dev --without-hashes`). This flow keeps local verification fast while guaranteeing the exact same dependency graph used in CI and Docker images.
+Both `.venv` directories stay ignored by git. `uv` keeps them consistent with the `pyproject.toml` + `uv.lock` definitions, so CI, local shells, and the Docker images all share the exact dependency graph.
 
 ## Logging Consistency
 

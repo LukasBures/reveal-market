@@ -6,14 +6,26 @@ import {IVerifier} from "../../src/interfaces/IVerifier.sol";
 /// @notice Lightweight test double that allows forcing verifier outcomes.
 contract MockVerifier is IVerifier {
     bool private _shouldVerify = true;
+    uint256[6] private _lastSignals;
+    bytes private _lastProof;
 
     /// @notice Configure whether subsequent verify calls succeed.
     function setShouldVerify(bool value) external {
         _shouldVerify = value;
     }
 
+    function lastSignals() external view returns (uint256[6] memory) {
+        return _lastSignals;
+    }
+
+    function lastProof() external view returns (bytes memory) {
+        return _lastProof;
+    }
+
     /// @inheritdoc IVerifier
-    function verifyProof(bytes calldata, uint256[4] calldata) external view override returns (bool success) {
+    function verifyProof(bytes calldata proof, uint256[6] calldata signals) external override returns (bool success) {
+        _lastSignals = signals;
+        _lastProof = proof;
         return _shouldVerify;
     }
 }

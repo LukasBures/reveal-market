@@ -1,32 +1,25 @@
 default_language_version:
-  python: python3.13
+  python: python3.12
 
 repos:
   - repo: local
     hooks:
-      - id: poetry-run-black
-        name: Format code with Black
-        entry: bash -lc 'cd backend/api && poetry run black .'
-        language: system
-        pass_filenames: false
-        types: [python]
-        files: ^backend/api/.*\.py$
-
-      - id: poetry-run-isort
-        name: Sort imports with isort
-        entry: bash -lc 'cd backend/api && poetry run isort .'
-        language: system
-        pass_filenames: false
-        types: [python]
-        files: ^backend/api/.*\.py$
-
-      - id: poetry-run-flake8
-        name: Lint code with Flake8
-        entry: bash -lc 'cd backend/api && poetry run flake8 .. --exclude .venv'
-        language: system
-        pass_filenames: false
-        types: [python]
-        files: ^backend/.*\.py$
+      - id: ruff-lint
+        name: ruff check
+        description: "Run 'ruff check' for extremely fast Python linting"
+        entry: ruff check --fix --force-exclude --config pyproject.toml
+        language: python
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+        additional_dependencies: ["ruff>=0.6.9"]
+      - id: ruff-format
+        name: ruff format
+        description: "Run 'ruff format' for extremely fast Python formatting"
+        entry: ruff format --force-exclude --config pyproject.toml
+        language: python
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+        additional_dependencies: ["ruff>=0.6.9"]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

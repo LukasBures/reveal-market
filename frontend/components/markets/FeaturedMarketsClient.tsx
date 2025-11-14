@@ -5,6 +5,8 @@ import type { MarketSummary } from "@/lib/api";
 import { MarketGrid } from "./MarketGrid";
 import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
+import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
+import { logger } from "@/lib/logging";
 
 const AUTO_LOAD_BATCHES = 3;
 
@@ -14,7 +16,6 @@ type ClientProps = {
   maxItems?: number;
   searchQuery?: string;
   categoryFilter?: string;
-  tagFilter?: string;
   emptyNotice?: string;
 };
 
@@ -24,7 +25,6 @@ export function FeaturedMarketsClient({
   maxItems = DEFAULT_MAX_ITEMS,
   searchQuery,
   categoryFilter,
-  tagFilter,
   emptyNotice,
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
@@ -32,14 +32,32 @@ export function FeaturedMarketsClient({
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const hasAppendedRef = useRef(false);
 
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
+  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}`;
+
+  const { data: refreshedMarkets } = useFeaturedMarkets({
+    limit: pageSize,
+    searchQuery,
+    category: categoryFilter,
+    initialData: initialMarkets,
+  });
 
   useEffect(() => {
     setMarkets(initialMarkets);
     setHasMore(initialMarkets.length >= pageSize);
     setAutoLoadCount(0);
-  }, [initialMarkets, pageSize]);
+    hasAppendedRef.current = false;
+  }, [initialMarkets, pageSize, filterSignature]);
+
+  useEffect(() => {
+    if (!refreshedMarkets || hasAppendedRef.current) {
+      return;
+    }
+    setMarkets(refreshedMarkets);
+    setHasMore(refreshedMarkets.length >= pageSize);
+  }, [refreshedMarkets, pageSize]);
 
   const normalizePayload = (items: any[]): MarketSummary[] =>
     items.map((item) => ({
@@ -65,48 +83,48 @@ export function FeaturedMarketsClient({
           const offset = markets.length;
           const params = new URLSearchParams({ limit: String(nextLimit), offset: String(offset) });
           if (searchQuery) {
-          params.set("search", searchQuery);
-        }
-        if (categoryFilter) {
-          params.set("category", categoryFilter);
-        }
-        if (tagFilter) {
-          params.set("tag", tagFilter);
-        }
-        const response = await fetch(`/markets?${params.toString()}`, { cache: "no-store" });
-        if (!response.ok) {
-          console.error("Failed to load more markets", response.status);
+            params.set("search", searchQuery);
+          }
+          if (categoryFilter) {
+            params.set("category", categoryFilter);
+          }
+          const response = await fetch(`/markets?${params.toString()}`, { cache: "no-store" });
+          if (!response.ok) {
+            logger.error("FeaturedMarketsClient:loadMore_http_error", { status: response.status });
+            setHasMore(false);
+            return;
+          }
+          const payload = await response.json();
+          if (!Array.isArray(payload) || payload.length === 0) {
+            setHasMore(false);
+            return;
+          }
+          const normalized = normalizePayload(payload);
+          const seen = new Set(markets.map((m) => m.eventId));
+          const additions: MarketSummary[] = [];
+          for (const item of normalized) {
+            if (!item.eventId || seen.has(item.eventId)) continue;
+            seen.add(item.eventId);
+            additions.push(item);
+          }
+          const merged = [...markets, ...additions];
+          const computedHasMore =
+            merged.length < maxItems && additions.length > 0 && normalized.length === nextLimit;
+          setMarkets(merged);
+          setHasMore(computedHasMore);
+          if (mode === "auto" && normalized.length > 0) {
+            setAutoLoadCount((count) => count + 1);
+          }
+          if (additions.length > 0) {
+            hasAppendedRef.current = true;
+          }
+        } catch (error) {
+          logger.error("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
           setHasMore(false);
-          return;
         }
-        const payload = await response.json();
-        if (!Array.isArray(payload) || payload.length === 0) {
-          setHasMore(false);
-          return;
-        }
-        const normalized = normalizePayload(payload);
-        const seen = new Set(markets.map((m) => m.eventId));
-        const additions: MarketSummary[] = [];
-        for (const item of normalized) {
-          if (!item.eventId || seen.has(item.eventId)) continue;
-          seen.add(item.eventId);
-          additions.push(item);
-        }
-        const merged = [...markets, ...additions];
-        const computedHasMore =
-          merged.length < maxItems && additions.length > 0 && normalized.length === nextLimit;
-        setMarkets(merged);
-        setHasMore(computedHasMore);
-        if (mode === "auto" && normalized.length > 0) {
-          setAutoLoadCount((count) => count + 1);
-        }
-      } catch (error) {
-        console.error("Unable to load additional markets", error);
-        setHasMore(false);
-      }
-    });
+      });
     },
-    [categoryFilter, hasMore, isPending, markets, maxItems, pageSize, remainingSlots, searchQuery, tagFilter],
+    [categoryFilter, hasMore, isPending, markets, maxItems, pageSize, remainingSlots, searchQuery],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
@@ -171,7 +189,7 @@ export function FeaturedMarketsClient({
       )}
       {!hasMore && markets.length > 0 && (
         <p className="text-center text-sm text-slate-400">
-          Looking for deeper categories? Use the filters above to jump into the tags that matter most.
+          Looking for deeper narratives? Use the category filters above to jump into the segments that matter most.
         </p>
       )}
     </section>

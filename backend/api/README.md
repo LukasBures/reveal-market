@@ -1,55 +1,239 @@
 # Reveal Market API Service
 
-The API exposes every investor-facing surface for Reveal Market: curated market feeds, settlement archives, partner stats, and automation hooks. It is a FastAPI application with hardened security headers, CORS controls, and Redis-backed caching.
+FastAPI service that powers every customer-facing surface: curated market feeds, resolution summaries, partner analytics, and automation hooks. It shares SQLAlchemy models and cache helpers with the worker to keep persistence, logging, and schema state aligned.
 
-## Highlights
+---
 
-- **Security-first defaults** – Trusted-host middleware, configurable CORS allowlists, and CSP/HSTS/COOP headers ship out of the box.
-- **Structured logging** – `logging_config.setup_logging()` produces `timestamp | LEVEL | logger | file:line | event | request_id` lines with optional rotating files.
-- **Automatic migrations & health checks** – Alembic migrations run on startup, and Docker health checks call `python -m app.healthcheck` to verify Postgres + Redis before serving traffic.
-- **Observability** – Prometheus metrics via `prometheus-fastapi-instrumentator`, request IDs in every log, and cache hit/miss events for Redis.
+## 1. Responsibilities at a Glance
 
-## Running Locally
+| Area | What the API handles |
+| --- | --- |
+| Market discovery | `/markets`, `/categories/{slug}`, `/tags/{slug}`, `/markets/suggest` (all Redis-backed) |
+| Market detail & settlement | `/markets/{event_id}` and `/resolution/{condition_id}` with sync invalidation from the worker |
+| Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, and Polymarket; `/metrics` exposes Prometheus counters |
+| Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
+| Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
+| AI narratives | Surfaces pre-generated `summary`/`summary_source`/`summary_model` fields produced by the enrichment worker so clients never call the LLM synchronously |
+
+---
+
+## 2. Architecture & Request Lifecycle
+
+1. **Startup**: `app.main` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, and wires middleware (TrustedHost, CORS, security headers, Prometheus).
+2. **Request entry**: `request_context_middleware` assigns/propagates `x-request-id`, measures latency, and emits structured events (`http.request.*`).
+3. **Routing**:
+   - Read endpoints hit Redis first (`shared.cache.get_json`). Cache keys are tagged (schema tag, logical tags like `markets:list`) for precise invalidation.
+   - On cache miss the handler calls `app.crud`, which wraps SQLAlchemy queries around `shared.models`.
+4. **Response shaping**: `schemas.MarketResponse` is augmented with metadata extracted from Polymarket’s `extra_data` block and filtered via tag/category allow-lists.
+5. **Cache writes**: payloads are dumped to Redis JSON, TTL’d via `RM_CACHE_TTL_SECONDS`, and tagged for invalidation by the worker.
+
+---
+
+## 3. Repository Map
+
+```
+backend/api/
+├── app/
+│   ├── main.py              # FastAPI wiring, routes, middleware
+│   ├── crud.py              # Read/write helpers backed by SQLAlchemy
+│   ├── schemas.py           # Pydantic response + request models
+│   ├── config.py            # Pydantic Settings (RM_* env vars)
+│   ├── database.py          # Engine/session factory + migration hook
+│   ├── health.py            # Dependency checks for /health
+│   ├── security.py          # CSP/HSTS middleware
+│   ├── logging_config.py    # Service-wide logging setup
+│   └── onchain.py           # Optional MarketFactory introspection
+├── tests/                   # Pytest suite (async + REST)
+├── requirements*.txt        # Pinned runtime/dev dependencies
+├── pyproject.toml           # Tooling (Black/isort/pytest) metadata
+└── run.py                   # Local entrypoint (uvicorn wrapper)
+```
+
+---
+
+## 4. Configuration Reference
+
+All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `app.config.Settings`.
+
+### Core service
+
+| Variable | Description |
+| --- | --- |
+| `RM_DATABASE_URL` | SQLAlchemy DSN (example `postgresql+psycopg2://user:<REDACTED>@host:5432/db`). |
+| `RM_DATABASE_POOL_SIZE` / `RM_DATABASE_MAX_OVERFLOW` | Connection pool sizing. |
+| `RM_REDIS_URL` | Redis connection string for caching + health checks. |
+| `RM_CACHE_TTL_SECONDS` | Default TTL for cached responses. |
+| `RM_SCHEMA_VERSION_KEY` | Redis key updated by the worker so the API can invalidate caches when schema revisions change. |
+| `RM_ALLOWED_HOSTS` | CSV consumed by Starlette’s TrustedHost middleware. |
+| `RM_CORS_ALLOW_*` | Origins/methods/headers/credentials for CORS. |
+| `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
+| `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
+
+### Polymarket/on-chain
+
+| Variable | Description |
+| --- | --- |
+| `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_CLOSED_FILTER` | Control how `/health` checks the upstream feed. |
+| `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_MARKET_IMPLEMENTATION_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Required only for `/markets/onchain` or when the API needs to interact with on-chain data. |
+| `RM_POLYGON_RPC_URL`, `RM_POLYGON_CTF_ADDRESS`, `RM_POLYMARKET_CLOB_HOST` | Optional overrides for Polygon + CLOB integrations. |
+
+Use `.env` or `SETTINGS_FILE` to load a dedicated config file (see `app.config.get_settings()`).
+
+---
+
+## 5. Local Development Workflow
+
+### Prerequisites
+- Python 3.12+
+- Postgres + Redis (run `./run_local.sh` or `docker compose up postgres redis`)
+- [`uv`](https://docs.astral.sh/uv/) CLI for dependency management (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+
+### Setup & Run
 
 ```bash
 cd backend/api
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-poetry export --help  # optional if you prefer Poetry directly
+uv sync --extra dev --no-install-project   # creates .venv with deps only (code runs from source)
 
-# Start the API (requires Postgres + Redis running via `run_local.sh` or docker compose)
-MODE=dev LOG_LEVEL=DEBUG python run.py
+# Copy env template (edit values as needed)
+cp ../.env.example .env.local
+export SETTINGS_FILE=.env.local
+
+# Start the API (uv prefers the synced virtualenv automatically)
+uv run --project . python run.py
+# or hot-reload:
+uv run --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Environment variables are prefixed `RM_`. Common ones:
+Useful commands:
 
-| Variable | Purpose |
+```bash
+uv run --project . --extra dev ruff check
+uv run --project . --extra dev pytest -q
+uv run --project . python -m app.healthcheck
+curl -H "accept: application/json" http://localhost:8000/markets
+```
+
+---
+
+## 6. Database & Migration Strategy
+
+1. Migrations live in `backend/migrations` at the repo root (shared with worker).
+2. On startup the API calls `app.database.run_migrations()` which delegates to `shared.migrations.run_migrations`. This ensures hot reloads don’t serve requests before schemas are current.
+3. Adding a schema change:
+   ```bash
+   cd backend/migrations
+   alembic revision -m "describe change"
+   alembic upgrade head
+   ```
+4. The worker records the applied revision in Postgres + Redis. The API tags caches with `schema:{revision}` so new schema changes automatically invalidate stale JSON.
+
+---
+
+## 7. Caching Model
+
+- All list/detail endpoints first attempt `shared.cache.get_json(redis_client, key)`.
+- Cache keys come from `shared.cache_keys` (`markets:list:{filters}`, `markets:category:<slug>`, etc.).
+- Each cached payload is tagged with:
+  - Schema tag (`schema:<rev>`), so when migrations land the worker can nuke the whole cohort.
+  - Logical tags (`markets:list`, `market:{event_id}`, `resolution:{condition_id}`) so the worker invalidates only impacted entries after it writes new data.
+- TTL defaults to `RM_CACHE_TTL_SECONDS` (30s). Override per route if needed.
+
+---
+
+## 8. Security Posture
+
+- **Transport**: Expect TLS termination at the load balancer. Enforce HTTPS via HSTS header (`Strict-Transport-Security`).
+- **Headers**: `SecurityHeadersMiddleware` sets CSP, Referrer-Policy, COOP/CORP, Permissions-Policy, and frame protections. `/docs`, `/redoc`, `/openapi.json` receive relaxed CSP to allow FastAPI assets.
+- **CORS**: Locked down via environment variables; defaults to permissive (`*`) for local development.
+- **Trusted Hosts**: Deny requests where `Host` is not whitelisted (unless `RM_ALLOWED_HOSTS="*"`).
+- **Request IDs**: All logs include `request_id`; clients can provide `X-Request-ID` to propagate across systems.
+
+---
+
+## 9. Observability & Operations
+
+| Surface | How to use |
 | --- | --- |
-| `RM_DATABASE_URL` | SQLAlchemy DSN for Postgres. |
-| `RM_REDIS_URL` | Redis URI used by caching layer. |
-| `RM_SCHEMA_VERSION_KEY` | Redis key where the worker publishes the latest Alembic revision for cache tagging. |
-| `RM_ALLOWED_HOSTS` | CSV of hosts for TrustedHost middleware (default `*`). |
-| `RM_CORS_ALLOW_ORIGINS` | CSV allowlist for CORS. |
-| `RM_ENABLE_SECURITY_HEADERS` | Toggle CSP/HSTS middleware (default `true`). |
+| Metrics | `GET /metrics` (Prometheus format, includes HTTP latencies, cache hit counters, instrumented by `prometheus_fastapi_instrumentator`). |
+| Health | `GET /health` or run `python -m app.healthcheck`. The HTTP endpoint aggregates DB, Redis, worker heartbeat, and Polymarket dependency states. |
+| Logs | Structured via `logging_config.setup_logging()`. Configure with `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`. |
+| Profiling slow queries | Set `RM_DATABASE_ECHO=true` or attach `SQLALCHEMY_SILENCE_UBER_WARNING=1` for verbose output. |
 
-## Testing
+Operational best practices:
+- Keep Redis and Postgres close to the API to minimize cache/query latency.
+- Monitor cache hit ratio (`markets_cache_requests_total`) to ensure warm paths stay hot.
+- Alert when `/health` returns `degraded` or `error` to catch upstream outages early.
+
+---
+
+## 10. Testing Matrix
 
 ```bash
 cd backend
-./run_tests.sh   # runs API + worker pytest suites
+./run_tests.sh         # uses uv run to execute API + worker suites
+
+# or run API-only tests
+cd backend/api
+uv run --project . --extra dev pytest -q
 ```
 
-Pytest uses SQLite/Redis substitutes; no external services required.
+What the suite covers:
+- Route contracts (200/404/422 behaviors, cache behavior via fakes)
+- Allowlist filtering, slug decoding, metadata augmentation
+- Health checks with dependency stubs
+- Permissionless endpoints and error handling
 
-## Observability Cheat Sheet
+Add new tests under `backend/api/tests` following the `test_*.py` convention. Use `pytest.mark.asyncio` for async tests and `fakeredis` or provided fixtures to avoid hitting real Redis.
 
-- **Metrics**: `GET /metrics`
-- **Health**: `python -m app.healthcheck` (used by Docker) or HTTP `GET /health`
-- **Logs**: emitted in JSON-like format with request IDs; set `LOG_TO_FILE=true` to enable rotating files under `/logs`.
+---
 
-## Deployment Notes
+## 11. Deployment Checklist
 
-- Use the provided Dockerfile (`docker/api/Dockerfile`) for slim runtime layers (Poetry build stage → pip install → non-root user).
-- Supply TLS via your ingress; the API enforces HSTS and CSP internally once behind HTTPS.
-- Configure `RM_POLYMARKET_*` variables if you need to point at alternative upstream data feeds.
+1. Build via repo root `docker/api/Dockerfile` or `make api`.
+2. Provide environment:
+   - Postgres reachable via `RM_DATABASE_URL`
+   - Redis reachable via `RM_REDIS_URL`
+   - Worker publishing schema revision/heartbeats (so `/health` stays green)
+3. Configure ingress to set `X-Forwarded-Proto`/`X-Forwarded-For` if you rely on access logs.
+4. Expose `/metrics` behind auth if deploying on the public internet.
+5. Run `python -m app.healthcheck` as the container `HEALTHCHECK` command (already wired in Dockerfile).
+6. Ensure environment secrets (RPC URLs, private keys) are injected via secret manager rather than baked into images.
+
+---
+
+## 12. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `/health` returns `degraded: worker` | Worker heartbeat key missing or expired. | Ensure worker publishes heartbeats (`RM_HEARTBEAT_KEY`) and Redis is reachable. |
+| `/markets` always cache-miss | Worker not publishing `RM_SCHEMA_VERSION_KEY`, causing repeated schema-tag invalidation. | Verify worker logs `worker.schema.version_cached` and that Redis stores the revision. |
+| Requests hang at startup | Migrations running or DB unreachable. | Check logs for `worker.schema.synced` / `alembic` output, ensure Postgres credentials are correct. |
+| 403 errors behind ingress | TrustedHost mismatch. | Set `RM_ALLOWED_HOSTS` to include the ingress hostname or `*` for testing. |
+| CSP violations on docs | CDN assets blocked. | Update `docs_csp` overrides in `app.main` if you introduce new assets. |
+
+---
+
+## 13. Reference Commands
+
+```bash
+# Format & lint
+ruff check backend/api
+black backend/api
+
+# Generate OpenAPI schema
+uvicorn app.main:app --reload --port 8000 &
+curl http://localhost:8000/openapi.json > openapi.json
+
+# Load test a route
+hey -n 1000 -c 50 http://localhost:8000/markets
+```
+
+The API is intentionally small, deterministic, and cache-heavy—keep new routes consistent with this model and reuse the shared helpers whenever possible.
+
+---
+
+## 14. AI Summaries
+
+- Markets can now include `summary`, `summary_source`, `summary_model`, `summary_checked_at`, and `summary_metadata` fields.
+- These values are populated asynchronously by the worker-side enrichment service and cached alongside every `/markets` payload. The API never calls the LLM inline.
+- If you need to invalidate a stale summary manually, delete the corresponding Redis tags (`market:{event_id}`) or clear the record in Postgres; the worker will enqueue a refreshed job.

@@ -9,6 +9,27 @@ import {IRakeManager} from "./interfaces/IRakeManager.sol"; // Interface for ded
 import {IVerifier} from "./interfaces/IVerifier.sol"; // Interface for verifying zero-knowledge proofs.
 import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol"; // Interface allowing markets to read global pauses.
 
+/**
+ * @dev Architectural overview
+ *
+ * RevealMarket is a stateful commit → reveal → settle engine with the following invariants:
+ *   1. Users only reveal their bets after the oracle posts a result, preserving private order flow while the market is live.
+ *   2. Settlement is provably correct through Groth16 public signals (winningPool, totalPool, outcome hash, version, nonce, market address).
+ *   3. Guardians/factory maintain fine-grained controls (pauses, emergency settle, cancellation) for operational safety.
+ *
+ * Storage is intentionally verbose (track totalPool, winningPool, claimed stake, paidOut) to support both accounting and invariant tests.
+ * All external functions either mutate state via guarded modifiers (phase/settlement locks) or run as pure view helpers for indexers.
+ *
+ * When integrating, remember the workflow:
+ *   - `initialize` is called once by the factory clone.
+ *   - During commit phase, `commit` accepts hashed tickets (hash(user, outcomeHash, salt)) for ERC20 or native collateral.
+ *   - Anyone may call `lock` after the commit deadline, then the oracle posts the result via `postResult`.
+ *   - Settlement requires submitting a Groth16 proof to `verifyProof`; on success we emit `ProofReceipt` + `MarketResolved`.
+ *   - Winners call `claim` with their plaintext outcome+salt, and losers or cancelled markets rely on `refund`.
+ *
+ * Phases are encoded via the `Phase` enum so that invariant tooling can assert monotonic state transitions.
+ */
+
 /// @title RevealMarket
 /// @notice Commit-reveal prediction market supporting zero-knowledge settlement.
 contract RevealMarket is ReentrancyGuard {
@@ -37,6 +58,7 @@ contract RevealMarket is ReentrancyGuard {
     event Committed(address indexed user, bytes32 indexed ticketHash, uint256 amount);
     event Locked();
     event ProofVerified(bool success);
+    event ProofReceipt(bytes32 indexed nonce, address indexed verifier, bool success);
     event Settled(bytes32 indexed winningOutcomeHash);
     event MarketResolved(
         bytes32 indexed outcomeHash, uint256 winningStake, uint256 netPayoutPool, uint256 rakePaid, uint256 settledAt
@@ -79,6 +101,9 @@ contract RevealMarket is ReentrancyGuard {
     error ProofOutcomeMismatch();
     error ProofTotalsMismatch();
     error ProofVersionMismatch();
+    error InvalidProofNonce();
+    error ProofNonceUsed();
+    error InvalidMarketAddress();
 
     string public eventId; // External identifier for the market.
     Phase public phase; // Current lifecycle phase.
@@ -107,10 +132,12 @@ contract RevealMarket is ReentrancyGuard {
 
     uint256 public claimedWinningStake; // Amount of winning stake that has already claimed.
     uint256 public paidOut; // Total collateral paid out to claimants.
+    bytes32 public lastProofNonce; // Latest proof nonce accepted for settlement.
 
     bool private _initialized; // Tracks whether initialize has already run.
     bool private _settlementInProgress; // Prevents concurrent controller actions during settlement.
     uint256 public rakeBpsOverride; // Optional per-market rake override.
+    mapping(bytes32 => bool) internal _consumedProofNonces; // Tracks used proof nonces to block replays.
 
     uint256 public constant CIRCUIT_VERSION = 1; // Hard-coded version gates proof circuits.
 
@@ -224,11 +251,7 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Verifies a zero-knowledge proof and settles the market.
-    function verifyProof(bytes calldata proof, uint256[4] calldata pubSignals)
-        external
-        onlyPhase(Phase.Locked)
-        nonReentrant
-    {
+    function verifyProof(bytes calldata proof, uint256[6] calldata pubSignals) external onlyPhase(Phase.Locked) nonReentrant {
         if (phase == Phase.Cancelled) revert MarketAlreadyCancelled(); // Prevent settlement on cancelled market.
         if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet(); // Oracle result must exist.
 
@@ -236,15 +259,24 @@ contract RevealMarket is ReentrancyGuard {
         uint256 proofTotalPool = pubSignals[1];
         bytes32 proofOutcomeHash = bytes32(pubSignals[2]);
         uint256 proofVersion = pubSignals[3];
+        bytes32 proofNonce = bytes32(pubSignals[4]);
+        address proofMarket = _decodeMarketAddress(pubSignals[5]);
 
         if (proofOutcomeHash != winningOutcomeHash) revert ProofOutcomeMismatch(); // Proof outcome must match oracle result.
         if (proofTotalPool != totalPool) revert ProofTotalsMismatch(); // Guard against mismatched total pool.
         if (proofVersion != CIRCUIT_VERSION) revert ProofVersionMismatch(); // Ensure proof version compatibility.
         if (declaredWinningPool == 0 || declaredWinningPool > proofTotalPool) revert WinningPoolNotSet(); // Validate declared stakes.
+        if (proofMarket != address(this)) revert InvalidMarketAddress(); // Prevent cross-market replays.
+        if (proofNonce == bytes32(0)) revert InvalidProofNonce();
+        if (_consumedProofNonces[proofNonce]) revert ProofNonceUsed();
 
         bool success = IVerifier(verifier).verifyProof(proof, pubSignals); // Delegate to verifier contract.
         emit ProofVerified(success); // Emit event regardless of result.
+        emit ProofReceipt(proofNonce, verifier, success);
         if (!success) revert ProofVerificationFailed(); // Shield against false positives.
+
+        _consumedProofNonces[proofNonce] = true;
+        lastProofNonce = proofNonce;
 
         _finalizeSettlement(winningOutcomeHash, declaredWinningPool); // Apply settlement state transitions.
     }
@@ -474,6 +506,13 @@ contract RevealMarket is ReentrancyGuard {
             result := keccak256(ptr, 0x54) // Hash the 84-byte payload.
             mstore(0x40, add(ptr, 0x60)) // Advance free memory pointer.
         }
+    }
+
+    function _decodeMarketAddress(uint256 raw) private pure returns (address) {
+        if (raw >> 160 != 0) revert InvalidMarketAddress(); // Reject values that overflow address space.
+        // casting to uint160 is safe because we've guaranteed the upper 96 bits are zero via the shift check above
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return address(uint160(raw));
     }
 
     function _getTicket(address user, uint256 ticketId) private view returns (Ticket storage) {

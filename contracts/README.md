@@ -1,44 +1,111 @@
 # Reveal Market On-Chain Stack
 
-Our smart contracts provide the settlement certainty that investors, auditors, and liquidity programs demand. They turn every market listed by the API into a verifiable on-chain asset with transparent rake distribution and zk-proof enforcement.
+This directory houses the full smart-contract layer for Reveal Market. It contains everything required to deploy and operate privacy-friendly prediction markets on Horizen-compatible EVM chains:
 
-## Core Components
+- Solidity sources (`src/`)
+- Foundry tests/mocks (`test/`)
+- Deployment scripts (`script/`)
+- Build config (`foundry.toml`, `run_local.sh`)
+- Low-level documentation/specs (`docs/`, `cache/`)
 
-| Contract | Investor Impact |
+The contracts convert every API-created market into a verifiable on-chain asset with:
+
+1. **Private commit → reveal → settle flows** guarded by deadlines, guardians, and nonces.
+2. **Transparent rake routing** enforced through a global manager.
+3. **Groth16 proof verification** tying each settlement to a specific market + proof nonce.
+4. **Factory orchestration** so ops teams can spin up new markets via minimal proxies.
+
+Below is a detailed breakdown so new contributors, auditors, or integration partners can quickly understand and extend the system.
+
+---
+
+## Directory Map
+
+```
+contracts/
+├── README.md                   # This document
+├── PLAN.txt / TODO.md          # High-level roadmaps and prioritized items
+├── foundry.toml                # Foundry configuration
+├── run_local.sh                # Local build/test utility
+├── cache/                      # Deployment artifacts (verifying keys, last deploy JSON)
+├── docs/                       # Line-by-line guides + circuit specs
+├── script/Deploy.s.sol         # Canonical deployment script
+├── src/
+│   ├── MarketFactory.sol
+│   ├── RevealMarket.sol
+│   ├── RakeManager.sol
+│   ├── Verifier.sol
+│   ├── interfaces/
+│   ├── utils/Pairing.sol
+│   └── verifiers/VerifierStub.sol
+└── test/
+    ├── RevealMarket.t.sol
+    ├── MarketFactory.t.sol
+    ├── RakeManager.t.sol
+    ├── Verifier.t.sol
+    ├── Pairing.t.sol
+    ├── FactoryLifecycle.t.sol
+    ├── RevealMarketFuzz.t.sol
+    ├── RevealMarketSecurity.t.sol
+    └── mocks/
+```
+
+---
+
+## Contract Deep Dive
+
+### `RevealMarket.sol`
+
+| Feature | Details |
 | --- | --- |
-| **RevealMarket** | Handles commit → lock → settle flows with guardian safeguards and prepares the protocol for Groth16-based verification, so winnings cannot be manipulated. |
-| **MarketFactory** | Mints minimal proxy markets, controls global safety switches, and emits metadata so off-chain services can index liquidity in real time. |
-| **RakeManager** | Caps protocol fees below 2%, records treasury routing, and makes rake modeling clear for tokenholders. |
-| **Verifier (upgrading)** | Temporary stub today; roadmap replaces it with the audited proof verifier that validates every settlement proof on-chain. |
+| Lifecycle | `Commit → Locked → Settled` (or `Cancelled`). Commits store hashed tickets with stake + salt. Lock enforces reveal sequencing. |
+| Oracle integration | `postResult` accepts an outcome hash from the configured oracle. |
+| Proof verification | `verifyProof(bytes proof, uint256[6] pubSignals)` enforces: winning pool, total pool, outcome hash, circuit version, proof nonce, and market binding. Emits `ProofReceipt` on success and prevents replay via on-chain nonce tracking. |
+| Settlement | `_finalizeSettlement` deducts rake through `IRakeManager`, records `MarketResolved`, and provides `resolutionSummary()` to indexers. |
+| Claims & refunds | Winners reveal their outcome+salt to claim proportional payout; losers stay private forever. Refunds available after reveal deadline or upon cancellation. |
+| Controls | Guardian/factory can pause commits/claims, update oracle, cancel markets, or `emergencySettle`. |
+| Security | Reentrancy guard wraps state mutations; `_settlementInProgress` prevents controller reentrancy; commit/claim phases enforced by modifiers. |
 
-This modular architecture lets us innovate quickly without sacrificing the compliance posture large partners expect.
+**Key Files**: `src/RevealMarket.sol`, `docs/RevealMarket_line_by_line.md`, tests under `test/RevealMarket*.t.sol`.
 
-## Design Principles
+### `MarketFactory.sol`
 
-- **Guardrails first** – Guardian roles, commit/reveal deadlines, and emergency settlement tooling protect capital even under extreme market conditions.
-- **Event-rich telemetry** – `MarketCreated`, `RakeConfigured`, and live `MarketResolved` events (plus the on-chain `resolutionSummary()` view) give analytics desks everything they need to reconcile revenue in real time.
-- **Upgradeable yet predictable** – Factory-managed implementation pointers ensure that audits remain valid while still allowing us to roll out new verifier versions or collateral allow-lists.
-- **Gas-conscious** – Minimal proxy deployments and carefully profiled settlement flows keep user costs low, preserving yield for LPs rather than miners.
+| Feature | Details |
+| --- | --- |
+| Deployment | Uses EIP-1167 minimal proxies (`Clones`) to spawn `RevealMarket` instances. |
+| Shared config | Stores implementation, rake manager, treasury, verifier, default collateral. |
+| Collateral allowlist | Maintains which ERC20s are allowed; zero address sentinel means “use default collateral”. |
+| Pause controls | Global commit/claim pauses plus per-market pause/guardian overrides. |
+| Metadata | Emits `MarketCreated`, `MarketPaused`, `MarketMetadataUpdated` for off-chain indexers. |
 
-## What’s Next
+**Key Files**: `src/MarketFactory.sol`, tests in `test/MarketFactory.t.sol` & `test/FactoryLifecycle.t.sol`.
 
-1. **Groth16 verifier integration** – Replaces the stub with a production verifier, documents signal layouts, and locks in settlement authenticity.
-2. **Resolution telemetry enrichment** – Extend the new `MarketResolved` + `resolutionSummary()` surface with payout vectors and UMA references so treasuries can mirror results instantly.
-3. **Factory deployment automation** – Produce machine-readable artifacts post-deployment for safer exchange integrations.
-4. **Invariant testing & static analysis** – Expand fuzz and invariant suites alongside Slither/Solhint automation ahead of external audits.
-5. **Horizen ZEN testnet-ready scripts** – Support sandbox launches where institutional partners can pilot liquidity with guardrails.
+### `RakeManager.sol`
 
-Each milestone strengthens the economic flywheel: provable outcomes lead to deeper liquidity, which drives more rake for the treasury and future token backers.
+| Feature | Details |
+| --- | --- |
+| Fee cap | `MAX_RAKE_BPS = 200` (2%); owner can adjust default rake or treasury. |
+| Deduction | `takeRake(token, amount, overrideBps)` returns net pool after rake, emits `RakeTaken`. |
+| Ownership | `Ownable2Step` so treasury/rake config can rotate safely. |
 
-## Strategic Takeaways
+**Key Files**: `src/RakeManager.sol`, tests in `test/RakeManager.t.sol`. Reentrancy-specific mocks live under `test/mocks/`.
 
-- **Investable compliance** – All fees, overrides, and guardian actions are on-chain, enabling regulators and institutional LPs to audit payouts without privileged access.
-- **Cross-stack synergy** – Backend services ingest on-chain events, while the worker can originate markets directly through the factory. This closed loop reduces informational asymmetry for investors.
-- **Future token alignment** – Rake events and treasury routing feed into the broader tokenomics plan. When the token launches, holders inherit an infrastructure with transparent, recurring cash flows.
+### `Verifier.sol` & helpers
 
-For partnership opportunities, validator participation, or audit collaboration, contact hello@revealmarket.xyz or DM [@RevealMarket](https://x.com/RevealMarket).
+| Feature | Details |
+| --- | --- |
+| Verifying key storage | Stores `α`, `β`, `γ`, `δ`, and the IC vector; owner can rotate keys. |
+| Inputs | Enforces exactly 6 public signals (winning pool, total pool, outcome hash, circuit version, nonce, market address). |
+| Pairing | Uses custom `Pairing` library with BN254 precompiles. Any invalid point/field element reverts; invalid proofs return `false`. |
+| Stub | `verifiers/VerifierStub.sol` remains available for local dev when `USE_STUB_VERIFIER=1`. |
 
-## Quick Start
+**Key Files**: `src/Verifier.sol`, `src/utils/Pairing.sol`, `docs/Verifier_line_by_line.md`, `docs/settlement-circuit.md`.
+
+---
+
+## Build, Test, and Tooling
+
+### Quick Start
 
 ```bash
 curl -L https://foundry.paradigm.xyz | bash
@@ -50,18 +117,72 @@ forge build
 forge test --gas-report
 ```
 
-`./run_local.sh` wraps build → tests → gas snapshots, and `./run_local.sh full` adds fuzzing + coverage.
+Use `./run_local.sh` for the standard build/test/snapshot flow. `./run_local.sh full` adds fuzzing (`FOUNDRY_PROFILE=ci.fuzz`) and coverage reports.
 
-## Testing & CI
+### Testing Coverage
 
-- `forge test` covers 70+ cases (lifecycle, guardian actions, rake overrides, reentrancy guards).
-- `forge fmt --check` is enforced; run `forge fmt` locally before committing.
-- GitHub Actions (`.github/workflows/ci.yml`) runs `./run_local.sh full` to guarantee Forge tests, gas snapshots, and coverage stay green.
+- `test/RevealMarket.t.sol` – Unit tests for each path (commits, claims, refunds, proof guards, events).
+- `test/RevealMarketNative.t.sol` – Mirrors ERC20 tests but with native collateral.
+- `test/RevealMarketSecurity.t.sol` – Reentrancy + guardian control scenarios.
+- `test/RevealMarketFuzz.t.sol` – Fuzz harness for commit/claim flows.
+- `test/FactoryLifecycle.t.sol` – Full end-to-end deployment + guardian operations.
+- `test/MarketFactory.t.sol`, `test/RakeManager.t.sol`, `test/Verifier.t.sol` – Component-level suites, including new verifying-key rotation guards and pairing helper checks.
+- `test/Pairing.t.sol` – Unit coverage for the BN254 helper (negation, scalar multiplication) used by the verifier.
 
-## Deployment Tips
+`forge snapshot` is configured (`foundry.toml`) to track gas budgets over time; CI should fail when regressions exceed thresholds.
 
-- `script/Deploy.s.sol` deploys `RakeManager → Verifier (stub) → RevealMarket → MarketFactory`. Exported addresses feed the backend/worker.
-- Use the JSON artifacts generated by Foundry to configure backend env vars (`RM_FACTORY_ADDRESS`, `RM_VERIFIER_ADDRESS`, etc.).
-- For testnet pilots, set `RPC_URL`/`DEPLOYER_KEY` env vars before running `forge script`.
+---
 
-Stay current with [`contracts/TODO.md`](./TODO.md) for the Groth16 verifier milestone, resolution event enhancements, and invariant suites.
+## Deployment & Configuration
+
+1. **Prepare verifying key JSON**: `contracts/cache/settlement-vk.json` must contain the actual circuit points (`alpha1`, `beta2`, `gamma2`, `delta2`, `ic`, `circuitHash`, `expectedInputs`). The file checked into Git is a placeholder—replace it with your audited Groth16 outputs before real deployments.
+2. **Environment variables for `Deploy.s.sol`**:
+   - `DEPLOYER_KEY`
+   - `ORACLE_ADDRESS`
+   - `TREASURY_ADDRESS`
+   - `COLLATERAL_ADDRESS`
+   - `RAKE_BPS`
+   - Optional: `SETTLEMENT_VK_PATH`, `USE_STUB_VERIFIER`
+3. **Run**:
+   ```bash
+   cd contracts
+   forge script script/Deploy.s.sol:Deploy \
+     --rpc-url $RPC_URL \
+     --broadcast \
+     --verify # optional
+   ```
+4. The script writes `contracts/cache/last-deployment.json` containing all deployed addresses + circuit metadata. Feed this into backend/worker env vars (`RM_FACTORY_ADDRESS`, `RM_VERIFIER_ADDRESS`, etc.).
+5. When refreshing the verifying key, run `proover/circuits/generate_keys.sh` to produce `build/settlement_vk.json` and copy that file into `contracts/cache/settlement-vk.json` before redeploying the verifier.
+
+**Note:** `USE_STUB_VERIFIER` should never be `1` outside dev/test networks.
+
+---
+
+## Integration Notes
+
+- **Backend/Worker**: Reads factory + verifier addresses from deployment artifacts; constructs markets through the factory; tracks `proofNonce` and `ProofReceipt` events for audit surfaces.
+- **Frontend**: Proof viewer (`frontend/app/proofs`) consumes receipts and zkVerify IDs when the backend surfaces them.
+- **zkVerify**: Current code emits the necessary data (nonce + outcome hash) to send proofs to zkVerify. The worker must forward proofs and store returned receipts.
+
+---
+
+## Roadmap Snapshot
+
+Refer to [`TODO.md`](./TODO.md) for the canonical backlog. Highlights:
+
+1. **Dual zkVerify attestations** – pipeline plus UI exposure.
+2. **Resolution telemetry** – richer `MarketResolved` payloads (winners array, UMA question IDs).
+3. **Deployment automation** – extend scripts to emit per-market JSON manifests.
+4. **Invariant / static analysis** – add Forge invariants + Slither hooks to CI.
+5. **Testnet playbooks** – presets for Horizen ZEN testnet, including sample markets and documentation.
+
+---
+
+## References
+
+- [`docs/settlement-circuit.md`](./docs/settlement-circuit.md) – public-signal layout, nonce semantics, zk integration plan.
+- [`docs/RevealMarket_line_by_line.md`](./docs/RevealMarket_line_by_line.md) – annotated contract walkthrough.
+- [`docs/Verifier_line_by_line.md`](./docs/Verifier_line_by_line.md) – verifying key management and pairing explanation.
+- [`PLAN.txt`](./PLAN.txt) – historical scope/milestone log.
+
+Questions? Reach out via hello@revealmarket.xyz or [@RevealMarket](https://x.com/RevealMarket). Auditors/partners should review this README alongside the docs and deployment artifacts before integration.

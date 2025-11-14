@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,22 +14,20 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="RM_")
 
-    database_url: str = Field(
-        default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market"
-    )
+    database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
     redis_url: str = Field(default="redis://redis:6379/0")
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
     polymarket_page_size: int = Field(default=100, ge=1, le=250)
-    polymarket_max_pages: Optional[int] = Field(default=None, ge=1)
+    polymarket_max_pages: int | None = Field(default=None, ge=1)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
-    polymarket_closed_filter: Optional[bool] = Field(default=None)
+    polymarket_closed_filter: bool | None = Field(default=None)
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)
     poll_interval_seconds: int = Field(default=30, ge=1)
-    api_base_url: Optional[str] = Field(default="http://localhost:8000")
+    api_base_url: str | None = Field(default="http://localhost:8000")
     prime_markets_cache_enabled: bool = Field(default=True)
     markets_cache_limit: int = Field(default=18, ge=1, le=250)
     markets_cache_offset: int = Field(default=0, ge=0)
@@ -47,26 +44,26 @@ class Settings(BaseSettings):
     batch_stats_key: str = Field(default="reveal_market_worker:batch_stats")
     batch_stats_ttl_seconds: int = Field(default=900, ge=30)
     schema_version_key: str = Field(default="reveal_market:schema_version")
-    factory_address: Optional[str] = Field(default=None)
-    rake_manager_address: Optional[str] = Field(default=None)
-    verifier_address: Optional[str] = Field(default=None)
-    rpc_url: Optional[AnyUrl] = Field(default=None)
-    polygon_rpc_url: Optional[AnyUrl] = Field(
+    factory_address: str | None = Field(default=None)
+    rake_manager_address: str | None = Field(default=None)
+    verifier_address: str | None = Field(default=None)
+    rpc_url: AnyUrl | None = Field(default=None)
+    polygon_rpc_url: AnyUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),
     )
-    conditional_tokens_address: Optional[str] = Field(
+    conditional_tokens_address: str | None = Field(
         default=None,
         validation_alias=AliasChoices("RM_POLYGON_CTF_ADDRESS", "POLYGON_CTF_ADDRESS"),
     )
-    clob_host: Optional[AnyHttpUrl] = Field(
+    clob_host: AnyHttpUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
     )
-    wallet_address: Optional[str] = Field(default=None)
-    wallet_private_key: Optional[SecretStr] = Field(default=None)
-    gas_price_gwei: Optional[float] = Field(default=None, ge=0)
-    max_priority_fee_gwei: Optional[float] = Field(default=None, ge=0)
+    wallet_address: str | None = Field(default=None)
+    wallet_private_key: SecretStr | None = Field(default=None)
+    gas_price_gwei: float | None = Field(default=None, ge=0)
+    max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     auto_create_onchain_markets: bool = Field(default=False)
     default_commit_lead_seconds: int = Field(default=86400, ge=60)
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
@@ -78,6 +75,45 @@ class Settings(BaseSettings):
     featured_categories: list[str] = Field(default_factory=list)
     featured_tags: list[str] = Field(default_factory=list)
     featured_suggest_queries: list[str] = Field(default_factory=list)
+    summary_enabled: bool = Field(default=True)
+    summary_queue_key: str = Field(default="reveal_market_worker:summary_queue")
+    summary_dead_letter_key: str = Field(default="reveal_market_worker:summary_dead_letter")
+    summary_requested_ttl_seconds: int = Field(default=600, ge=60)
+    summary_refresh_interval_seconds: int = Field(default=604800, ge=3600)
+    summary_min_words: int = Field(default=200, ge=50)
+    summary_max_words: int = Field(default=400, ge=100)
+    summary_model: str = Field(default="gpt-5.1-mini")
+    summary_source_label: str = Field(default="ai_enrichment")
+    summary_prompt_template: str = Field(
+        default=(
+            "You are an analyst preparing a concise but well-researched summary for a prediction market.\n"
+            "Write {min_words}-{max_words} words that:\n"
+            "- Restate the core question in neutral, plain language.\n"
+            "- Highlight the key drivers/risk factors investors should research.\n"
+            "- Mention relevant timelines if they appear in the source data.\n"
+            "Always disclose that this section is AI generated after a quick public-source scan.\n"
+            "QUESTION: {title}\n"
+            "CATEGORY: {category}\n"
+            "TAGS: {tags}\n"
+            "DESCRIPTION:\n"
+            "{description}\n"
+            "EXTRA CONTEXT:\n"
+            "{extra_context}\n"
+        )
+    )
+    summary_api_base_url: AnyHttpUrl | None = Field(default="https://api.openai.com/v1")
+    summary_api_key: SecretStr | None = Field(default=None)
+    summary_http_timeout_seconds: float = Field(default=20.0, gt=0)
+    summary_queue_poll_seconds: float = Field(default=2.0, gt=0)
+    summary_retry_backoff_seconds: float = Field(default=30.0, ge=0)
+    summary_retry_max_attempts: int = Field(default=3, ge=1)
+    summary_fallback_enabled: bool = Field(default=True)
+    container_heartbeat_seconds: int = Field(default=60, ge=10)
+    prover_enabled: bool = Field(default=False)
+    prover_base_url: AnyHttpUrl | None = Field(default=None)
+    prover_timeout_seconds: float = Field(default=5.0, gt=0)
+    proof_cache_prefix: str = Field(default="reveal_market:proof_receipts")
+    proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
 
     @field_validator("featured_categories", "featured_tags", "featured_suggest_queries", mode="before")
     @classmethod

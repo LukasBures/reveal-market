@@ -8,6 +8,28 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol"; // Provides min
 import {RevealMarket} from "./RevealMarket.sol";
 import {IRakeManager} from "./interfaces/IRakeManager.sol";
 
+/**
+ * @title MarketFactory – reveal-market deployment coordinator
+ *
+ * This contract is the single on-chain entrypoint used by the ops/worker stack to create prediction markets.
+ * It owns the canonical RevealMarket implementation and creates minimal clones so that:
+ *   - gas stays low (EIP-1167 proxies),
+ *   - upgrades are explicit (owner updates the implementation address),
+ *   - every market inherits shared configuration (verifier, rake manager, treasury, allowlist).
+ *
+ * The factory also centralises operational controls:
+ *   • global commit/claim pauses (e.g., during incident response),
+ *   • per-market guardian overrides,
+ *   • collateral allowlisting and default-collateral routing,
+ *   • guardian ownership (Ownable2Step) so rotations are auditable.
+ *
+ * High-level lifecycle orchestrated by this contract:
+ *   1. Ops deploy a new RevealMarket implementation + MarketFactory.
+ *   2. When new events arrive, the worker calls `createMarket(...)`.
+ *   3. The factory clones the implementation, runs `initialize`, and emits `MarketCreated`.
+ *   4. Guardian/owner can later pause markets, swap guardians, or update defaults via provided setters.
+ */
+
 /// @title MarketFactory
 /// @notice Deploys RevealMarket clones with shared configuration.
 contract MarketFactory is Ownable2Step {

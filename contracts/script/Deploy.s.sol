@@ -8,6 +8,7 @@ import {MarketFactory} from "../src/MarketFactory.sol";
 import {RakeManager} from "../src/RakeManager.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {Verifier} from "../src/Verifier.sol";
+import {VerifierStub} from "../src/verifiers/VerifierStub.sol";
 
 /// @notice Extends Vm with helper aliases for environment reads and broadcast control.
 interface VmExtended is Vm {
@@ -23,6 +24,16 @@ abstract contract ScriptBase {
 }
 
 contract Deploy is ScriptBase {
+    struct VerifyingKeyConfig {
+        uint256[2] alpha1;
+        uint256[2][2] beta2;
+        uint256[2][2] gamma2;
+        uint256[2][2] delta2;
+        uint256[2][] ic;
+        bytes32 circuitHash;
+        uint256 expectedInputs;
+    }
+
     function run() external {
         // ── Load environment variables ─────────────────────────────────────────────
         uint256 deployerKey = HEVM.envUint("DEPLOYER_KEY");
@@ -31,6 +42,8 @@ contract Deploy is ScriptBase {
         uint256 rakeBps = HEVM.envUint("RAKE_BPS");
         string memory metadataURI = HEVM.envString("MARKET_METADATA_URI");
         address collateral = HEVM.envAddress("COLLATERAL_ADDRESS");
+        bool useStubVerifier = _envOrUint("USE_STUB_VERIFIER", 0) == 1;
+        string memory vkPath = _envOrString("SETTLEMENT_VK_PATH", "contracts/cache/settlement-vk.json");
 
         address deployer = HEVM.addr(deployerKey);
 
@@ -38,25 +51,114 @@ contract Deploy is ScriptBase {
         HEVM.startBroadcast(deployerKey);
 
         RakeManager rakeManager = new RakeManager(deployer, treasury, rakeBps);
-        Verifier verifier = new Verifier();
         RevealMarket implementation = new RevealMarket();
+
+        address verifierAddress;
+        bytes32 circuitHash;
+        uint256 expectedInputs;
+        if (useStubVerifier) {
+            VerifierStub stub = new VerifierStub();
+            verifierAddress = address(stub);
+            circuitHash = bytes32(0);
+            expectedInputs = 6;
+        } else {
+            VerifyingKeyConfig memory vkConfig = _loadVerifyingKey(vkPath);
+            Verifier verifier = new Verifier(
+                vkConfig.alpha1,
+                vkConfig.beta2,
+                vkConfig.gamma2,
+                vkConfig.delta2,
+                vkConfig.ic,
+                vkConfig.circuitHash,
+                vkConfig.expectedInputs
+            );
+            verifierAddress = address(verifier);
+            circuitHash = vkConfig.circuitHash;
+            expectedInputs = vkConfig.expectedInputs;
+        }
+
         MarketFactory factory =
-            new MarketFactory(address(implementation), address(rakeManager), treasury, address(verifier), collateral);
+            new MarketFactory(address(implementation), address(rakeManager), treasury, verifierAddress, collateral);
 
         HEVM.stopBroadcast();
 
         // ── Log deployed addresses ─────────────────────────────────────────────────
         console.log("RakeManager:", address(rakeManager));
-        console.log("Verifier:", address(verifier));
+        console.log("Verifier:", verifierAddress);
         console.log("RevealMarket implementation:", address(implementation));
         console.log("MarketFactory:", address(factory));
         console.log("Oracle:", oracle);
         console.log("Default collateral:", collateral);
         console.log("Default metadata URI:", metadataURI);
+        console.log("Circuit hash:", uint256(circuitHash));
+        console.log("Expected signals:", expectedInputs);
+
+        _writeArtifacts(
+            rakeManager,
+            implementation,
+            factory,
+            verifierAddress,
+            oracle,
+            collateral,
+            circuitHash,
+            implementation.CIRCUIT_VERSION()
+        );
 
         // Example (optional):
         // uint256 commitDeadline = block.timestamp + 3 days;
         // uint256 revealDeadline = commitDeadline + 2 days;
         // factory.createMarket("EVENT-ID", commitDeadline, revealDeadline, oracle, collateral, 0);
+    }
+    function _loadVerifyingKey(string memory path) private view returns (VerifyingKeyConfig memory config) {
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        string memory json = HEVM.readFile(path);
+        config.alpha1 = abi.decode(HEVM.parseJson(json, ".alpha1"), (uint256[2]));
+        config.beta2 = abi.decode(HEVM.parseJson(json, ".beta2"), (uint256[2][2]));
+        config.gamma2 = abi.decode(HEVM.parseJson(json, ".gamma2"), (uint256[2][2]));
+        config.delta2 = abi.decode(HEVM.parseJson(json, ".delta2"), (uint256[2][2]));
+        config.ic = abi.decode(HEVM.parseJson(json, ".ic"), (uint256[2][]));
+        config.circuitHash = abi.decode(HEVM.parseJson(json, ".circuitHash"), (bytes32));
+        config.expectedInputs = abi.decode(HEVM.parseJson(json, ".expectedInputs"), (uint256));
+    }
+
+    function _envOrString(string memory key, string memory defaultValue) private view returns (string memory) {
+        try HEVM.envString(key) returns (string memory value) {
+            return value;
+        } catch {
+            return defaultValue;
+        }
+    }
+
+    function _envOrUint(string memory key, uint256 defaultValue) private view returns (uint256) {
+        try HEVM.envUint(key) returns (uint256 value) {
+            return value;
+        } catch {
+            return defaultValue;
+        }
+    }
+
+    function _writeArtifacts(
+        RakeManager rakeManager,
+        RevealMarket implementation,
+        MarketFactory factory,
+        address verifier,
+        address oracle,
+        address collateral,
+        bytes32 circuitHash,
+        uint256 circuitVersion
+    ) private {
+        string memory root = "deploy";
+        string memory json = HEVM.serializeAddress(root, "rakeManager", address(rakeManager));
+        json = HEVM.serializeAddress(root, "verifier", verifier);
+        json = HEVM.serializeAddress(root, "revealMarketImplementation", address(implementation));
+        json = HEVM.serializeAddress(root, "marketFactory", address(factory));
+        json = HEVM.serializeAddress(root, "oracle", oracle);
+        json = HEVM.serializeAddress(root, "defaultCollateral", collateral);
+        json = HEVM.serializeBytes32(root, "circuitHash", circuitHash);
+        json = HEVM.serializeUint(root, "circuitVersion", circuitVersion);
+
+        string memory outputPath = "contracts/cache/last-deployment.json";
+        HEVM.writeJson(json, outputPath);
+        console.log("Wrote deployment artifact:", outputPath);
     }
 }

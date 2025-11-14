@@ -1,6 +1,8 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
 
 const sampleMarket = {
@@ -28,14 +30,19 @@ describe("FeaturedMarketsClient", () => {
     delete (globalThis as any).IntersectionObserver;
   });
 
+  const renderWithClient = (ui: ReactElement) => {
+    const client = new QueryClient();
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  };
+
   it("renders skeletons when no markets exist yet", () => {
-    const { container } = render(<FeaturedMarketsClient initialMarkets={[]} />);
+    const { container } = renderWithClient(<FeaturedMarketsClient initialMarkets={[]} />);
     const skeletons = container.querySelectorAll(".animate-pulse");
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
   it("renders a helpful notice when provided", () => {
-    render(<FeaturedMarketsClient initialMarkets={[]} emptyNotice="Type more to search" />);
+    renderWithClient(<FeaturedMarketsClient initialMarkets={[]} emptyNotice="Type more to search" />);
     expect(screen.getByText(/type more to search/i)).toBeInTheDocument();
   });
 
@@ -54,7 +61,7 @@ describe("FeaturedMarketsClient", () => {
       json: async () => [nextMarket],
     });
 
-    render(
+    renderWithClient(
       <FeaturedMarketsClient
         initialMarkets={[sampleMarket]}
         pageSize={1}
@@ -103,7 +110,7 @@ describe("FeaturedMarketsClient", () => {
     }
     (globalThis as any).IntersectionObserver = InstantIntersectionObserver;
 
-    render(
+    renderWithClient(
       <FeaturedMarketsClient
         initialMarkets={[sampleMarket]}
         pageSize={1}

@@ -2,7 +2,6 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MarketFilters } from "@/components/markets/MarketFilters";
-import { HeartbeatBadge } from "@/components/metrics/HeartbeatBadge";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
 
@@ -65,18 +64,15 @@ export default async function HomePage({ searchParams }: PageProps) {
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
         <div className="flex flex-col gap-4">
           <MarketFilters initialSearch={rawSearchQuery} />
-          <Suspense fallback={null}>
-            <HeartbeatBadge />
-          </Suspense>
         </div>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
         </Suspense>
-        <section className="grid gap-6 rounded-3xl border border-white/5 bg-slate-900/40 p-6 text-sm text-slate-300 md:grid-cols-4">
+        <section className="glass-panel grid gap-4 p-6 text-sm text-slate-300 md:grid-cols-4">
           {callouts.map((item) => (
-            <div key={item.label} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+            <div key={item.label} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-center md:text-left">
               <p className="text-xs uppercase tracking-[0.35em] text-slate-500">{item.label}</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{item.value}</p>
+              <p className="mt-2 text-2xl font-semibold text-white text-glow">{item.value}</p>
             </div>
           ))}
         </section>
@@ -85,7 +81,7 @@ export default async function HomePage({ searchParams }: PageProps) {
             <Link
               key={article.title}
               href={article.href}
-              className="rounded-2xl border border-white/5 bg-slate-950/40 p-5 transition hover:border-brand-400/60"
+              className="rounded-2xl border border-white/5 bg-slate-950/40 p-5 text-center transition hover:border-brand-400/60 md:text-left"
             >
               <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Docs</p>
               <h3 className="mt-2 text-xl font-semibold text-white">{article.title}</h3>
@@ -94,12 +90,13 @@ export default async function HomePage({ searchParams }: PageProps) {
           ))}
         </section>
       </div>
-      <section className="bg-slate-950/80 py-16">
+      <section className="relative overflow-hidden bg-slate-950/80 py-16">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-brand-500/10 to-transparent" />
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 text-center">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Need a bespoke feed?</p>
-          <p className="text-slate-300">
+          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Need a bespoke feed?</p>
+          <p className="text-lg text-slate-200">
             Email{" "}
-            <a href="mailto:hello@revealmarket.xyz" className="text-brand-200 underline">
+            <a href="mailto:hello@revealmarket.xyz" className="text-brand-200 underline underline-offset-4">
               hello@revealmarket.xyz
             </a>{" "}
             for curated endpoints, rake splits, and zk audit logs tailored to your venue.

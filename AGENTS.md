@@ -57,7 +57,7 @@
 - **SEO/AI readiness** – Metadata centralised in `lib/seo.ts`. Every docs/legal/about page imports `docsMetadata` so canonical URLs + keywords stay consistent. `app/sitemap.ts`/`app/robots.ts` update automatically.
 - **Security headers** – Configured in `next.config.mjs` (CSP, HSTS, Referrer/Permissions policies, COOP/CORP). Update the CSP when adding external assets.
 - **Testing** – Vitest + Testing Library cover hero CTA, DocsNav, MainNav, DocsLayout. Keep tests updated when components change.
-- **Live ops badge** – `frontend/components/metrics/HeartbeatBadge.tsx` surfaces worker heartbeats on the homepage by calling the API. Local builds without the backend rely on the mock health snapshot in `lib/api.ts`.
+- **Live ops badge** – The homepage no longer surfaces worker heartbeats or sync badges; data freshness stays internal even though mock health helpers still exist in `lib/api.ts`.
 
 ### Contracts (Foundry)
 - `src/` houses RevealMarket, MarketFactory, RakeManager, Verifier. `test/` contains Forge suites (unit + fuzz). `run_local.sh full` builds/tests/gas-checks/fuzzes; CI runs this via GitHub Actions.
@@ -66,7 +66,7 @@
 
 ### CI / Automation
 - `.github/workflows/ci.yml` runs three jobs in parallel:
-  - **backend**: setup Python 3.13 + Poetry, cache virtualenvs, run `./backend/run_tests.sh`.
+  - **backend**: setup Python 3.12 + uv, cache the uv resolver, run `./backend/run_tests.sh`.
   - **contracts**: install Foundry via `foundryup`, execute `./contracts/run_local.sh full`.
   - **frontend**: setup Node 20, `npm install`, `npm run build` (ready for lint/test when expanded).
 - `.github/workflows/contracts-ci.yml` exists for legacy Forge-only runs; keep it unless instructed otherwise.

@@ -32,14 +32,4 @@ describe("fetchFeaturedMarkets", () => {
       }),
     );
   });
-
-  it("targets the tags endpoint when tag filter provided", async () => {
-    await fetchFeaturedMarkets(8, { tag: "btc halving" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/tags/btc-halving?limit=8"),
-      expect.objectContaining({
-        next: expect.objectContaining({ tags: ["tag:btc-halving"] }),
-      }),
-    );
-  });
 });

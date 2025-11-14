@@ -6,14 +6,80 @@
   color-scheme: dark;
   --background: #030712;
   --foreground: #f8fafc;
+  --panel: rgba(15, 23, 42, 0.75);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --brand: #38bdf8;
 }
 
 body {
   min-height: 100vh;
   background-color: var(--background);
   color: var(--foreground);
+  font-family: var(--font-sans, "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-feature-settings: "cv11", "ss01", "ss02";
+  letter-spacing: 0.01em;
+  position: relative;
+  overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.25), transparent 45%),
+    radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.2), transparent 35%),
+    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.12), transparent 40%),
+    linear-gradient(130deg, #020617 0%, #0f172a 45%, #020617 100%);
+  filter: blur(0px);
+  opacity: 0.95;
+}
+
+@supports not (scrollbar-gutter: stable both-edges) {
+  body {
+    overflow-y: scroll;
+  }
 }
 
 a {
   color: inherit;
+}
+
+.glass-panel {
+  border-radius: 1.5rem;
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.65));
+  box-shadow:
+    0 20px 35px rgba(2, 6, 23, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(18px);
+}
+
+.divider-gradient {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.4), transparent);
+}
+
+.text-glow {
+  text-shadow: 0 0 30px rgba(56, 189, 248, 0.35);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-up {
+    animation: fadeUp 0.65s ease-out both;
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

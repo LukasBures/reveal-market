@@ -26,6 +26,7 @@ contract FactoryLifecycleTest is Test {
     bytes32 private constant OUTCOME_HASH = keccak256(bytes(OUTCOME));
     bytes32 private constant WIN_SALT = bytes32(uint256(555));
     bytes32 private constant LOSE_SALT = bytes32(uint256(777));
+    uint256 private proofNonce;
 
     function setUp() public {
         implementation = new RevealMarket();
@@ -78,7 +79,7 @@ contract FactoryLifecycleTest is Test {
         // Post result & verify proof
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
-        uint256[4] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
+        uint256[6] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
         market.verifyProof(new bytes(0), pubSignals);
 
         // Global claim pause
@@ -111,12 +112,13 @@ contract FactoryLifecycleTest is Test {
 
     function _buildSignals(RevealMarket market, uint256 winningPool, bytes32 outcomeHash)
         internal
-        view
-        returns (uint256[4] memory signals)
+        returns (uint256[6] memory signals)
     {
         signals[0] = winningPool;
         signals[1] = market.totalPool();
         signals[2] = uint256(outcomeHash);
         signals[3] = market.CIRCUIT_VERSION();
+        signals[4] = ++proofNonce;
+        signals[5] = uint256(uint160(address(market)));
     }
 }

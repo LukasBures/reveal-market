@@ -6,39 +6,31 @@ authors = [
     {name = "Lukas Bures, Ph.D.",email = "me@lukasbures.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
+    "pre-commit>=3.8.0",
 ]
 
 # ---------------------------------------------------------------------
 # Tool Configurations
 # ---------------------------------------------------------------------
-[tool.black]
+[tool.ruff]
 line-length = 120
-target-version = ["py312"]
-skip-string-normalization = true
+target-version = "py312"
 
-[tool.isort]
-profile = "black"
-line_length = 120
-skip = [".venv", "build", "dist"]
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "N", "UP", "S"]
+ignore = ["B008", "S101"]
+fixable = ["ALL"]
 
-[tool.flake8]
-max-line-length = 120
-max-complexity = 12
-ignore = ["D203", "W503", "E203", "F401", "F403", "F405", "E704"]
-extend-ignore = ["B305"]
-exclude = [
-    ".git",
-    "__pycache__",
-    ".venv",
-    "build",
-    "dist",
-    "docs",
-    "old",
-    "tests/data"
-]
-per-file-ignores = ["__init__.py:F401,F403,F405"]
+[tool.ruff.lint.isort]
+case-sensitive = false
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -58,5 +50,8 @@ markers = [
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.8.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["backend"]

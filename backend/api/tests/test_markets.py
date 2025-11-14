@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import app.main as api_main
@@ -18,7 +18,7 @@ def _make_market(
     status: str,
     rake_bps: int | None = None,
 ) -> models.Market:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return models.Market(
         event_id=event_id,
         title=title,
@@ -109,6 +109,26 @@ def test_create_market_with_rake(client):
     assert fetched["rake_bps"] == 75
 
 
+def test_market_response_includes_summary_fields(client, db_session):
+    market = _make_market("evt-555", "Summary Ready", category="finance", oracle="0xdef", status="commit")
+    market.summary = "AI generated overview."
+    market.summary_source = "ai_enrichment"
+    market.summary_model = "gpt-5.1-mini"
+    now = datetime.now(UTC)
+    market.summary_checked_at = now
+    market.summary_metadata = {"mode": "fallback"}
+    db_session.add(market)
+    db_session.commit()
+
+    response = client.get(f"/markets/{market.event_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == "AI generated overview."
+    assert payload["summary_source"] == "ai_enrichment"
+    assert payload["summary_model"] == "gpt-5.1-mini"
+    assert payload["summary_checked_at"].startswith(now.strftime("%Y-%m-%d"))
+
+
 def test_patch_market_and_stats(client, db_session):
     market = _make_market("evt-200", "Patch Me", category="culture", oracle="0xccc", status="commit")
     db_session.add(market)
@@ -176,7 +196,7 @@ def test_resolution_endpoint_returns_summary(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    checked_at = datetime.now(timezone.utc)
+    checked_at = datetime.now(UTC)
     resolution = models.Resolution(
         condition_id=market.condition_id.lower(),
         source="conditional_tokens",
@@ -267,6 +287,22 @@ def test_category_endpoint_allows_hyphenated_slug(client, db_session):
     resp = client.get("/categories/ai-tech", params={"limit": 2})
     assert resp.status_code == 200
     assert resp.json()[0]["event_id"] == "evt-cat-slug"
+
+
+def test_category_endpoint_populates_trending_with_general_feed(client, db_session):
+    db_session.add_all(
+        [
+            _make_market("evt-trend-a", "Macro Watch", category="Finance", oracle="0xtrend", status="commit"),
+            _make_market("evt-trend-b", "Championship Odds", category="Sports", oracle="0xtrend", status="commit"),
+        ]
+    )
+    db_session.commit()
+
+    resp = client.get("/categories/trending", params={"limit": 2})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 2
+    assert {item["event_id"] for item in payload} == {"evt-trend-a", "evt-trend-b"}
 
 
 def test_tag_endpoint_filters_and_caches(client, db_session):
@@ -372,7 +408,7 @@ def test_patch_market_invalidates_detail_cache(client, db_session):
 
 
 def test_markets_support_pagination_with_offset(client, db_session):
-    base = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    base = datetime.now(tz=UTC).replace(microsecond=0)
     entries = []
     for idx in range(3):
         market = _make_market(

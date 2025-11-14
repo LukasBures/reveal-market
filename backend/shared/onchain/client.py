@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
-    from eth_account.signers.local import LocalAccount
-    from web3 import AsyncWeb3
+    pass
 
 logger = logging.getLogger("reveal_market.onchain")
 
@@ -16,7 +15,7 @@ class OnChainConfigurationError(RuntimeError):
 
 
 @lru_cache(maxsize=1)
-def get_async_web3(rpc_url: Optional[str]):
+def get_async_web3(rpc_url: str | None):
     """Return a cached AsyncWeb3 instance or raise if misconfigured."""
 
     if not rpc_url:
@@ -38,7 +37,7 @@ def get_async_web3(rpc_url: Optional[str]):
     return web3
 
 
-def load_account(private_key: Optional[str]):
+def load_account(private_key: str | None):
     """Create a signing account from the provided private key."""
 
     if not private_key:
@@ -53,7 +52,7 @@ def load_account(private_key: Optional[str]):
     return account
 
 
-def to_checksum(address: Optional[str]) -> str:
+def to_checksum(address: str | None) -> str:
     """Convert address to checksum format, raising if invalid."""
 
     if not address:

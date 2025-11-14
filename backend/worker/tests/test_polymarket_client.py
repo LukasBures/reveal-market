@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import httpx
-
 from app.polymarket import PolymarketClient
 
 
@@ -70,6 +69,35 @@ def test_polymarket_client_handles_pagination():
     assert second.outcomes == ["Option A", "Option B", "Option C"]
     assert second.outcome_prices == [0.2, 0.3, 0.5]
     assert second.extra_data["gamma"]["slug"] == "market-two"
+
+
+def test_polymarket_client_derives_category_from_event_series_when_tags_missing():
+    """Ensure category falls back to event/series metadata when tags are absent."""
+
+    payload = [
+        {
+            "id": "evt-derivation",
+            "question": "Who wins?",
+            "conditionId": "0xccc0000000000000000000000000000000000000000000000000000000000000",
+            "events": [
+                {
+                    "slug": "cfb-sc-txam-2025-11-15",
+                    "series": [{"title": "CFB 2025"}],
+                }
+            ],
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+
+    assert len(markets) == 1
+    assert markets[0].category == "CFB 2025"
 
 
 def test_polymarket_client_respects_closed_filter_and_extra_params():

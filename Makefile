@@ -1,4 +1,4 @@
-PYTHON ?= $(shell command -v python3.13 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
+PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 INFRA_SERVICES ?= postgres redis
 

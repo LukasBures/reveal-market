@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 MARKETS_LIST_PREFIX = "markets:list"
 CATEGORY_PREFIX = "markets:category"
 TAG_PREFIX = "markets:tag"
 SUGGEST_PREFIX = "markets:suggest"
 RESOLUTION_PREFIX = "markets:resolution"
+PROOF_PREFIX = "proofs:receipt"
 
 
 def markets_list_cache_key(
-    status: Optional[str],
-    category: Optional[str],
-    oracle: Optional[str],
-    search: Optional[str],
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    search: str | None,
     limit: int,
     offset: int,
 ) -> str:
@@ -51,7 +51,12 @@ def resolution_cache_key(condition_id: str) -> str:
     return f"{RESOLUTION_PREFIX}:{normalized}"
 
 
-def _slugify(value: Optional[str]) -> str:
+def proof_receipt_cache_key(condition_id: str) -> str:
+    normalized = (condition_id or "*").strip().lower() or "*"
+    return f"{PROOF_PREFIX}:{normalized}"
+
+
+def _slugify(value: str | None) -> str:
     if not value:
         return "*"
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")

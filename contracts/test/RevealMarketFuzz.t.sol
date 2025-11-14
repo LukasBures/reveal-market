@@ -20,6 +20,7 @@ contract RevealMarketFuzzTest is Test {
     address private constant OTHER = address(0xF004);
     string private constant OUTCOME = "YES";
     bytes32 private constant LOSE_SALT = bytes32(uint256(999));
+    uint256 private proofNonce;
 
     function setUp() public {
         market = new RevealMarket();
@@ -57,7 +58,7 @@ contract RevealMarketFuzzTest is Test {
         vm.prank(ORACLE);
         market.postResult(keccak256(bytes(OUTCOME)));
 
-        uint256[4] memory pubSignals = _buildSignals(stake);
+        uint256[6] memory pubSignals = _buildSignals(stake);
         market.verifyProof(new bytes(0), pubSignals);
 
         uint256 before = collateralToken.balanceOf(USER);
@@ -76,10 +77,12 @@ contract RevealMarketFuzzTest is Test {
         market.commit(ticketHash, amount);
     }
 
-    function _buildSignals(uint256 winningPool) private view returns (uint256[4] memory signals) {
+    function _buildSignals(uint256 winningPool) private returns (uint256[6] memory signals) {
         signals[0] = winningPool;
         signals[1] = market.totalPool();
         signals[2] = uint256(keccak256(bytes(OUTCOME)));
         signals[3] = market.CIRCUIT_VERSION();
+        signals[4] = ++proofNonce;
+        signals[5] = uint256(uint160(address(market)));
     }
 }

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import List
 
 from shared.logging import log_event
 from shared.onchain import MARKET_FACTORY_ABI, OnChainConfigurationError, get_async_web3, to_checksum
 
-from .config import Settings, get_settings
+from .config import Settings
 
 logger = logging.getLogger("reveal_market.api")
 
 
-async def fetch_factory_markets(settings: Settings) -> List[str]:
+async def fetch_factory_markets(settings: Settings) -> list[str]:
     rpc_url = settings.rpc_url and str(settings.rpc_url)
     factory_address = settings.factory_address
     if not (rpc_url and factory_address):

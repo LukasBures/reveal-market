@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from shared.logging import log_event
 from shared.onchain import MARKET_FACTORY_ABI, OnChainConfigurationError, get_async_web3, load_account, to_checksum
@@ -11,7 +10,7 @@ from shared.onchain import MARKET_FACTORY_ABI, OnChainConfigurationError, get_as
 logger = logging.getLogger("reveal_market.worker")
 
 
-class OnChainDisabled(Exception):
+class OnChainDisabledError(Exception):
     """Raised when on-chain execution is intentionally disabled."""
 
 
@@ -24,9 +23,9 @@ async def _send_create_market_transaction(
     commit_deadline: int,
     reveal_deadline: int,
     oracle: str,
-    collateral: Optional[str],
-    gas_price_wei: Optional[int],
-    max_priority_fee_wei: Optional[int],
+    collateral: str | None,
+    gas_price_wei: int | None,
+    max_priority_fee_wei: int | None,
     max_retries: int,
 ) -> str:
     from web3.exceptions import ContractLogicError, TransactionNotFound
@@ -119,7 +118,7 @@ async def _send_create_market_transaction(
     raise RuntimeError("Exceeded max retries for createMarket")
 
 
-def maybe_create_onchain_market(settings, market, session) -> Optional[str]:
+def maybe_create_onchain_market(settings, market, session) -> str | None:
     if not settings.auto_create_onchain_markets:
         return None
 
@@ -211,7 +210,7 @@ def maybe_create_onchain_market(settings, market, session) -> Optional[str]:
     return market_address
 
 
-def _to_wei(value_gwei: Optional[float]) -> Optional[int]:
+def _to_wei(value_gwei: float | None) -> int | None:
     if value_gwei is None:
         return None
     return int(value_gwei * 1_000_000_000)

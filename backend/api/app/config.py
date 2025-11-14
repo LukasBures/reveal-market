@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     market_category_allowlist: list[str] = Field(default_factory=list)
     market_tag_allowlist: list[str] = Field(default_factory=list)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
+    container_heartbeat_seconds: int = Field(default=60, ge=10)
 
     @field_validator("max_page_size")
     @classmethod

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from sqlalchemy import create_engine, text
 
@@ -34,7 +33,7 @@ def run_migrations(database_url: str) -> None:
     command.upgrade(config, "head")
 
 
-def get_current_revision(database_url: str) -> Optional[str]:
+def get_current_revision(database_url: str) -> str | None:
     """Return the Alembic revision currently recorded in the database."""
 
     engine = create_engine(database_url, future=True)
@@ -47,7 +46,7 @@ def get_current_revision(database_url: str) -> Optional[str]:
         engine.dispose()
 
 
-def get_head_revision() -> Optional[str]:
+def get_head_revision() -> str | None:
     """Return the head revision as defined by the local migrations directory."""
 
     from alembic.script import ScriptDirectory

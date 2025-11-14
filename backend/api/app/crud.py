@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from shared import repository as shared_repository
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
@@ -12,13 +10,13 @@ from . import models, schemas
 def get_markets(
     session: Session,
     *,
-    status: Optional[str] = None,
-    category: Optional[str] = None,
-    oracle: Optional[str] = None,
-    search: Optional[str] = None,
+    status: str | None = None,
+    category: str | None = None,
+    oracle: str | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> List[models.Market]:
+) -> list[models.Market]:
     stmt = select(models.Market)
     if status:
         stmt = stmt.where(models.Market.status == status)
@@ -31,7 +29,7 @@ def get_markets(
     return list(session.scalars(stmt))
 
 
-def get_market_stats(session: Session) -> List[schemas.MarketStatusBreakdown]:
+def get_market_stats(session: Session) -> list[schemas.MarketStatusBreakdown]:
     stmt = (
         select(models.Market.status, func.count(models.Market.id))
         .group_by(models.Market.status)
@@ -41,16 +39,16 @@ def get_market_stats(session: Session) -> List[schemas.MarketStatusBreakdown]:
     return [schemas.MarketStatusBreakdown(status=row[0], count=row[1]) for row in rows]
 
 
-def get_market_by_event_id(session: Session, event_id: str) -> Optional[models.Market]:
+def get_market_by_event_id(session: Session, event_id: str) -> models.Market | None:
     return shared_repository.get_market_by_event_id(session, event_id)
 
 
-def get_market_by_condition_id(session: Session, condition_id: str) -> Optional[models.Market]:
+def get_market_by_condition_id(session: Session, condition_id: str) -> models.Market | None:
     stmt = select(models.Market).where(models.Market.condition_id == condition_id)
     return session.scalars(stmt).first()
 
 
-def get_resolution_by_condition_id(session: Session, condition_id: str) -> Optional[models.Resolution]:
+def get_resolution_by_condition_id(session: Session, condition_id: str) -> models.Resolution | None:
     stmt = select(models.Resolution).where(models.Resolution.condition_id == condition_id)
     return session.scalars(stmt).first()
 
@@ -65,14 +63,14 @@ def patch_market(session: Session, market: models.Market, update: schemas.Market
     return market
 
 
-def search_markets(session: Session, query: str, limit: int) -> List[models.Market]:
+def search_markets(session: Session, query: str, limit: int) -> list[models.Market]:
     stmt = select(models.Market)
     stmt = _apply_text_search(session, stmt, query or "")
     stmt = stmt.limit(limit)
     return list(session.scalars(stmt))
 
 
-def get_markets_by_tag(session: Session, tag: str, limit: int) -> List[models.Market]:
+def get_markets_by_tag(session: Session, tag: str, limit: int) -> list[models.Market]:
     normalized = (tag or "").strip().lower()
     if not normalized:
         return []
@@ -86,7 +84,7 @@ def get_markets_by_tag(session: Session, tag: str, limit: int) -> List[models.Ma
     return list(session.scalars(stmt))
 
 
-def _apply_text_search(session: Session, stmt, search: Optional[str]):
+def _apply_text_search(session: Session, stmt, search: str | None):
     search_value = (search or "").strip()
     if not search_value:
         return stmt.order_by(models.Market.created_at.desc())

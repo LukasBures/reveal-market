@@ -15,14 +15,6 @@ vi.mock("@/lib/api", async (importOriginal) => {
         outcomePrices: [0.7, 0.3],
       },
     ]),
-    fetchHealthSnapshot: vi.fn().mockResolvedValue({
-      status: "ok",
-      workerHeartbeat: {
-        marketsProcessed: 20,
-        latencyMs: 50,
-        timestamp: "2025-01-01T00:00:00.000Z",
-      },
-    }),
   };
 });
 
@@ -38,10 +30,6 @@ vi.mock("@/components/markets/MarketFilters", () => ({
   MarketFilters: () => <div data-testid="filters">Filters</div>,
 }));
 
-vi.mock("@/components/metrics/HeartbeatBadge", () => ({
-  HeartbeatBadge: () => <div data-testid="heartbeat">Heartbeat</div>,
-}));
-
 vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
   FeaturedMarketsSection: () => <div data-testid="featured">Featured Markets</div>,
   FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading…</div>,
@@ -53,7 +41,6 @@ describe("HomePage", () => {
     render(ui);
 
     expect(screen.getByTestId("filters")).toBeInTheDocument();
-    expect(screen.getByTestId("heartbeat")).toBeInTheDocument();
     expect(screen.getByTestId("featured")).toBeInTheDocument();
   });
 });

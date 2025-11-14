@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice Interface for the fee management contract.
+/// @notice Minimal surface that RevealMarket/Factory rely on to enforce fee policy.
 interface IRakeManager {
     function maxRakeBps() external view returns (uint256);
 

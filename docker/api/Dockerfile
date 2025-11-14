@@ -1,66 +1,89 @@
-FROM python:3.13-slim AS builder
+# syntax=docker/dockerfile:1
 
-# Builder image keeps full toolchain (Poetry, compilers) but produces an isolated
-# virtualenv we can copy into the runtime stage so the final image stays minimal.
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    POETRY_VERSION=1.8.3 \
-    VENV_PATH=/opt/venv
+ARG UV_BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim
+ARG SERVICE_DIR=backend/api
+ARG SHARED_DIR=backend/shared
+ARG MIGRATIONS_DIR=backend/migrations
 
-WORKDIR /app
-
-# Install build tooling + Python venv for dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl libpq-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
-    && python -m venv "${VENV_PATH}" \
-    && "${VENV_PATH}/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
-
-# Only copy pyproject/lockfiles so dependency installation stays cached unless
-# the dependency graph actually changes.
-COPY backend/api/pyproject.toml ./pyproject.toml
-COPY backend/api/poetry.lock ./poetry.lock
-
-# Export runtime deps and pre-install wheels in the dedicated venv. This keeps
-# Poetry out of the runtime image while still respecting the lock file.
-RUN poetry export --only main --format requirements.txt --output /tmp/requirements.txt --without-hashes \
-    && "${VENV_PATH}/bin/pip" install --no-cache-dir -r /tmp/requirements.txt \
-    && rm -rf /tmp/requirements.txt
-
-FROM python:3.13-slim AS runtime
-
-# Runtime only needs the slim base + the copied venv. MODE + PATH configure the
-# FastAPI app to boot in production mode.
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    MODE=prod \
-    PATH="/opt/venv/bin:$PATH"
+# =============================================================================
+# Stage 1: Builder — install runtime deps with uv (no dev extras)
+# =============================================================================
+FROM ${UV_BUILDER_IMAGE} AS builder
+ARG SERVICE_DIR=backend/api
+ARG SHARED_DIR=backend/shared
+ARG MIGRATIONS_DIR=backend/migrations
 
 WORKDIR /app
 
-# Runtime dependencies only (curl for healthchecks + libpq for psycopg2).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Copy already-installed dependencies from builder venv
-COPY --from=builder /opt/venv /opt/venv
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    libpq-dev \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
-# Drop privileges so the API never runs as root inside the container.
+COPY ${SERVICE_DIR}/pyproject.toml ./pyproject.toml
+COPY ${SERVICE_DIR}/uv.lock ./uv.lock
+
+RUN uv sync --no-dev --frozen --no-install-project
+
+# =============================================================================
+# Stage 2: Test — include dev dependencies + source for pytest
+# =============================================================================
+FROM builder AS test
+ARG SERVICE_DIR=backend/api
+ARG SHARED_DIR=backend/shared
+ARG MIGRATIONS_DIR=backend/migrations
+
+RUN uv sync --extra dev --frozen
+
+COPY ${SERVICE_DIR}/app ./app
+COPY ${SHARED_DIR} ./shared
+COPY ${MIGRATIONS_DIR} ./migrations
+COPY ${SERVICE_DIR}/tests ./tests
+
+CMD ["uv", "run", "--frozen", "pytest", "-q"]
+
+# =============================================================================
+# Stage 3: Runtime — minimal image with synced venv and source
+# =============================================================================
+FROM ${PYTHON_RUNTIME_IMAGE} AS api
+ARG SERVICE_DIR=backend/api
+ARG SHARED_DIR=backend/shared
+ARG MIGRATIONS_DIR=backend/migrations
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libpq5 \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY --from=builder /app/.venv /.venv
+
 RUN useradd --create-home appuser
 USER appuser
 
-# Copy application code (shared utilities, API app, migrations + entrypoint).
-COPY --chown=appuser:appuser backend/shared ./shared
-COPY --chown=appuser:appuser backend/api/app ./app
-COPY --chown=appuser:appuser backend/api/run.py ./run.py
-COPY --chown=appuser:appuser backend/migrations ./migrations
+COPY --chown=appuser:appuser ${SHARED_DIR} ./shared
+COPY --chown=appuser:appuser ${SERVICE_DIR}/app ./app
+COPY --chown=appuser:appuser ${SERVICE_DIR}/run.py ./run.py
+COPY --chown=appuser:appuser ${MIGRATIONS_DIR} ./migrations
 
 EXPOSE 8000
 
-# HTTP health endpoint is already exposed, so reuse it for the Docker healthcheck.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:8000/health || exit 1
 

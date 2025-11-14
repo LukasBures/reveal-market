@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import type { MarketDetail } from "@/lib/api";
 
@@ -13,6 +13,31 @@ type MetadataItem = {
 };
 
 export function MarketDetailMetadata({ market }: Props) {
+  const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
+    | Record<string, any>
+    | null;
+  const gamma = extraData?.gamma as Record<string, any> | undefined;
+  const sourceSlug =
+    typeof gamma?.slug === "string" && gamma.slug.trim()
+      ? gamma.slug
+      : typeof market.slug === "string"
+        ? market.slug
+        : undefined;
+  const clobPairId =
+    typeof gamma?.clobPairId === "string"
+      ? gamma.clobPairId
+      : typeof gamma?.pairId === "string"
+        ? gamma.pairId
+        : undefined;
+  const tokenIds = Array.isArray(gamma?.clobTokenIds ?? gamma?.tokenIds)
+    ? (gamma?.clobTokenIds ?? gamma?.tokenIds).map((value: any) => String(value))
+    : undefined;
+  const formattedTokens = tokenIds?.length ? tokenIds.join(", ") : undefined;
+  const feeLabel =
+    typeof market.rakeBps === "number" && Number.isFinite(market.rakeBps)
+      ? `${Math.round(market.rakeBps)} bps`
+      : undefined;
+
   const items: MetadataItem[] = [
     { label: "Condition ID", value: market.conditionId, mono: true },
     { label: "Question ID", value: market.questionId, mono: true },
@@ -20,13 +45,27 @@ export function MarketDetailMetadata({ market }: Props) {
     { label: "Market address", value: market.marketAddress, mono: true },
     { label: "Event ID", value: market.eventId },
   ];
+  if (market.factory) {
+    items.push({ label: "Factory address", value: market.factory, mono: true });
+  }
+  if (sourceSlug) {
+    items.push({ label: "Source slug", value: sourceSlug, mono: true });
+  }
+  if (clobPairId) {
+    items.push({ label: "CLOB pair ID", value: clobPairId, mono: true });
+  }
+  if (formattedTokens) {
+    items.push({ label: "Order book tokens", value: formattedTokens, mono: true });
+  }
+  if (feeLabel) {
+    items.push({ label: "Fee (bps)", value: feeLabel });
+  }
   const tags = market.tags ?? [];
   type ResolutionWinner = { index: number; label?: string | null; payout?: number | null };
   const resolution = (market.resolution ?? (market.extraData?.resolution as any)) || null;
   const resolutionWinners: ResolutionWinner[] = Array.isArray(resolution?.winners)
     ? (resolution.winners as ResolutionWinner[])
     : [];
-  const heartbeat = market.heartbeat ?? (market.extraData?.heartbeat as any);
 
   const copyToClipboard = async (value?: string | null) => {
     if (!value || typeof navigator === "undefined" || !navigator.clipboard) return;
@@ -127,28 +166,6 @@ export function MarketDetailMetadata({ market }: Props) {
           </p>
         </div>
       </div>
-      {heartbeat && (
-        <div className="mt-6 rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Data freshness</p>
-          <p className="mt-2">
-            Last worker sync at{" "}
-            <span className="text-white">
-              {heartbeat.timestamp ? new Date(heartbeat.timestamp).toLocaleString() : "unknown"}
-            </span>
-            {typeof heartbeat.latencyMs === "number" && (
-              <>
-                {" "}
-                <span className="text-slate-400">(latency {Math.round(heartbeat.latencyMs)} ms)</span>
-              </>
-            )}
-          </p>
-          {typeof heartbeat.marketsProcessed === "number" && (
-            <p className="text-xs text-slate-500">
-              Markets processed in last batch: {heartbeat.marketsProcessed}
-            </p>
-          )}
-        </div>
-      )}
     </section>
   );
 }

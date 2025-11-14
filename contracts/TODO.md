@@ -4,31 +4,31 @@ Smart-contract credibility is the clearest signal that Reveal Market handles inv
 
 ## Phase 1 – Credible Settlement Layer (Highest Leverage)
 
-- **Groth16 verifier integration**
-  Replace the temporary stub with the audited verifier circuit, document public-signal layouts, and assert every settlement parameter (winning pool, circuit version, oracle hash) directly in `RevealMarket`. This unlocks external audits and institutional listings.
+- **Groth16 verifier hardening**
+  Finalize proving-key ceremony + audits, swap the placeholder `settlement-vk.json` with production keys, wire automated verifying-key rotation (with circuit hashes recorded on-chain), and document how zkVerify attestations mirror every on-chain receipt. Deliver a rotation runbook + monitoring alerts for mismatched hashes.
 
 - **Proof replay & tamper guards**
-  Introduce proof nonces and circuit hashes so outdated or duplicated proofs cannot slip through during volatile markets.
+  Replay guards exist on-chain, but there is no backend persistence/logging. Extend the worker/API to store `proofNonce`, emitting receipts via `/proofs`, so downstream systems can audit replays and cross-check zkVerify receipts.
 
 - **Resolution event stream**
   `MarketResolved` plus the `resolutionSummary()` view now publish winning stake, net pool, rake paid, and settlement timestamp. Next iteration should add payout vectors / UMA question IDs so indexers capture full context without rereading storage.
 
 - **Factory deployment artifacts**
-  Extend `script/Deploy.s.sol` to emit JSON manifests (addresses, guardian keys, rake caps) and optionally instantiate a demo market. Deterministic artifacts accelerate partner testnet rollouts.
+  `Deploy.s.sol` writes `last-deployment.json`, but nothing consumes it. Build a CLI or backend bootstrap that ingests these manifests (addresses, guardian keys, rake caps) and hydrates env vars automatically. Consider emitting per-market manifests and default demo deployments for integration testing.
 
 - **Invariant + fuzz coverage**
-  Add Foundry invariant suites (`paidOut + rake <= totalPool`, guardian-state correctness) and wire Slither/solhint into CI. Demonstrable security hygiene is a prerequisite for major investors.
+  Extend current unit/fuzz suites with Forge `invariant` tests (`paidOut + rake <= deposits`, guardian state monotonicity), plus Slither + echidna runs in CI. Highlight coverage gaps (refund loops, emergency settle) and gate PRs on these checks.
 
 - **Ownership & guardian transfer drills**
-  Codify runbooks + tests for `Ownable2Step`/guardian transfers (Factory, RakeManager) so we can rotate keys without downtime—critical once capital pools rely on these contracts.
+  Codify runbooks + tests for `Ownable2Step`/guardian transfers (Factory, RakeManager) so we can rotate keys without downtime—critical once capital pools rely on these contracts. Include simulated ceremonies in tests and document on-call procedures.
 
 ## Phase 2 – Treasury & Liquidity Mechanics
 
 - **Rake override validation**
-  Stress-test multi-market overrides, enforce 2% ceilings, and ensure `RakeConfigured` emits indexed parameters so analytics desks can reconcile revenue distribution.
+  Stress-test multi-market overrides, enforce 2% ceilings, and ensure `RakeConfigured` emits indexed parameters so analytics desks can reconcile revenue distribution. Add analytics hooks for per-market rake so backend/partners can reconcile treasury inflows.
 
 - **Flexible treasury routing**
-  Explore split payouts (treasury + insurance fund) and codify the model before token launch. Investors need clarity on cash-flow destinations.
+  Explore split payouts (treasury + insurance fund) and codify the model before token launch. Investors need clarity on cash-flow destinations. Consider upgradeable manager with per-market overrides, plus docs for revenue transparency.
 
 - **Metadata lifecycle definition**
   Formalize a schema for `setMarketMetadata`, emit previous/next values, and document versioning so partner dashboards always reflect the latest collateral or narrative data.
@@ -37,18 +37,18 @@ Smart-contract credibility is the clearest signal that Reveal Market handles inv
   Encode decision windows (cancel vs. emergency settle) as constants/configs and document the expected playbooks for compliance reviews.
 
 - **Horizen ZEN testnet enablement**
-  Provide scripts and configs that target Goldsky’s Horizen ZEN testnet so institutional pilots can run in a controlled sandbox before moving capital.
+  Provide scripts and configs that target Goldsky’s Horizen ZEN testnet so institutional pilots can run in a controlled sandbox before moving capital. Include canned deployment artifacts + faucet instructions.
 
 ## Phase 3 – Expansion & Operational Excellence
 
 - **Upgradeable verifier registry**
-  Track circuit versions per market so we can roll out new proofs without disrupting active liquidity, satisfying audit remediations while keeping markets live.
+  Track circuit versions per market so we can roll out new proofs without disrupting active liquidity, satisfying audit remediations while keeping markets live. Add events + backend sync to map markets → circuit hashes.
 
 - **Gas regression gates**
-  Establish budgets for commit/claim/refund paths and enforce them with `forge snapshot --check` plus custom assertions. Predictable gas profiles improve ROI modeling for LPs.
+  Establish budgets for commit/claim/refund paths and enforce them with `forge snapshot --check` plus custom assertions. Predictable gas profiles improve ROI modeling for LPs. Document macros for frequently-touched code (e.g., caching pause flags) to guide contributors.
 
 - **Cross-chain readiness**
-  Design how MarketFactory registries, oracle endpoints, and guardian keys extend to additional chains without fragmenting governance.
+  Design how MarketFactory registries, oracle endpoints, and guardian keys extend to additional chains without fragmenting governance. Include address registries + metadata so the backend can route traffic per chain.
 
 - **Backend-aligned settlement tooling**
   Offer a helper that consumes the backend’s Conditional Tokens snapshot and drives `postResult/settle` end-to-end, ensuring ops teams have a single button to sync books.

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -35,6 +36,14 @@ def get_json(client: Redis | None, key: str) -> Any:
     """Fetch and JSON-decode the given key from Redis."""
 
     if client is None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.get.disabled",
+                message="cache client unavailable, treating key as miss",
+                key=key,
+            )
         return None
     try:
         payload = client.get(key)
@@ -49,9 +58,27 @@ def get_json(client: Redis | None, key: str) -> Any:
         )
         return None
     if payload is None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.get.miss",
+                message="cache miss",
+                key=key,
+            )
         return None
     try:
-        return json.loads(payload)
+        data = json.loads(payload)
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.get.hit",
+                message="cache hit",
+                key=key,
+                size=len(payload),
+            )
+        return data
     except json.JSONDecodeError:
         log_event(
             logger,
@@ -67,6 +94,14 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
     """Serialize value as JSON and store it."""
 
     if client is None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.set.disabled",
+                message="cache client unavailable, skipping SET",
+                key=key,
+            )
         return
     try:
         payload = json.dumps(value)
@@ -74,6 +109,16 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
             client.set(key, payload, ex=ttl_seconds)
         else:
             client.set(key, payload)
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.set",
+                message="cache entry written",
+                key=key,
+                ttl_seconds=ttl_seconds,
+                size=len(payload),
+            )
     except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -89,6 +134,14 @@ def delete(client: Redis | None, key: str) -> None:
     """Delete the given key if present."""
 
     if client is None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.delete.disabled",
+                message="cache client unavailable, skipping DELETE",
+                key=key,
+            )
         return
     try:
         client.delete(key)
@@ -140,6 +193,15 @@ def add_tag(client: Redis | None, tag: str, key: str) -> None:
         return
     try:
         client.sadd(_tag_storage_key(tag), key)
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.tag.added",
+                message="cache tag registered",
+                tag=tag,
+                key=key,
+            )
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -170,6 +232,15 @@ def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
         if members:
             client.delete(*members)
         client.delete(storage_key)
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.tag.invalidated",
+                message="cache tag invalidated",
+                tag=tag,
+                keys=len(members),
+            )
         return members
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(

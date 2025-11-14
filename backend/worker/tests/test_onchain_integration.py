@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from pydantic import SecretStr
-
 from app.config import Settings
 from app.onchain import maybe_create_onchain_market
+from pydantic import SecretStr
 
 
 def test_onchain_creation_skips_when_disabled(monkeypatch):
@@ -40,9 +39,7 @@ def test_onchain_creation_happy_path(monkeypatch):
     settings = Settings(auto_create_onchain_markets=True)
     settings.factory_address = "0x1234567890abcdef1234567890abcdef12345678"
     settings.rpc_url = "https://unit.test"  # type: ignore[assignment]
-    settings.wallet_private_key = SecretStr(
-        "0x1000000000000000000000000000000000000000000000000000000000000000"
-    )
+    settings.wallet_private_key = SecretStr("0x1000000000000000000000000000000000000000000000000000000000000000")
     settings.wallet_address = "0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed"
     market = SimpleNamespace(
         event_id="evt",

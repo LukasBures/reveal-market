@@ -6,39 +6,42 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from typing import Any, Callable, Iterator, List, Optional, TypeVar
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import quote_plus
 
 import httpx
 from redis import Redis
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-
 from shared import cache as shared_cache
-from shared import repository as shared_repository
 from shared import models as shared_models
-from shared.logging import log_event
-from shared.migrations import get_current_revision, run_migrations as apply_migrations
+from shared import repository as shared_repository
 from shared.cache_keys import (
-    category_cache_key,
     markets_list_cache_key,
+    proof_receipt_cache_key,
     resolution_cache_key,
     suggest_cache_key,
-    tag_cache_key,
 )
+from shared.logging import log_event, start_heartbeat_logger
+from shared.migrations import get_current_revision
+from shared.migrations import run_migrations as apply_migrations
 from shared.onchain import ConditionalTokensClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings
 from .logging_config import setup_logging
 from .onchain import maybe_create_onchain_market
 from .polymarket import MarketPayload, PolymarketClient
+from .prover_client import ProverClient, ProverError, SettlementProofRequest, compute_outcome_hash
+from .summary_jobs import maybe_enqueue_summary_job
 
 try:
     from prometheus_client import Counter
 except ImportError:  # pragma: no cover - optional dependency
+
     class Counter:  # type: ignore[override]
         def __init__(self, *args, **kwargs):
             pass
@@ -46,7 +49,8 @@ except ImportError:  # pragma: no cover - optional dependency
         def labels(self, **kwargs):
             return self
 
-        def inc(self, amount: float = 1.0) -> None:
+        @staticmethod
+        def inc(amount: float = 1.0) -> None:
             return None
 
 
@@ -71,7 +75,12 @@ setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
-T = TypeVar("T")
+PROVER_CLIENT: ProverClient | None = None
+if settings.prover_enabled and settings.prover_base_url:
+    PROVER_CLIENT = ProverClient(
+        base_url=settings.prover_base_url,
+        timeout_seconds=settings.prover_timeout_seconds,
+    )
 
 _schema_checked = False
 
@@ -79,25 +88,27 @@ _schema_checked = False
 @dataclass
 class SchemaSyncResult:
     changed: bool = False
-    previous_revision: Optional[str] = None
-    current_revision: Optional[str] = None
+    previous_revision: str | None = None
+    current_revision: str | None = None
 
 
 @dataclass
 class SyncOutcome:
     market_changed: bool
     resolution_changed: bool
-    category_slug: Optional[str]
+    category_slug: str | None
     tag_slugs: list[str]
-    condition_id: Optional[str]
-    resolution_cache_payload: Optional[dict[str, Any]]
+    condition_id: str | None
+    resolution_cache_payload: dict[str, Any] | None
+    market_created: bool = False
+    market_updated: bool = False
 
 
 @dataclass
 class ResolutionOutcome:
     changed: bool = False
-    condition_id: Optional[str] = None
-    cache_payload: Optional[dict[str, Any]] = None
+    condition_id: str | None = None
+    cache_payload: dict[str, Any] | None = None
 
 
 @dataclass
@@ -142,11 +153,11 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-def _run_with_retries(
+def _run_with_retries[T](
     action: Callable[[], T],
     max_attempts: int,
     base_backoff: float,
-    max_backoff: Optional[float] = None,
+    max_backoff: float | None = None,
 ) -> T:
     """Execute an action with optional retry semantics using tenacity."""
 
@@ -207,12 +218,12 @@ def _ensure_schema() -> SchemaSyncResult:
 
 
 polymarket_client = PolymarketClient(
-    settings.polymarket_api_base,
+    str(settings.polymarket_api_base),
     timeout=settings.polymarket_timeout_seconds,
 )
 
 
-def _build_conditional_tokens_client() -> Optional[ConditionalTokensClient]:
+def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
     rpc_url = settings.polygon_rpc_url or settings.rpc_url
     contract_address = settings.conditional_tokens_address
     if not (rpc_url and contract_address):
@@ -247,7 +258,7 @@ def _build_conditional_tokens_client() -> Optional[ConditionalTokensClient]:
 conditional_tokens_client = _build_conditional_tokens_client()
 
 
-def fetch_markets_from_polymarket() -> tuple[List[MarketPayload], float]:
+def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
     """Pull the latest markets from Polymarket using the shared client."""
     start = time.perf_counter()
     log_event(
@@ -308,25 +319,25 @@ def fetch_markets_from_polymarket() -> tuple[List[MarketPayload], float]:
     return markets, latency_ms
 
 
-def _merge_extra_data(existing: Optional[dict], update: dict) -> dict:
+def _merge_extra_data(existing: dict | None, update: dict) -> dict:
     merged = dict(existing) if isinstance(existing, dict) else {}
     merged.update(update)
     return merged
 
 
-def _slugify_token(value: Optional[str]) -> Optional[str]:
+def _slugify_token(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or None
 
 
-def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) -> None:
@@ -345,7 +356,7 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     normalized_condition_id = condition_id.lower()
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
     existing = shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     refresh_due = existing is None
 
     if existing is not None:
@@ -465,27 +476,52 @@ def sync_market(session: Session, market: MarketPayload):
     existing = shared_repository.get_market_by_event_id(session, market.event_id)
     db_market = existing
     market_changed = False
+    market_created = False
+    market_updated = False
     incoming_updated_at = getattr(market, "source_updated_at", None)
     incoming_hash = getattr(market, "content_hash", None)
 
     if existing is None:
         db_market = shared_repository.upsert_market(session, payload)
         market_changed = True
+        market_created = True
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.market.created",
+            message="market created from polymarket feed",
+            event_id=market.event_id,
+            status=payload.get("status"),
+            category=payload.get("category"),
+        )
     else:
-        if _markets_match(existing, incoming_updated_at, incoming_hash):
+        match, match_reason = _markets_match(existing, incoming_updated_at, incoming_hash)
+        if match:
             log_event(
                 logger,
                 logging.DEBUG,
                 event="worker.market.skip_update",
                 message="skipping market update (no changes detected)",
                 event_id=market.event_id,
+                reason=match_reason,
             )
         else:
             db_market = shared_repository.upsert_market(session, payload)
             market_changed = True
+            market_updated = True
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.market.updated",
+                message="market updated from polymarket feed",
+                event_id=market.event_id,
+                status=payload.get("status"),
+                category=payload.get("category"),
+                match_reason=match_reason,
+            )
 
     if market.rake_bps is not None and db_market is not None:
-        setattr(db_market, "rake_bps", market.rake_bps)
+        db_market.rake_bps = market.rake_bps
     resolution_outcome = _apply_resolution(session, db_market, market)
     session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))
@@ -498,27 +534,29 @@ def sync_market(session: Session, market: MarketPayload):
         tag_slugs=[slug for slug in tag_slugs if slug],
         condition_id=resolution_outcome.condition_id,
         resolution_cache_payload=resolution_outcome.cache_payload,
+        market_created=market_created,
+        market_updated=market_updated,
     )
 
 
-def _markets_match(existing, source_updated_at: Optional[datetime], content_hash: Optional[str]) -> bool:
+def _markets_match(existing, source_updated_at: datetime | None, content_hash: str | None) -> tuple[bool, str]:
     if source_updated_at and getattr(existing, "source_updated_at", None) == source_updated_at:
-        return True
+        return True, "source_timestamp"
     existing_hash = getattr(existing, "content_hash", None)
     if content_hash and existing_hash and existing_hash == content_hash:
-        return True
-    return False
+        return True, "content_hash"
+    return False, "diff_detected"
 
 
 def cleanup_resolved_markets(  # noqa: C901
     session: Session,
     *,
     dry_run: bool = False,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> CleanupOutcome:
     """Remove markets that have been resolved for longer than the configured retention."""
 
-    reference_time = _as_utc(now) or datetime.now(timezone.utc)
+    reference_time = _as_utc(now) or datetime.now(UTC)
     cutoff = reference_time - timedelta(seconds=settings.resolved_retention_seconds)
     stmt = select(
         shared_models.Market.id,
@@ -666,12 +704,13 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
     if redis_client is None:
         return
     payload = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "markets_processed": stats.get("markets_processed", 0),
         "markets_changed": stats.get("markets_changed", 0),
         "resolutions_changed": stats.get("resolutions_changed", 0),
         "latency_ms": stats.get("latency_ms"),
     }
+
     def _publish() -> bool:
         redis_client.set(
             settings.heartbeat_key,
@@ -731,14 +770,23 @@ def run_worker() -> None:
         poll_interval_seconds=settings.poll_interval_seconds,
         page_size=settings.polymarket_page_size,
     )
-    while True:
-        loop_start = time.time()
-        sync_stats = process_once(redis_client)
-        prime_stats = prime_markets_cache(redis_client)
-        featured_stats = prime_featured_views(redis_client)
-        prime_stats.update(featured_stats)
-        record_batch_stats(redis_client, sync_stats, prime_stats)
-        time.sleep(_calculate_sleep(loop_start))
+    heartbeat_stop = start_heartbeat_logger(
+        logger,
+        service_name="reveal_market.worker",
+        interval_seconds=settings.container_heartbeat_seconds,
+        message="Worker container heartbeat",
+    )
+    try:
+        while True:
+            loop_start = time.time()
+            sync_stats = process_once(redis_client)
+            prime_stats = prime_markets_cache(redis_client)
+            featured_stats = prime_featured_views(redis_client)
+            prime_stats.update(featured_stats)
+            record_batch_stats(redis_client, sync_stats, prime_stats)
+            time.sleep(_calculate_sleep(loop_start))
+    finally:
+        heartbeat_stop.set()
 
 
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  # noqa: C901
@@ -752,6 +800,11 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
     changed_tags: set[str] = set()
     resolution_cache_updates: list[tuple[str, dict[str, Any]]] = []
     stats_dirty = False
+    markets_created = 0
+    markets_updated = 0
+    markets_deleted = 0
+    summaries_enqueued = 0
+    proofs_generated = 0
     try:
         with session_scope() as session:
             if markets:
@@ -767,6 +820,10 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
                     if outcome.market_changed and db_market and db_market.event_id:
                         changed_events.add(db_market.event_id)
                         stats_dirty = True
+                    if outcome.market_created:
+                        markets_created += 1
+                    if outcome.market_updated:
+                        markets_updated += 1
                     if outcome.resolution_changed and outcome.condition_id:
                         changed_conditions.add(outcome.condition_id.lower())
                     if outcome.category_slug:
@@ -776,6 +833,19 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
                     if outcome.resolution_cache_payload and outcome.condition_id:
                         resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
                     maybe_create_onchain_market(settings, db_market, session)
+                    if maybe_enqueue_summary_job(
+                        redis_client,
+                        market_record=db_market,
+                        market_payload=market,
+                    ):
+                        summaries_enqueued += 1
+                    if maybe_generate_settlement_proof(
+                        redis_client,
+                        market_record=db_market,
+                        market_payload=market,
+                        condition_id=outcome.condition_id,
+                    ):
+                        proofs_generated += 1
             cleanup_outcome = cleanup_resolved_markets(
                 session,
                 dry_run=settings.resolved_retention_dry_run,
@@ -786,6 +856,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
             changed_conditions.update(cleanup_outcome.conditions)
             changed_categories.update(cleanup_outcome.categories)
             changed_tags.update(cleanup_outcome.tags)
+            markets_deleted = cleanup_outcome.deleted_rows
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
             "failed to synchronise markets",
@@ -798,7 +869,28 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
         "categories_changed": len(changed_categories),
         "tags_changed": len(changed_tags),
         "latency_ms": round(latency_ms, 2),
+        "markets_created": markets_created,
+        "markets_updated": markets_updated,
+        "markets_deleted": markets_deleted,
+        "summaries_enqueued": summaries_enqueued,
+        "proofs_generated": proofs_generated,
     }
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.sync.summary",
+        message="completed market sync",
+        markets_processed=len(markets),
+        markets_created=markets_created,
+        markets_updated=markets_updated,
+        markets_deleted=markets_deleted,
+        resolutions_changed=len(changed_conditions),
+        categories_changed=len(changed_categories),
+        tags_changed=len(changed_tags),
+        summaries_enqueued=summaries_enqueued,
+        proofs_generated=proofs_generated,
+        latency_ms=round(latency_ms, 2),
+    )
     publish_heartbeat(redis_client, stats)
     _propagate_schema_revision(redis_client, schema_state)
     if redis_client is not None and resolution_cache_updates:
@@ -839,6 +931,109 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
         duration_ms=round(latency_ms, 2),
     )
     return stats
+
+
+def maybe_generate_settlement_proof(
+    redis_client: Redis | None,
+    *,
+    market_record,
+    market_payload: MarketPayload,
+    condition_id: str | None,
+) -> bool:
+    """Call the prover service when settlements change so downstream services can audit proofs."""
+
+    if not settings.prover_enabled or PROVER_CLIENT is None:
+        return False
+    normalized_condition = condition_id or getattr(market_record, "condition_id", None)
+    if not normalized_condition:
+        return False
+    request = SettlementProofRequest(
+        event_id=getattr(market_record, "event_id", "unknown"),
+        condition_id=str(normalized_condition).lower(),
+        total_pool=_derive_total_pool_value(market_payload),
+        winning_pool=_derive_winning_pool_value(market_payload),
+        outcome_hash=compute_outcome_hash(
+            getattr(market_record, "event_id", "unknown"),
+            normalized_condition,
+            market_payload.outcomes or [],
+        ),
+        market_address=_normalize_market_address(getattr(market_record, "market_address", None)),
+        circuit_version=1,
+        metadata=_build_proof_metadata(market_payload),
+    )
+    try:
+        response = PROVER_CLIENT.generate_settlement_proof(request)
+    except ProverError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.proof.failed",
+            message="prover rejected settlement request",
+            error=str(exc),
+            event_id=getattr(market_record, "event_id", None),
+        )
+        return False
+    cache_key = proof_receipt_cache_key(normalized_condition)
+    if redis_client is not None:
+        shared_cache.set_json(
+            redis_client,
+            cache_key,
+            response.to_json(),
+            settings.proof_cache_ttl_seconds,
+        )
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.proof.generated",
+        message="cached settlement proof receipt",
+        event_id=getattr(market_record, "event_id", None),
+        condition_id=normalized_condition,
+        prover_version=response.prover_version,
+        nonce=response.request_nonce,
+    )
+    return True
+
+
+def _derive_total_pool_value(market_payload: MarketPayload) -> str:
+    prices = market_payload.outcome_prices or []
+    numeric_prices = [price for price in prices if isinstance(price, (int, float))]
+    if numeric_prices:
+        total = sum(numeric_prices)
+        scaled = max(int(total * 1_000_000), 1)
+        return str(scaled)
+    outcomes = market_payload.outcomes or []
+    return str(max(len(outcomes), 1))
+
+
+def _derive_winning_pool_value(market_payload: MarketPayload) -> str:
+    prices = market_payload.outcome_prices or []
+    numeric_prices = [price for price in prices if isinstance(price, (int, float))]
+    if numeric_prices:
+        winning = max(numeric_prices)
+        scaled = max(int(winning * 1_000_000), 1)
+        return str(scaled)
+    return "1"
+
+
+def _normalize_market_address(address: str | None) -> str:
+    if not address:
+        return "0x" + "0" * 40
+    normalized = address.lower().replace("0x", "")
+    padded = normalized.rjust(40, "0")
+    return f"0x{padded}"
+
+
+def _build_proof_metadata(market_payload: MarketPayload) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    if market_payload.status:
+        metadata["status"] = str(market_payload.status)
+    if market_payload.oracle:
+        metadata["oracle"] = str(market_payload.oracle)
+    if market_payload.category:
+        metadata["category"] = str(market_payload.category)
+    if market_payload.source_updated_at:
+        metadata["source_updated_at"] = market_payload.source_updated_at.isoformat()
+    return metadata
 
 
 def prime_markets_cache(
@@ -904,9 +1099,7 @@ def prime_markets_cache(
     shared_cache.add_tag(redis_client, "markets:list", cache_key)
     if isinstance(payload, list):
         event_tags = [
-            f"market:{item.get('event_id')}"
-            for item in payload
-            if isinstance(item, dict) and item.get("event_id")
+            f"market:{item.get('event_id')}" for item in payload if isinstance(item, dict) and item.get("event_id")
         ]
         shared_cache.add_tags(redis_client, event_tags, cache_key)
     log_event(
@@ -937,11 +1130,7 @@ def prime_featured_views(
     summary: dict[str, Any] = {"categories_primed": 0, "tags_primed": 0, "suggestions_primed": 0, "suggestion_ttls": {}}
     if redis_client is None or not settings.api_base_url:
         return summary
-    if (
-        not settings.featured_categories
-        and not settings.featured_tags
-        and not settings.featured_suggest_queries
-    ):
+    if not settings.featured_categories and not settings.featured_tags and not settings.featured_suggest_queries:
         return summary
     base_url = settings.api_base_url.rstrip("/")
     try:
@@ -1004,7 +1193,7 @@ def record_batch_stats(
     if redis_client is None:
         return
     payload = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "markets_processed": sync_stats.get("markets_processed", 0),
         "markets_changed": sync_stats.get("markets_changed", 0),
         "resolutions_changed": sync_stats.get("resolutions_changed", 0),

@@ -16,8 +16,9 @@ export function MarketDetailOutcomes({ market }: Props) {
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6">
-      <table className="w-full text-sm text-slate-200">
+    <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-4 sm:p-6">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[480px] text-sm text-slate-200">
         <thead>
           <tr className="text-left text-xs uppercase tracking-[0.25em] text-slate-500">
             <th className="py-2">Outcome</th>
@@ -43,6 +44,7 @@ export function MarketDetailOutcomes({ market }: Props) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

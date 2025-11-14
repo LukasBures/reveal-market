@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import app.main
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-
 from app.main import sync_market
 from app.polymarket import MarketPayload
 from shared.models import Base, Market, Resolution
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 
 def create_in_memory_db():
@@ -18,19 +17,19 @@ def create_in_memory_db():
     engine = create_engine("sqlite://", future=True)
     Base.metadata.create_all(bind=engine)
 
-    TestSession = sessionmaker(
+    session_factory = sessionmaker(
         bind=engine,
         autoflush=False,
         autocommit=False,
         expire_on_commit=False,
         future=True,
     )
-    return engine, TestSession
+    return engine, session_factory
 
 
 def test_sync_market_inserts_and_updates():
     """Verify the same event_id can be inserted and subsequently updated."""
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
 
     try:
         initial = MarketPayload(
@@ -48,15 +47,13 @@ def test_sync_market_inserts_and_updates():
             extra_data={"gamma": {"id": "evt-1"}},
         )
 
-        with TestSession() as session:
+        with session_factory() as session:
             _, outcome = sync_market(session, initial)
             assert outcome.market_changed is True
             session.commit()
 
-        with TestSession() as session:
-            stored = session.execute(
-                select(Market).where(Market.event_id == "evt-1")
-            ).scalar_one()
+        with session_factory() as session:
+            stored = session.execute(select(Market).where(Market.event_id == "evt-1")).scalar_one()
             assert stored.title == "First Market"
             assert stored.status == "commit"
             assert stored.outcomes == ["YES", "NO"]
@@ -64,15 +61,13 @@ def test_sync_market_inserts_and_updates():
 
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
 
-        with TestSession() as session:
+        with session_factory() as session:
             _, outcome = sync_market(session, updated)
             assert outcome.market_changed is True
             session.commit()
 
-        with TestSession() as session:
-            stored = session.execute(
-                select(Market).where(Market.event_id == "evt-1")
-            ).scalar_one()
+        with session_factory() as session:
+            stored = session.execute(select(Market).where(Market.event_id == "evt-1")).scalar_one()
             assert stored.title == "Updated Market"
             assert stored.status == "settled"
             assert stored.rake_bps is None
@@ -81,7 +76,7 @@ def test_sync_market_inserts_and_updates():
 
 
 def test_sync_market_persists_resolution(monkeypatch):
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
 
     class DummyClient:
         def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
@@ -92,12 +87,12 @@ def test_sync_market_persists_resolution(monkeypatch):
                 "outcomes": outcomes,
                 "payouts": [0, 1],
                 "winners": [{"index": 1, "label": outcomes[1] if len(outcomes) > 1 else None, "payout": 1}],
-                "checkedAt": datetime.now(timezone.utc),
+                "checkedAt": datetime.now(UTC),
                 "oracle": "0xfeed",
                 "questionId": "0x" + "1" * 64,
                 "transactionHash": "0x" + "2" * 64,
                 "blockNumber": 555,
-                "blockTimestamp": datetime.now(timezone.utc),
+                "blockTimestamp": datetime.now(UTC),
             }
 
     try:
@@ -117,12 +112,12 @@ def test_sync_market_persists_resolution(monkeypatch):
             condition_id="0x" + "3" * 64,
         )
 
-        with TestSession() as session:
+        with session_factory() as session:
             _, outcome = sync_market(session, payload)
             assert outcome.resolution_changed is True
             session.commit()
 
-        with TestSession() as session:
+        with session_factory() as session:
             record = session.execute(
                 select(Resolution).where(Resolution.condition_id == payload.condition_id.lower())
             ).scalar_one()
@@ -134,9 +129,9 @@ def test_sync_market_persists_resolution(monkeypatch):
 
 
 def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
     try:
-        updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(UTC)
         payload = MarketPayload(
             event_id="evt-skip",
             title="Skip Market",
@@ -162,7 +157,7 @@ def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
 
         monkeypatch.setattr("app.main.shared_repository.upsert_market", tracked_upsert, raising=False)
 
-        with TestSession() as session:
+        with session_factory() as session:
             _, outcome = sync_market(session, payload)
             assert outcome.market_changed is True
             assert outcome.resolution_changed is False
@@ -170,7 +165,7 @@ def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
 
         identical = MarketPayload(**payload.model_dump())
 
-        with TestSession() as session:
+        with session_factory() as session:
             _, outcome = sync_market(session, identical)
             assert outcome.market_changed is False
             assert outcome.resolution_changed is False

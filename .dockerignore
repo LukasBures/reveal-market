@@ -1,0 +1,27 @@
+# Ignore everything by default to keep build contexts slim
+*
+
+# Include service sources so Docker builds have access to code
+!backend/
+!frontend/
+!shared/
+!pyproject.toml
+!uv.lock
+!run.py
+!proover/
+!docker/
+
+# Allow top-level metadata files as needed
+!.dockerignore
+!README.md
+!Makefile
+
+# Ignore common build artifacts inside included directories
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/node_modules/
+**/.DS_Store

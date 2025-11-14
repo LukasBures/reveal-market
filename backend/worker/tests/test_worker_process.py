@@ -2,28 +2,33 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
+import app.main
 import httpx
 import pytest
-import app.main
-from prometheus_client import REGISTRY
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-
 from app.main import (
     SchemaSyncResult,
     cleanup_resolved_markets,
+    maybe_generate_settlement_proof,
     prime_featured_views,
     prime_markets_cache,
     process_once,
     record_batch_stats,
 )
+from app.main import (
+    settings as worker_settings,
+)
 from app.polymarket import MarketPayload
+from app.prover_client import SettlementProofResponse
+from prometheus_client import REGISTRY
 from shared import cache as shared_cache
 from shared.cache_keys import suggest_cache_key
 from shared.models import Base, Market
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from tests.test_sync_market import create_in_memory_db
 
 
@@ -66,6 +71,20 @@ class DummyRedis:
             return -1
         return ttl
 
+    def lpush(self, key: str, value: Any):
+        queue = self.store.setdefault(key, [])
+        if not isinstance(queue, list):
+            queue = []
+            self.store[key] = queue
+        queue.insert(0, value)
+
+    def rpush(self, key: str, value: Any):
+        queue = self.store.setdefault(key, [])
+        if not isinstance(queue, list):
+            queue = []
+            self.store[key] = queue
+        queue.append(value)
+
 
 class DummyCounter:
     def __init__(self):
@@ -88,11 +107,11 @@ class DummyCounter:
 def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path, caplog):
     db_url = f"sqlite:///{tmp_path / 'worker.db'}"
     engine = create_engine(db_url, future=True)
-    TestSession = sessionmaker(bind=engine, future=True)
+    session_factory = sessionmaker(bind=engine, future=True)
     Base.metadata.create_all(bind=engine)
 
     monkeypatch.setattr("app.main.engine", engine, raising=False)
-    monkeypatch.setattr("app.main.SessionLocal", TestSession, raising=False)
+    monkeypatch.setattr("app.main.SessionLocal", session_factory, raising=False)
     monkeypatch.setattr(app.main.settings, "run_migrations_on_startup", False, raising=False)
 
     sample_markets = [
@@ -137,10 +156,13 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
     caplog.set_level(logging.DEBUG, logger="reveal_market.worker")
 
-    category_before = REGISTRY.get_sample_value(
-        "worker_cache_invalidations_total",
-        labels={"type": "category"},
-    ) or 0
+    category_before = (
+        REGISTRY.get_sample_value(
+            "worker_cache_invalidations_total",
+            labels={"type": "category"},
+        )
+        or 0
+    )
     stats = process_once(dummy)
     assert stats["markets_processed"] == len(sample_markets)
     assert stats["markets_changed"] == len(sample_markets)
@@ -149,8 +171,9 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     assert stats["tags_changed"] == 0
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
+    assert stats["summaries_enqueued"] == 0
 
-    with TestSession() as session:
+    with session_factory() as session:
         stored = session.execute(select(Market)).scalars().all()
         assert len(stored) == 2
 
@@ -165,10 +188,13 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     events = [record.event for record in caplog.records if hasattr(record, "event")]
     assert "worker.persist.batch" in events
     assert "worker.cache.invalidate" in events
-    category_after = REGISTRY.get_sample_value(
-        "worker_cache_invalidations_total",
-        labels={"type": "category"},
-    ) or 0
+    category_after = (
+        REGISTRY.get_sample_value(
+            "worker_cache_invalidations_total",
+            labels={"type": "category"},
+        )
+        or 0
+    )
     assert category_after == category_before + 2
 
 
@@ -198,6 +224,7 @@ def test_process_once_publishes_schema_revision(monkeypatch):
     assert stats["markets_changed"] == 0
     assert stats["resolutions_changed"] == 0
     assert stats["markets_changed"] == 0
+    assert stats["summaries_enqueued"] == 0
     assert stats["resolutions_changed"] == 0
     assert dummy.store.get(app.main.settings.schema_version_key) == schema_state.current_revision
     assert "schema:unknown" in invalidated
@@ -270,7 +297,7 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
 
 
 def test_cleanup_resolved_markets_removes_expired(monkeypatch):
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
     try:
         deleted_counter = DummyCounter()
         skipped_counter = DummyCounter()
@@ -282,7 +309,7 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             category="Sports",
             oracle="0xold",
             status="settled",
-            resolved_at=datetime.now(timezone.utc) - timedelta(days=2),
+            resolved_at=datetime.now(UTC) - timedelta(days=2),
             tags=["Gov"],
         )
         recent = Market(
@@ -291,17 +318,17 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             category="News",
             oracle="0xnew",
             status="settled",
-            resolved_at=datetime.now(timezone.utc),
+            resolved_at=datetime.now(UTC),
             tags=["Crypto"],
         )
-        with TestSession() as session:
+        with session_factory() as session:
             session.add_all([expired, recent])
             session.commit()
 
         monkeypatch.setattr(app.main.settings, "resolved_retention_seconds", 60 * 60, raising=False)
 
-        with TestSession() as session:
-            outcome = cleanup_resolved_markets(session, now=datetime.now(timezone.utc))
+        with session_factory() as session:
+            outcome = cleanup_resolved_markets(session, now=datetime.now(UTC))
             session.commit()
 
         assert "evt-old" in outcome.events
@@ -314,7 +341,7 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
         assert deleted_counter.records and deleted_counter.records[0]["amount"] == 1
         assert skipped_counter.records == []
 
-        with TestSession() as session:
+        with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
             assert remaining == ["evt-new"]
     finally:
@@ -445,7 +472,7 @@ def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
 
 
 def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
     try:
         deleted_counter = DummyCounter()
         skipped_counter = DummyCounter()
@@ -457,25 +484,25 @@ def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
             category="Crypto",
             oracle="0xdry",
             status="settled",
-            resolved_at=datetime.now(timezone.utc) - timedelta(days=2),
+            resolved_at=datetime.now(UTC) - timedelta(days=2),
             tags=["btc"],
         )
-        with TestSession() as session:
+        with session_factory() as session:
             session.add(market)
             session.commit()
 
-        with TestSession() as session:
+        with session_factory() as session:
             outcome = cleanup_resolved_markets(
                 session,
                 dry_run=True,
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
             )
             session.commit()
 
         assert outcome.deleted_rows == 0
         assert outcome.eligible_rows == 1
         assert outcome.dry_run is True
-        with TestSession() as session:
+        with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
             assert remaining == ["evt-dry"]
         assert skipped_counter.records and skipped_counter.records[0]["amount"] == 1
@@ -485,7 +512,7 @@ def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
 
 
 def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
-    engine, TestSession = create_in_memory_db()
+    engine, session_factory = create_in_memory_db()
     try:
         offset_zone = timezone(timedelta(hours=-5))
         market = Market(
@@ -496,19 +523,61 @@ def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
             status="settled",
             resolved_at=datetime(2024, 3, 10, 1, 30, tzinfo=offset_zone),
         )
-        with TestSession() as session:
+        with session_factory() as session:
             session.add(market)
             session.commit()
 
         monkeypatch.setattr(app.main.settings, "resolved_retention_seconds", 60 * 60, raising=False)
-        reference = datetime(2024, 3, 10, 7, 0, tzinfo=timezone.utc)
-        with TestSession() as session:
+        reference = datetime(2024, 3, 10, 7, 0, tzinfo=UTC)
+        with session_factory() as session:
             outcome = cleanup_resolved_markets(session, now=reference)
             session.commit()
 
         assert outcome.deleted_rows == 1
-        with TestSession() as session:
+        with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
             assert remaining == []
     finally:
         engine.dispose()
+
+
+def test_maybe_generate_settlement_proof(monkeypatch):
+    class FakeProver:
+        def __init__(self):
+            self.called_with = None
+
+        def generate_settlement_proof(self, request):
+            self.called_with = request
+            return SettlementProofResponse(
+                proof="0xdead",
+                public_signals=["1"],
+                circuit_hash="0xabc",
+                generated_at=datetime.now(UTC),
+                prover_version="test",
+                request_nonce=request.nonce,
+            )
+
+    fake_prover = FakeProver()
+    monkeypatch.setattr(app.main, "PROVER_CLIENT", fake_prover, raising=False)
+    monkeypatch.setattr(worker_settings, "prover_enabled", True, raising=False)
+
+    redis_client = DummyRedis()
+    market_payload = MarketPayload(
+        event_id="evt-proof",
+        title="Proof Market",
+        outcomes=["Yes", "No"],
+        outcome_prices=[0.6, 0.4],
+    )
+    market_record = SimpleNamespace(
+        event_id="evt-proof",
+        market_address=None,
+        condition_id="0xabc",
+    )
+    assert maybe_generate_settlement_proof(
+        redis_client,
+        market_record=market_record,
+        market_payload=market_payload,
+        condition_id="0xabc",
+    )
+    assert fake_prover.called_with is not None
+    assert redis_client.last_set is not None

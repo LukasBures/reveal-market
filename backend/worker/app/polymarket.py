@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -19,28 +19,28 @@ class MarketPayload(BaseModel):
 
     event_id: str
     title: str
-    slug: Optional[str] = None
-    category: Optional[str] = None
-    metadata_uri: Optional[str] = None
+    slug: str | None = None
+    category: str | None = None
+    metadata_uri: str | None = None
     oracle: str = Field(default="polymarket")
-    factory: Optional[str] = None
-    market_address: Optional[str] = None
+    factory: str | None = None
+    market_address: str | None = None
     status: str = Field(default="commit")
-    outcomes: Optional[List[str]] = None
-    outcome_prices: Optional[List[float]] = None
-    tags: Optional[List[str]] = None
-    extra_data: Optional[Dict[str, Any]] = None
-    rake_bps: Optional[int] = None
-    condition_id: Optional[str] = None
-    question_id: Optional[str] = None
-    image_url: Optional[str] = None
-    closed: Optional[bool] = None
-    uma_resolution_status: Optional[str] = None
-    source_updated_at: Optional[datetime] = None
-    content_hash: Optional[str] = None
+    outcomes: list[str] | None = None
+    outcome_prices: list[float] | None = None
+    tags: list[str] | None = None
+    extra_data: dict[str, Any] | None = None
+    rake_bps: int | None = None
+    condition_id: str | None = None
+    question_id: str | None = None
+    image_url: str | None = None
+    closed: bool | None = None
+    uma_resolution_status: str | None = None
+    source_updated_at: datetime | None = None
+    content_hash: str | None = None
 
     @classmethod
-    def from_gamma(cls, raw: Dict[str, Any]) -> "MarketPayload":
+    def from_gamma(cls, raw: dict[str, Any]) -> MarketPayload:
         """Normalise a Gamma market payload into `MarketPayload`."""
         if not isinstance(raw, dict):
             raise ValueError("Polymarket record must be a dictionary")
@@ -64,7 +64,7 @@ class MarketPayload(BaseModel):
         tags = _extract_tags(raw.get("tags"))
         updated_at = _extract_updated_at(raw)
 
-        extra_data: Dict[str, Any] = {"gamma": raw}
+        extra_data: dict[str, Any] = {"gamma": raw}
         hash_payload = {
             "event_id": str(event_id),
             "title": str(title),
@@ -127,17 +127,17 @@ class PolymarketClient:
         max_pages: int | None = None,
         order: str = "id",
         ascending: bool = False,
-        closed: Optional[bool] = None,
-        extra_params: Dict[str, Any] | None = None,
-    ) -> List[MarketPayload]:
+        closed: bool | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> list[MarketPayload]:
         """Walk the offset-based API, returning a list of validated markets."""
-        markets: List[MarketPayload] = []
+        markets: list[MarketPayload] = []
         offset = 0
         page = 0
 
         with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
             while True:
-                params: Dict[str, Any] = {
+                params: dict[str, Any] = {
                     "limit": page_size,
                     "offset": offset,
                     "order": order,
@@ -179,10 +179,10 @@ class PolymarketClient:
         return markets
 
 
-def _extract_outcomes(outcomes: Any) -> Optional[List[str]]:
+def _extract_outcomes(outcomes: Any) -> list[str] | None:
     if not isinstance(outcomes, list):
         return None
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     for item in outcomes:
         if isinstance(item, str):
             cleaned.append(item)
@@ -193,10 +193,10 @@ def _extract_outcomes(outcomes: Any) -> Optional[List[str]]:
     return cleaned or None
 
 
-def _extract_prices(prices: Any) -> Optional[List[float]]:
+def _extract_prices(prices: Any) -> list[float] | None:
     if not isinstance(prices, list):
         return None
-    cleaned: List[float] = []
+    cleaned: list[float] = []
     for value in prices:
         if isinstance(value, (int, float)):
             cleaned.append(float(value))
@@ -208,26 +208,101 @@ def _extract_prices(prices: Any) -> Optional[List[float]]:
     return cleaned or None
 
 
-def _derive_category(raw: Dict[str, Any]) -> Optional[str]:
-    tags = raw.get("tags")
-    if isinstance(tags, list):
-        for entry in tags:
-            if isinstance(entry, str) and entry:
-                return entry
-            if isinstance(entry, dict):
-                candidate = entry.get("slug") or entry.get("name")
-                if isinstance(candidate, str) and candidate:
-                    return candidate
-    category = raw.get("category")
-    if isinstance(category, str) and category:
-        return category
+def _clean_string(value: Any) -> str | None:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
     return None
 
 
-def _extract_tags(tags: Any) -> Optional[List[str]]:
+def _category_from_tags(raw: dict[str, Any]) -> str | None:
+    tags = raw.get("tags")
     if not isinstance(tags, list):
         return None
-    result: List[str] = []
+    for entry in tags:
+        if isinstance(entry, str):
+            candidate = _clean_string(entry)
+            if candidate:
+                return candidate
+        elif isinstance(entry, dict):
+            candidate = _clean_string(entry.get("slug") or entry.get("name") or entry.get("label"))
+            if candidate:
+                return candidate
+    return None
+
+
+def _category_from_field(raw: dict[str, Any]) -> str | None:
+    return _clean_string(raw.get("category"))
+
+
+def _category_from_events(raw: dict[str, Any]) -> str | None:
+    events = raw.get("events")
+    if not isinstance(events, list):
+        return None
+
+    def _from_event(event: dict[str, Any]) -> str | None:
+        series = event.get("series")
+        if isinstance(series, list):
+            for item in series:
+                if isinstance(item, dict):
+                    candidate = _clean_string(item.get("title") or item.get("slug"))
+                    if candidate:
+                        return candidate
+        keys = (
+            "seriesSlug",
+            "series_slug",
+            "seriesTicker",
+            "seriesTickerSlug",
+            "seriesTickerLabel",
+            "ticker",
+            "slug",
+            "title",
+            "groupItemTitle",
+        )
+        for key in keys:
+            candidate = _clean_string(event.get(key))
+            if candidate:
+                return candidate
+        return None
+
+    for event in events:
+        if isinstance(event, dict):
+            candidate = _from_event(event)
+            if candidate:
+                return candidate
+    return None
+
+
+def _category_from_series(raw: dict[str, Any]) -> str | None:
+    series = raw.get("series")
+    if not isinstance(series, list):
+        return None
+    for entry in series:
+        if isinstance(entry, dict):
+            candidate = _clean_string(entry.get("title") or entry.get("slug"))
+            if candidate:
+                return candidate
+    return None
+
+
+def _derive_category(raw: dict[str, Any]) -> str | None:
+    for extractor in (
+        _category_from_tags,
+        _category_from_field,
+        _category_from_events,
+        _category_from_series,
+    ):
+        category = extractor(raw)
+        if category:
+            return category
+    return None
+
+
+def _extract_tags(tags: Any) -> list[str] | None:
+    if not isinstance(tags, list):
+        return None
+    result: list[str] = []
     for entry in tags:
         if isinstance(entry, str):
             cleaned = entry.strip()
@@ -250,7 +325,7 @@ def _derive_status(closed: Any, resolution_status: Any) -> str:
     return "commit"
 
 
-def _extract_updated_at(raw: Dict[str, Any]) -> Optional[datetime]:
+def _extract_updated_at(raw: dict[str, Any]) -> datetime | None:
     candidate_keys = [
         "updatedAt",
         "updated_at",
@@ -269,14 +344,14 @@ def _extract_updated_at(raw: Dict[str, Any]) -> Optional[datetime]:
     return None
 
 
-def _coerce_timestamp(value: Any) -> Optional[datetime]:
+def _coerce_timestamp(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
         seconds = float(value)
         if seconds > 1_000_000_000_000:  # assume milliseconds
             seconds = seconds / 1000.0
-        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        return datetime.fromtimestamp(seconds, tz=UTC)
     if isinstance(value, str):
         candidate = value.strip()
         if not candidate:
@@ -287,8 +362,8 @@ def _coerce_timestamp(value: Any) -> Optional[datetime]:
             normalized = candidate.replace("Z", "+00:00")
             parsed = datetime.fromisoformat(normalized)
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
         except ValueError:
             try:
                 numeric = float(candidate)
@@ -298,13 +373,13 @@ def _coerce_timestamp(value: Any) -> Optional[datetime]:
     return None
 
 
-def _compute_market_hash(payload: Dict[str, Any]) -> str:
+def _compute_market_hash(payload: dict[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
-        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).isoformat()
+        dt = value if value.tzinfo else value.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat()
     return value

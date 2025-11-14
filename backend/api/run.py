@@ -10,7 +10,7 @@ def main() -> None:
     if mode == "dev":
         os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST") or "127.0.0.1"
     port = int(os.getenv("PORT", "8000"))
     workers = int(os.getenv("APP_WORKERS", "2"))
 

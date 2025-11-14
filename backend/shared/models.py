@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, JSON, Index
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -42,6 +42,12 @@ class Market(Base):
     source_updated_at = Column(DateTime(timezone=True), nullable=True)
     content_hash = Column(String(128), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    summary = Column(Text, nullable=True)
+    summary_source = Column(String(64), nullable=True)
+    summary_model = Column(String(64), nullable=True)
+    summary_metadata = Column(JSON, nullable=True)
+    summary_checked_at = Column(DateTime(timezone=True), nullable=True)
+    summary_requested_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

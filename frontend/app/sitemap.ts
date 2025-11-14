@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { DEFAULT_API_BASE, getMockMarkets } from "@/lib/api";
-import { categorySlugs, tagSlugs } from "@/lib/slugs";
+import { categorySlugs } from "@/lib/slugs";
 
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
 
@@ -42,7 +42,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...STATIC_PATHS.filter((path) => path !== "/").map((path) => createEntry(path, 0.8)),
     ...DOC_PATHS.map((path) => createEntry(path, path === "/docs" ? 0.75 : 0.6)),
     ...categorySlugs.map((slug) => createEntry(`/categories/${slug}`, 0.7, "weekly")),
-    ...tagSlugs.map((slug) => createEntry(`/tags/${slug}`, 0.65, "weekly")),
   ];
 
   const pushMarketEntries = (markets: any[]) => {

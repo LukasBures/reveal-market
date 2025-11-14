@@ -49,12 +49,9 @@ Additional docs live in each directory’s README.
 git clone https://github.com/RevealMarket/reveal-market.git
 cd reveal-market
 
-# Backend (Python 3.13)
-python -m venv backend/api/.venv && source backend/api/.venv/bin/activate
-pip install -r backend/api/requirements-dev.txt
-deactivate
-python -m venv backend/worker/.venv && source backend/worker/.venv/bin/activate
-pip install -r backend/worker/requirements-dev.txt
+# Backend (Python 3.12 + uv)
+uv sync --project backend/api --extra dev --no-install-project
+uv sync --project backend/worker --extra dev --no-install-project
 ./backend/run_tests.sh
 
 # Frontend

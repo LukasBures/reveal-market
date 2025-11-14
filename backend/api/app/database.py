@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from shared.migrations import run_migrations as apply_migrations
 from sqlalchemy import create_engine

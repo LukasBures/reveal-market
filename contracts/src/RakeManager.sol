@@ -6,6 +6,21 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol"; //
 
 import {IRakeManager} from "./interfaces/IRakeManager.sol";
 
+/**
+ * @title RakeManager – protocol-fee policy registry
+ *
+ * Every market defers to this contract to determine how much rake is taken from the gross pool and where it flows.
+ * The manager enforces a global cap (2%) and exposes a tiny API so other contracts can:
+ *   - read the maximum allowable rake (`maxRakeBps`),
+ *   - deduct fees from a contribution via `takeRake`,
+ *   - rotate the treasury/rakeBps through owner-only setters.
+ *
+ * Keeping fee logic isolated instead of embedding it inside RevealMarket gives us:
+ *   • a single upgrade surface for treasury changes,
+ *   • simpler auditing (one contract drives all rake math),
+ *   • compatibility with new market types without redeploying core logic.
+ */
+
 /// @title RakeManager
 /// @notice Handles protocol rake distribution to the treasury.
 contract RakeManager is Ownable2Step, IRakeManager {

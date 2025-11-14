@@ -21,6 +21,7 @@ contract MarketFactoryTest is Test {
     bytes32 private constant OUTCOME_HASH = keccak256(bytes(OUTCOME));
     bytes32 private constant WIN_SALT = bytes32(uint256(111));
     bytes32 private constant LOSE_SALT = bytes32(uint256(222));
+    uint256 private proofNonce;
     address private constant USER = address(0xFEED);
     address private constant OTHER = address(0xDADA);
 
@@ -280,6 +281,31 @@ contract MarketFactoryTest is Test {
         assertTrue(market.claimsPaused());
     }
 
+    function testSetMarketPausesUnknownMarketReverts() public {
+        vm.expectRevert(MarketFactory.UnknownMarket.selector);
+        factory.setMarketPauses(address(0xdead), true, true);
+    }
+
+    function testSetAllowlistPausedRequiresGuardianOrOwner() public {
+        vm.prank(OTHER);
+        vm.expectRevert(MarketFactory.NotGuardianOrOwner.selector);
+        factory.setAllowlistPaused(true);
+
+        vm.expectEmit(false, true, false, true);
+        emit MarketFactory.AllowlistPauseSet(true, address(this));
+        factory.setAllowlistPaused(true);
+        assertTrue(factory.allowlistPaused());
+    }
+
+    function testGetMarketsReturnsAllDeployed() public {
+        RevealMarket first = _deployDefaultMarket("E-ONE");
+        RevealMarket second = _deployDefaultMarket("E-TWO");
+        address[] memory markets = factory.getMarkets();
+        assertEq(markets.length, 2);
+        assertEq(markets[0], address(first));
+        assertEq(markets[1], address(second));
+    }
+
     // -----------------------------------------------------------------------
     // GLOBAL PAUSES
     // -----------------------------------------------------------------------
@@ -306,7 +332,7 @@ contract MarketFactoryTest is Test {
         market.lock();
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
-        uint256[4] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
+        uint256[6] memory pubSignals = _buildSignals(market, 100e6, OUTCOME_HASH);
         market.verifyProof(new bytes(0), pubSignals);
 
         factory.setGlobalClaimPaused(true);
@@ -353,12 +379,13 @@ contract MarketFactoryTest is Test {
 
     function _buildSignals(RevealMarket market, uint256 winningPool, bytes32 outcomeHash)
         private
-        view
-        returns (uint256[4] memory signals)
+        returns (uint256[6] memory signals)
     {
         signals[0] = winningPool;
         signals[1] = market.totalPool();
         signals[2] = uint256(outcomeHash);
         signals[3] = market.CIRCUIT_VERSION();
+        signals[4] = ++proofNonce;
+        signals[5] = uint256(uint160(address(market)));
     }
 }

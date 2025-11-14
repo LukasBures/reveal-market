@@ -9,6 +9,7 @@ import { AppProviders } from "@/components/providers/AppProviders";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
 import { absoluteUrl } from "@/lib/seo";
+import { ensureHeartbeat, logger } from "@/lib/logging";
 
 const font = Manrope({
   subsets: ["latin"],
@@ -16,6 +17,17 @@ const font = Manrope({
 });
 
 const SITE_URL = absoluteUrl("/");
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.RM_API_BASE_URL ??
+  "http://localhost:8000";
+const API_ORIGIN = (() => {
+  try {
+    return new URL(API_BASE).origin;
+  } catch {
+    return null;
+  }
+})();
 
 const organizationJsonLd = {
   "@context": "https://schema.org",
@@ -88,8 +100,18 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  ensureHeartbeat();
+  logger.info("Rendering RootLayout", {
+    route: "app/layout",
+    nodeEnv: process.env.NODE_ENV,
+  });
   return (
     <html lang="en" className={font.variable}>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
+      </head>
       <body className="bg-[#030712] text-white antialiased">
         <AppProviders>
           <div className="flex min-h-screen flex-col">
