@@ -114,11 +114,6 @@ ensure_caddyfile() {
   local desired
   read -r -d '' desired <<EOF || true
 {
-  logging {
-    output stdout
-    format single_field "{ts} | {level} | caddy | {msg}"
-    level INFO
-  }
   admin off
   grace_period 5s
   servers :443 {
