@@ -1,111 +1,117 @@
 {
-  # Disable the admin API for extra hardening (prevents local API access)
+  # ======================================================================
+  #  GLOBAL OPTIONS
+  # ======================================================================
+
+  # Disable the admin API for extra hardening (prevents local HTTP control)
   admin off
 
-  # Allow graceful restarts without dropping connections
+  # Allow graceful restarts and config reloads without dropping connections
   grace_period 5s
 
-  # ================================
-  #  Global listener configuration
-  # ================================
-  # NOTE: Only supported options are used
+  # ----------------------------------------------------------------------
+  #  Listener configuration
+  #  NOTE: Only supported options for servers{} are used.
+  # ----------------------------------------------------------------------
   servers :443 {
     # Enable modern HTTP protocols
     protocols h1 h2 h3
 
-    # Protect against oversized headers
+    # Protect against oversized request headers
     max_header_size 32kb
   }
 
   servers :80 {
-    # Only h1/h2 on port 80, no HTTP/3
+    # HTTP/3 is not used on port 80
     protocols h1 h2
   }
 }
 
 
-# ===============================================================
+# ======================================================================
 #  PRIMARY DOMAIN — revealmarket.xyz
-# ===============================================================
+# ======================================================================
 revealmarket.xyz {
 
-  # Enable optimal compression for static + API responses
+  # Enable modern compression (zstd first, fallback gzip)
   encode zstd gzip
 
-  # --------------------------
-  #  Body size limit (20 MB)
-  # --------------------------
-  # Correct placement — cannot go in the global block
+  # ------------------------------------------------------------------
+  #  Limit request body size (20 MB) — correct location
+  # ------------------------------------------------------------------
   request_body {
     max_size 20MB
   }
 
-  # --------------------------
-  #  TLS & Certificate Hardening
-  # --------------------------
+  # ------------------------------------------------------------------
+  #  TLS HARDENING
+  # ------------------------------------------------------------------
   tls {
-    # Minimum: TLS 1.2 (safe), max: TLS 1.3
+    # Allow only TLS1.2+ (TLS1.3 preferred)
     protocols tls1.2 tls1.3
 
-    # Modern secure ECDH curves
+    # Strong ECDH curves for key exchange
     curves x25519 secp521r1 secp384r1
 
-    # ACME (Let's Encrypt) issuer with contact email
+    # ACME certificate issuer settings
     issuer acme {
       email infra@revealmarket.xyz
     }
   }
 
-  # --------------------------
-  #  Security Headers (best practice)
-  # --------------------------
+  # ------------------------------------------------------------------
+  #  SECURITY HEADERS
+  # ------------------------------------------------------------------
   header {
-    # HSTS — long max-age with preload
+
+    # Strict Transport Security with preload (2 years)
     Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 
-    # Prevent MIME type sniffing
+    # Prevent MIME-type sniffing
     X-Content-Type-Options "nosniff"
 
-    # Limit referrer information
+    # Limit referrer leakage
     Referrer-Policy "strict-origin-when-cross-origin"
 
-    # Hard-lock browser features
+    # Limit browser features
     Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
 
-    # Prevent clickjacking
+    # Clickjacking protection
     X-Frame-Options "DENY"
 
-    # Short browser cache for HTML/API
+    # Short cache lifetime for HTML/API responses
     Cache-Control "public, max-age=60"
 
-    # Remove the "Server: Caddy" header
+    # Remove the Server header to reduce fingerprinting
     -Server
   }
 
-  # --------------------------
-  #  Structured Access Logs
-  # --------------------------
+  # ------------------------------------------------------------------
+  #  ACCESS LOGGING (using supported logfmt encoder)
+  # ------------------------------------------------------------------
   log {
     output stdout
-    format single_field "{ts} | {level} | caddy.access | {request>remote_ip} | {request>method} {request>uri} {response>status} {size}B {duration}"
+
+    # logfmt is supported, single_field is NOT
+    format logfmt
   }
 
-  # --------------------------
-  #  Reverse Proxy to Frontend
-  # --------------------------
+  # ------------------------------------------------------------------
+  #  REVERSE PROXY TO FRONTEND
+  # ------------------------------------------------------------------
   reverse_proxy frontend:3000 {
 
-    # Real client information
+    # Preserve client info when passing to internal services
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}
     header_up X-Real-IP {remote_host}
 
-    # Prevent IP spoofing attacks
+    # Prevent attackers from spoofing proxy headers
     trusted_proxies private_ranges
 
-    # Transport-level optimizations
+    # Optimized HTTP transport for Docker internal calls
     transport http {
-      versions h1 h2c  # HTTP/2 to upstream inside Docker
+      versions h1 h2c             # Enable HTTP/2 to upstream
       keepalive_idle_conns 128
       keepalive_interval 60s
       read_buffer 4MiB
@@ -115,11 +121,12 @@ revealmarket.xyz {
 }
 
 
-# ===============================================================
-#  WWW Redirection — www.revealmarket.xyz → main domain
-# ===============================================================
+# ======================================================================
+#  WWW REDIRECT — www.revealmarket.xyz → revealmarket.xyz
+# ======================================================================
 www.revealmarket.xyz {
-  # Compression also applied here (small overhead)
+
+  # Enable compression for redirect responses
   encode zstd gzip
 
   tls {
@@ -129,6 +136,6 @@ www.revealmarket.xyz {
     }
   }
 
-  # Redirect with correct permanent status
+  # Permanent redirect with 308 (RFC-recommended)
   redir https://revealmarket.xyz{uri} 308
 }
