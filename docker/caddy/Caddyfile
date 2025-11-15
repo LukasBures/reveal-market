@@ -1,0 +1,11 @@
+{
+  # Global options can go here if needed (logging, email, etc.)
+}
+
+localhost {
+  encode zstd gzip
+  tls {
+    protocols tls1.2 tls1.3
+  }
+  reverse_proxy frontend:3000
+}
