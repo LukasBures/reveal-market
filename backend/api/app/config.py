@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import csv
 import os
 from functools import lru_cache
 
 from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _split_csv(value: str) -> list[str]:
+    reader = csv.reader([value], skipinitialspace=True)
+    items = next(reader, [])
+    if len(items) == 1:
+        stripped = value.strip()
+        if stripped and stripped[0] in {'"', "'"} and stripped[-1] == stripped[0]:
+            inner = stripped[1:-1]
+            if "," in inner:
+                items = inner.split(",")
+    return [item.strip() for item in items if item.strip()]
 
 
 class Settings(BaseSettings):
@@ -86,7 +99,7 @@ class Settings(BaseSettings):
     @classmethod
     def _coerce_csv(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            return _split_csv(value)
         return value
 
 
