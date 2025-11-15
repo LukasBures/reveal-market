@@ -13,9 +13,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("MarketFilters", () => {
-  const advanceTimers = async (ms: number) => {
+  const runDebounce = async () => {
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(ms);
+      vi.runOnlyPendingTimers();
+      await Promise.resolve();
     });
   };
 
@@ -89,14 +90,14 @@ describe("MarketFilters", () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "Cache" } });
 
-      await advanceTimers(220);
+      await runDebounce();
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument(), { timeout: 2000 });
+      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
-      // Trigger the same trimmed query again; cache should be used (no extra fetch).
+      fetchMock.mockClear();
       fireEvent.change(input, { target: { value: "Cache " } });
-      await advanceTimers(220);
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await runDebounce();
+      await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
     } finally {
       vi.useRealTimers();
     }
