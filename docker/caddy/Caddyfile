@@ -1,72 +1,111 @@
 {
-  # Disable admin API for additional hardening
+  # Disable the admin API for extra hardening (prevents local API access)
   admin off
 
-  # Allow graceful restarts
+  # Allow graceful restarts without dropping connections
   grace_period 5s
 
-  # Production listeners — no NGINX-style timeouts (not supported by Caddyfile)
+  # ================================
+  #  Global listener configuration
+  # ================================
+  # NOTE: Only supported options are used
   servers :443 {
+    # Enable modern HTTP protocols
     protocols h1 h2 h3
+
+    # Protect against oversized headers
     max_header_size 32kb
-    request_body {
-      max_size 20MB
-    }
   }
 
   servers :80 {
+    # Only h1/h2 on port 80, no HTTP/3
     protocols h1 h2
   }
 }
 
 
-# ---------------------------------------------------------------
+# ===============================================================
 #  PRIMARY DOMAIN — revealmarket.xyz
-# ---------------------------------------------------------------
+# ===============================================================
 revealmarket.xyz {
 
-  # Compression optimized for production
+  # Enable optimal compression for static + API responses
   encode zstd gzip
 
-  # TLS hardening
+  # --------------------------
+  #  Body size limit (20 MB)
+  # --------------------------
+  # Correct placement — cannot go in the global block
+  request_body {
+    max_size 20MB
+  }
+
+  # --------------------------
+  #  TLS & Certificate Hardening
+  # --------------------------
   tls {
+    # Minimum: TLS 1.2 (safe), max: TLS 1.3
     protocols tls1.2 tls1.3
+
+    # Modern secure ECDH curves
     curves x25519 secp521r1 secp384r1
+
+    # ACME (Let's Encrypt) issuer with contact email
     issuer acme {
       email infra@revealmarket.xyz
     }
   }
 
-  # --- SECURITY HEADERS ---
+  # --------------------------
+  #  Security Headers (best practice)
+  # --------------------------
   header {
+    # HSTS — long max-age with preload
     Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+    # Prevent MIME type sniffing
     X-Content-Type-Options "nosniff"
+
+    # Limit referrer information
     Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Hard-lock browser features
     Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+
+    # Prevent clickjacking
     X-Frame-Options "DENY"
+
+    # Short browser cache for HTML/API
     Cache-Control "public, max-age=60"
 
-    # Remove Server: Caddy
+    # Remove the "Server: Caddy" header
     -Server
   }
 
-  # --- ACCESS LOGGING ---
+  # --------------------------
+  #  Structured Access Logs
+  # --------------------------
   log {
     output stdout
     format single_field "{ts} | {level} | caddy.access | {request>remote_ip} | {request>method} {request>uri} {response>status} {size}B {duration}"
   }
 
-  # --- REVERSE PROXY ---
+  # --------------------------
+  #  Reverse Proxy to Frontend
+  # --------------------------
   reverse_proxy frontend:3000 {
+
+    # Real client information
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}
     header_up X-Real-IP {remote_host}
 
-    # Prevent spoofed proxy headers
+    # Prevent IP spoofing attacks
     trusted_proxies private_ranges
 
+    # Transport-level optimizations
     transport http {
-      versions h1 h2c
+      versions h1 h2c  # HTTP/2 to upstream inside Docker
       keepalive_idle_conns 128
       keepalive_interval 60s
       read_buffer 4MiB
@@ -76,10 +115,11 @@ revealmarket.xyz {
 }
 
 
-# ---------------------------------------------------------------
-#  WWW Redirect — www.revealmarket.xyz
-# ---------------------------------------------------------------
+# ===============================================================
+#  WWW Redirection — www.revealmarket.xyz → main domain
+# ===============================================================
 www.revealmarket.xyz {
+  # Compression also applied here (small overhead)
   encode zstd gzip
 
   tls {
@@ -89,6 +129,6 @@ www.revealmarket.xyz {
     }
   }
 
-  # Permanent redirect
+  # Redirect with correct permanent status
   redir https://revealmarket.xyz{uri} 308
 }
