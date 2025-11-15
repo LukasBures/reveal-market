@@ -12,6 +12,7 @@ x-backend-env: &backend-env
 services:
   postgres:
     image: postgres:15-alpine
+    container_name: reveal-market-postgres
     restart: unless-stopped
     # Primary datastore for both API + worker. The binded volume keeps data
     # across container restarts so migrations/tests do not blow away fixtures.
@@ -30,9 +31,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
   redis:
     image: redis:7-alpine
+    container_name: reveal-market-redis
     restart: unless-stopped
     # Acts as cache + heartbeat store. We expose the default port so developers
     # can inspect metrics with redis-cli locally if needed.
@@ -48,11 +59,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   api:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
+    container_name: reveal-market-api
     restart: unless-stopped
     init: true
     environment:
@@ -81,11 +102,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.5"
+          memory: 384M
 
   worker:
     build:
       context: .
       dockerfile: docker/worker/Dockerfile
+    container_name: reveal-market-worker
     restart: unless-stopped
     init: true
     environment:
@@ -114,6 +145,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.5"
+          memory: 384M
 
   frontend:
     build:
@@ -123,6 +163,7 @@ services:
         RM_API_BASE_URL: http://api:8000
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
         RUNNING_IN_DOCKER: "true"
+    container_name: reveal-market-frontend
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -136,11 +177,21 @@ services:
     # Public entrypoint for the stack. Keep host mapping so preview builds work.
     ports:
       - "3000:3000"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
 
   proover:
     build:
       context: .
       dockerfile: docker/proover/Dockerfile
+    container_name: reveal-market-proover
     restart: unless-stopped
     volumes:
       - ./proover/circuits:/app/circuits:ro
@@ -158,6 +209,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
 
 volumes:
   # Named volumes keep state between docker compose up/down cycles.
