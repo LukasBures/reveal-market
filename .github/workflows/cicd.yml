@@ -1,17 +1,19 @@
-name: Tests
+name: Tests + Deploy
 
 on:
   push:
     branches:
       - main
   pull_request:
+    branches:
+      - main
 
 jobs:
+
   backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -35,6 +37,7 @@ jobs:
       - name: Run backend tests
         run: ./backend/run_tests.sh
 
+
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -49,11 +52,13 @@ jobs:
         working-directory: contracts
         run: ./run_local.sh full
 
+
   frontend:
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       RM_API_BASE_URL: http://api:8000
+
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +90,7 @@ jobs:
           NODE_ENV: production
         run: npm run build
 
+
   proover:
     runs-on: ubuntu-latest
     steps:
@@ -113,4 +119,39 @@ jobs:
 
       - name: Go vet
         working-directory: proover
-        run: go vet ./...
+        run: go vet -v ./...
+
+
+  deploy:
+    # Only run deploy if ALL tests passed
+    needs:
+      - backend
+      - contracts
+      - frontend
+      - proover
+
+    # Only deploy on main branch
+    if: github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Reveal Market production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 159.69.29.255
+          username: reveal
+          port: 2222
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            echo ">>> Pull latest code"
+            cd ~/apps/reveal-market
+            git pull --rebase
+
+            echo ">>> Run production deployment script"
+            chmod +x run_prod.sh
+            ./run_prod.sh
+
+            echo ">>> Deployment complete"
