@@ -104,11 +104,15 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install rapidsnark
-        run: npm install -g rapidsnark@0.0.2
-
-      - name: Add npm global bin to PATH
-        run: echo "$(npm bin -g)" >> $GITHUB_PATH
+      - name: Install rapidsnark binary
+        env:
+          RAPIDSNARK_VERSION: v0.0.7
+        run: |
+          curl -fsSL -o /tmp/rapidsnark.zip "https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}.zip"
+          unzip -q /tmp/rapidsnark.zip -d /tmp/rapidsnark
+          RS_DIR="/tmp/rapidsnark/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}"
+          echo "${RS_DIR}/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
       - name: Verify rapidsnark binary
         run: rapidsnark --version
