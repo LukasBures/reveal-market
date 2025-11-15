@@ -163,6 +163,7 @@ services:
         RM_API_BASE_URL: http://api:8000
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
         RUNNING_IN_DOCKER: "true"
+        LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE:-rm125}
     container_name: reveal-market-frontend
     restart: unless-stopped
     environment:
@@ -171,6 +172,7 @@ services:
       RM_API_BASE_URL: http://api:8000
       RUNNING_IN_DOCKER: "true"
       DOCS_HOST: docs.revealmarket.xyz
+      LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE:-rm125}
     depends_on:
       api:
         condition: service_healthy

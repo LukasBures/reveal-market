@@ -48,6 +48,7 @@ Set these in `.env.local` (copy from `.env.example`):
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (e.g., `http://localhost:8000` when running Docker locally). |
 | `RM_API_BASE_URL` | Internal base URL for server-side fetches. Defaults to `http://api:8000` inside Docker networks. |
+| `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
 
 When deploying, ensure these values align with the CDN or reverse proxy domain so CSP/HSTS headers reference the correct origin.
 

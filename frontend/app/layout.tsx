@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
 import Script from "next/script";
+import { cookies } from "next/headers";
 
 import "./globals.css";
 
@@ -11,6 +12,11 @@ import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
 import { absoluteUrl } from "@/lib/seo";
 import { logger } from "@/lib/logging";
+import { LandingGate } from "@/components/landing/LandingGate";
+import {
+  LANDING_ACCESS_COOKIE_NAME,
+  isLandingGateEnabled,
+} from "@/lib/access-gate";
 
 const font = Manrope({
   subsets: ["latin"],
@@ -101,11 +107,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
   logger.info("Rendering RootLayout", {
     route: "app/layout",
     nodeEnv: process.env.NODE_ENV,
   });
+  const cookieStore = await cookies();
+  const hasLandingAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
+  const gateEnabled = isLandingGateEnabled();
+  const showProtectedApp = !gateEnabled || hasLandingAccess;
   return (
     <html lang="en" className={font.variable}>
       <head>
@@ -115,12 +125,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="bg-[#030712] text-white antialiased">
         <AppProviders>
-          <HeartbeatClient />
-          <div className="flex min-h-screen flex-col">
-            <MainNav />
-            <main className="flex-1">{children}</main>
-            <Footer />
-          </div>
+          {showProtectedApp ? (
+            <>
+              <HeartbeatClient />
+              <div className="flex min-h-screen flex-col">
+                <MainNav />
+                <main className="flex-1">{children}</main>
+                <Footer />
+              </div>
+            </>
+          ) : (
+            <LandingGate />
+          )}
         </AppProviders>
         {IS_PRODUCTION ? (
           <>
