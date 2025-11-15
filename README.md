@@ -67,6 +67,12 @@ cd contracts && forge test
 
 The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no longer runs `npm install` or `npm run dev` on container start. Re-run `./run_local.sh` after frontend changes or use `cd frontend && npm run dev` for hot reload.
 
+### Groth16 prover setup
+
+- Run `bash proover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `proover/circuits/build`. The prover container mounts those paths read-only; without them it refuses to start.
+- Both `./run_local.sh` and `./run_prod.sh` call a built-in artifact check before launching Docker. If the files are missing, `run_prod.sh` automatically executes `generate_keys.sh`; set `SKIP_PROOVER_CHECK=true` only when you have already mounted known-good artifacts.
+- The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. After the stack is up, hit `/healthz` or send a sample payload (see `proover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed.
+
 ### Live market ingestion
 
 - Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com` and `RM_POLYMARKET_CLOSED_FILTER=false` in `.env` (bare metal) or `docker-compose.yml` (containers) so the worker ingests active markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` empty until you want to curate narratives.
