@@ -7,6 +7,7 @@ import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, u
 import type { MarketSummary } from "@/lib/api-types";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
+import { mapApiMarketToSummary } from "@/lib/marketMapper";
 
 const categories = [
   "Trending",
@@ -122,7 +123,8 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
         if (!response.ok) {
           throw new Error(`suggestions failed (${response.status})`);
         }
-        const results = (await response.json()) as MarketSummary[];
+        const payload = await response.json();
+        const results = Array.isArray(payload) ? payload.map(mapApiMarketToSummary) : [];
         cache.set(cacheKey, { data: results, expiresAt: Date.now() + SUGGESTION_CACHE_TTL_MS });
         if (cache.size > SUGGESTION_CACHE_LIMIT) {
           const keys = Array.from(cache.keys());
