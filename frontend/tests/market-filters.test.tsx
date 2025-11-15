@@ -13,10 +13,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("MarketFilters", () => {
-  const runDebounce = async () => {
+  const flushDebounce = async () => {
     await act(async () => {
-      vi.runOnlyPendingTimers();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(250);
     });
   };
 
@@ -90,13 +89,13 @@ describe("MarketFilters", () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "Cache" } });
 
-      await runDebounce();
+      await flushDebounce();
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
       fetchMock.mockClear();
       fireEvent.change(input, { target: { value: "Cache " } });
-      await runDebounce();
+      await flushDebounce();
       await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
     } finally {
       vi.useRealTimers();
