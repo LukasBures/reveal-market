@@ -189,6 +189,7 @@ services:
 
   caddy:
     image: caddy:2
+    container_name: reveal-market-caddy
     restart: unless-stopped
     depends_on:
       - frontend

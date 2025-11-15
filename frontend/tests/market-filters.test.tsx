@@ -83,13 +83,13 @@ describe("MarketFilters", () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "Cache" } });
 
-      vi.advanceTimersByTime(220);
+      await vi.advanceTimersByTimeAsync(220);
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
       // Trigger the same trimmed query again; cache should be used (no extra fetch).
       fireEvent.change(input, { target: { value: "Cache " } });
-      vi.advanceTimersByTime(220);
+      await vi.advanceTimersByTimeAsync(220);
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     } finally {
       vi.useRealTimers();
