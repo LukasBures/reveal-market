@@ -87,13 +87,16 @@ revealmarket.xyz {
   }
 
   # ------------------------------------------------------------------
-  #  ACCESS LOGGING (using supported logfmt encoder)
+  #  ACCESS LOGGING (uses supported JSON encoder w/ filter wrapper)
   # ------------------------------------------------------------------
   log {
     output stdout
 
-    # logfmt is supported, single_field is NOT
-    format logfmt
+    # JSON encoder is guaranteed to exist in caddy:2
+    # filter{} prevents future noisy fields if needed
+    format filter {
+      wrap json
+    }
   }
 
   # ------------------------------------------------------------------
