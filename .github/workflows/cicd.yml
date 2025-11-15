@@ -96,6 +96,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('proover/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
@@ -147,8 +157,14 @@ jobs:
           port: 2222
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
+            set -euo pipefail
             echo ">>> Pull latest code"
             cd ~/apps/reveal-market
+            git status --short
+            if ! git diff --quiet; then
+              echo "Working tree dirty. Stash or commit changes before deploying." >&2
+              exit 1
+            fi
             git pull --rebase
 
             echo ">>> Run production deployment script"
