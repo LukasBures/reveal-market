@@ -153,6 +153,8 @@ build/Release
 # Dependency directories
 node_modules/
 jspm_packages/
+proover/circuits/build/
+proover/circuits/.node-runtime/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
