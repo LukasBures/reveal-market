@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketFilters } from "@/components/markets/MarketFilters";
 
@@ -13,6 +13,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("MarketFilters", () => {
+  const advanceTimers = async (ms: number) => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  };
+
   beforeEach(() => {
     pushMock.mockReset();
   });
@@ -83,13 +89,13 @@ describe("MarketFilters", () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "Cache" } });
 
-      await vi.advanceTimersByTimeAsync(220);
+      await advanceTimers(220);
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
       // Trigger the same trimmed query again; cache should be used (no extra fetch).
       fireEvent.change(input, { target: { value: "Cache " } });
-      await vi.advanceTimersByTimeAsync(220);
+      await advanceTimers(220);
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     } finally {
       vi.useRealTimers();
