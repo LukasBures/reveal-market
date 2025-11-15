@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /usr/bin/proover
 FROM alpine:3.19
 
 RUN apk add --no-cache nodejs npm bash wget curl ca-certificates && \
-    npm install -g --unsafe-perm --loglevel=error rapidsnark@0.1.1 && \
+    npm install -g --unsafe-perm --loglevel=error rapidsnark@0.0.2 && \
     npm cache clean --force
 
 RUN adduser -D -g '' prover

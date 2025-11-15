@@ -20,15 +20,15 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
   - `circuits/build/settlement_js/generate_witness.js`
 - `snarkjs` is still required locally when running `generate_keys.sh` because the setup script shells out to it for Groth16 key generation, but runtime proof generation relies on the rapidsnark binary.
 
-> **Tip:** `docker/proover/Dockerfile` installs Node + `rapidsnark@0.1.1` via npm and mounts `./proover/circuits` into `/app/circuits`. Run `bash proover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime.
+> **Tip:** `docker/proover/Dockerfile` installs Node + `rapidsnark@0.0.2` via npm and mounts `./proover/circuits` into `/app/circuits`. Run `bash proover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2` today, so CI and Docker pin to that version to avoid ETARGET install failures; bump the pin once a newer release appears upstream.
 
 ## Architecture Overview
 
 ```
 ┌────────────┐   JSON payload   ┌──────────────────────┐   witness.wtns   ┌──────────────────────┐
 │ HTTP API   │ ───────────────▶ │ generate_witness.js  │ ───────────────▶ │  rapidsnark CLI      │
-└────────────┘                  │  (Node + Circom)     │                 │  (proof + signals)   │
-       ▲                       └──────────────────────┘                 └──────────────────────┘
+└────────────┘                  │  (Node + Circom)     │                  │  (proof + signals)   │
+       ▲                        └──────────────────────┘                  └──────────────────────┘
        │                                 │                                      │
        │                                 ▼                                      ▼
        │                        /tmp/groth16-*/input.json            /tmp/groth16-*/{proof,public}.json
@@ -157,5 +157,5 @@ If the artifacts are missing or the Groth16 toolchain fails, the service exits w
 ## Docker Notes
 
 - `docker-compose.yml` mounts `./proover/circuits` into the container so locally generated artifacts are available.
-- The Dockerfile installs Node 20 + `rapidsnark@0.1.1`; override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
+- The Dockerfile installs Node 20 + `rapidsnark@0.0.2`; override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
 - Running `./run_local.sh` rebuilds the prover image, so re-run after regenerating circuits.
