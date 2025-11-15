@@ -14,7 +14,7 @@
   #  NOTE: Only supported options for servers{} are used.
   # ----------------------------------------------------------------------
   servers :443 {
-    # Enable modern HTTP protocols
+    # Enable modern HTTP protocols for clients
     protocols h1 h2 h3
 
     # Protect against oversized request headers
@@ -93,7 +93,7 @@ revealmarket.xyz {
     output stdout
 
     # JSON encoder is guaranteed to exist in caddy:2
-    # filter{} prevents future noisy fields if needed
+    # filter{} allows future log field filtering without breaking format
     format filter {
       wrap json
     }
@@ -104,7 +104,7 @@ revealmarket.xyz {
   # ------------------------------------------------------------------
   reverse_proxy frontend:3000 {
 
-    # Preserve client info when passing to internal services
+    # Preserve client info for upstream service
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}
     header_up X-Real-IP {remote_host}
@@ -114,7 +114,9 @@ revealmarket.xyz {
 
     # Optimized HTTP transport for Docker internal calls
     transport http {
-      versions h1 h2c             # Enable HTTP/2 to upstream
+      # *** FIXED: Caddy supports ONLY these: 1.1, 2, h2c, 3 ***
+      versions 1.1 h2c
+
       keepalive_idle_conns 128
       keepalive_interval 60s
       read_buffer 4MiB
