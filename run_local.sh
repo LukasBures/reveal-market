@@ -19,6 +19,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROOVER_BUILD_DIR="${ROOT_DIR}/proover/circuits/build"
+PROOVER_REQUIRED_FILES=(
+  "settlement_js/generate_witness.js"
+  "settlement_js/settlement.wasm"
+  "settlement_final.zkey"
+)
+SKIP_PROOVER_CHECK="${SKIP_PROOVER_CHECK:-false}"
 
 # Sanity-check that Docker is installed.
 if ! command -v docker >/dev/null 2>&1; then
@@ -57,6 +64,29 @@ calc_parallel_builds() {
 }
 
 PARALLEL_BUILDS="$(calc_parallel_builds)"
+
+ensure_proover_artifacts() {
+  if [[ "${SKIP_PROOVER_CHECK}" == "true" ]]; then
+    echo "Skipping Groth16 artifact validation (SKIP_PROOVER_CHECK=true)."
+    return
+  fi
+  local missing=()
+  for rel_path in "${PROOVER_REQUIRED_FILES[@]}"; do
+    if [[ ! -f "${PROOVER_BUILD_DIR}/${rel_path}" ]]; then
+      missing+=("${rel_path}")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    cat <<EOF
+Missing Groth16 artifacts under ${PROOVER_BUILD_DIR}.
+Run 'bash proover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
+Missing files:
+$(printf '  - %s\n' "${missing[@]}")
+Set SKIP_PROOVER_CHECK=true to bypass this check (not recommended).
+EOF
+    exit 1
+  fi
+}
 
 # Enable BuildKit + Compose's CLI mode so builds are faster and parallelizable.
 export DOCKER_BUILDKIT=1
@@ -106,6 +136,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+ensure_proover_artifacts
 
 echo "Validating docker compose files..."
 "${COMPOSE_CMD[@]}" config >/dev/null

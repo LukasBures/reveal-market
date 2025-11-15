@@ -4,10 +4,11 @@ This directory hosts the reference circuit and helper scripts needed to generate
 
 > **Prerequisites**
 >
-> - Node ≥ 18
-> - `circom` installed globally (`npm install -g circom`)
-> - `snarkjs` installed locally (`npm install snarkjs`) or globally
-> - Internet access to download the Powers of Tau file (default: `powersOfTau28_hez_final_12.ptau`)
+> - Node ≥ 18 plus `curl`/`tar` (the script auto-downloads the circom binary, circomlib source, and uses `npx snarkjs@0.7.4` if missing)
+> - Optional: `circom` installed globally for faster runs (otherwise the official GitHub binary is cached under `build/.circom-bin/`)
+> - Optional: `snarkjs` installed globally (set `USE_SYSTEM_SNARKJS=true` to use it)
+> - Internet access to download the Powers of Tau file (default: `powersOfTau28_hez_final_12.ptau` from `storage.googleapis.com/zkevm/ptau/...`)
+> - Apple Silicon: Rosetta is required because the upstream circom release is x86_64-only today.
 
 ## Files
 
@@ -29,6 +30,8 @@ bash generate_keys.sh
 #   settlement_js/            -> witness generator artifacts
 #   settlement_final.zkey     -> proving key (mount in proover container)
 #   settlement_vk.json        -> verification key (copy to contracts/cache/settlement-vk.json)
+#   circomlib/                -> cached circomlib sources for deterministic builds
+#   .circom-bin/              -> cached circom binary (auto-downloaded when not on PATH)
 ```
 
 After running the script:

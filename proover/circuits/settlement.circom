@@ -20,7 +20,7 @@ template SettlementCircuit() {
     signal output pubNonce;
     signal output pubMarketAddress;
 
-    component leqCheck = LessThan(256);
+    component leqCheck = LessThan(252);
     leqCheck.in[0] <== winningPool;
     leqCheck.in[1] <== totalPool + 1;
     leqCheck.out === 1;
