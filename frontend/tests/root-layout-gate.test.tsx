@@ -14,6 +14,10 @@ vi.mock("@/components/providers/AppProviders", () => ({
   AppProviders: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@/components/landing/LandingGate", () => ({
+  LandingGate: () => <div data-testid="landing-gate" />,
+}));
+
 vi.mock("@/components/providers/HeartbeatClient", () => ({
   HeartbeatClient: () => <div data-testid="heartbeat" />,
 }));
@@ -60,7 +64,7 @@ describe("RootLayout gate", () => {
     const ui = await RootLayout({ children: <>Hidden content</> });
     render(ui);
 
-    expect(screen.getByText(/Private beta/i)).toBeInTheDocument();
+    expect(screen.getByTestId("landing-gate")).toBeInTheDocument();
     expect(screen.queryByTestId("main-nav")).not.toBeInTheDocument();
     expect(screen.queryByText("Hidden content")).not.toBeInTheDocument();
   });
@@ -74,6 +78,6 @@ describe("RootLayout gate", () => {
 
     expect(screen.getByTestId("main-nav")).toBeInTheDocument();
     expect(screen.getByText("Welcome in")).toBeInTheDocument();
-    expect(screen.queryByText(/Private beta/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("landing-gate")).not.toBeInTheDocument();
   });
 });

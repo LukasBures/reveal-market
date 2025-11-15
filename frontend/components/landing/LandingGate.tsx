@@ -79,7 +79,7 @@ export function LandingGate() {
             <p className="mt-3 text-lg text-slate-100">
               Sealed commit phases, private relayers, and Groth16-backed settlement give partners verifiable fairness without exposing live orderflow.
             </p>
-            <div className="mt-6 grid gap-4 text-left sm:grid-cols-3">
+            <div className="mt-6 grid gap-4 text-left sm:grid-cols-2">
               {heroStats.map((stat) => (
                 <div key={stat.label} className="rounded-2xl border border-white/10 bg-black/40 p-4">
                   <p className="text-xs uppercase tracking-[0.35em] text-slate-500">{stat.label}</p>
