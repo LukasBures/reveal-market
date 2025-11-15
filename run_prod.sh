@@ -23,6 +23,8 @@ PROOVER_REQUIRED_FILES=(
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
 )
+DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"
+CADDY_DOMAIN="${CADDY_DOMAIN:-revealmarket.xyz}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required to deploy the stack" >&2
@@ -109,6 +111,28 @@ EOF
   fi
 }
 
+ensure_caddyfile() {
+  local target="${DEFAULT_CADDY_FILE}"
+  local target_dir
+  target_dir="$(dirname "${target}")"
+  mkdir -p "${target_dir}"
+  local desired
+  read -r -d '' desired <<EOF || true
+${CADDY_DOMAIN} {
+  encode zstd gzip
+  tls {
+    protocols tls1.2 tls1.3
+  }
+  reverse_proxy frontend:3000
+}
+EOF
+
+  if [[ ! -f "${target}" || "$(cat "${target}")" != "${desired}" ]]; then
+    echo "Writing Caddyfile for ${CADDY_DOMAIN} -> frontend:3000"
+    printf "%s\n" "${desired}" > "${target}"
+  fi
+}
+
 PARALLEL_BUILDS="$(calc_parallel_builds)"
 WAIT_FLAG=()
 if supports_wait_flag; then
@@ -162,6 +186,7 @@ done
 
 check_env_file
 check_proover_artifacts
+ensure_caddyfile
 
 echo "Validating docker compose files..."
 "${COMPOSE_CMD[@]}" config >/dev/null
@@ -183,3 +208,4 @@ fi
 "${COMPOSE_CMD[@]}" ps
 
 echo "Deployment complete."
+DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"

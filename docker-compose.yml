@@ -187,6 +187,19 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   proover:
     build:
       context: .
@@ -223,3 +236,5 @@ volumes:
   # Named volumes keep state between docker compose up/down cycles.
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:

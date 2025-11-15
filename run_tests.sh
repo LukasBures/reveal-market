@@ -26,6 +26,7 @@ run_section() {
 run_section "backend" "${ROOT_DIR}/backend/run_tests.sh"
 run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh"
 run_section "contracts" "${ROOT_DIR}/contracts/run_tests.sh"
+run_section "proover" "${ROOT_DIR}/proover/run_tests.sh"
 
 echo "=============================="
 echo "All test suites completed."
