@@ -64,7 +64,7 @@ revealmarket.xyz {
   # ------------------------------------------------------------------
   header {
 
-    # Strict Transport Security with preload (2 years)
+    # HTTPS Strict Transport Security with preload (2 years)
     Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 
     # Prevent MIME-type sniffing
@@ -139,6 +139,11 @@ www.revealmarket.xyz {
     issuer acme {
       email infra@revealmarket.xyz
     }
+  }
+
+  # HTTPS Strict Transport Security with preload (2 years)
+  header {
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
   }
 
   # Permanent redirect with 308 (RFC-recommended)
