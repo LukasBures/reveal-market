@@ -69,18 +69,36 @@ run_circom() {
   "${CIRCOM_BIN}" "$@"
 }
 
+ensure_snarkjs_deps() {
+  if command -v npx >/dev/null 2>&1; then
+    return
+  fi
+  if command -v snarkjs >/dev/null 2>&1; then
+    echo "npx not found but snarkjs is available; using system snarkjs."
+    USE_SYSTEM_SNARKJS=true
+    return
+  fi
+  echo "Installing Node.js runtime (missing npx/snarkjs)..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq
+    sudo apt-get install -y nodejs npm >/dev/null
+  elif command -v apk >/dev/null 2>&1; then
+    sudo apk add --no-cache nodejs npm
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nodejs npm
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y nodejs npm
+  else
+    echo "Unsupported package manager. Please install Node.js and npm manually." >&2
+    exit 1
+  fi
+}
+
 run_snarkjs() {
+  ensure_snarkjs_deps
   if [[ "${USE_SYSTEM_SNARKJS}" == "true" ]] && command -v snarkjs >/dev/null 2>&1; then
     snarkjs "$@"
   else
-    if ! command -v npx >/dev/null 2>&1; then
-      if command -v snarkjs >/dev/null 2>&1; then
-        snarkjs "$@"
-        return
-      fi
-      echo "snarkjs/npx not found. Install Node + npm to run this script." >&2
-      exit 1
-    fi
     echo "snarkjs not found; running via npx snarkjs@${SNARKJS_VERSION}..."
     npx --yes "snarkjs@${SNARKJS_VERSION}" "$@"
   fi

@@ -101,14 +101,8 @@ check_proover_artifacts() {
   done
 
   if (( ${#missing[@]} > 0 )); then
-    cat <<EOF
-Missing Groth16 artifacts under ${PROOVER_BUILD_DIR}.
-Ensure the Circom build output + zkey files are present before deploying (see proover/circuits/README).
-Missing:
-$(printf '  - %s\n' "${missing[@]}")
-Use SKIP_PROOVER_CHECK=true only when intentionally disabling the prover.
-EOF
-    exit 1
+    echo "Groth16 artifacts missing; running proover/circuits/generate_keys.sh ..."
+    (cd "${ROOT_DIR}/proover/circuits" && bash generate_keys.sh)
   fi
 }
 
