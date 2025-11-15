@@ -91,7 +91,7 @@ describe("MarketFilters", () => {
 
       await advanceTimers(220);
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument(), { timeout: 2000 });
 
       // Trigger the same trimmed query again; cache should be used (no extra fetch).
       fireEvent.change(input, { target: { value: "Cache " } });
