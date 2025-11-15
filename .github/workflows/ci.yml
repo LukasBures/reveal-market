@@ -71,16 +71,11 @@ jobs:
       - name: Start backend stack
         run: docker compose up -d postgres redis proover api worker
 
-      - name: Wait for API
-        run: |
-          for i in {1..30}; do
-            if curl -fsS http://localhost:8000/health >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "API did not become healthy in time" >&2
-          exit 1
+      - name: Wait for backend services
+        run: docker compose wait postgres redis proover api worker
+
+      - name: Smoke check API
+        run: curl -fsS http://localhost:8000/health
 
       - name: Install dependencies
         working-directory: frontend
