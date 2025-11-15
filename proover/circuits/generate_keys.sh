@@ -13,8 +13,10 @@ CIRCOM_BIN="$CIRCOM_CACHE_DIR/circom"
 CIRCOMLIB_TAG="${CIRCOMLIB_TAG:-v2.0.5}"
 CIRCOMLIB_DIR="$BUILD_DIR/circomlib"
 SNARKJS_VERSION="${SNARKJS_VERSION:-0.7.4}"
-USE_SYSTEM_SNARKJS="${USE_SYSTEM_SNARKJS:-false}"
+USE_SYSTEM_SNARKJS="${USE_SYSTEM_SNARKJS:-true}"
 CONTRIBUTOR_NAME="${CONTRIBUTOR_NAME:-initial contribution}"
+NODE_VERSION="${NODE_VERSION:-v20.18.0}"
+NODE_CACHE_DIR="${BUILD_DIR}/.node-runtime"
 generate_entropy() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -69,36 +71,14 @@ run_circom() {
   "${CIRCOM_BIN}" "$@"
 }
 
-ensure_snarkjs_deps() {
-  if command -v npx >/dev/null 2>&1; then
-    return
-  fi
-  if command -v snarkjs >/dev/null 2>&1; then
-    echo "npx not found but snarkjs is available; using system snarkjs."
-    USE_SYSTEM_SNARKJS=true
-    return
-  fi
-  echo "Installing Node.js runtime (missing npx/snarkjs)..."
-  if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq
-    sudo apt-get install -y nodejs npm >/dev/null
-  elif command -v apk >/dev/null 2>&1; then
-    sudo apk add --no-cache nodejs npm
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y nodejs npm
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y nodejs npm
-  else
-    echo "Unsupported package manager. Please install Node.js and npm manually." >&2
-    exit 1
-  fi
-}
-
 run_snarkjs() {
-  ensure_snarkjs_deps
   if [[ "${USE_SYSTEM_SNARKJS}" == "true" ]] && command -v snarkjs >/dev/null 2>&1; then
     snarkjs "$@"
   else
+    if ! command -v npx >/dev/null 2>&1; then
+      echo "npx is required to download snarkjs. Install Node.js + npm (e.g., sudo apt install -y nodejs npm)." >&2
+      exit 1
+    fi
     echo "snarkjs not found; running via npx snarkjs@${SNARKJS_VERSION}..."
     npx --yes "snarkjs@${SNARKJS_VERSION}" "$@"
   fi
