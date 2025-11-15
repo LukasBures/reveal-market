@@ -114,8 +114,8 @@ revealmarket.xyz {
 
     # Optimized HTTP transport for Docker internal calls
     transport http {
-      # *** FIXED: Caddy supports ONLY these: 1.1, 2, h2c, 3 ***
-      versions 1.1 h2c
+      # Upstream Next.js only speaks HTTP/1.1, so do not negotiate h2c
+      versions 1.1
 
       keepalive_idle_conns 128
       keepalive_interval 60s
