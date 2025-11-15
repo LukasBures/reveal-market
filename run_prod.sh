@@ -24,8 +24,6 @@ PROOVER_REQUIRED_FILES=(
   "settlement_final.zkey"
 )
 DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"
-CADDY_DOMAIN="${CADDY_DOMAIN:-revealmarket.xyz}"
-CADDY_ACME_EMAIL="${CADDY_ACME_EMAIL:-infra@revealmarket.xyz}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required to deploy the stack" >&2
@@ -106,83 +104,13 @@ check_proover_artifacts() {
   fi
 }
 
-ensure_caddyfile() {
-  local target="${DEFAULT_CADDY_FILE}"
-  local target_dir
-  target_dir="$(dirname "${target}")"
-  mkdir -p "${target_dir}"
-  local desired
-  read -r -d '' desired <<EOF || true
-{
-  admin off
-  grace_period 5s
-  servers :443 {
-    protocols h1 h2 h3
-    max_header_size 32kb
-    read_timeout 30s
-    write_timeout 30s
-    idle_timeout 120s
-    request_body {
-      max_size 20MB
-    }
-  }
-  servers :80 {
-    protocols h1 h2
-    read_timeout 15s
-    write_timeout 15s
-    idle_timeout 60s
-  }
-}
-
-${CADDY_DOMAIN} {
-  encode zstd gzip
-  tls {
-    protocols tls1.2 tls1.3
-    curves x25519 secp521r1 secp384r1
-    issuer acme {
-      email ${CADDY_ACME_EMAIL}
-    }
-  }
-  header {
-    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-    X-Content-Type-Options "nosniff"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
-    X-Frame-Options "DENY"
-    Cache-Control "public, max-age=60"
-    -Server
-  }
-  log {
-    output stdout
-    format single_field "{ts} | {level} | caddy.access | {request>remote_ip} | {request>method} {request>uri} {response>status} {size}B {duration}"
-  }
-  reverse_proxy frontend:3000 {
-    header_up X-Forwarded-Proto {scheme}
-    header_up X-Forwarded-Host {host}
-    header_up X-Real-IP {remote_host}
-    trusted_proxies private_ranges
-    transport http {
-      versions h1 h2c
-      keepalive_idle_conns 128
-      keepalive_interval 60s
-      read_buffer 4MiB
-      write_buffer 4MiB
-    }
-  }
-}
-
-www.${CADDY_DOMAIN} {
-  encode zstd gzip
-  tls {
-    protocols tls1.2 tls1.3
-  }
-  redir https://${CADDY_DOMAIN}{uri} 308
-}
+check_caddyfile() {
+  if [[ ! -f "${DEFAULT_CADDY_FILE}" ]]; then
+    cat <<EOF
+Missing Caddyfile at ${DEFAULT_CADDY_FILE}
+Commit the desired config to docker/caddy/Caddyfile before deploying.
 EOF
-
-  if [[ ! -f "${target}" || "$(cat "${target}")" != "${desired}" ]]; then
-    echo "Writing Caddyfile for ${CADDY_DOMAIN} -> frontend:3000"
-    printf "%s\n" "${desired}" > "${target}"
+    exit 1
   fi
 }
 
@@ -239,7 +167,7 @@ done
 
 check_env_file
 check_proover_artifacts
-ensure_caddyfile
+check_caddyfile
 
 echo "Validating docker compose files..."
 "${COMPOSE_CMD[@]}" config >/dev/null
@@ -261,4 +189,3 @@ fi
 "${COMPOSE_CMD[@]}" ps
 
 echo "Deployment complete."
-DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"
