@@ -25,4 +25,8 @@ vi.mock("next/image", () => ({
   ),
 }));
 
+vi.mock("next/font/google", () => ({
+  Manrope: () => ({ className: "font-manrope", variable: "--font-sans" }),
+}));
+
 vi.mock("server-only", () => ({}));
