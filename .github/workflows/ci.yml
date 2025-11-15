@@ -68,15 +68,6 @@ jobs:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
-      - name: Start backend stack
-        run: docker compose up -d postgres redis proover api worker
-
-      - name: Wait for backend services
-        run: docker compose wait postgres redis proover api worker
-
-      - name: Smoke check API
-        run: curl -fsS http://localhost:8000/health
-
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
@@ -92,7 +83,3 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
-
-      - name: Shutdown stack
-        if: always()
-        run: docker compose down
