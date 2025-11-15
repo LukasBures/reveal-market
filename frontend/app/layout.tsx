@@ -18,6 +18,8 @@ import {
   isLandingGateEnabled,
 } from "@/lib/access-gate";
 
+export const dynamic = "force-dynamic";
+
 const font = Manrope({
   subsets: ["latin"],
   variable: "--font-sans",
