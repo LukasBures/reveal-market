@@ -230,6 +230,36 @@ def test_process_once_publishes_schema_revision(monkeypatch):
     assert f"schema:{schema_state.previous_revision}" in invalidated
 
 
+def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
+    dummy = DummyRedis()
+    schema_state = SchemaSyncResult(
+        changed=False,
+        previous_revision=None,
+        current_revision="0004_latest_revision",
+    )
+
+    def fail_fetch():
+        raise RuntimeError("connect refused")
+
+    published_stats: dict[str, Any] = {}
+
+    def fake_publish(_redis, stats):
+        published_stats.update(stats)
+
+    monkeypatch.setattr("app.main._ensure_schema", lambda: schema_state, raising=False)
+    monkeypatch.setattr("app.main.fetch_markets_from_polymarket", fail_fetch, raising=False)
+    monkeypatch.setattr("app.main.publish_heartbeat", fake_publish, raising=False)
+
+    caplog.set_level(logging.WARNING, logger="reveal_market.worker")
+    stats = process_once(dummy)
+
+    assert stats["markets_processed"] == 0
+    assert stats == published_stats
+    assert dummy.store.get(app.main.settings.schema_version_key) == schema_state.current_revision
+    events = [getattr(record, "event", None) for record in caplog.records]
+    assert "worker.sync.skipped" in events
+
+
 def test_prime_markets_cache_stores_payload(monkeypatch):
     dummy = DummyRedis()
     payload = [

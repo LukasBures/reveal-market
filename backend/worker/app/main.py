@@ -808,11 +808,42 @@ def run_worker() -> None:
         heartbeat_stop.set()
 
 
+def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
+    """Return a zeroed-out stats payload so callers can keep metrics flowing."""
+    rounded_latency = round(latency_ms, 2)
+    return {
+        "markets_processed": 0,
+        "markets_changed": 0,
+        "resolutions_changed": 0,
+        "categories_changed": 0,
+        "tags_changed": 0,
+        "latency_ms": rounded_latency,
+        "markets_created": 0,
+        "markets_updated": 0,
+        "markets_deleted": 0,
+        "summaries_enqueued": 0,
+        "proofs_generated": 0,
+    }
+
+
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  # noqa: C901
     """Fetch markets, persist them, and emit a heartbeat once."""
 
     schema_state = _ensure_schema()
-    markets, latency_ms = fetch_markets_from_polymarket()
+    try:
+        markets, latency_ms = fetch_markets_from_polymarket()
+    except Exception as exc:
+        stats = _empty_sync_stats()
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.sync.skipped",
+            message="skipping market sync due to upstream failure",
+            error=str(exc),
+        )
+        publish_heartbeat(redis_client, stats)
+        _propagate_schema_revision(redis_client, schema_state)
+        return stats
     changed_events: set[str] = set()
     changed_conditions: set[str] = set()
     changed_categories: set[str] = set()

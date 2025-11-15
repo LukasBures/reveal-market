@@ -15,7 +15,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
 | AI narratives | Surfaces pre-generated `summary`/`summary_source`/`summary_model` fields produced by the enrichment worker so clients never call the LLM synchronously |
 
-> **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The default `proover` container is a deterministic mock; swap in real Groth16 keys once you are ready for production-grade proofs.
+> **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The `proover` container emits real Groth16 proofs (rapidsnark + the Circom artifacts under `proover/circuits/build`) and fails fast if those files are missing. Refresh the proving/verifying keys via `proover/circuits/generate_keys.sh` before promising zk-grade receipts to partners.
 
 ---
 

@@ -32,4 +32,10 @@ describe("fetchFeaturedMarkets", () => {
       }),
     );
   });
+
+  it("returns an empty list when the network request fails", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    const result = await fetchFeaturedMarkets(4);
+    expect(result).toEqual([]);
+  });
 });

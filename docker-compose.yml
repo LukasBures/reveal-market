@@ -142,11 +142,14 @@ services:
       context: .
       dockerfile: docker/proover/Dockerfile
     restart: unless-stopped
+    volumes:
+      - ./proover/circuits:/app/circuits:ro
     environment:
       PROVER_LISTEN_ADDR: 0.0.0.0:8085
       PROVER_HEARTBEAT_SECONDS: 60
       PROVER_VERSION: ${PROVER_VERSION:-dev}
       PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH:-0x0}
+      PROVER_BACKEND: ${PROVER_BACKEND:-groth16}
     ports:
       - "8085:8085"
     healthcheck:

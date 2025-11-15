@@ -17,7 +17,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | AI enrichment | Queue summary jobs whenever a market lacks a narrative and process them via `app.summary_worker`. |
 | Proof receipts | When enabled, call the `proover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
 
-> The default `proover` container included with this repo is a deterministic mock that hashes request payloads. Treat the emitted receipts as demo artifacts until you mount real proving/verifying keys generated from `proover/circuits/`.
+> The `proover` container emits real Groth16 receipts (`rapidsnark` + the Circom artifacts under `proover/circuits/build`) and fails hard if the artifacts are missing. Mount fresh proving/verifying keys generated via `proover/circuits/generate_keys.sh` before sharing proofs with downstream systems.
 
 ---
 

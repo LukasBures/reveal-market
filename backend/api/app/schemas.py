@@ -115,4 +115,4 @@ class ResolutionSummary(BaseModel):
     block_number: int | None = Field(default=None, alias="blockNumber")
     block_timestamp: datetime | None = Field(default=None, alias="blockTimestamp")
 
-    model_config = ConfigDict(populate_by_name=True, allow_population_by_field_name=True)
+    model_config = ConfigDict(populate_by_name=True, validate_by_name=True)

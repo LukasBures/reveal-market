@@ -14,7 +14,7 @@ Follow progress on X: [@RevealMarket](https://x.com/RevealMarket).
 | `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, structured logging, Polymarket + on-chain sync, pytest suite. |
 | `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components, zero mock fallbacks. |
 | `contracts/` | Foundry workspace (RevealMarket, MarketFactory, etc.). | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
-| `proover/` | Mock prover + Groth16 circuit artifacts. | Deterministic “proof” responses for demos, heartbeat endpoint, scripts for generating real proving/verifying keys when upgrading beyond the mock. |
+| `proover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
 
 Additional docs live in each directory’s README.
 
@@ -61,7 +61,7 @@ cd frontend && npm install && npm run dev
 # Contracts
 cd contracts && forge test
 
-# Full docker stack (API, worker, frontend, Postgres, Redis, mock prover)
+# Full docker stack (API, worker, frontend, Postgres, Redis, prover)
 ./run_local.sh
 ```
 
@@ -85,4 +85,4 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 - **Liquidity Providers & DAOs** – Tap fee-sharing programs, structured webhooks, and rake analytics to model outcome-market exposure.
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via `hello@revealmarket.xyz`.
 
-Let’s build prediction markets institutions actually trust. The prover bundled in this repo still returns deterministic hashes for demonstration purposes; production integrations should replace it with the Groth16 artifacts generated under `proover/circuits/`.
+Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `proover/circuits/build` are missing or invalid. Run `proover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.

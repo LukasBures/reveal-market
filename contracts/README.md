@@ -15,7 +15,7 @@ The contracts convert every API-created market into a verifiable on-chain asset 
 3. **Groth16 proof verification** tying each settlement to a specific market + proof nonce.
 4. **Factory orchestration** so ops teams can spin up new markets via minimal proxies.
 
-> ⚠️ **Current state:** The repo ships with a mock prover that hashes payloads for demo receipts. The Solidity contracts, circuit artifacts, and prover interface are production-ready, but you must generate/import real Groth16 keys (see `proover/circuits/`) before marketing the system as zk-auditable.
+> ⚠️ **Current state:** The Go-based `proover` emits Groth16 receipts (`rapidsnark` + the Circom artifacts under `proover/circuits/build`) and refuses to run if the artifacts are missing. The Solidity verifier + contracts are production-ready, but you must keep the proving/verifying keys generated via `proover/circuits/generate_keys.sh` in sync before marketing the system as zk-auditable.
 
 Below is a detailed breakdown so new contributors, auditors, or integration partners can quickly understand and extend the system.
 

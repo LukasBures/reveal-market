@@ -13,7 +13,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 
 > **Reality check**
 >
-> - The bundled `proover` service is still a deterministic mock. It hashes request payloads to emit “proofs” while we iterate on the Groth16 circuit. Swap in the real proving keys under `proover/circuits/` before claiming production-grade zk support.
+> - The bundled `proover` service now boots a Groth16 pipeline (Circom witness generation + `rapidsnark`) and halts startup if the artifacts under `proover/circuits/build` are missing. Always refresh the proving/verifying keys via `proover/circuits/generate_keys.sh` before marketing the stack as zk-auditable.
 > - Worker ingestion targets Polymarket’s Gamma API; when the upstream dataset returns `image_url = null`, the frontend falls back to deterministic placeholders. Populate `extra_data.image_url` via the worker once you negotiate richer feeds.
 > - All environments, including local Docker, rely on the live backend—mock API toggles have been removed from the frontend.
 

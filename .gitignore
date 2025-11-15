@@ -262,6 +262,7 @@ blockchain/history
 #truffle
 yarn.lock
 package-lock.json
+!frontend/package-lock.json
 
 ### Node template
 # Logs

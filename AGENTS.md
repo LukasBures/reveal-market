@@ -42,7 +42,7 @@
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
 - Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
-- The bundled `proover` service is a deterministic mock that hashes request payloads for demo proofs. Mount real Groth16 proving/verifying keys (see `proover/circuits/`) before representing the stack as production-grade zk.
+- The bundled `proover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if the compiled artifacts under `proover/circuits/build` are missing. Always mount fresh proving/verifying keys (see `proover/circuits/`) before representing the stack as production-grade zk.
 
 ## Agent Notes
 
@@ -53,7 +53,7 @@
 - **Worker** – `backend/worker/app/main.py` pulls Polymarket feeds, writes markets/resolutions, emits Redis heartbeats, and can call `maybe_create_onchain_market`. `worker/app/healthcheck.py` verifies Postgres connectivity for Docker. Logs mirror the API format.
 - **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
 - **Polymarket client** – `backend/worker/app/polymarket.py` now captures loop variables safely, but still lacks robust retries/backoff for the entire sync; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
-- **Prover reality** – The `proover` container remains a deterministic mock. Treat proof receipts as demo artifacts until you generate real Groth16 keys and wire them into both the worker and Solidity verifier.
+- **Prover reality** – `proover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `proover/circuits/build`). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
 
 ### Frontend (Next.js)
 - **SEO/AI readiness** – Metadata centralised in `lib/seo.ts`. Every docs/legal/about page imports `docsMetadata` so canonical URLs + keywords stay consistent. `app/sitemap.ts`/`app/robots.ts` update automatically.
