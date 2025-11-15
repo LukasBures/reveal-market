@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketFilters } from "@/components/markets/MarketFilters";
 
@@ -13,11 +13,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("MarketFilters", () => {
-  const flushDebounce = async () => {
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-    });
-  };
 
   beforeEach(() => {
     pushMock.mockReset();
@@ -69,36 +64,31 @@ describe("MarketFilters", () => {
   });
 
   it("caches successful suggestion queries", async () => {
-    vi.useFakeTimers();
-    try {
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => [
-          {
-            event_id: "evt-cache",
-            title: "Cache Hit Market",
-            category: "Politics",
-          },
-        ],
-      });
-      vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          event_id: "evt-cache",
+          title: "Cache Hit Market",
+          category: "Politics",
+        },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
-      render(<MarketFilters />);
+    render(<MarketFilters />);
 
-      const input = screen.getByPlaceholderText(/search markets/i);
-      fireEvent.focus(input);
-      fireEvent.change(input, { target: { value: "Cache" } });
+    const input = screen.getByPlaceholderText(/search markets/i);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Cache" } });
 
-      await flushDebounce();
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("Cache Hit Market")).toBeInTheDocument());
 
-      fetchMock.mockClear();
-      fireEvent.change(input, { target: { value: "Cache " } });
-      await flushDebounce();
-      await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
-    } finally {
-      vi.useRealTimers();
-    }
+    fetchMock.mockClear();
+    fireEvent.change(input, { target: { value: "Cache " } });
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
