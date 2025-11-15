@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
 
 func TestValidateRequest(t *testing.T) {
 	valid := settlementProofRequest{
@@ -83,4 +91,115 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error when winning pool exceeds total pool")
 	}
+}
+
+func TestProofHandlerSuccess(t *testing.T) {
+    stub := &stubProver{
+        backend:     "stub-backend",
+        circuitHash:  "0xtest",
+        ready:        true,
+        result: &proofResult{
+            Proof:         `{"pi_a":["1","2"]}`,
+            PublicSignals: []string{"1", "2"},
+            ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
+            Warnings:      []string{"warn"},
+        },
+    }
+    app := newApp(config{Version: "test", RequestTimeout: time.Second}, stub)
+    payload := settlementProofRequest{
+        EventID:        "evt",
+        ConditionID:    "0xabc",
+        TotalPool:      "10",
+        WinningPool:    "5",
+        OutcomeHash:    "0x1",
+        MarketAddress:  "0x2",
+        Nonce:          "9",
+        CircuitVersion: 1,
+    }
+    body, _ := json.Marshal(payload)
+    rec := httptest.NewRecorder()
+    req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+    app.proofHandler(rec, req)
+    if rec.Code != http.StatusOK {
+        t.Fatalf("unexpected status: %d", rec.Code)
+    }
+    var resp settlementProofResponse
+    if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+        t.Fatalf("failed to decode response: %v", err)
+    }
+    if resp.Proof != stub.result.Proof {
+        t.Fatalf("proof mismatch: %s", resp.Proof)
+    }
+    if resp.Backend != stub.backend {
+        t.Fatalf("backend mismatch: %s", resp.Backend)
+    }
+    if stub.calls != 1 {
+        t.Fatalf("expected prover call, got %d", stub.calls)
+    }
+    if stub.lastRequest.EventID != payload.EventID {
+        t.Fatalf("request not forwarded")
+    }
+}
+
+func TestProofHandlerInvalidJSON(t *testing.T) {
+    app := newApp(config{Version: "test", RequestTimeout: time.Second}, &stubProver{ready: true})
+    rec := httptest.NewRecorder()
+    req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewBufferString("{"))
+    app.proofHandler(rec, req)
+    if rec.Code != http.StatusBadRequest {
+        t.Fatalf("expected 400, got %d", rec.Code)
+    }
+}
+
+func TestProofHandlerProverError(t *testing.T) {
+    stub := &stubProver{err: newValidationError("bad payload"), ready: true}
+    app := newApp(config{Version: "test", RequestTimeout: time.Second}, stub)
+    payload := settlementProofRequest{EventID: "evt", ConditionID: "0xabc", TotalPool: "10", WinningPool: "5", OutcomeHash: "0x1", MarketAddress: "0x2", Nonce: "1", CircuitVersion: 1}
+    body, _ := json.Marshal(payload)
+    rec := httptest.NewRecorder()
+    req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+    app.proofHandler(rec, req)
+    if rec.Code != http.StatusBadRequest {
+        t.Fatalf("expected validation error, got %d", rec.Code)
+    }
+}
+
+type stubProver struct {
+	backend     string
+	circuitHash string
+	ready       bool
+	result      *proofResult
+	err         error
+	calls       int
+	lastRequest settlementProofRequest
+}
+
+func (s *stubProver) Backend() string {
+	if s.backend == "" {
+		return "stub"
+	}
+	return s.backend
+}
+
+func (s *stubProver) CircuitHash() string {
+	if s.circuitHash == "" {
+		return "0xstub"
+	}
+	return s.circuitHash
+}
+
+func (s *stubProver) Ready() bool {
+	return s.ready
+}
+
+func (s *stubProver) Generate(ctx context.Context, req settlementProofRequest) (*proofResult, error) {
+	s.calls++
+	s.lastRequest = req
+	if s.err != nil {
+		return nil, s.err
+	}
+    if s.result == nil {
+        return &proofResult{}, nil
+    }
+    return s.result, nil
 }

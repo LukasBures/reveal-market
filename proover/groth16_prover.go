@@ -246,24 +246,20 @@ func readFileAsString(path string) (string, error) {
 }
 
 func readPublicSignals(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, newInternalError(fmt.Errorf("failed to read public signals: %w", err))
 	}
-	var raw []any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.UseNumber()
+	var raw []json.Number
+	if err := decoder.Decode(&raw); err != nil {
 		return nil, newInternalError(fmt.Errorf("invalid public signals payload: %w", err))
 	}
 	signals := make([]string, 0, len(raw))
 	for _, item := range raw {
-		switch v := item.(type) {
-		case string:
-			signals = append(signals, strings.TrimSpace(v))
-		case float64:
-			signals = append(signals, fmt.Sprintf("%.0f", v))
-		default:
-			signals = append(signals, fmt.Sprintf("%v", v))
-		}
+		signals = append(signals, item.String())
 	}
 	return signals, nil
 }
@@ -521,9 +517,12 @@ func parseHexField(value string, field string) (*big.Int, error) {
 }
 
 func parseFlexibleNumber(value string, field string) (*big.Int, error) {
-	trimmed := strings.TrimSpace(strings.ReplaceAll(value, "-", ""))
+	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%s required", field)
+	}
+	if strings.Contains(trimmed, "-") {
+		return nil, fmt.Errorf("%s must be positive", field)
 	}
 	base := 10
 	lower := strings.ToLower(trimmed)

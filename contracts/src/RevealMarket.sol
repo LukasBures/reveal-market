@@ -324,6 +324,10 @@ contract RevealMarket is ReentrancyGuard {
 
     /// @notice Refunds all tickets if the market was not settled before reveal deadline.
     function refund() external nonReentrant ifNotSettled {
+        if (phase != Phase.Cancelled) {
+            if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase); // Refunds only after commit window closed.
+            if (block.timestamp <= revealDeadline) revert InvalidTimestamp(); // Require reveal deadline to have elapsed.
+        }
         Ticket[] storage tickets = userTickets[msg.sender]; // Pull caller tickets into memory pointer.
         uint256 length = tickets.length; // Cache length for gas.
         uint256 refundAmount; // Accumulates total refund due.
@@ -338,7 +342,6 @@ contract RevealMarket is ReentrancyGuard {
         }
 
         if (refundAmount == 0) revert NothingToRefund(); // Bail out when nothing refundable.
-        if (phase != Phase.Cancelled && block.timestamp <= revealDeadline) revert InvalidTimestamp(); // Ensure refund window open.
 
         totalPool -= refundAmount; // Reduce pool to account for refunded stake.
         if (collateral == address(0)) {

@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     cache_ttl_seconds: int = Field(default=30, ge=1)
+    cache_connect_retries: int = Field(default=3, ge=1)
+    cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)

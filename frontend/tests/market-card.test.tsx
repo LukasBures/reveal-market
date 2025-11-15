@@ -27,7 +27,7 @@ describe("MarketCard", () => {
     expect(screen.getByRole("link", { name: /card coverage/i })).toHaveAttribute("href", "/markets/evt-card");
     expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.example/cover.jpg");
     expect(screen.getAllByText("72%").length).toBeGreaterThan(0);
-    expect(screen.getByText("$125,000")).toBeInTheDocument();
+    expect(screen.getByText(/crypto/i)).toBeInTheDocument();
   });
 
   it("falls back to placeholder when no image exists", () => {

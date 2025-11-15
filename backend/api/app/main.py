@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
-from threading import Event
+from threading import Event, Lock
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
 from uuid import uuid4
@@ -37,6 +37,13 @@ from app.logging_config import setup_logging
 from app.onchain import fetch_factory_markets
 from app.security import SecurityHeadersMiddleware
 
+try:
+    from redis import Redis
+    from redis.exceptions import RedisError
+except ImportError:  # pragma: no cover - redis is an optional dependency during certain tests
+    Redis = Any  # type: ignore
+    RedisError = Exception  # type: ignore
+
 CANONICAL_TAGS = {
     "gov-shutdown": "Gov shutdown",
     "fed-policy": "Fed policy",
@@ -51,7 +58,8 @@ setup_logging("reveal_market.api")
 settings = get_settings()
 logger = logging.getLogger("reveal_market.api")
 instrumentator = Instrumentator()
-cache_client = get_client(settings.redis_url)
+cache_client: Redis | None = None
+_cache_lock = Lock()
 _heartbeat_stop_event: Event | None = None
 
 MARKETS_STATS_KEY = "markets:stats"
@@ -120,6 +128,59 @@ if not getattr(app.state, "metrics_instrumented", False):
     instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
     app.state.metrics_instrumented = True
 app.cache_client = cache_client  # type: ignore[attr-defined]
+
+
+def _connect_cache_with_retry() -> Redis | None:
+    attempts = max(1, settings.cache_connect_retries)
+    delay = max(0.0, settings.cache_connect_retry_delay_seconds)
+    for attempt in range(1, attempts + 1):
+        client = get_client(settings.redis_url)
+        if client is None:
+            if attempt < attempts and delay:
+                time.sleep(delay)
+            continue
+        try:
+            client.ping()
+        except RedisError as exc:  # pragma: no cover - network flake
+            log_event(
+                logger,
+                logging.WARNING,
+                event="cache.connect.ping_failed",
+                message="redis ping failed, will retry",
+                attempt=attempt,
+                error=str(exc),
+            )
+            if attempt < attempts and delay:
+                time.sleep(delay)
+            continue
+        log_event(
+            logger,
+            logging.INFO,
+            event="cache.connect.established",
+            message="connected to redis",
+            attempt=attempt,
+        )
+        return client
+    log_event(
+        logger,
+        logging.WARNING,
+        event="cache.connect.unavailable",
+        message="redis unavailable after retries, continuing without cache",
+        attempts=attempts,
+    )
+    return None
+
+
+def get_cache_client() -> Redis | None:
+    global cache_client
+    if cache_client is not None:
+        return cache_client
+    with _cache_lock:
+        if cache_client is None:
+            cache_client = _connect_cache_with_retry()
+            if cache_client is not None:
+                app.cache_client = cache_client  # type: ignore[attr-defined]
+    return cache_client
 
 
 def _filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
@@ -318,7 +379,21 @@ async def request_context_middleware(request: Request, call_next):
     )
     try:
         response = await call_next(request)
-    except Exception as exc:
+    except HTTPException as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        log_event(
+            logger,
+            logging.WARNING if 400 <= exc.status_code < 500 else logging.ERROR,
+            event="http.request.error",
+            message="request failed",
+            path=request.url.path,
+            method=request.method,
+            status_code=exc.status_code,
+            duration_ms=round(duration_ms, 2),
+        )
+        reset_request_id(token)
+        raise
+    except Exception:
         duration_ms = (time.perf_counter() - start_time) * 1000
         log_event(
             logger,
@@ -331,7 +406,7 @@ async def request_context_middleware(request: Request, call_next):
             duration_ms=round(duration_ms, 2),
         )
         reset_request_id(token)
-        raise exc
+        raise
     duration_ms = (time.perf_counter() - start_time) * 1000
     response.headers["x-request-id"] = request_id
     log_event(
@@ -383,7 +458,14 @@ def list_markets(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
-    cache_key = markets_list_cache_key(status, category, oracle, search, limit, offset)
+    normalized_search = search
+    if search is not None:
+        normalized = search.strip().lower()
+        if len(normalized) > 120:
+            normalized = normalized[:120]
+        normalized_search = normalized
+    cache_key = markets_list_cache_key(status, category, oracle, normalized_search, limit, offset)
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -393,12 +475,12 @@ def list_markets(
         status=status,
         category=category,
         oracle=oracle,
-        search=search,
+        search=normalized_search,
         limit=limit,
         offset=offset,
     )
     start = time.perf_counter()
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
         duration = (time.perf_counter() - start) * 1000
@@ -413,7 +495,7 @@ def list_markets(
             status=status,
             category=category,
             oracle=oracle,
-            search=search,
+            search=normalized_search,
             limit=limit,
             offset=offset,
             result_count=len(cached),
@@ -428,7 +510,7 @@ def list_markets(
         status=status,
         category=category,
         oracle=oracle,
-        search=search,
+        search=normalized_search,
         limit=limit,
         offset=offset,
     )
@@ -448,12 +530,12 @@ def list_markets(
             offset=offset,
         )
     payload = [item.model_dump(mode="json") for item in market_models]
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, "markets:list", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, "markets:list", cache_key)
     add_tags(
-        cache_client,
+        cache,
         [f"market:{item.event_id}" for item in market_models if item.event_id],
         cache_key,
     )
@@ -487,6 +569,7 @@ def list_markets_by_category(
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -509,7 +592,7 @@ def list_markets_by_category(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
     cache_key = category_cache_key(category_slug_key, limit)
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         models_from_cache = _filter_markets_for_visibility(
             _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
@@ -558,11 +641,11 @@ def list_markets_by_category(
             limit=limit,
         )
     payload = [item.model_dump(mode="json") for item in market_models]
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, "markets:category", cache_key)
-    add_tag(cache_client, f"category:{category_slug_key}", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, "markets:category", cache_key)
+    add_tag(cache, f"category:{category_slug_key}", cache_key)
     log_event(
         logger,
         logging.INFO,
@@ -586,6 +669,7 @@ def list_markets_by_tag(
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -608,7 +692,7 @@ def list_markets_by_tag(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tag_not_found")
     tag_slug_key, tag_label = lookup
     cache_key = tag_cache_key(tag_slug_key, limit)
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         models_from_cache = _filter_markets_for_visibility(
             _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
@@ -639,11 +723,11 @@ def list_markets_by_tag(
             limit=limit,
         )
     payload = [item.model_dump(mode="json") for item in market_models]
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, "markets:tag", cache_key)
-    add_tag(cache_client, f"tag:{tag_slug_key}", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, "markets:tag", cache_key)
+    add_tag(cache, f"tag:{tag_slug_key}", cache_key)
     log_event(
         logger,
         logging.INFO,
@@ -680,8 +764,9 @@ async def list_onchain_markets():
 @app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
 def market_stats(session: Session = Depends(get_session)) -> list[schemas.MarketStatusBreakdown]:
     start = time.perf_counter()
+    cache = get_cache_client()
     log_event(logger, logging.DEBUG, "markets.stats.request", "processing market stats request")
-    cached = get_json(cache_client, MARKETS_STATS_KEY)
+    cached = get_json(cache, MARKETS_STATS_KEY)
     if cached is not None:
         duration = (time.perf_counter() - start) * 1000
         log_event(
@@ -696,10 +781,10 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
         return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
     stats = crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, MARKETS_STATS_KEY)
-    add_tag(cache_client, "markets:stats", MARKETS_STATS_KEY)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, MARKETS_STATS_KEY)
+    add_tag(cache, "markets:stats", MARKETS_STATS_KEY)
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -720,6 +805,7 @@ def suggest_markets(
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -730,7 +816,7 @@ def suggest_markets(
     )
     normalized_query = q.strip()
     cache_key = suggest_cache_key(normalized_query, limit)
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
         _augment_market_models(models_from_cache)
@@ -759,10 +845,10 @@ def suggest_markets(
             limit=limit,
         )
     payload = [item.model_dump(mode="json") for item in filtered]
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, "markets:suggest", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, "markets:suggest", cache_key)
     log_event(
         logger,
         logging.INFO,
@@ -779,6 +865,7 @@ def suggest_markets(
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])
 def read_resolution(condition_id_hex: str, session: Session = Depends(get_session)) -> schemas.ResolutionSummary:
     start = time.perf_counter()
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -788,7 +875,7 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
     )
     normalized_condition = condition_id_hex.lower()
     cache_key = resolution_cache_key(normalized_condition)
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         summary = schemas.ResolutionSummary.model_validate(cached)
         log_event(
@@ -845,10 +932,10 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         cache_payload["checkedAt"] = summary_model.checked_at.isoformat()
     if summary_model.block_timestamp is not None:
         cache_payload["blockTimestamp"] = summary_model.block_timestamp.isoformat()
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, cache_payload, settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, f"resolution:{normalized_condition}", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, cache_payload, settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, f"resolution:{normalized_condition}", cache_key)
     log_event(
         logger,
         logging.INFO,
@@ -863,6 +950,7 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
 @app.get("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])
 def read_market(event_id: str, session: Session = Depends(get_session)) -> schemas.MarketResponse:
     cache_key = _market_detail_cache_key(event_id)
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -872,7 +960,7 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
         cache_key=cache_key,
     )
     start = time.perf_counter()
-    cached = get_json(cache_client, cache_key)
+    cached = get_json(cache, cache_key)
     if cached is not None:
         duration = (time.perf_counter() - start) * 1000
         model = schemas.MarketResponse.model_validate(cached)
@@ -894,10 +982,10 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     response = schemas.MarketResponse.model_validate(market)
     _apply_market_metadata(response)
-    schema_tag = get_schema_tag(cache_client, settings.schema_version_key)
-    set_json(cache_client, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
-    add_tag(cache_client, schema_tag, cache_key)
-    add_tag(cache_client, f"market:{event_id}", cache_key)
+    schema_tag = get_schema_tag(cache, settings.schema_version_key)
+    set_json(cache, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
+    add_tag(cache, schema_tag, cache_key)
+    add_tag(cache, f"market:{event_id}", cache_key)
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -980,6 +1068,7 @@ def _market_detail_cache_key(event_id: str) -> str:
 
 
 def _invalidate_market_cache(event_id: str | None = None, condition_id: str | None = None) -> None:
+    cache = get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -988,12 +1077,12 @@ def _invalidate_market_cache(event_id: str | None = None, condition_id: str | No
         event_id=event_id,
         condition_id=condition_id,
     )
-    invalidate_tag(cache_client, "markets:list")
-    invalidate_tag(cache_client, "markets:stats")
-    invalidate_tag(cache_client, "markets:category")
-    invalidate_tag(cache_client, "markets:tag")
-    invalidate_tag(cache_client, "markets:suggest")
+    invalidate_tag(cache, "markets:list")
+    invalidate_tag(cache, "markets:stats")
+    invalidate_tag(cache, "markets:category")
+    invalidate_tag(cache, "markets:tag")
+    invalidate_tag(cache, "markets:suggest")
     if event_id:
-        invalidate_tag(cache_client, f"market:{event_id}")
+        invalidate_tag(cache, f"market:{event_id}")
     if condition_id:
-        invalidate_tag(cache_client, f"resolution:{condition_id.lower()}")
+        invalidate_tag(cache, f"resolution:{condition_id.lower()}")

@@ -340,6 +340,8 @@ contract RevealMarketTest is Test {
     function testRefundFlowWhenNotSettled() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
 
+        vm.warp(commitDeadline + 1);
+        market.lock();
         vm.warp(revealDeadline + 1);
 
         uint256 balanceBefore = collateralToken.balanceOf(WINNER);
@@ -357,7 +359,7 @@ contract RevealMarketTest is Test {
 
     function testRefundBeforeRevealDeadlineReverts() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
-        vm.expectRevert(RevealMarket.InvalidTimestamp.selector);
+        vm.expectRevert(abi.encodeWithSelector(RevealMarket.InvalidPhase.selector, RevealMarket.Phase.Locked, 0));
         vm.prank(WINNER);
         market.refund();
     }
@@ -775,6 +777,8 @@ contract RevealMarketNativeTest is Test {
     function testNativeRefundFlow() public {
         _commitTicket(WINNER, WIN_SALT, OUTCOME_HASH, STAKE);
 
+        vm.warp(commitDeadline + 1);
+        market.lock();
         vm.warp(revealDeadline + 1);
         uint256 balanceBefore = WINNER.balance;
 

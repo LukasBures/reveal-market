@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MainNav } from "@/components/layout/MainNav";
 
 describe("MainNav", () => {
@@ -14,11 +14,10 @@ describe("MainNav", () => {
     expect(screen.getByRole("link", { name: /log in/i })).toHaveAttribute("href", "/login");
   });
 
-  it("toggles the mobile menu button state", () => {
+  it("renders a static desktop navigation bar with two actions", () => {
     render(<MainNav />);
-    const toggle = screen.getByRole("button", { name: /menu/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const nav = screen.getByRole("navigation");
+    expect(nav).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /menu/i })).not.toBeInTheDocument();
   });
 });

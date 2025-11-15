@@ -101,12 +101,20 @@ func TestParseProofErrors(t *testing.T) {
 }
 
 func TestParseFlexibleNumber(t *testing.T) {
-	num, err := parseFlexibleNumber("12-34", "nonce")
+	_, err := parseFlexibleNumber("12-34", "nonce")
+	if err == nil {
+		t.Fatalf("expected error for hyphenated input")
+	}
+	_, err = parseFlexibleNumber("-5", "nonce")
+	if err == nil {
+		t.Fatalf("expected error for negative input")
+	}
+	num, err := parseFlexibleNumber("0x2a", "nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if num.String() != "1234" {
-		t.Fatalf("expected hyphens to be removed, got %s", num.String())
+	if num.String() != "42" {
+		t.Fatalf("expected 42, got %s", num.String())
 	}
 }
 

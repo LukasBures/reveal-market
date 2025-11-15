@@ -672,7 +672,7 @@ def cleanup_resolved_markets(  # noqa: C901
 def _calculate_sleep(start_time: float) -> float:
     """Determine how long the worker should sleep to honour the poll interval."""
     elapsed = time.time() - start_time
-    return max(settings.poll_interval_seconds - elapsed, 5)
+    return max(settings.poll_interval_seconds - elapsed, 0)
 
 
 def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResult) -> None:
@@ -914,6 +914,11 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
             "failed to synchronise markets",
             extra={"event": "worker.persist.error", "error": str(exc)},
         )
+        # Skip prover/cache side effects when the DB transaction failed.
+        stats = _empty_sync_stats(round(latency_ms, 2))
+        publish_heartbeat(redis_client, stats)
+        _propagate_schema_revision(redis_client, schema_state)
+        return stats
     for snapshot, payload, condition in proof_jobs:
         if maybe_generate_settlement_proof(
             redis_client,

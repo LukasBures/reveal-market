@@ -101,6 +101,9 @@ jobs:
       - name: Install rapidsnark
         run: npm install -g rapidsnark@0.0.2
 
+      - name: Add npm global bin to PATH
+        run: echo "$(npm bin -g)" >> $GITHUB_PATH
+
       - name: Verify rapidsnark binary
         run: rapidsnark --version
 
