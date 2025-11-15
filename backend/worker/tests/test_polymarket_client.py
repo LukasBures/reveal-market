@@ -53,7 +53,7 @@ def test_polymarket_client_handles_pagination():
     assert first.event_id == "1"
     assert first.slug == "market-one"
     assert first.title == "Market One?"
-    assert first.category == "sports"
+    assert first.category == "Sports"
     assert first.tags == ["sports", "macro"]
     assert first.status == "commit"
     assert first.outcomes == ["Yes", "No"]
@@ -62,7 +62,7 @@ def test_polymarket_client_handles_pagination():
 
     assert second.event_id == "2"
     assert second.slug == "market-two"
-    assert second.category == "politics"
+    assert second.category == "Politics"
     assert second.tags == ["politics", "governance"]
     assert second.status == "settled"
     assert second.closed is True
@@ -97,7 +97,7 @@ def test_polymarket_client_derives_category_from_event_series_when_tags_missing(
     markets = client.fetch_markets(page_size=1, max_pages=1)
 
     assert len(markets) == 1
-    assert markets[0].category == "CFB 2025"
+    assert markets[0].category == "Sports"
 
 
 def test_polymarket_client_respects_closed_filter_and_extra_params():

@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 from contextvars import ContextVar, Token
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event, Thread
 
 _LOG_RECORD_RESERVED = {
@@ -95,22 +96,28 @@ class StructuredFormatter(logging.Formatter):
         self.service_name = service_name
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         level = record.levelname.upper()
+        logger_name = record.name or self.service_name
+        pathname = getattr(record, "pathname", None)
+        lineno = getattr(record, "lineno", None)
+        if pathname and lineno:
+            location = f"{Path(pathname).name}:{lineno}"
+        else:
+            location = "-"
         event = getattr(record, "event", record.getMessage() or "log")
+        request_id = getattr(record, "request_id", None) or "-"
+
         payload: dict[str, object] = {}
         for key, value in record.__dict__.items():
-            if key in _LOG_RECORD_RESERVED:
+            if key in _LOG_RECORD_RESERVED or key in {"request_id", "event"}:
                 continue
             payload[key] = value
-        if "message" not in payload and record.getMessage():
-            payload["message"] = record.getMessage()
-        if "request_id" not in payload and hasattr(record, "request_id"):
-            payload["request_id"] = record.request_id
-        if not payload:
-            payload = {"message": record.getMessage() or ""}
-        serialized = json.dumps(payload, default=str)
-        return f"{timestamp} | {level} | {self.service_name} | {event} | {serialized}"
+        if record.getMessage():
+            payload.setdefault("message", record.getMessage())
+        payload.setdefault("service", self.service_name)
+        serialized = json.dumps(payload, default=str) if payload else "{}"
+        return f"{timestamp} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"
 
 
 def start_heartbeat_logger(

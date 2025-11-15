@@ -9,11 +9,17 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 )
+
+func init() {
+	log.SetFlags(0)
+}
 
 type settlementProofRequest struct {
 	EventID       string            `json:"event_id"`
@@ -46,11 +52,34 @@ var (
 )
 
 func logLine(level, event string, fields map[string]any) {
-	if fields == nil {
-		fields = make(map[string]any)
+	payloadFields := make(map[string]any)
+	requestID := "-"
+	if fields != nil {
+		for key, value := range fields {
+			if key == "request_id" {
+				if v, ok := value.(string); ok && v != "" {
+					requestID = v
+				}
+				continue
+			}
+			payloadFields[key] = value
+		}
 	}
-	payload, _ := json.Marshal(fields)
-	log.Printf("%s | %s | proover | %s | %s", time.Now().UTC().Format(time.RFC3339), strings.ToUpper(level), event, payload)
+	payload, _ := json.Marshal(payloadFields)
+	_, file, line, ok := runtime.Caller(2)
+	location := "-"
+	if ok {
+		location = fmt.Sprintf("%s:%d", filepath.Base(file), line)
+	}
+	log.Printf(
+		"%s | %s | proover | %s | %s | %s | %s",
+		time.Now().UTC().Format(time.RFC3339Nano),
+		strings.ToUpper(level),
+		location,
+		event,
+		requestID,
+		payload,
+	)
 }
 
 func main() {

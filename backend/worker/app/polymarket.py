@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
+from shared.categories import canonical_category_from_raw
 
 logger = logging.getLogger("reveal_market.worker.polymarket")
 
@@ -64,6 +65,9 @@ class MarketPayload(BaseModel):
         category = _derive_category(raw)
         status = _derive_status(closed, uma_status)
         tags = _extract_tags(raw.get("tags"))
+        canonical_category = canonical_category_from_raw(category, tags=tags)
+        if canonical_category:
+            _, category = canonical_category
         updated_at = _extract_updated_at(raw)
 
         extra_data: dict[str, Any] = {"gamma": raw}

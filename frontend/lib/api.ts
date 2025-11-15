@@ -198,7 +198,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
 export async function fetchProofReceipts(
   limit = 20,
   options?: { offset?: number },
-): Promise<ProofReceipt[]> {
+): Promise<{ receipts: ProofReceipt[]; error?: string }> {
   const offset = Math.max(0, options?.offset ?? 0);
 
   const url = new URL(`${DEFAULT_API_BASE}/proofs`);
@@ -214,21 +214,23 @@ export async function fetchProofReceipts(
       next: { revalidate: DEFAULT_REVALIDATE_SECONDS },
     });
     if (!response.ok) {
-      throw new Error(`Failed to fetch proof receipts (${response.status})`);
+      const errorMessage = `Failed to fetch proof receipts (${response.status})`;
+      logger.error("fetchProofReceipts:failed", { status: response.status, endpoint, offset });
+      return { receipts: [], error: errorMessage };
     }
     const payload = await response.json();
     if (Array.isArray(payload)) {
       logger.info("fetchProofReceipts:success", { count: payload.length, offset });
-      return payload as ProofReceipt[];
+      return { receipts: payload as ProofReceipt[] };
     }
     if (payload?.data && Array.isArray(payload.data)) {
       logger.info("fetchProofReceipts:success", { count: payload.data.length, offset });
-      return payload.data as ProofReceipt[];
+      return { receipts: payload.data as ProofReceipt[] };
     }
-    return [];
+    return { receipts: [] };
   } catch (error) {
     logger.error("fetchProofReceipts:error", { error: (error as Error).message, offset });
-    return [];
+    return { receipts: [], error: (error as Error).message };
   }
 }
 

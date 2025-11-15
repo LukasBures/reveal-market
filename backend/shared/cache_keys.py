@@ -20,11 +20,12 @@ def markets_list_cache_key(
 ) -> str:
     """Build the cache key used for /markets list responses."""
 
+    normalized_search = (search or "").strip().lower() or "*"
     parts = [
         f"status={status or '*'}",
         f"category={category or '*'}",
         f"oracle={oracle or '*'}",
-        f"search={search or '*'}",
+        f"search={normalized_search}",
         f"limit={limit}",
         f"offset={offset}",
     ]

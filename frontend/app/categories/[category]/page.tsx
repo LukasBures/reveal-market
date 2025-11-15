@@ -2,17 +2,15 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { buildMetadata } from "@/lib/seo";
-import { categorySlugs, parseCategorySlug } from "@/lib/slugs";
+import { parseCategorySlug } from "@/lib/slugs";
 import { CategoryMarkets } from "@/app/categories/[category]/CategoryMarkets";
 import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
+
+export const dynamic = "force-dynamic";
 
 type CategoryPageProps = {
   params: Promise<{ category: string }>;
 };
-
-export function generateStaticParams() {
-  return categorySlugs.map((category) => ({ category }));
-}
 
 export async function generateMetadata({ params }: CategoryPageProps): Promise<Metadata> {
   const { category } = await params;
@@ -50,10 +48,6 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
               Live markets classified under “{label}”. You’ll see up to sixty of the freshest markets mirrored from the
               worker feed; if the feed is still syncing we backfill with featured liquidity so the page never feels empty.
             </p>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-center text-sm text-slate-300 md:text-left">
-            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Navigation tip</p>
-            <p className="mt-1">Use Keyboard ⇧ + ⌘ + F to jump back to global search from any category.</p>
           </div>
         </div>
       </section>

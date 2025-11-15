@@ -332,6 +332,27 @@ def test_tag_endpoint_validates_slug(client):
     assert resp.status_code == 404
 
 
+def test_category_cache_respects_allowlist(client, db_session):
+    original_allow = list(api_main.settings.market_category_allowlist)
+    api_main.settings.market_category_allowlist = []
+    try:
+        db_session.add(
+            _make_market("evt-allow-sports", "Allowlisted", category="sports", oracle="0xaaa", status="commit")
+        )
+        db_session.commit()
+
+        first = client.get("/categories/sports", params={"limit": 5})
+        assert first.status_code == 200
+        assert len(first.json()) == 1
+
+        api_main.settings.market_category_allowlist = ["politics"]
+        cached = client.get("/categories/sports", params={"limit": 5})
+        assert cached.status_code == 200
+        assert cached.json() == []
+    finally:
+        api_main.settings.market_category_allowlist = original_allow
+
+
 def test_tag_endpoint_accepts_encoded_spaces(client, db_session):
     market = _make_market("evt-tag-space", "Gov Market", category="news", oracle="0xgov", status="commit")
     market.tags = ["Gov shutdown"]
@@ -383,6 +404,22 @@ def test_create_market_invalidates_list_cache(client, db_session):
     second = client.get("/markets", params={"limit": 10})
     assert second.status_code == 200
     assert {item["event_id"] for item in second.json()} == {"evt-cache-base", "evt-cache-new"}
+
+
+def test_markets_cache_normalizes_search_query(client, db_session):
+    db_session.add(_make_market("evt-search", "AI Boom", category="tech", oracle="0xaaa", status="commit"))
+    db_session.commit()
+
+    initial = client.get("/markets", params={"search": "AI", "limit": 5})
+    assert initial.status_code == 200
+    assert {item["event_id"] for item in initial.json()} == {"evt-search"}
+
+    db_session.query(models.Market).delete()
+    db_session.commit()
+
+    cached = client.get("/markets", params={"search": "ai", "limit": 5})
+    assert cached.status_code == 200
+    assert {item["event_id"] for item in cached.json()} == {"evt-search"}
 
 
 def test_patch_market_invalidates_detail_cache(client, db_session):

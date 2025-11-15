@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta, timezone
-from types import SimpleNamespace
 from typing import Any
 
 import app.main
@@ -183,7 +182,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     heartbeat = json.loads(dummy.last_set["value"])
     assert heartbeat["markets_processed"] == len(sample_markets)
     assert all(not key.startswith("markets:") for key in dummy.store.keys())
-    assert {"market:evt-1", "market:evt-2", "markets:stats"}.issubset(set(invalidated_tags))
+    assert {"market:evt-1", "market:evt-2", "markets:stats", "category:trending"}.issubset(set(invalidated_tags))
 
     events = [record.event for record in caplog.records if hasattr(record, "event")]
     assert "worker.persist.batch" in events
@@ -557,14 +556,10 @@ def test_maybe_generate_settlement_proof(monkeypatch):
         outcomes=["Yes", "No"],
         outcome_prices=[0.6, 0.4],
     )
-    market_record = SimpleNamespace(
-        event_id="evt-proof",
-        market_address=None,
-        condition_id="0xabc",
-    )
+    market_snapshot = {"event_id": "evt-proof", "market_address": None, "condition_id": "0xabc"}
     assert maybe_generate_settlement_proof(
         redis_client,
-        market_record=market_record,
+        market_snapshot=market_snapshot,
         market_payload=market_payload,
         condition_id="0xabc",
     )

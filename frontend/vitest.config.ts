@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(projectRoot, "."),
+      "server-only": path.resolve(projectRoot, "tests/mocks/server-only.ts"),
     },
   },
   esbuild: {

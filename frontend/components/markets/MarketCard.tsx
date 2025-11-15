@@ -1,6 +1,6 @@
 import type { MarketSummary } from "@/lib/api-types";
 import Link from "next/link";
-import Image from "next/image";
+import { MarketArtwork } from "./MarketArtwork";
 
 type Props = {
   market: MarketSummary;
@@ -59,37 +59,16 @@ export function MarketCard({ market }: Props) {
       className="group relative flex h-full flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-xl shadow-black/30 transition duration-200 hover:-translate-y-1 hover:border-brand-400/60 hover:bg-white/10"
     >
       <div className="flex items-center gap-4">
-        <div className="relative h-16 w-16 overflow-hidden rounded-xl border border-white/10 bg-slate-800/60">
-          {coverImage ? (
-            <Image
-              src={coverImage}
-              alt={`Artwork for ${market.title}`}
-              fill
-              sizes="64px"
-              className="object-cover"
-              priority={false}
-              loading="lazy"
-            />
-          ) : (
-            <div className="h-full w-full bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950" aria-hidden="true" />
-          )}
-        </div>
+        <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{market.category ?? "General"}</p>
-          <h3 className="mt-1 text-lg font-semibold text-white">{market.title}</h3>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-            {market.commitDeadline ? new Date(market.commitDeadline).toLocaleDateString() : "Commit window"}
-          </p>
+          <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">{market.title}</h3>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{categoryLabel}</p>
         </div>
       </div>
       <div className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-2 text-sm">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>
           <p className="text-2xl font-semibold text-white">{yesProbability}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Liquidity</p>
-          <p className="text-xl font-semibold text-brand-200">{formatLiquidity(market.liquidityUsd)}</p>
         </div>
       </div>
       {outcomes.length > 0 && (

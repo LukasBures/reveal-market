@@ -24,3 +24,5 @@ vi.mock("next/image", () => ({
     <img {...props} data-fill={fill ? "true" : undefined} data-priority={priority ? "true" : undefined} />
   ),
 }));
+
+vi.mock("server-only", () => ({}));

@@ -28,12 +28,42 @@ const resolveHeartbeatInterval = () => {
 
 const HEARTBEAT_INTERVAL_MS = resolveHeartbeatInterval();
 
+const LOGGER_NAME = "frontend";
+
+const formatTimestamp = () => (typeof Date !== "undefined" ? new Date().toISOString() : "0000-00-00T00:00:00.000Z");
+
+const extractCaller = () => {
+  if (typeof Error === "undefined") {
+    return "-";
+  }
+  const err = new Error();
+  if (!err.stack) {
+    return "-";
+  }
+  const frames = err.stack.split("\n").map((line) => line.trim());
+  for (let i = 2; i < frames.length; i += 1) {
+    const match = frames[i].match(/\(?(.+?):(\d+):\d+\)?$/);
+    if (match) {
+      const [, filePath, line] = match;
+      const segments = filePath.split(/[/\\]/);
+      const file = segments[segments.length - 1] || filePath;
+      return `${file}:${line}`;
+    }
+  }
+  return "-";
+};
+
 const formatLine = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
-  const timestamp =
-    typeof Date !== "undefined" ? new Date().toISOString() : "0000-00-00T00:00:00.000Z";
-  const payload =
-    meta && Object.keys(meta).length > 0 ? JSON.stringify(meta) : "{}";
-  return `${timestamp} | ${level.toUpperCase()} | frontend | ${message} | ${payload}`;
+  const timestamp = formatTimestamp();
+  const location = extractCaller();
+  const payload: Record<string, unknown> = meta ? { ...meta } : {};
+  const rawRequestId = payload["requestId"];
+  const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : "-";
+  if ("requestId" in payload) {
+    delete payload["requestId"];
+  }
+  const serialized = Object.keys(payload).length > 0 ? JSON.stringify(payload) : "{}";
+  return `${timestamp} | ${level.toUpperCase()} | ${LOGGER_NAME} | ${location} | ${message} | ${requestId} | ${serialized}`;
 };
 
 const baseLogger = {

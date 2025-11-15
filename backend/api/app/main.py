@@ -23,6 +23,7 @@ from shared.cache_keys import (
     suggest_cache_key,
     tag_cache_key,
 )
+from shared.categories import canonical_category_from_slug
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
 from sqlalchemy.orm import Session
@@ -35,16 +36,6 @@ from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.onchain import fetch_factory_markets
 from app.security import SecurityHeadersMiddleware
-
-CANONICAL_CATEGORIES = {
-    "trending": "Trending",
-    "politics": "Politics",
-    "sports": "Sports",
-    "finance": "Finance",
-    "crypto": "Crypto",
-    "geopolitics": "Geopolitics",
-    "ai-tech": "AI & Tech",
-}
 
 CANONICAL_TAGS = {
     "gov-shutdown": "Gov shutdown",
@@ -276,7 +267,14 @@ def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) 
     matched: list[schemas.MarketResponse] = []
     for candidate in candidates:
         category_value = getattr(candidate, "category", None) or ""
-        if _slugify(str(category_value)) == normalized:
+        tag_values = getattr(candidate, "tags", None)
+        matched_slug = _slugify(str(category_value)) == normalized
+        if not matched_slug and isinstance(tag_values, list):
+            for tag in tag_values:
+                if isinstance(tag, str) and _slugify(tag) == normalized:
+                    matched_slug = True
+                    break
+        if matched_slug:
             matched.append(schemas.MarketResponse.model_validate(candidate))
             if len(matched) >= limit:
                 break
@@ -293,11 +291,7 @@ def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) 
 
 
 def _canonical_category_lookup(raw: str) -> tuple[str, str] | None:
-    slug = _slugify(raw)
-    label = CANONICAL_CATEGORIES.get(slug)
-    if label:
-        return slug, label
-    return None
+    return canonical_category_from_slug(raw)
 
 
 def _canonical_tag_lookup(raw: str) -> tuple[str, str] | None:
@@ -517,8 +511,9 @@ def list_markets_by_category(
     cache_key = category_cache_key(category_slug_key, limit)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
-        _augment_market_models(models_from_cache)
+        models_from_cache = _filter_markets_for_visibility(
+            _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
+        )
         log_event(
             logger,
             logging.INFO,
@@ -615,8 +610,9 @@ def list_markets_by_tag(
     cache_key = tag_cache_key(tag_slug_key, limit)
     cached = get_json(cache_client, cache_key)
     if cached is not None:
-        models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
-        _augment_market_models(models_from_cache)
+        models_from_cache = _filter_markets_for_visibility(
+            _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
+        )
         log_event(
             logger,
             logging.INFO,

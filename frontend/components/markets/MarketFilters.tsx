@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MarketSummary } from "@/lib/api-types";
 import { categorySlugFromLabel } from "@/lib/slugs";
+import { MarketArtwork } from "@/components/markets/MarketArtwork";
 
 const categories = [
   "Trending",
@@ -23,7 +24,12 @@ type Props = {
   totalMarketsCount?: number;
 };
 
-const windowSuggestionCache = new Map<string, MarketSummary[]>();
+const SUGGESTION_CACHE_LIMIT = 50;
+const SUGGESTION_CACHE_TTL_MS = 60_000;
+const windowSuggestionCache = new Map<
+  string,
+  { data: MarketSummary[]; expiresAt: number }
+>();
 
 export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCount }: Props) {
   const router = useRouter();
@@ -81,22 +87,29 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
       setSuggestions([]);
       setSuggestionsVisible(false);
       setHighlightedIndex(-1);
+      setLoadingSuggestions(false);
       return;
     }
     const cacheKey = `${trimmed.toLowerCase()}|5`;
     const cache = windowSuggestionCache;
     const controller = new AbortController();
     fetchAbortRef.current = controller;
+    if (!loadingSuggestions) {
+      setLoadingSuggestions(true);
+    }
+    const cachedEntry = cache.get(cacheKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      setSuggestions(cachedEntry.data);
+      setHighlightedIndex(cachedEntry.data.length ? 0 : -1);
+      setLoadingSuggestions(false);
+      fetchAbortRef.current = null;
+      return;
+    }
+    if (cachedEntry) {
+      cache.delete(cacheKey);
+    }
     const debounce = setTimeout(async () => {
       try {
-        setLoadingSuggestions(true);
-        if (cache.has(cacheKey)) {
-          const cached = cache.get(cacheKey)!;
-          setSuggestions(cached);
-          setHighlightedIndex(cached.length ? 0 : -1);
-          return;
-        }
-
         const params = new URLSearchParams();
         params.set("limit", "5");
         params.set("q", trimmed);
@@ -110,7 +123,13 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
           throw new Error(`suggestions failed (${response.status})`);
         }
         const results = (await response.json()) as MarketSummary[];
-        cache.set(cacheKey, results);
+        cache.set(cacheKey, { data: results, expiresAt: Date.now() + SUGGESTION_CACHE_TTL_MS });
+        if (cache.size > SUGGESTION_CACHE_LIMIT) {
+          const keys = Array.from(cache.keys());
+          for (const key of keys.slice(0, cache.size - SUGGESTION_CACHE_LIMIT)) {
+            cache.delete(key);
+          }
+        }
         setSuggestions(results);
         setHighlightedIndex(results.length ? 0 : -1);
       } catch (error) {
@@ -131,7 +150,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
         fetchAbortRef.current = null;
       }
     };
-  }, [deferredSearch]);
+  }, [deferredSearch, loadingSuggestions]);
 
   const hideSuggestionsWithDelay = () => {
     hideTimeout.current = setTimeout(() => {
@@ -186,12 +205,12 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
   }, [router]);
 
   useEffect(() => {
-    const trimmed = deferredSearch.trim();
+    const trimmed = search.trim();
     setSuggestionsVisible(trimmed.length >= 2 && (loadingSuggestions || suggestions.length > 0));
-  }, [suggestions, deferredSearch, loadingSuggestions]);
+  }, [suggestions, loadingSuggestions, search]);
 
   return (
-    <section className="glass-panel relative overflow-hidden px-4 py-8 shadow-2xl shadow-black/40 sm:px-6 md:px-10">
+    <section className="glass-panel relative overflow-visible px-4 py-8 shadow-2xl shadow-black/40 sm:px-6 md:px-10">
       <div className="pointer-events-none absolute -top-24 right-0 h-64 w-64 rounded-full bg-brand-400/20 blur-3xl" />
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-4 text-center lg:max-w-2xl lg:text-left">
@@ -263,23 +282,13 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
                       index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"
                     }`}
                   >
-                    <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg border border-white/10">
-                      <div
-                        className={`h-full w-full ${
-                          suggestion.imageUrl ? "" : "bg-gradient-to-br from-brand-500/20 via-slate-900 to-slate-950"
-                        }`}
-                        style={
-                          suggestion.imageUrl
-                            ? {
-                                backgroundImage: `url(${suggestion.imageUrl})`,
-                                backgroundSize: "cover",
-                                backgroundPosition: "center",
-                              }
-                            : undefined
-                        }
-                        aria-hidden="true"
-                      />
-                    </div>
+                  <MarketArtwork
+                    src={suggestion.imageUrl ?? null}
+                    alt={`${suggestion.title} artwork`}
+                    sizeClass="w-10"
+                    roundedClass="rounded-lg"
+                    borderClass="border border-white/10"
+                  />
                     <div className="flex flex-col">
                       <span className="font-semibold leading-snug text-white">{suggestion.title}</span>
                       <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-500">

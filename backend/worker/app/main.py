@@ -165,6 +165,14 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
+def _snapshot_market_record(record) -> dict[str, Any]:
+    return {
+        "event_id": getattr(record, "event_id", None),
+        "market_address": getattr(record, "market_address", None),
+        "condition_id": getattr(record, "condition_id", None),
+    }
+
+
 def _run_with_retries[T](
     action: Callable[[], T],
     max_attempts: int,
@@ -576,7 +584,7 @@ def cleanup_resolved_markets(  # noqa: C901
         shared_models.Market.category,
         shared_models.Market.tags,
         shared_models.Market.resolved_at,
-    ).where(shared_models.Market.resolved_at.isnot(None))
+    ).where(shared_models.Market.resolved_at.isnot(None), shared_models.Market.resolved_at < cutoff)
     records = session.execute(stmt).all()
 
     if not records:
@@ -816,6 +824,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
     markets_deleted = 0
     summaries_enqueued = 0
     proofs_generated = 0
+    proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = []
     try:
         with session_scope() as session:
             if markets:
@@ -850,13 +859,14 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
                         market_payload=market,
                     ):
                         summaries_enqueued += 1
-                    if maybe_generate_settlement_proof(
-                        redis_client,
-                        market_record=db_market,
-                        market_payload=market,
-                        condition_id=outcome.condition_id,
-                    ):
-                        proofs_generated += 1
+                    if settings.prover_enabled and PROVER_CLIENT is not None and db_market is not None:
+                        proof_jobs.append(
+                            (
+                                _snapshot_market_record(db_market),
+                                market,
+                                outcome.condition_id,
+                            )
+                        )
             cleanup_outcome = cleanup_resolved_markets(
                 session,
                 dry_run=settings.resolved_retention_dry_run,
@@ -873,6 +883,15 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
             "failed to synchronise markets",
             extra={"event": "worker.persist.error", "error": str(exc)},
         )
+    for snapshot, payload, condition in proof_jobs:
+        if maybe_generate_settlement_proof(
+            redis_client,
+            market_snapshot=snapshot,
+            market_payload=payload,
+            condition_id=condition,
+        ):
+            proofs_generated += 1
+
     stats = {
         "markets_processed": len(markets),
         "markets_changed": len(changed_events),
@@ -925,6 +944,8 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
             shared_cache.invalidate_tag(redis_client, f"category:{category_slug}")
         for tag_slug in changed_tags:
             shared_cache.invalidate_tag(redis_client, f"tag:{tag_slug}")
+        if changed_events or changed_categories:
+            shared_cache.invalidate_tag(redis_client, "category:trending")
         if changed_categories:
             CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(changed_categories))
         if changed_tags:
@@ -947,7 +968,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
 def maybe_generate_settlement_proof(
     redis_client: Redis | None,
     *,
-    market_record,
+    market_snapshot: dict[str, Any],
     market_payload: MarketPayload,
     condition_id: str | None,
 ) -> bool:
@@ -955,20 +976,20 @@ def maybe_generate_settlement_proof(
 
     if not settings.prover_enabled or PROVER_CLIENT is None:
         return False
-    normalized_condition = condition_id or getattr(market_record, "condition_id", None)
+    normalized_condition = condition_id or market_snapshot.get("condition_id")
     if not normalized_condition:
         return False
     request = SettlementProofRequest(
-        event_id=getattr(market_record, "event_id", "unknown"),
+        event_id=str(market_snapshot.get("event_id") or "unknown"),
         condition_id=str(normalized_condition).lower(),
         total_pool=_derive_total_pool_value(market_payload),
         winning_pool=_derive_winning_pool_value(market_payload),
         outcome_hash=compute_outcome_hash(
-            getattr(market_record, "event_id", "unknown"),
+            str(market_snapshot.get("event_id") or "unknown"),
             normalized_condition,
             market_payload.outcomes or [],
         ),
-        market_address=_normalize_market_address(getattr(market_record, "market_address", None)),
+        market_address=_normalize_market_address(market_snapshot.get("market_address")),
         circuit_version=1,
         metadata=_build_proof_metadata(market_payload),
     )
@@ -981,7 +1002,7 @@ def maybe_generate_settlement_proof(
             event="worker.proof.failed",
             message="prover rejected settlement request",
             error=str(exc),
-            event_id=getattr(market_record, "event_id", None),
+            event_id=market_snapshot.get("event_id"),
         )
         return False
     cache_key = proof_receipt_cache_key(normalized_condition)
@@ -997,7 +1018,7 @@ def maybe_generate_settlement_proof(
         logging.INFO,
         event="worker.proof.generated",
         message="cached settlement proof receipt",
-        event_id=getattr(market_record, "event_id", None),
+        event_id=market_snapshot.get("event_id"),
         condition_id=normalized_condition,
         prover_version=response.prover_version,
         nonce=response.request_nonce,
@@ -1144,22 +1165,42 @@ def prime_featured_views(
     if not settings.featured_categories and not settings.featured_tags and not settings.featured_suggest_queries:
         return summary
     base_url = settings.api_base_url.rstrip("/")
-    try:
-        with httpx.Client(timeout=settings.cache_prime_timeout_seconds, transport=transport) as client:
-            for category in settings.featured_categories:
-                slug = quote_plus(category)
-                params = {"limit": settings.category_cache_limit}
+    with httpx.Client(timeout=settings.cache_prime_timeout_seconds, transport=transport) as client:
+        for category in settings.featured_categories:
+            slug = quote_plus(category)
+            params = {"limit": settings.category_cache_limit}
+            try:
                 response = client.get(f"{base_url}/categories/{slug}", params=params)
                 if response.is_success:
                     summary["categories_primed"] += 1
-            for tag in settings.featured_tags:
-                slug = quote_plus(tag)
-                params = {"limit": settings.tag_cache_limit}
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.cache.featured_category_failed",
+                    message="failed to prime category cache",
+                    category=category,
+                    error=str(exc),
+                )
+        for tag in settings.featured_tags:
+            slug = quote_plus(tag)
+            params = {"limit": settings.tag_cache_limit}
+            try:
                 response = client.get(f"{base_url}/tags/{slug}", params=params)
                 if response.is_success:
                     summary["tags_primed"] += 1
-            for query in settings.featured_suggest_queries:
-                params = {"q": query, "limit": settings.suggest_cache_limit}
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.cache.featured_tag_failed",
+                    message="failed to prime tag cache",
+                    tag=tag,
+                    error=str(exc),
+                )
+        for query in settings.featured_suggest_queries:
+            params = {"q": query, "limit": settings.suggest_cache_limit}
+            try:
                 response = client.get(f"{base_url}/markets/suggest", params=params)
                 if response.is_success:
                     summary["suggestions_primed"] += 1
@@ -1168,15 +1209,15 @@ def prime_featured_views(
                     if ttl is None or ttl < 0:
                         ttl = settings.markets_cache_ttl_seconds
                     summary["suggestion_ttls"][query] = ttl
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.cache.featured_failed",
-            message="failed to prime featured caches",
-            error=str(exc),
-        )
-        return summary
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.cache.featured_suggest_failed",
+                    message="failed to prime suggestion cache",
+                    query=query,
+                    error=str(exc),
+                )
 
     log_event(
         logger,

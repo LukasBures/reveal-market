@@ -27,7 +27,7 @@ export const revalidate = 60;
 
 export default async function ProofsPage() {
   const PAGE_SIZE = 24;
-  const receipts = await fetchProofReceipts(PAGE_SIZE);
+  const { receipts, error } = await fetchProofReceipts(PAGE_SIZE);
   return (
     <div className="mx-auto max-w-5xl px-4 py-16">
       <div className="space-y-4">
@@ -38,9 +38,16 @@ export default async function ProofsPage() {
           to cross-check on-chain verification with zkVerify receipts and downstream attestations.
         </p>
       </div>
-      <div className="mt-10">
-        <ProofsClient initialReceipts={receipts} pageSize={PAGE_SIZE} />
-      </div>
+      {error ? (
+        <div className="mt-10 rounded-3xl border border-rose-400/30 bg-rose-500/10 p-6 text-center text-rose-100">
+          <p className="text-lg font-semibold text-white">Unable to load proof receipts</p>
+          <p className="mt-2 text-sm">The prover API responded with an error: {error}. Please retry in a moment.</p>
+        </div>
+      ) : (
+        <div className="mt-10">
+          <ProofsClient initialReceipts={receipts} pageSize={PAGE_SIZE} />
+        </div>
+      )}
     </div>
   );
 }
