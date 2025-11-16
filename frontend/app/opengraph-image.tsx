@@ -31,7 +31,7 @@ export default function OgImage() {
           Trustless commit-reveal markets.
         </div>
         <div style={{ marginTop: 24, fontSize: 28, opacity: 0.8 }}>
-          FastAPI + Foundry + Next.js
+          Private while live. Provable at the end.
         </div>
       </div>
     ),
