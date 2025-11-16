@@ -64,8 +64,8 @@ revealmarket.xyz {
   # ------------------------------------------------------------------
   header {
 
-    # HTTPS Strict Transport Security with preload (2 years)
-    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    # HTTPS Strict Transport Security with preload (1 year)
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 
     # Prevent MIME-type sniffing
     X-Content-Type-Options "nosniff"
@@ -141,9 +141,9 @@ www.revealmarket.xyz {
     }
   }
 
-  # HTTPS Strict Transport Security with preload (2 years)
+  # HTTPS Strict Transport Security with preload (1 year)
   header {
-    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
   }
 
   # Permanent redirect with 308 (RFC-recommended)
