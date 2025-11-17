@@ -344,7 +344,7 @@ func logLine(level, event string, fields map[string]any) {
 	}
 	log.Printf(
 		"%s | %s | proover | %s | %s | %s | %s",
-		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339),
 		strings.ToUpper(level),
 		location,
 		event,
