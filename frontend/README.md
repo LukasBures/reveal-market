@@ -41,14 +41,13 @@ Tech stack callouts:
 
 ## Environment Variables
 
-Set these in `.env.local` (copy from `.env.example`):
+Set these in the repo-root `.env` (copied from `.env.example`). The frontend reads from the same file as the backend/Docker stack, so there’s no `.env.local` split to maintain:
 
 | Variable | Purpose |
 | -------- | ------- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (e.g., `http://localhost:8000` when running Docker locally). |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
-| `NEXT_PUBLIC_WALLET_CHAINS` | Optional comma-delimited list of supported chain presets (`base`). Defaults to Base only. |
 | `RM_API_BASE_URL` | Internal base URL for server-side fetches. Defaults to `http://api:8000` inside Docker networks. |
 | `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at an internal API host (e.g., `http://api:8000`) so the backend stays private. |
 | `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
@@ -77,7 +76,7 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 
 ### Wallet connections
 
-`Connect Wallet` in the main nav is powered by Wagmi + WalletConnect v2. Configure `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and (optionally) `NEXT_PUBLIC_WALLET_CHAINS` before running `npm run dev` so the modal can issue QR codes + deep links. Base is the default (and only) supported chain preset. The modal automatically hides wallets that are not available on the current device (MetaMask only renders when a browser extension/mobile browser is detected, Coinbase Wallet hides on unsupported mobile browsers, WalletConnect stays available everywhere via QR/deep links).
+`Connect Wallet` in the main nav is powered by Wagmi 2 + WalletConnect v2 with viem transports for Mainnet, Base, and zkSync. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online. WalletConnect stays available everywhere via QR/deep links.
 
 ---
 

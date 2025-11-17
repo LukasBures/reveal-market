@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 
 import "./globals.css";
 
+import { WagmiProvider } from "wagmi";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
@@ -18,6 +19,7 @@ import {
   LANDING_ACCESS_COOKIE_NAME,
   isLandingGateEnabled,
 } from "@/lib/access-gate";
+import { wagmiConfig } from "@/src/lib/wagmi";
 
 export const dynamic = "force-dynamic";
 
@@ -127,10 +129,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
-        <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        <link rel="shortcut icon" href="/favicon.ico" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+        <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+        <link rel="shortcut icon" href="/icons/favicon.ico" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-title" content="Reveal Market" />
         <link rel="manifest" href="/site.webmanifest" />
         <script
@@ -145,20 +147,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         />
       </head>
       <body className="text-white antialiased">
-        <AppProviders>
-          {showProtectedApp ? (
-            <>
-              <HeartbeatClient />
-              <div className="flex min-h-screen flex-col">
-                <MainNav />
-                <main className="flex-1">{children}</main>
-                <Footer />
-              </div>
-            </>
-          ) : (
-            <LandingGate />
-          )}
-        </AppProviders>
+        <WagmiProvider config={wagmiConfig}>
+          <AppProviders>
+            {showProtectedApp ? (
+              <>
+                <HeartbeatClient />
+                <div className="flex min-h-screen flex-col">
+                  <MainNav />
+                  <main className="flex-1">{children}</main>
+                  <Footer />
+                </div>
+              </>
+            ) : (
+              <LandingGate />
+            )}
+          </AppProviders>
+        </WagmiProvider>
         {IS_PRODUCTION ? (
           <>
             <Script
