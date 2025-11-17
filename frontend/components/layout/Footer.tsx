@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 const footerLinks = [
@@ -9,21 +10,46 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-slate-950/80">
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
-        <p>© {new Date().getFullYear()} Reveal Market. All rights reserved.</p>
-        <div className="flex flex-wrap items-center gap-4">
-          {footerLinks.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-white">
-              {link.label}
+    <footer className="border-t border-white/10 bg-black/40 backdrop-blur-2xl">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-4">
+          <Link href="/" className="inline-flex items-center gap-3 text-white">
+            <Image src="/brand/reveal-logo-full.svg" alt="Reveal Market logo" width={180} height={54} priority />
+          </Link>
+          <p className="text-base text-slate-200">
+            Institutional-grade prediction markets with Horizen roots, zk-settled proofs, and provable custody.
+          </p>
+          <div className="flex items-center gap-3">
+            <Image src="/brand/reveal-wolf.png" alt="Reveal Market wolf" width={48} height={48} className="rounded-2xl border border-white/15 bg-white/5 p-2" />
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-white/60">Signal wolfpack</p>
+              <p className="font-semibold text-white">Always-on risk ops &amp; zk attestations</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col gap-5 md:items-end">
+          <div className="flex flex-wrap gap-4 text-sm text-white/70 md:justify-end">
+            {footerLinks.map((link) => (
+              <Link key={link.href} href={link.href} className="transition hover:text-white">
+                {link.label}
+              </Link>
+            ))}
+            <Link
+              href="https://x.com/RevealMarket"
+              className="transition hover:text-white"
+              rel="noreferrer"
+              target="_blank"
+            >
+              X / Twitter
             </Link>
-          ))}
-          <Link href="https://x.com/RevealMarket" className="hover:text-white" rel="noreferrer" target="_blank">
-            X / Twitter
+          </div>
+          <Link
+            href="mailto:hello@revealmarket.xyz"
+            className="inline-flex items-center justify-center rounded-full border border-white/20 px-6 py-3 text-sm font-semibold text-white transition hover:border-brand-400 hover:text-brand-100"
+          >
+            Contact the team
           </Link>
-          <Link href="mailto:hello@revealmarket.xyz" className="hover:text-white">
-            Contact
-          </Link>
+          <p className="text-xs text-white/40">© {new Date().getFullYear()} Reveal Market. All rights reserved.</p>
         </div>
       </div>
     </footer>

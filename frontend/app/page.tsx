@@ -5,6 +5,7 @@ import { MarketFilters } from "@/components/markets/MarketFilters";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
 import { fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
+import { Hero } from "@/components/marketing/Hero";
 
 export const metadata: Metadata = buildMetadata({
   title: "Reveal Market | Live Prediction Markets",
@@ -65,54 +66,50 @@ export default async function HomePage({ searchParams }: PageProps) {
   const searchNotice = hasShortSearch ? "Enter at least two characters to search markets." : undefined;
 
   return (
-    <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
-      <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10">
-        <div className="flex flex-col gap-4">
+    <div className="relative text-white">
+      <Hero stats={callouts} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 pb-12">
+        <section className="glass-panel p-6">
           <MarketFilters
             initialSearch={rawSearchQuery}
             liveMarketsCount={liveMarkets}
             totalMarketsCount={totalMarkets}
           />
-        </div>
+        </section>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
         </Suspense>
-        <section className="glass-panel grid gap-4 p-6 text-sm text-slate-300 md:grid-cols-4">
-          {callouts.map((item) => (
-            <div key={item.label} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-center md:text-left">
-              <p className="text-xs uppercase tracking-[0.35em] text-slate-500">{item.label}</p>
-              <p className="mt-2 text-2xl font-semibold text-white text-glow">{item.value}</p>
-            </div>
-          ))}
-        </section>
-        <section className="grid gap-4 rounded-3xl border border-white/5 bg-slate-900/50 p-6 text-sm text-slate-300 lg:grid-cols-3">
+        <section className="grid gap-4 rounded-[32px] border border-white/10 bg-black/40 p-6 text-slate-200 lg:grid-cols-3">
           {featuredArticles.map((article) => (
             <Link
               key={article.title}
               href={article.href}
-              className="rounded-2xl border border-white/5 bg-slate-950/40 p-5 text-center transition hover:border-brand-400/60 md:text-left"
+              className="group rounded-2xl border border-white/10 bg-white/5 p-5 text-left transition hover:border-brand-400/60 hover:bg-white/10"
             >
-              <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Docs</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-white/60">Docs</p>
               <h3 className="mt-2 text-xl font-semibold text-white">{article.title}</h3>
               <p className="mt-2 text-slate-300">{article.description}</p>
+              <span className="mt-3 inline-flex items-center text-sm font-semibold text-accent-400">
+                Explore the guide →
+              </span>
             </Link>
           ))}
         </section>
       </div>
-      <section className="relative overflow-hidden bg-slate-950/80 py-16">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-brand-500/10 to-transparent" />
+      <section className="relative overflow-hidden py-16">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-brand-500/20 to-transparent" />
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 text-center">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Need a bespoke feed?</p>
-          <p className="text-lg text-slate-200">
+          <p className="text-sm uppercase tracking-[0.3em] text-white/60">Need a bespoke feed?</p>
+          <p className="text-lg text-slate-100">
             Email{" "}
-            <a href="mailto:hello@revealmarket.xyz" className="text-brand-200 underline underline-offset-4">
+            <a href="mailto:hello@revealmarket.xyz" className="text-accent-400 underline underline-offset-4">
               hello@revealmarket.xyz
             </a>{" "}
-            for curated endpoints, rake splits, and zk audit logs tailored to your venue.
+            for curated endpoints, rake overrides, and zk audit logs tailored to your venue.
           </p>
           <Link
             href="/docs"
-            className="rounded-full border border-white/40 px-8 py-3 font-semibold text-white transition hover:bg-white/10"
+            className="rounded-full border border-white/30 px-8 py-3 font-semibold text-white transition hover:border-accent-400/70 hover:text-accent-300"
           >
             Browse Documentation
           </Link>

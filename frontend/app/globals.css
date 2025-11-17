@@ -4,11 +4,14 @@
 
 :root {
   color-scheme: dark;
-  --background: #030712;
-  --foreground: #f8fafc;
-  --panel: rgba(15, 23, 42, 0.75);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --brand: #38bdf8;
+  --background: #010314;
+  --background-secondary: #020c4c;
+  --foreground: #f5f7ff;
+  --panel: rgba(4, 7, 34, 0.85);
+  --panel-border: rgba(123, 240, 94, 0.15);
+  --brand: #0c27b1;
+  --brand-dark: #020c4c;
+  --brand-accent: #7bf05e;
 }
 
 body {
@@ -27,13 +30,12 @@ body::before {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: -2;
   background:
-    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.25), transparent 45%),
-    radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.2), transparent 35%),
-    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.12), transparent 40%),
-    linear-gradient(130deg, #020617 0%, #0f172a 45%, #020617 100%);
-  filter: blur(0px);
+    radial-gradient(circle at 18% 15%, rgba(12, 39, 177, 0.55), transparent 48%),
+    radial-gradient(circle at 80% 12%, rgba(123, 240, 94, 0.25), transparent 42%),
+    radial-gradient(circle at 55% 78%, rgba(2, 12, 76, 0.55), transparent 55%),
+    linear-gradient(150deg, #010314 10%, #040c2c 40%, #020c4c 75%, #050e26 100%);
   opacity: 0.95;
 }
 
@@ -46,10 +48,10 @@ body::before {
   position: absolute;
   inset: -35%;
   background:
-    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.3), transparent 55%),
-    radial-gradient(circle at 75% 10%, rgba(129, 140, 248, 0.25), transparent 50%),
-    radial-gradient(circle at 50% 80%, rgba(34, 197, 94, 0.25), transparent 55%),
-    linear-gradient(180deg, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.98));
+    radial-gradient(circle at 15% 25%, rgba(12, 39, 177, 0.35), transparent 60%),
+    radial-gradient(circle at 80% 10%, rgba(123, 240, 94, 0.25), transparent 55%),
+    radial-gradient(circle at 55% 80%, rgba(2, 12, 76, 0.35), transparent 60%),
+    linear-gradient(185deg, rgba(3, 6, 28, 0.95), rgba(2, 8, 34, 0.98));
   animation: landingGradient 30s ease-in-out infinite alternate;
   opacity: 0.9;
   z-index: 0;
@@ -90,14 +92,20 @@ a {
   color: inherit;
 }
 
+.font-display {
+  font-family: var(--font-display), var(--font-sans, "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  letter-spacing: 0.05em;
+}
+
 .glass-panel {
   border-radius: 1.5rem;
   border: 1px solid var(--panel-border);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.65));
+  background: radial-gradient(circle at 0% 0%, rgba(12, 39, 177, 0.12), transparent 55%),
+    linear-gradient(180deg, rgba(3, 7, 34, 0.95), rgba(2, 8, 40, 0.7));
   box-shadow:
-    0 20px 35px rgba(2, 6, 23, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(18px);
+    0 25px 45px rgba(2, 9, 40, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(22px);
 }
 
 .divider-gradient {

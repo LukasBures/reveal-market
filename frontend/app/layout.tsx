@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
+import localFont from "next/font/local";
 import Script from "next/script";
 import { cookies } from "next/headers";
 
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
 const font = Manrope({
   subsets: ["latin"],
   variable: "--font-sans",
+});
+const displayFont = localFont({
+  src: "./fonts/AutobusBold.ttf",
+  variable: "--font-display",
+  weight: "400",
 });
 
 const SITE_URL = absoluteUrl("/");
@@ -119,13 +125,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const gateEnabled = isLandingGateEnabled();
   const showProtectedApp = !gateEnabled || hasLandingAccess;
   return (
-    <html lang="en" className={font.variable}>
+    <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
       </head>
-      <body className="bg-[#030712] text-white antialiased">
+      <body className="text-white antialiased">
         <AppProviders>
           {showProtectedApp ? (
             <>
