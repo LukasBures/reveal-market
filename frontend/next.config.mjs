@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'https://api.revealmarket.xyz';
+import path from "node:path";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const GA_ORIGINS = [
@@ -56,6 +58,15 @@ const nextConfig = {
   },
   eslint: {
     ignoreDuringBuilds: true,
+  },
+  webpack: (config) => {
+    config.resolve = config.resolve ?? {};
+    config.resolve.alias = config.resolve.alias ?? {};
+    config.resolve.alias["@react-native-async-storage/async-storage"] = path.resolve(
+      process.cwd(),
+      "lib/wallet/asyncStorageShim.ts",
+    );
+    return config;
   },
   headers: async () => [
     {

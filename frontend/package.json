@@ -14,6 +14,9 @@
   "dependencies": {
     "@tanstack/react-query": "^5.51.0",
     "@walletconnect/ethereum-provider": "^2.23.0",
+    "@walletconnect/modal": "^2.6.3",
+    "asyncstorage-down": "^4.1.0",
+    "pino-pretty": "^11.2.0",
     "clsx": "^2.1.0",
     "next": "15.4.7",
     "react": "18.3.1",

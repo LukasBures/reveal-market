@@ -1,4 +1,4 @@
- createConfig, http } from "wagmi";
+import { createConfig, http } from "wagmi";
 import { coinbaseWallet, metaMask, walletConnect } from "wagmi/connectors";
 import { base } from "wagmi/chains";
 
@@ -9,15 +9,7 @@ const DEFAULT_CHAIN_KEYS = (process.env.NEXT_PUBLIC_WALLET_CHAINS ?? "base")
   .map((chain) => chain.trim())
   .filter(Boolean);
 
-const CHAIN_REGISTRY = {
-  base,
-};
-
-const chains = DEFAULT_CHAIN_KEYS.map((key) => CHAIN_REGISTRY[key as keyof typeof CHAIN_REGISTRY]).filter(
-  (chain): chain is (typeof CHAIN_REGISTRY)[keyof typeof CHAIN_REGISTRY] => Boolean(chain),
-);
-
-const supportedChains = chains.length > 0 ? chains : [base];
+const supportedChains = [base] as const;
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
 const runtimeOrigin =

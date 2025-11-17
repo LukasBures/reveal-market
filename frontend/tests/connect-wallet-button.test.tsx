@@ -3,14 +3,16 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Connector } from "wagmi";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
+import { primaryChain } from "@/lib/wallet/config";
 
 type WagmiAccountState = {
   address?: `0x${string}` | undefined;
   status: "connected" | "connecting" | "disconnected" | "reconnecting";
+  connector?: Connector | undefined;
 };
 
 type WagmiConnectState = {
-  connect: (args: { connector: Connector }) => void;
+  connectAsync: (args: { connector: Connector }) => Promise<void>;
   connectors: Connector[];
   status: "idle" | "pending" | "success" | "error";
   error: Error | null;
@@ -21,26 +23,31 @@ type WagmiDisconnectState = {
   disconnect: () => void;
 };
 
-const createConnector = (id: string, name: string): Connector =>
+const createConnector = (id: string, name: string, ready = true): Connector =>
   ({
     id,
     name,
     uid: `${id}-uid`,
     type: "app",
+    ready,
   }) as unknown as Connector;
 
-const walletConnectConnector = createConnector("walletConnect", "WalletConnect");
-const metaMaskConnector = createConnector("metaMaskSDK", "MetaMask");
+const walletConnectConnector = createConnector("walletConnect", "WalletConnect", true);
+const metaMaskConnector = createConnector("metaMaskSDK", "MetaMask", false);
 
 let currentAccountState: WagmiAccountState;
 let currentConnectState: WagmiConnectState;
 let currentDisconnectState: WagmiDisconnectState;
 
-vi.mock("wagmi", () => ({
-  useAccount: () => currentAccountState,
-  useConnect: () => currentConnectState,
-  useDisconnect: () => currentDisconnectState,
-}));
+vi.mock("wagmi", async () => {
+  const actual = await vi.importActual<typeof import("wagmi")>("wagmi");
+  return {
+    ...actual,
+    useAccount: () => currentAccountState,
+    useConnect: () => currentConnectState,
+    useDisconnect: () => currentDisconnectState,
+  };
+});
 
 describe("ConnectWalletButton", () => {
   beforeEach(() => {
@@ -49,7 +56,7 @@ describe("ConnectWalletButton", () => {
       status: "disconnected",
     };
     currentConnectState = {
-      connect: vi.fn(),
+      connectAsync: vi.fn().mockResolvedValue(undefined),
       connectors: [walletConnectConnector, metaMaskConnector],
       status: "idle",
       error: null,
@@ -69,7 +76,12 @@ describe("ConnectWalletButton", () => {
     const walletButton = await screen.findByRole("button", { name: /walletconnect/i });
     fireEvent.click(walletButton);
 
-    expect(currentConnectState.connect).toHaveBeenCalledWith({ connector: walletConnectConnector });
+    await waitFor(() =>
+      expect(currentConnectState.connectAsync).toHaveBeenCalledWith({
+        connector: walletConnectConnector,
+        chainId: primaryChain.id,
+      }),
+    );
   });
 
   it("omits MetaMask when no injected provider exists", () => {
@@ -79,11 +91,8 @@ describe("ConnectWalletButton", () => {
   });
 
   it("shows MetaMask when an injected provider is detected", async () => {
-    Object.defineProperty(window, "ethereum", {
-      configurable: true,
-      value: { providers: [{ isMetaMask: true }] },
-    });
-
+    const readyMetaMask = createConnector("metaMaskSDK", "MetaMask", true);
+    currentConnectState.connectors = [readyMetaMask];
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
 
@@ -94,6 +103,7 @@ describe("ConnectWalletButton", () => {
     currentAccountState = {
       address: "0x1234567890abcdef1234567890abcdef12345678",
       status: "reconnecting",
+      connector: createConnector("metaMaskSDK", "MetaMask", true),
     };
 
     render(<ConnectWalletButton />);
@@ -102,7 +112,7 @@ describe("ConnectWalletButton", () => {
     expect(triggerButton).toBeInTheDocument();
 
     fireEvent.click(triggerButton);
-    const disconnectButton = screen.getByRole("button", { name: /disconnect/i });
+    const disconnectButton = await screen.findByRole("button", { name: /disconnect/i });
     fireEvent.click(disconnectButton);
 
     expect(currentDisconnectState.disconnect).toHaveBeenCalledTimes(1);

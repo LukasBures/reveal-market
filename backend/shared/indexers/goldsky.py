@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
+import logging
 
 import httpx
+from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
+from shared.logging import log_event
 from shared.onchain.conditional_tokens import _derive_winners
 
 
@@ -77,13 +80,36 @@ class GoldskyClient:
         api_key: str | None = None,
         timeout_seconds: float = 5.0,
         transport: httpx.BaseTransport | None = None,
+        max_attempts: int = 3,
+        backoff_seconds: float = 0.2,
+        backoff_max_seconds: float = 2.0,
         logger_name: str = "reveal_market.goldsky",
     ) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self._transport = transport
-        self._logger_name = logger_name
+        self._logger = logging.getLogger(logger_name)
+        wait_strategy = wait_random_exponential(multiplier=backoff_seconds, max=backoff_max_seconds)
+
+        def _before_sleep(retry_state):
+            error = retry_state.outcome.exception() if retry_state.outcome else None
+            log_event(
+                self._logger,
+                logging.WARNING,
+                event="goldsky.request.retry",
+                message="retrying goldsky request",
+                attempt=retry_state.attempt_number,
+                error=str(error) if error else None,
+            )
+
+        self._retryer = Retrying(
+            stop=stop_after_attempt(max(1, max_attempts)),
+            wait=wait_strategy,
+            retry=retry_if_exception_type(httpx.HTTPError),
+            reraise=True,
+            before_sleep=_before_sleep,
+        )
 
     def _headers(self) -> dict[str, str]:
         headers = {"content-type": "application/json"}
@@ -102,6 +128,12 @@ class GoldskyClient:
             raise GoldskyError(str(errors))
         return data.get("data") or {}
 
+    def _run_with_retry(self, action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        for attempt in self._retryer:
+            with attempt:
+                return action()
+        raise GoldskyError("goldsky request failed unexpectedly")
+
     def resolution_summary(
         self,
         condition_id: str,
@@ -113,7 +145,17 @@ class GoldskyClient:
             "query": CONDITION_RESOLUTION_QUERY,
             "variables": {"conditionId": condition_id.lower()},
         }
-        data = self._post(payload)
+        try:
+            data = self._run_with_retry(lambda: self._post(payload))
+        except Exception as exc:
+            log_event(
+                self._logger,
+                logging.ERROR,
+                event="goldsky.request.failed",
+                message="failed to query goldsky subgraph",
+                error=str(exc),
+            )
+            raise
         resolutions = data.get("conditionResolutions") or []
         if not resolutions:
             return None

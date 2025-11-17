@@ -13,10 +13,11 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 
+const OFFLINE_FALLBACK =
+  process.env.NODE_ENV === "development" ? "http://localhost:8000" : "http://127.0.0.1:65535";
+
 export const DEFAULT_API_BASE =
-  process.env.RM_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "http://api:8000");
+  process.env.RM_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? OFFLINE_FALLBACK;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;

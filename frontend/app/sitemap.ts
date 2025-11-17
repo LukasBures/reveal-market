@@ -3,7 +3,7 @@ import { DEFAULT_API_BASE } from "@/lib/api";
 import { categorySlugs } from "@/lib/slugs";
 
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
-const API_BASE_OVERRIDE = process.env.SITEMAP_API_BASE_URL;
+const API_BASE_OVERRIDE = process.env.SITEMAP_API_BASE_URL ?? DEFAULT_API_BASE;
 
 const DOC_PATHS = [
   "/docs",
@@ -61,8 +61,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   };
 
   try {
-    const marketsApiBase = API_BASE_OVERRIDE || DEFAULT_API_BASE;
-    const response = await fetch(`${marketsApiBase}/markets?limit=200`, {
+    const response = await fetch(`${API_BASE_OVERRIDE}/markets?limit=200`, {
       next: { revalidate: 60 * 30 },
     });
     if (response.ok) {

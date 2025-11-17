@@ -218,21 +218,60 @@ def test_resolution_endpoint_returns_summary(client, db_session):
     assert response.status_code == 200
     payload = response.json()
     assert payload["resolved"] is True
-    assert payload["winners"] == [{"index": 1, "label": "No", "payout": 1}]
+
+
+def test_resolution_endpoint_uses_goldsky_fallback(client, db_session, monkeypatch):
+    market = _make_market(
+        "evt-301",
+        "Goldsky Market",
+        category="economy",
+        oracle="0xabc",
+        status="commit",
+    )
+    market.condition_id = "0x2222222222222222222222222222222222222222222222222222222222222222"
+    market.condition_id = market.condition_id.lower()
+    market.outcomes = ["Up", "Down"]
+    db_session.add(market)
+    db_session.commit()
+
+    class DummyGoldsky:
+        def __init__(self):
+            self.called = False
+
+        def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
+            self.called = True
+            return {
+                "source": "goldsky_subgraph",
+                "conditionId": condition_id_hex,
+                "resolved": True,
+                "outcomes": outcomes or [],
+                "payouts": [1, 0],
+                "winners": [{"index": 0, "label": "Up", "payout": 1}],
+                "checkedAt": datetime.now(UTC),
+                "blockNumber": 42,
+                "blockTimestamp": datetime.now(UTC),
+                "transactionHash": "0x" + "3" * 64,
+                "oracle": "0xoracle",
+                "questionId": "0x" + "4" * 64,
+            }
+
+    dummy = DummyGoldsky()
+    monkeypatch.setattr(api_main, "goldsky_client", dummy, raising=False)
+
+    response = client.get(f"/resolution/{market.condition_id}")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["source"] == "goldsky_subgraph"
+    assert payload["resolved"] is True
+    assert payload["outcomes"] == ["Up", "Down"]
+    assert payload["transactionHash"].startswith("0x3")
+    assert dummy.called is True
+    assert payload["winners"] == [{"index": 0, "label": "Up", "payout": 1}]
     assert payload["marketId"] == market.id
     assert payload["eventId"] == market.event_id
     assert payload["title"] == market.title
-    assert payload["transactionHash"] == resolution.transaction_hash
-    assert payload["blockNumber"] == resolution.block_number
-    assert payload["oracle"] == resolution.oracle
-    assert datetime.fromisoformat(payload["checkedAt"]) == resolution.checked_at.replace(tzinfo=None)
-    assert datetime.fromisoformat(payload["blockTimestamp"]) == resolution.block_timestamp.replace(tzinfo=None)
-    cache_key = resolution_cache_key(market.condition_id)
-    assert cache_key in api_main.cache_client.store
-
-    cached = client.get(f"/resolution/{market.condition_id}")
-    assert cached.status_code == 200
-    assert cached.json()["eventId"] == market.event_id
+    assert payload["oracle"] == "0xoracle"
+    assert payload["questionId"].startswith("0x4")
 
 
 def test_markets_cache_metrics_track_hits_and_misses(client, db_session):

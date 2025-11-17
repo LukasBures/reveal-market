@@ -24,6 +24,7 @@ from shared.cache_keys import (
     tag_cache_key,
 )
 from shared.categories import canonical_category_from_slug
+from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
 from sqlalchemy.orm import Session
@@ -61,6 +62,7 @@ instrumentator = Instrumentator()
 cache_client: Redis | None = None
 _cache_lock = Lock()
 _heartbeat_stop_event: Event | None = None
+goldsky_client: GoldskyClient | None = None
 
 MARKETS_STATS_KEY = "markets:stats"
 MARKET_DETAIL_PREFIX = "markets:detail"
@@ -181,6 +183,44 @@ def get_cache_client() -> Redis | None:
             if cache_client is not None:
                 app.cache_client = cache_client  # type: ignore[attr-defined]
     return cache_client
+
+
+def _build_goldsky_client() -> GoldskyClient | None:
+    endpoint = settings.goldsky_subgraph_url
+    if not endpoint:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="goldsky.disabled",
+            message="goldsky client disabled (missing endpoint)",
+        )
+        return None
+    api_key = settings.goldsky_api_key.get_secret_value() if settings.goldsky_api_key else None
+    try:
+        client = GoldskyClient(
+            str(endpoint),
+            api_key=api_key,
+            timeout_seconds=settings.goldsky_timeout_seconds,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="goldsky.error",
+            message="failed to initialise goldsky client",
+            error=str(exc),
+        )
+        return None
+    log_event(
+        logger,
+        logging.INFO,
+        event="goldsky.enabled",
+        message="goldsky client initialised",
+    )
+    return client
+
+
+goldsky_client = _build_goldsky_client()
 
 
 def _filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
@@ -888,8 +928,52 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         )
         return summary
 
+    market = crud.get_market_by_condition_id(session, normalized_condition)
     record = crud.get_resolution_by_condition_id(session, normalized_condition)
-    if record is None:
+
+    summary: dict[str, Any] | None = None
+    if record is not None:
+        summary = {
+            "source": record.source,
+            "conditionId": record.condition_id,
+            "resolved": record.resolved,
+            "outcomes": record.outcomes or [],
+            "payouts": record.payouts or [],
+            "winners": record.winners or [],
+            "checkedAt": record.checked_at,
+            "oracle": record.oracle,
+            "questionId": record.question_id,
+            "transactionHash": record.transaction_hash,
+            "blockNumber": record.block_number,
+            "blockTimestamp": record.block_timestamp,
+        }
+    elif goldsky_client is not None:
+        try:
+            summary = goldsky_client.resolution_summary(
+                normalized_condition,
+                market.outcomes if market and market.outcomes else None,
+                len(market.outcomes) if market and market.outcomes else None,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="markets.resolution.goldsky_failed",
+                message="failed to fetch resolution from goldsky",
+                condition_id=normalized_condition,
+                error=str(exc),
+            )
+        else:
+            if summary:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="markets.resolution.goldsky",
+                    message="served resolution summary via goldsky fallback",
+                    condition_id=normalized_condition,
+                )
+
+    if summary is None:
         log_event(
             logger,
             logging.WARNING,
@@ -899,22 +983,6 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
 
-    summary: dict[str, Any] = {
-        "source": record.source,
-        "conditionId": record.condition_id,
-        "resolved": record.resolved,
-        "outcomes": record.outcomes or [],
-        "payouts": record.payouts or [],
-        "winners": record.winners or [],
-        "checkedAt": record.checked_at,
-        "oracle": record.oracle,
-        "questionId": record.question_id,
-        "transactionHash": record.transaction_hash,
-        "blockNumber": record.block_number,
-        "blockTimestamp": record.block_timestamp,
-    }
-
-    market = crud.get_market_by_condition_id(session, normalized_condition)
     if market:
         summary.update(
             {
@@ -922,7 +990,7 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
                 "eventId": market.event_id,
                 "title": market.title,
                 "slug": market.slug,
-                "outcomes": market.outcomes or summary["outcomes"],
+                "outcomes": market.outcomes or summary.get("outcomes", []),
             }
         )
 

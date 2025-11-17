@@ -3,20 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import type { Connector } from "wagmi";
-
-type DeviceState = {
-  isClient: boolean;
-  isMobile: boolean;
-  hasMetaMask: boolean;
-  hasCoinbaseWallet: boolean;
-};
-
-const INITIAL_DEVICE_STATE: DeviceState = {
-  isClient: false,
-  isMobile: false,
-  hasMetaMask: false,
-  hasCoinbaseWallet: false,
-};
+import { primaryChain } from "@/lib/wallet/config";
 
 const connectorLabels: Record<string, { title: string; description: string }> = {
   metaMaskSDK: {
@@ -33,26 +20,6 @@ const connectorLabels: Record<string, { title: string; description: string }> = 
   },
 };
 
-function detectDevice(): DeviceState {
-  if (typeof window === "undefined") {
-    return INITIAL_DEVICE_STATE;
-  }
-
-  const ua = window.navigator.userAgent || "";
-  const hasEthereum = typeof (window as typeof window & { ethereum?: unknown }).ethereum !== "undefined";
-  const ethereum = (window as typeof window & { ethereum?: { providers?: Array<Record<string, unknown>> } }).ethereum;
-  const providers = ethereum?.providers ?? (ethereum ? [ethereum] : []);
-
-  const providerHasFlag = (flag: string) => providers.some((provider) => Boolean((provider as never)?.[flag]));
-
-  return {
-    isClient: true,
-    isMobile: /Android|iPhone|iPad|iPod/i.test(ua),
-    hasMetaMask: providerHasFlag("isMetaMask"),
-    hasCoinbaseWallet: providerHasFlag("isCoinbaseWallet"),
-  };
-}
-
 function formatAddress(address?: string) {
   if (!address) {
     return "";
@@ -60,35 +27,39 @@ function formatAddress(address?: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-function isConnectorAvailable(connector: Connector, device: DeviceState) {
-  const connectorId = connector.id;
+function sortConnectors(connectors: Connector[]) {
+  const priority: Record<string, number> = {
+    metaMaskSDK: 0,
+    coinbaseWalletSDK: 1,
+    walletConnect: 2,
+  };
+  return [...connectors].sort((a, b) => {
+    const left = priority[a.id] ?? 99;
+    const right = priority[b.id] ?? 99;
+    return left - right;
+  });
+}
 
-  if (connectorId === "metaMaskSDK") {
-    return device.hasMetaMask;
-  }
-
-  if (connectorId === "coinbaseWalletSDK") {
-    return device.hasCoinbaseWallet || !device.isMobile;
-  }
-
-  if (connectorId === "walletConnect") {
+function connectorReady(connector: Connector) {
+  if (connector.id === "walletConnect") {
     return true;
   }
-
-  return device.isClient;
+  return Boolean((connector as Connector & { ready?: boolean }).ready);
 }
 
 export function ConnectWalletButton() {
-  const { address, status } = useAccount();
+  const { address, status, connector: activeConnector } = useAccount();
   const { disconnect } = useDisconnect();
-  const { connect, connectors, status: connectStatus, error, reset } = useConnect();
-  const [device, setDevice] = useState<DeviceState>(INITIAL_DEVICE_STATE);
+  const {
+    connectAsync,
+    connectors,
+    status: connectStatus,
+    error,
+    reset,
+  } = useConnect();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    setDevice(detectDevice());
-  }, []);
+  const [targetConnectorId, setTargetConnectorId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -117,10 +88,10 @@ export function ConnectWalletButton() {
     }
   }, [connectStatus, isModalOpen, reset]);
 
-  const availableConnectors = useMemo(
-    () => connectors.filter((connector) => isConnectorAvailable(connector, device)),
-    [connectors, device],
-  );
+  const visibleConnectors = useMemo(() => {
+    const list = [...connectors];
+    return sortConnectors(list).filter((connector) => connectorReady(connector));
+  }, [connectors]);
 
   async function copyAddress() {
     if (!address || typeof navigator?.clipboard === "undefined") {
@@ -131,11 +102,22 @@ export function ConnectWalletButton() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleConnect(connector: Connector) {
-    connect({ connector });
+  async function handleConnect(connector: Connector) {
+    setTargetConnectorId(connector.id);
+    try {
+      await connectAsync({
+        connector,
+        chainId: primaryChain?.id,
+      });
+    } finally {
+      setTargetConnectorId(null);
+    }
   }
 
   const buttonLabel = address ? formatAddress(address) : "Connect Wallet";
+  const connectedLabel = activeConnector?.name ? `Connected via ${activeConnector.name}` : null;
+  const isConnecting = connectStatus === "pending";
+  const pendingConnectorId = targetConnectorId;
 
   return (
     <>
@@ -177,6 +159,7 @@ export function ConnectWalletButton() {
               <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
                 <p className="text-sm text-white/70">Connected wallet</p>
                 <p className="mt-1 text-lg font-semibold">{formatAddress(address)}</p>
+                {connectedLabel ? <p className="text-xs uppercase tracking-[0.3em] text-white/60">{connectedLabel}</p> : null}
                 <div className="mt-4 flex gap-3">
                   <button
                     type="button"
@@ -197,29 +180,32 @@ export function ConnectWalletButton() {
             ) : null}
 
             <div className="mt-6 space-y-3">
-              {availableConnectors.length === 0 ? (
+              {visibleConnectors.length === 0 ? (
                 <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
                   No compatible wallets detected in this browser. Try WalletConnect on mobile or install MetaMask or
                   Coinbase Wallet.
                 </p>
               ) : (
-                availableConnectors.map((connector) => {
+                visibleConnectors.map((connector) => {
                   const labels = connectorLabels[connector.id] ?? {
                     title: connector.name,
                     description: "Connect with this wallet",
                   };
-                  const isConnecting = connectStatus === "pending";
+                  const isTargeted = isConnecting && pendingConnectorId === connector.id;
 
                   return (
                     <button
                       key={connector.uid}
                       type="button"
                       onClick={() => handleConnect(connector)}
-                      disabled={isConnecting}
+                      disabled={connectStatus === "pending"}
                       className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-left transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                      aria-busy={isTargeted}
                     >
                       <p className="text-base font-semibold">{labels.title}</p>
-                      <p className="text-sm text-white/70">{labels.description}</p>
+                      <p className="text-sm text-white/70">
+                        {isTargeted ? "Awaiting approval..." : labels.description}
+                      </p>
                     </button>
                   );
                 })
