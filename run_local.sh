@@ -38,6 +38,22 @@ prune_docker_artifacts() {
   docker system prune -af >/dev/null
 }
 
+detect_cpu_count() {
+  local cpus
+  if command -v nproc >/dev/null 2>&1; then
+    cpus="$(nproc 2>/dev/null || echo 1)"
+  elif [[ "$(uname -s)" == "Darwin" ]]; then
+    cpus="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+  else
+    cpus=1
+  fi
+  if [[ -z "${cpus}" || "${cpus}" -lt 1 ]]; then
+    echo 1
+  else
+    echo "${cpus}"
+  fi
+}
+
 # Compose v2 (docker compose) is preferred; fall back to classic docker-compose.
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=("docker" "compose")
@@ -55,13 +71,9 @@ prune_docker_artifacts
 calc_parallel_builds() {
   # Compose refuses to parallelise more builds than CPUs, so detect the host
   # count once and leave one core idle to keep laptops responsive.
-  local cpus
-  if command -v nproc >/dev/null 2>&1; then
-    cpus="$(nproc 2>/dev/null || echo 1)"
-  elif [[ "$(uname -s)" == "Darwin" ]]; then
-    cpus="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 1)"
-  else
-    cpus=1
+  local cpus="${1:-}"
+  if [[ -z "${cpus}" ]]; then
+    cpus="$(detect_cpu_count)"
   fi
   if [[ -z "${cpus}" || "${cpus}" -lt 2 ]]; then
     echo 1
@@ -70,7 +82,10 @@ calc_parallel_builds() {
   fi
 }
 
-PARALLEL_BUILDS="$(calc_parallel_builds)"
+CPU_COUNT="$(detect_cpu_count)"
+PARALLEL_BUILDS="$(calc_parallel_builds "${CPU_COUNT}")"
+NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
+export NEXT_BUILD_WORKERS
 
 ensure_proover_artifacts() {
   if [[ "${SKIP_PROOVER_CHECK}" == "true" ]]; then

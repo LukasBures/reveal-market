@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate:css": "node scripts/generate-css.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.51.0",

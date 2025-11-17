@@ -200,6 +200,7 @@ web_modules/
 # Next.js build output
 .next
 out
+frontend/app/.generated/
 
 # Nuxt.js build / generate output
 .nuxt

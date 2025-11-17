@@ -3,7 +3,7 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY frontend/package*.json ./
 # Cache npm modules between builds when BuildKit is enabled.
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -11,18 +11,23 @@ ARG RM_API_BASE_URL=http://api:8000
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ARG RUNNING_IN_DOCKER=false
 ARG LANDING_ACCESS_CODE=
+ARG NEXT_BUILD_WORKERS=2
 ENV NODE_ENV=production \
     RM_API_BASE_URL=${RM_API_BASE_URL} \
     NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
     RUNNING_IN_DOCKER=${RUNNING_IN_DOCKER} \
     LANDING_ACCESS_CODE=${LANDING_ACCESS_CODE} \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_BUILD_WORKERS=${NEXT_BUILD_WORKERS}
 # Reuse node_modules from deps stage so builds never reinstall packages twice.
 COPY --from=deps /app/node_modules ./node_modules
 COPY ./frontend ./
-# `next build` emits the standalone server; prune heavy cache artifacts to keep
-# the builder layer slim.
-RUN npm run build && rm -rf .next/cache
+# Precompile Tailwind CSS once before Next.js builds so the generated bundle can
+# be reused within this stage without lengthy reprocessing.
+RUN cp app/globals.css app/globals.source.css \
+    && TAILWIND_INPUT=./app/globals.source.css TAILWIND_OUTPUT=./app/globals.css npm run generate:css \
+    && npm run build \
+    && mv app/globals.source.css app/globals.css
 
 FROM node:20-alpine AS runner
 ARG RUNNING_IN_DOCKER=false

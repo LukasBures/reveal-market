@@ -10,6 +10,7 @@ const chainPresets = {
 } as const;
 
 type PresetChain = (typeof chainPresets)[keyof typeof chainPresets];
+type SupportedChainList = readonly [PresetChain, ...PresetChain[]];
 
 function parseChainKeys(value?: string) {
   return (value ?? "base")
@@ -18,12 +19,20 @@ function parseChainKeys(value?: string) {
     .filter(Boolean);
 }
 
-export function resolveSupportedChains(value?: string): PresetChain[] {
+function ensureChainList(chains: PresetChain[]): SupportedChainList {
+  if (chains.length === 0) {
+    return [chainPresets.base];
+  }
+  const [first, ...rest] = chains;
+  return [first, ...rest] as SupportedChainList;
+}
+
+export function resolveSupportedChains(value?: string): SupportedChainList {
   const requested = parseChainKeys(value);
   const chains = requested
     .map((key) => chainPresets[key as keyof typeof chainPresets])
     .filter((chain): chain is PresetChain => Boolean(chain));
-  return chains.length > 0 ? chains : [chainPresets.base];
+  return ensureChainList(chains);
 }
 
 const supportedChains = resolveSupportedChains(process.env.NEXT_PUBLIC_WALLET_CHAINS);
