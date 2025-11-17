@@ -4,12 +4,29 @@ import { base } from "wagmi/chains";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
 const APP_NAME = "Reveal Market";
-const DEFAULT_CHAIN_KEYS = (process.env.NEXT_PUBLIC_WALLET_CHAINS ?? "base")
-  .split(",")
-  .map((chain) => chain.trim())
-  .filter(Boolean);
 
-const supportedChains = [base] as const;
+const chainPresets = {
+  base,
+} as const;
+
+type PresetChain = (typeof chainPresets)[keyof typeof chainPresets];
+
+function parseChainKeys(value?: string) {
+  return (value ?? "base")
+    .split(",")
+    .map((chain) => chain.trim())
+    .filter(Boolean);
+}
+
+export function resolveSupportedChains(value?: string): PresetChain[] {
+  const requested = parseChainKeys(value);
+  const chains = requested
+    .map((key) => chainPresets[key as keyof typeof chainPresets])
+    .filter((chain): chain is PresetChain => Boolean(chain));
+  return chains.length > 0 ? chains : [chainPresets.base];
+}
+
+const supportedChains = resolveSupportedChains(process.env.NEXT_PUBLIC_WALLET_CHAINS);
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
 const runtimeOrigin =

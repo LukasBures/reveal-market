@@ -442,8 +442,10 @@ def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) ->
 
 def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:  # noqa: C901
     condition_id = market.condition_id
-    if (goldsky_client is None and conditional_tokens_client is None) or not isinstance(condition_id, str) or not condition_id.startswith(
-        "0x"
+    if (
+        (goldsky_client is None and conditional_tokens_client is None)
+        or not isinstance(condition_id, str)
+        or not condition_id.startswith("0x")
     ):
         return ResolutionOutcome()
 

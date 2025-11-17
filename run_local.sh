@@ -33,6 +33,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+prune_docker_artifacts() {
+  echo "Pruning unused Docker data to free disk space..."
+  docker system prune -af >/dev/null
+}
+
 # Compose v2 (docker compose) is preferred; fall back to classic docker-compose.
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=("docker" "compose")
@@ -44,6 +49,8 @@ else
 fi
 
 cd "${ROOT_DIR}"
+
+prune_docker_artifacts
 
 calc_parallel_builds() {
   # Compose refuses to parallelise more builds than CPUs, so detect the host

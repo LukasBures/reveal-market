@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any, Callable, Sequence
 import logging
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import app.main
 from app.main import _fetch_resolution_snapshot
 from app.polymarket import MarketPayload
 

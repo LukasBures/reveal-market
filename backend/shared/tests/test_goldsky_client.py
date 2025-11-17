@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
-
 from shared.indexers.goldsky import GoldskyClient, GoldskyError
 
 
@@ -18,7 +17,7 @@ def _build_transport(expected_body: dict, *, status_code: int = 200, request_ass
 
 
 def test_resolution_summary_parses_payload(monkeypatch):
-    timestamp = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp())
+    timestamp = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
     payload = {
         "data": {
             "conditionResolutions": [
@@ -50,7 +49,7 @@ def test_resolution_summary_parses_payload(monkeypatch):
     assert summary["transactionHash"] == "0xdead"
     assert summary["questionId"] == "0x1234"
     assert isinstance(summary["checkedAt"], datetime)
-    assert summary["blockTimestamp"] == datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    assert summary["blockTimestamp"] == datetime.fromtimestamp(timestamp, tz=UTC)
 
 
 def test_resolution_summary_returns_none_when_not_found():

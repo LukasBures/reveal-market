@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import app.main as api_main
 from app import crud, models
 from prometheus_client import REGISTRY
-from shared.cache_keys import category_cache_key, resolution_cache_key, suggest_cache_key, tag_cache_key
+from shared.cache_keys import category_cache_key, suggest_cache_key, tag_cache_key
 
 
 def _make_market(

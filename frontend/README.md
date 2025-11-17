@@ -111,6 +111,7 @@ Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast 
   - `MarketDetailHeader/Metadata/Sidebar/Outcomes`
 - **Spacing** – Use the existing Tailwind spacing scale (`px-4 py-6`, `rounded-3xl`, etc.) to maintain visual rhythm.
 - **Typography** – Manrope is loaded via `next/font/google`. When adding new copy, keep headings within `text-3xl`–`text-4xl` and supporting paragraphs at `text-base` or `text-sm` for readability on mobile.
+- **Brand assets** – Source logos, gradients, and lockups are stored in [this shared Drive folder](https://drive.google.com/drive/u/0/folders/1tHh_4g5wugT2LusltcLbopsyyH1MupQd); reference it before exporting new files into `public/brand` or the mockups directory.
 
 When in doubt, wrap new sections in `glass-panel` to inherit the global blur/gradient aesthetic.
 
