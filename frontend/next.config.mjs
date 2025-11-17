@@ -13,28 +13,46 @@ const scriptSrc = ["'self'", "'unsafe-inline'"];
 const styleSrc = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"];
 const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com"];
 const WALLET_PROVIDER_ORIGINS = [
-  "https://metamask-sdk.api.cx.metamask.io",
-  "https://mm-sdk-analytics.api.cx.metamask.io",
+  // Base RPC + optional providers
+  "https://mainnet.base.org",
+  "https://*.alchemy.com",
+  "https://*.infura.io",
+  "https://rpc.ankr.com",
+  // Coinbase Wallet endpoints
   "https://wallet.coinbase.com",
-  "https://cca-lite.coinbase.com",
-  "https://cca.coinbase.com",
-  "https://pulse.walletconnect.org",
-  "https://api.web3modal.org",
-  "wss://relay.walletconnect.org",
+  "https://www.walletlink.org",
+  "https://api.wallet.coinbase.com",
+  "https://avatars.coinbase.com",
+  // WalletConnect infrastructure + modal assets
+  "https://*.walletconnect.com",
+  "https://relay.walletconnect.com",
+  "https://registry.walletconnect.com",
+  "https://explorer-api.walletconnect.com",
+  "https://cloud.walletconnect.com",
+  "https://*.walletconnect.cloud",
+  "https://cdn.walletconnect.com",
+  "https://images.walletconnect.com",
+  "https://walletconnect.org",
+  "https://walletconnect.com",
 ];
-const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS];
+const WALLET_PROVIDER_WS = ["wss://relay.walletconnect.com"];
+
+const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
 if (IS_PRODUCTION) {
   scriptSrc.push(...GA_ORIGINS);
   connectSrc.push(...GA_ORIGINS);
 }
 
+const walletFrameOrigins = ["https://verify.walletconnect.org", "https://*.walletconnect.com"];
+
 const csp = [
   "default-src 'self'",
   `script-src ${scriptSrc.join(" ")}`,
   `style-src ${styleSrc.join(" ")}`,
-  "img-src 'self' data: https:",
+  "img-src 'self' data: https: blob:",
   `font-src ${fontSrc.join(" ")}`,
   `connect-src ${connectSrc.join(" ")}`,
+  `frame-src 'self' ${walletFrameOrigins.join(" ")}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
