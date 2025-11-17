@@ -59,7 +59,8 @@ uv sync --project backend/api --extra dev --no-install-project
 uv sync --project backend/worker --extra dev --no-install-project
 ./backend/run_tests.sh
 
-# Frontend
+# Frontend (Node 20 LTS)
+nvm use # respects repo-root .nvmrc, falls back to Node 20
 cd frontend && npm install && npm run dev
 
 # Contracts

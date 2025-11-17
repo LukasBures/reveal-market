@@ -59,6 +59,8 @@ When deploying, ensure these values align with the CDN or reverse proxy domain s
 
 ## Getting Started
 
+> **Prereqs**: Node.js 20 LTS (the repo root `.nvmrc` pins this). Use `nvm use` or your preferred version manager before installing dependencies so Next.js 15.4.7, wagmi 2.x, and the WalletConnect stack all share the same runtime assumptions.
+
 ```bash
 cd frontend
 npm install
