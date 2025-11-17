@@ -10,7 +10,13 @@ const GA_ORIGINS = [
 ];
 
 const scriptSrc = ["'self'", "'unsafe-inline'"];
-const connectSrc = ["'self'", API_BASE];
+const WALLET_PROVIDER_ORIGINS = [
+  "https://mm-sdk-analytics.api.cx.metamask.io",
+  "https://wallet.coinbase.com",
+  "https://cca-lite.coinbase.com",
+  "https://cca.coinbase.com",
+];
+const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS];
 if (IS_PRODUCTION) {
   scriptSrc.push(...GA_ORIGINS);
   connectSrc.push(...GA_ORIGINS);
@@ -35,7 +41,7 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'no-referrer' },
   { key: 'Permissions-Policy', value: 'geolocation=(), camera=(), microphone=()' },
   { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
-  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
   { key: 'Content-Security-Policy', value: csp },
 ];

@@ -1,5 +1,5 @@
 import { createConfig, http } from "wagmi";
-import { coinbaseWallet, metaMask, walletConnect } from "wagmi/connectors";
+import { coinbaseWallet, metaMask, walletConnect, injected } from "wagmi/connectors";
 import { base } from "wagmi/chains";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
@@ -38,6 +38,7 @@ export function resolveSupportedChains(value?: string): SupportedChainList {
 const supportedChains = resolveSupportedChains(process.env.NEXT_PUBLIC_WALLET_CHAINS);
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
+export const walletConnectEnabled = Boolean(projectId);
 const runtimeOrigin =
   typeof window !== "undefined" && typeof window.location !== "undefined" ? window.location.origin : null;
 const metadataUrl = runtimeOrigin || SITE_URL;
@@ -51,25 +52,42 @@ const walletMetadata = {
   icons: [iconUrl],
 };
 
+const baseConnectors = [
+  injected({
+    shimDisconnect: true,
+  }),
+  metaMask({
+    dappMetadata: walletMetadata,
+    useDeeplink: true,
+  }),
+  coinbaseWallet({
+    appName: APP_NAME,
+    appLogoUrl: iconUrl,
+    reloadOnDisconnect: false,
+  }),
+] as const;
+
+const connectors = walletConnectEnabled
+  ? [
+      ...baseConnectors,
+      walletConnect({
+        projectId,
+        showQrModal: true,
+        metadata: walletMetadata,
+        qrModalOptions: {
+          themeVariables: {
+            "--wcm-accent-color": "#7bf05e",
+            "--wcm-background-color": "#010314",
+          },
+        },
+      }),
+    ]
+  : baseConnectors;
+
 export const wagmiConfig = createConfig({
   chains: supportedChains,
   ssr: true,
-  connectors: [
-    metaMask({
-      dappMetadata: walletMetadata,
-      useDeeplink: true,
-    }),
-    walletConnect({
-      projectId: projectId || "00000000000000000000000000000000",
-      showQrModal: true,
-      metadata: walletMetadata,
-    }),
-    coinbaseWallet({
-      appName: APP_NAME,
-      appLogoUrl: iconUrl,
-      reloadOnDisconnect: false,
-    }),
-  ],
+  connectors,
   transports: supportedChains.reduce(
     (acc, chain) => ({
       ...acc,

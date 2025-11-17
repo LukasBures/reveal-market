@@ -25,14 +25,14 @@ describe("MarketCard", () => {
     render(<MarketCard market={{ ...baseMarket, imageUrl: "https://cdn.example/cover.jpg" }} />);
 
     expect(screen.getByRole("link", { name: /card coverage/i })).toHaveAttribute("href", "/markets/evt-card");
-    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.example/cover.jpg");
+    expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.example/cover.jpg");
     expect(screen.getAllByText("72%").length).toBeGreaterThan(0);
     expect(screen.getByText(/crypto/i)).toBeInTheDocument();
   });
 
   it("falls back to placeholder when no image exists", () => {
     render(<MarketCard market={{ ...baseMarket, imageUrl: undefined }} />);
-    const img = screen.getByTestId("market-image");
+    const img = screen.getAllByTestId("market-image")[0];
     expect(img.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
   });
 
@@ -46,7 +46,7 @@ describe("MarketCard", () => {
         }}
       />,
     );
-    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.example/extra.jpg");
+    expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.example/extra.jpg");
   });
 
   it("falls back to gamma image metadata", () => {
@@ -59,6 +59,6 @@ describe("MarketCard", () => {
         }}
       />,
     );
-    expect(screen.getByTestId("market-image")).toHaveAttribute("src", "https://cdn.gamma/example.png");
+    expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.gamma/example.png");
   });
 });

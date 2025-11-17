@@ -15,16 +15,15 @@ describe("MainNav", () => {
     expect(screen.getByRole("link", { name: /reveal market/i })).toHaveAttribute("href", "/");
   });
 
-  it("contains Docs + Connect Wallet calls to action", () => {
+  it("shows only the Connect Wallet CTAs (no docs link)", () => {
     renderWithProviders(<MainNav />);
-    expect(screen.getByRole("link", { name: /docs/i })).toHaveAttribute("href", "/docs");
     expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /docs/i })).not.toBeInTheDocument();
   });
 
-  it("renders a static desktop navigation bar with two actions", () => {
+  it("renders the navigation bar and menu toggle", () => {
     renderWithProviders(<MainNav />);
-    const nav = screen.getByRole("navigation");
-    expect(nav).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /menu/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /menu/i })).toBeInTheDocument();
   });
 });

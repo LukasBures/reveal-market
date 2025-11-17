@@ -8,10 +8,13 @@
   --background-secondary: #020c4c;
   --foreground: #f5f7ff;
   --panel: rgba(4, 7, 34, 0.85);
-  --panel-border: rgba(123, 240, 94, 0.15);
+  --panel-border: rgba(123, 240, 94, 0.2);
   --brand: #0c27b1;
   --brand-dark: #020c4c;
   --brand-accent: #7bf05e;
+  --wolf-ember: #f8e7d3;
+  --wolf-violet: #7c84ff;
+  --wolf-midnight: #04081f;
 }
 
 body {
@@ -37,6 +40,21 @@ body::before {
     radial-gradient(circle at 55% 78%, rgba(2, 12, 76, 0.55), transparent 55%),
     linear-gradient(150deg, #010314 10%, #040c2c 40%, #020c4c 75%, #050e26 100%);
   opacity: 0.95;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 80% 10%, rgba(124, 132, 255, 0.28), transparent 45%),
+    radial-gradient(circle at 20% 85%, rgba(123, 240, 94, 0.2), transparent 50%),
+    url("/brand/reveal-wolf-03.png") no-repeat right -140px top -80px;
+  background-size: auto, auto, 820px;
+  opacity: 0.25;
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 
 .landing-noise {
@@ -122,6 +140,74 @@ a {
   .fade-up {
     animation: fadeUp 0.65s ease-out both;
   }
+}
+
+.wolf-aura {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(120% 120% at 0% 0%, rgba(124, 132, 255, 0.12), transparent),
+    linear-gradient(180deg, rgba(2, 6, 25, 0.75), rgba(2, 9, 40, 0.92));
+  box-shadow:
+    0 40px 80px rgba(2, 7, 38, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.wolf-aura::before,
+.wolf-aura::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(60px);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.wolf-aura::before {
+  inset: auto auto 10% -10%;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(123, 240, 94, 0.55), transparent 60%);
+}
+
+.wolf-aura::after {
+  inset: -20% -15% auto auto;
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(circle, rgba(124, 132, 255, 0.7), transparent 65%);
+}
+
+.aurora-divider {
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    rgba(124, 132, 255, 0.45),
+    rgba(123, 240, 94, 0.3),
+    transparent
+  );
+}
+
+.halo-card {
+  position: relative;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(1, 3, 20, 0.75);
+  box-shadow:
+    0 30px 70px rgba(1, 4, 17, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.halo-card::before {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: 1.4rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(124, 132, 255, 0.08));
+  pointer-events: none;
 }
 
 @keyframes fadeUp {

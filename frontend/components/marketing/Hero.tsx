@@ -27,56 +27,55 @@ type HeroProps = {
 
 export function Hero({ stats }: HeroProps) {
   return (
-    <section className="relative overflow-hidden px-4 pb-12 pt-16">
-      <div className="pointer-events-none absolute inset-x-4 top-8 h-64 rounded-full bg-brand-500/20 blur-[120px]" />
-      <div className="relative mx-auto grid max-w-6xl gap-10 rounded-[32px] border border-white/10 bg-gradient-to-br from-brand-900/30 via-black/60 to-midnight-500/40 p-8 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-6">
+    <section className="relative overflow-hidden px-4 pb-16 pt-20">
+      <div className="pointer-events-none absolute inset-x-0 -top-32 h-96 bg-[radial-gradient(circle_at_50%_-10%,rgba(124,132,255,0.18),transparent_60%)] blur-[140px]" />
+      <div className="relative mx-auto grid max-w-6xl gap-10 rounded-[40px] border border-white/10 bg-black/30 p-8 shadow-[0_40px_120px_-60px_rgba(14,21,56,0.9)] lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="space-y-8">
           <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.4em] text-white/80">
             <Image src="/brand/reveal-mark.svg" alt="Reveal Market sigil" width={22} height={32} className="opacity-90" />
-            Horizen ready · ZK native
+            Horizen ready · zk native
           </div>
-          <h1 className="font-display text-4xl leading-tight text-white md:text-5xl">
-            Settle conviction without leaking alpha.
-          </h1>
-          <p className="text-lg text-slate-200 md:text-xl">
-            Reveal Market gives institutional desks zk-settled commit-and-reveal rails, Groth16 proofs, and unified APIs
-            so every market trade, rake split, and proof receipt clears instantly.
-          </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <Link
-              href="/docs/getting-started"
-              className="rounded-full bg-brand-500 px-6 py-3 font-semibold text-white shadow-glow-brand transition hover:bg-brand-400"
-            >
-              Launch markets
-            </Link>
-            <Link
-              href="/about"
-              className="rounded-full border border-white/20 px-6 py-3 font-semibold text-white/80 transition hover:border-white hover:text-white"
-            >
-              Meet the team
-            </Link>
+          <div className="space-y-4">
+            <h1 className="font-display text-4xl leading-tight text-white md:text-5xl lg:text-6xl">
+              Watch live conviction settle in real time.
+            </h1>
+            <p className="text-base text-slate-200 md:text-lg">
+              Every market below clears through sealed commits, Groth16 proofs, and a wolf-run ops desk. Scroll down and
+              browse the markets—no launch forms, just the live orderflow.
+            </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             {stats.map((stat) => (
-              <div key={stat.label} className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-[0.3em] text-white/60">{stat.label}</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{stat.value}</p>
+              <div
+                key={stat.label}
+                className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_40px_rgba(0,0,0,0.35)]"
+              >
+                <div className="pointer-events-none absolute inset-x-4 top-2 h-16 rounded-full bg-gradient-to-r from-accent-400/20 via-white/10 to-brand-500/20 blur-3xl" />
+                <p className="text-xs uppercase tracking-[0.3em] text-white/70">{stat.label}</p>
+                <p className="mt-3 text-2xl font-semibold text-white">{stat.value}</p>
               </div>
             ))}
           </div>
         </div>
-        <div className="relative overflow-hidden rounded-[28px] border border-white/15 bg-gradient-to-b from-brand-700/30 via-midnight-500/40 to-black/70 p-6">
-          <div className="pointer-events-none absolute -right-24 top-6 h-48 w-48 rounded-full bg-brand-500/30 blur-[120px]" />
-          <div className="pointer-events-none absolute -left-16 bottom-0 h-48 w-48 rounded-full bg-accent-400/15 blur-[100px]" />
-          <div className="relative flex flex-col items-center gap-5 text-center">
-            <div className="rounded-[24px] border border-white/20 bg-white/10 p-6 shadow-inner">
-              <Image src="/brand/reveal-wolf.png" alt="Reveal Market wolf avatar" width={120} height={120} priority />
+        <div className="wolf-aura p-6">
+          <div className="relative flex h-full flex-col items-center gap-5 text-center">
+            <div className="relative flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/40 via-white/10 to-transparent opacity-70 blur-3xl" />
+              <Image
+                src="/brand/reveal-wolf-02.png"
+                alt="Reveal Market wolf avatar"
+                width={320}
+                height={320}
+                priority
+                className="relative z-10 w-64 max-w-full drop-shadow-[0_35px_70px_rgba(0,0,0,0.55)]"
+              />
             </div>
-            <p className="text-sm uppercase tracking-[0.35em] text-white/60">Signal wolfpack</p>
-            <p className="text-2xl font-semibold text-white">Continuous risk ops.</p>
+            <div className="aurora-divider" aria-hidden />
+            <p className="text-xs uppercase tracking-[0.45em] text-white/60">Signal wolfpack</p>
+            <p className="text-2xl font-semibold text-white">Continuous risk ops</p>
             <p className="text-base text-slate-200">
-              Wolf badges flag every on-chain intervention, oracle pause, and zk proof push. Investors always know how the
-              venue is defended.
+              Wolf badges appear whenever oracles pause, rake splits update, or proofs post. Investors see operational
+              excellence before they wire a single dollar.
             </p>
             <ul className="w-full space-y-3 text-left text-sm text-slate-200">
               {heroHighlights.map((highlight) => (

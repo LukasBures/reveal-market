@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import type { Connector } from "wagmi";
-import { primaryChain } from "@/lib/wallet/config";
+import { primaryChain, walletConnectEnabled } from "@/lib/wallet/config";
 
 const connectorLabels: Record<string, { title: string; description: string }> = {
+  injected: {
+    title: "Browser Wallet",
+    description: "Connect with Brave, Rabby, or any injected provider",
+  },
   metaMaskSDK: {
     title: "MetaMask",
     description: "Browser extension or MetaMask mobile browser",
@@ -15,6 +19,10 @@ const connectorLabels: Record<string, { title: string; description: string }> = 
     description: "Scan a QR code or deep link to 500+ wallets",
   },
   coinbaseWalletSDK: {
+    title: "Coinbase Wallet",
+    description: "Connect via the Coinbase Wallet extension or app",
+  },
+  coinbaseWallet: {
     title: "Coinbase Wallet",
     description: "Connect via the Coinbase Wallet extension or app",
   },
@@ -30,8 +38,10 @@ function formatAddress(address?: string) {
 function sortConnectors(connectors: Connector[]) {
   const priority: Record<string, number> = {
     metaMaskSDK: 0,
-    coinbaseWalletSDK: 1,
-    walletConnect: 2,
+    injected: 1,
+    coinbaseWalletSDK: 2,
+    coinbaseWallet: 2,
+    walletConnect: 3,
   };
   return [...connectors].sort((a, b) => {
     const left = priority[a.id] ?? 99;
@@ -130,21 +140,22 @@ export function ConnectWalletButton() {
       </button>
 
       {isModalOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
-          onClick={() => setIsModalOpen(false)}
-        >
+        <div className="fixed inset-0 z-50 overflow-y-auto">
           <div
-            role="dialog"
-            aria-modal="true"
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
+            className="flex min-h-full items-center justify-center bg-gradient-to-b from-black/85 via-black/80 to-black/85 px-4 py-16 sm:py-20"
+            onClick={() => setIsModalOpen(false)}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-white/60">Wallet access</p>
-                <h2 className="text-2xl font-semibold">Connect your wallet</h2>
-              </div>
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-white/60">Wallet access</p>
+                  <h2 className="text-2xl font-semibold">Connect your wallet</h2>
+                </div>
               <button
                 type="button"
                 aria-label="Close wallet modal"
@@ -182,8 +193,7 @@ export function ConnectWalletButton() {
             <div className="mt-6 space-y-3">
               {visibleConnectors.length === 0 ? (
                 <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-                  No compatible wallets detected in this browser. Try WalletConnect on mobile or install MetaMask or
-                  Coinbase Wallet.
+                  No compatible wallets detected in this browser. {walletConnectEnabled ? "Try WalletConnect on mobile or install MetaMask or Coinbase Wallet." : "Set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID to enable QR / mobile connections."}
                 </p>
               ) : (
                 visibleConnectors.map((connector) => {
@@ -211,8 +221,8 @@ export function ConnectWalletButton() {
                 })
               )}
             </div>
-
-            {error ? <p className="mt-4 text-sm text-rose-400">{error.message}</p> : null}
+              {error ? <p className="mt-4 text-sm text-rose-400">{error.message}</p> : null}
+            </div>
           </div>
         </div>
       ) : null}

@@ -10,19 +10,19 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-black/40 backdrop-blur-2xl">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
+    <footer className="border-t border-white/10 bg-black/50 backdrop-blur-2xl">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Link href="/" className="inline-flex items-center gap-3 text-white">
-            <Image src="/brand/reveal-logo-full.svg" alt="Reveal Market logo" width={180} height={54} priority />
+            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market logo" width={240} height={64} priority />
           </Link>
           <p className="text-base text-slate-200">
             Institutional-grade prediction markets with Horizen roots, zk-settled proofs, and provable custody.
           </p>
-          <div className="flex items-center gap-3">
-            <Image src="/brand/reveal-wolf.png" alt="Reveal Market wolf" width={48} height={48} className="rounded-2xl border border-white/15 bg-white/5 p-2" />
+          <div className="wolf-aura flex items-center gap-4 rounded-2xl border border-white/10 p-4 text-left text-white">
+            <Image src="/brand/reveal-wolf-01.png" alt="Reveal Market wolf" width={64} height={64} className="rounded-2xl border border-white/15 bg-white/5 p-2" />
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-white/60">Signal wolfpack</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-white/70">Signal wolfpack</p>
               <p className="font-semibold text-white">Always-on risk ops &amp; zk attestations</p>
             </div>
           </div>

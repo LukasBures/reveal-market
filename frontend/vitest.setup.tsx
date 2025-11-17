@@ -68,4 +68,9 @@ vi.mock("next/font/google", () => ({
   Manrope: () => ({ className: "font-manrope", variable: "--font-sans" }),
 }));
 
+vi.mock("next/font/local", () => ({
+  __esModule: true,
+  default: () => ({ className: "font-local", variable: "--font-display" }),
+}));
+
 vi.mock("server-only", () => ({}));

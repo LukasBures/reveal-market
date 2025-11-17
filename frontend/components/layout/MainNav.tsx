@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
@@ -11,19 +12,33 @@ const navLinks = [
 ] as const;
 
 export function MainNav() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isMobileMenuOpen]);
+
   return (
-    <header className="relative border-b border-white/10 bg-black/40 backdrop-blur-2xl">
+    <header className="relative border-b border-white/10 bg-black/50 backdrop-blur-2xl">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
       <div className="absolute inset-y-0 right-8 hidden w-40 bg-brand-500/10 blur-3xl lg:block" aria-hidden="true" />
-      <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
-        <Link href="/" className="flex items-center gap-3 text-white transition hover:opacity-90">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-gradient-to-br from-brand-500/40 to-brand-700/40 shadow-glow-brand">
-            <Image src="/brand/reveal-mark.svg" alt="Reveal Market mark" width={34} height={54} priority />
-          </span>
-          <span>
-            <span className="font-display text-base uppercase tracking-[0.3em]">Reveal Market</span>
-            <span className="block text-xs font-semibold text-white/60">zk commit &amp; reveal venue</span>
-          </span>
+      <div className="relative mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+        <Link
+          href="/"
+          className="flex items-center gap-3 text-white transition hover:opacity-90"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
           {navLinks.map((link) => (
@@ -33,15 +48,42 @@ export function MainNav() {
           ))}
         </nav>
         <div className="flex items-center gap-3">
-          <Link
-            href="/docs"
-            className="hidden rounded-full border border-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-white/80 transition hover:border-white/40 hover:text-white sm:inline-flex"
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            aria-expanded={isMobileMenuOpen}
+            aria-label={isMobileMenuOpen ? "Close navigation" : "Open navigation"}
+            onClick={() => setIsMobileMenuOpen((prev) => !prev)}
           >
-            Docs
-          </Link>
-          <ConnectWalletButton />
+            Menu
+            <span className="relative h-1.5 w-1.5 rounded-full bg-accent-400 shadow-[0_0_10px_rgba(123,240,94,0.8)]" />
+          </button>
+          <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
+            <ConnectWalletButton />
+          </div>
         </div>
       </div>
+      {isMobileMenuOpen ? (
+        <>
+          <div className="md:hidden">
+            <div className="mx-4 mb-4 rounded-2xl border border-white/10 bg-black/80 p-4 text-sm text-white/80">
+              <nav className="flex flex-col gap-3">
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </nav>
+            </div>
+          </div>
+          <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
+        </>
+      ) : null}
     </header>
   );
 }

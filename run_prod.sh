@@ -30,6 +30,12 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+prune_docker_artifacts() {
+  echo "Pruning unused Docker images, containers, and build cache..."
+  docker system prune -af >/dev/null
+  docker builder prune -af >/dev/null || true
+}
+
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=("docker" "compose")
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -40,6 +46,7 @@ else
 fi
 
 cd "${ROOT_DIR}"
+prune_docker_artifacts
 
 calc_parallel_builds() {
   local cpus

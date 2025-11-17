@@ -1,4 +1,5 @@
 import type { MarketSummary } from "@/lib/api-types";
+import Image from "next/image";
 import Link from "next/link";
 import { MarketArtwork } from "./MarketArtwork";
 
@@ -56,8 +57,10 @@ export function MarketCard({ market }: Props) {
   return (
     <Link
       href={`/markets/${market.eventId}`}
-      className="group relative flex h-full flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-xl shadow-black/30 transition duration-200 hover:-translate-y-1 hover:border-brand-400/60 hover:bg-white/10"
+      className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 hover:-translate-y-1.5 hover:border-brand-400/60 hover:bg-white/10"
     >
+      <div className="pointer-events-none absolute -top-12 right-0 h-40 w-40 rounded-full bg-gradient-to-b from-white/10 to-transparent opacity-80 blur-3xl transition duration-200 group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-0 border border-white/5 opacity-0 transition duration-200 group-hover:opacity-70" />
       <div className="flex items-center gap-4">
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
@@ -65,10 +68,14 @@ export function MarketCard({ market }: Props) {
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{categoryLabel}</p>
         </div>
       </div>
-      <div className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-2 text-sm">
+      <div className="relative flex items-center justify-between rounded-xl border border-white/5 bg-slate-950/60 px-3 py-2 text-sm backdrop-blur">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>
           <p className="text-2xl font-semibold text-white">{yesProbability}</p>
+        </div>
+        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
+          <Image src="/brand/reveal-wolf-01.png" alt="" width={18} height={18} className="h-4 w-4 rounded-full object-cover" />
+          ZK
         </div>
       </div>
       {outcomes.length > 0 && (
