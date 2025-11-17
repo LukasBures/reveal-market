@@ -191,6 +191,7 @@ cat <<EOF
 ------------------------------------------------------------
 Stack ready. Useful URLs while running locally:
   • API docs / health:      http://localhost:${API_PORT}/docs  | http://localhost:${API_PORT}/health
+  • Perf / SLA metrics:     http://localhost:${API_PORT}/health/heartbeats
   • Frontend / marketing:   http://localhost:${FRONTEND_PORT}/
   • Postgres (psql):        ${POSTGRES_URI}
   • Redis (CLI):            ${REDIS_CMD}

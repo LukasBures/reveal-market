@@ -37,22 +37,18 @@ run_py_tests() {
     pytest_args+=("-n" "${workers}")
   fi
 
-  if command -v uv >/dev/null 2>&1 && [[ -f "uv.lock" ]]; then
-    local -a cmd=("uv" "run" --project "${PWD}" --extra dev --no-sync --active "pytest")
-    cmd+=("${pytest_args[@]}")
-    "${cmd[@]}"
-  elif [[ -f ".venv/bin/activate" ]]; then
-    (
-      set +u
-      # shellcheck disable=SC1091
-      source ".venv/bin/activate"
-      set -u
-      python -m pytest "${pytest_args[@]}"
-    )
-  else
-    echo "Error: install dependencies with 'uv sync --extra dev' (uv not found and no .venv present)." >&2
+  local venv_path="${service_dir}/.venv"
+  local python_bin="${venv_path}/bin/python"
+  if [[ ! -x "${python_bin}" ]]; then
+    echo "Error: expected virtualenv at ${venv_path}. Run 'uv sync --project ${service_dir} --extra dev --no-install-project' first." >&2
     exit 1
   fi
+
+  (
+    export VIRTUAL_ENV="${venv_path}"
+    PATH="${venv_path}/bin:${PATH}"
+    "${python_bin}" -m pytest "${pytest_args[@]}"
+  )
   popd >/dev/null
 }
 
