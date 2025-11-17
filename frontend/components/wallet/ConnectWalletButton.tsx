@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 
 function formatAddress(address?: string) {
@@ -13,6 +14,11 @@ export function ConnectWalletButton() {
   const { address, status } = useAccount();
   const { connect, connectors, status: connectStatus, error } = useConnect();
   const { disconnect } = useDisconnect();
+  useEffect(() => {
+    if (error) {
+      console.error("Wallet connection failed:", error);
+    }
+  }, [error]);
 
   const primaryConnector = connectors[0];
   const isConnecting = connectStatus === "pending";
@@ -43,7 +49,7 @@ export function ConnectWalletButton() {
       >
         {isConnecting ? "Connecting…" : "Connect Wallet"}
       </button>
-      {error ? <p className="text-center text-xs text-rose-300">{error.message}</p> : null}
+      {error ? <p className="text-center text-xs text-rose-300">Unable to connect. Please try again.</p> : null}
     </div>
   );
 }

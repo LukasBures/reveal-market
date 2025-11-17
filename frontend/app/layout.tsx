@@ -7,7 +7,6 @@ import { cookies } from "next/headers";
 
 import "./globals.css";
 
-import { WagmiProvider } from "wagmi";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
@@ -19,7 +18,6 @@ import {
   LANDING_ACCESS_COOKIE_NAME,
   isLandingGateEnabled,
 } from "@/lib/access-gate";
-import { wagmiConfig } from "@/src/lib/wagmi";
 
 export const dynamic = "force-dynamic";
 
@@ -147,22 +145,20 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         />
       </head>
       <body className="text-white antialiased">
-        <WagmiProvider config={wagmiConfig}>
-          <AppProviders>
-            {showProtectedApp ? (
-              <>
-                <HeartbeatClient />
-                <div className="flex min-h-screen flex-col">
-                  <MainNav />
-                  <main className="flex-1">{children}</main>
-                  <Footer />
-                </div>
-              </>
-            ) : (
-              <LandingGate />
-            )}
-          </AppProviders>
-        </WagmiProvider>
+        <AppProviders>
+          {showProtectedApp ? (
+            <>
+              <HeartbeatClient />
+              <div className="flex min-h-screen flex-col">
+                <MainNav />
+                <main className="flex-1">{children}</main>
+                <Footer />
+              </div>
+            </>
+          ) : (
+            <LandingGate />
+          )}
+        </AppProviders>
         {IS_PRODUCTION ? (
           <>
             <Script

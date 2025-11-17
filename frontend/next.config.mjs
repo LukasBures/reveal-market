@@ -10,12 +10,17 @@ const GA_ORIGINS = [
 ];
 
 const scriptSrc = ["'self'", "'unsafe-inline'"];
+const styleSrc = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"];
+const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com"];
 const WALLET_PROVIDER_ORIGINS = [
   "https://metamask-sdk.api.cx.metamask.io",
   "https://mm-sdk-analytics.api.cx.metamask.io",
   "https://wallet.coinbase.com",
   "https://cca-lite.coinbase.com",
   "https://cca.coinbase.com",
+  "https://pulse.walletconnect.org",
+  "https://api.web3modal.org",
+  "wss://relay.walletconnect.org",
 ];
 const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS];
 if (IS_PRODUCTION) {
@@ -26,9 +31,9 @@ if (IS_PRODUCTION) {
 const csp = [
   "default-src 'self'",
   `script-src ${scriptSrc.join(" ")}`,
-  "style-src 'self' 'unsafe-inline'",
+  `style-src ${styleSrc.join(" ")}`,
   "img-src 'self' data: https:",
-  "font-src 'self' data:",
+  `font-src ${fontSrc.join(" ")}`,
   `connect-src ${connectSrc.join(" ")}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
