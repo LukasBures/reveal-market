@@ -87,9 +87,6 @@ export const metadata: Metadata = {
     "zero knowledge",
     "institutional trading",
   ],
-  alternates: {
-    canonical: SITE_URL,
-  },
   robots: {
     index: true,
     follow: true,
@@ -130,12 +127,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
-        <link rel="icon" type="image/png" href="/icon/favicon-96x96.png" sizes="96x96" />
-        <link rel="icon" type="image/svg+xml" href="/icon/favicon.svg" />
-        <link rel="shortcut icon" href="/icon/favicon.ico" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/icon/apple-touch-icon.png" />
+        <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-title" content="Reveal Market" />
-        <link rel="manifest" href="/icon/site.webmanifest" />
+        <link rel="manifest" href="/site.webmanifest" />
+        <script
+          type="application/ld+json"
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
+        <script
+          type="application/ld+json"
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+        />
       </head>
       <body className="text-white antialiased">
         <AppProviders>
@@ -168,16 +175,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </Script>
           </>
         ) : null}
-        <script
-          type="application/ld+json"
-          suppressHydrationWarning
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
-        />
-        <script
-          type="application/ld+json"
-          suppressHydrationWarning
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
-        />
       </body>
     </html>
   );

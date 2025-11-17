@@ -11,6 +11,7 @@ const GA_ORIGINS = [
 
 const scriptSrc = ["'self'", "'unsafe-inline'"];
 const WALLET_PROVIDER_ORIGINS = [
+  "https://metamask-sdk.api.cx.metamask.io",
   "https://mm-sdk-analytics.api.cx.metamask.io",
   "https://wallet.coinbase.com",
   "https://cca-lite.coinbase.com",
