@@ -22,6 +22,22 @@ class HealthResponse(BaseModel):
     components: dict[str, HealthComponent]
 
 
+class HeartbeatMetrics(BaseModel):
+    service: str
+    component: str
+    status: HealthState
+    last_heartbeat: datetime | None = None
+    latency_ms: float | None = None
+    detail: str | None = None
+    metrics: dict[str, Any] | None = None
+
+
+class HeartbeatDashboard(BaseModel):
+    generated_at: datetime
+    worker: HeartbeatMetrics | None = None
+    api: HeartbeatMetrics | None = None
+
+
 class MarketBase(BaseModel):
     event_id: str
     title: str

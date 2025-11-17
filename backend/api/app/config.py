@@ -80,7 +80,12 @@ class Settings(BaseSettings):
     market_category_allowlist: list[str] = Field(default_factory=list)
     market_tag_allowlist: list[str] = Field(default_factory=list)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
+    api_heartbeat_key: str = Field(default="reveal_market_api:heartbeat")
     container_heartbeat_seconds: int = Field(default=60, ge=10)
+    api_heartbeat_ttl_seconds: int = Field(default=180, ge=30)
+    performance_heartbeat_interval_seconds: int = Field(default=60, ge=10)
+    worker_heartbeat_stale_seconds: int = Field(default=180, ge=30)
+    slow_request_threshold_ms: float = Field(default=500.0, ge=10)
 
     @field_validator("max_page_size")
     @classmethod

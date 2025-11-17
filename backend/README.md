@@ -7,7 +7,7 @@ The backend is the heartbeat of Reveal Market’s investable ecosystem. It trans
 | Component | Investor Benefit |
 | --- | --- |
 | **Market API** | Surfaces curated markets, stats, and settlements through a high-availability FastAPI layer backed by Redis caching, structured logging, and Prometheus metrics. Investors see the same latency and transparency they expect from Tier-1 exchanges. |
-| **Ingestion & On-Chain Worker** | Continuously ingests Polymarket and Conditional Tokens data, reconciles it with our PostgreSQL source of truth, sends heartbeats, and can optionally originate on-chain markets via MarketFactory. This keeps treasury projections synchronized with on-chain cash flows. |
+| **Ingestion & On-Chain Worker** | Continuously ingests Polymarket and Conditional Tokens data, reconciles it with our PostgreSQL source of truth, and sends heartbeats so ops can verify freshness. |
 
 Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
 
@@ -22,7 +22,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Deterministic data lineage** – Every market travels through an audited pipeline: upstream fetch → repository upsert → cache tagging → API exposure. The cycle produces traceable logs and metrics so diligence teams can replay any event.
 - **Heartbeat-driven reliability** – Workers advertise liveness via Redis keys with TTLs. If a heartbeat is missed, alerting fires before stale data reaches investor dashboards.
 - **Smart economics tracking** – API responses expose rake basis points, settlement hashes, and on-chain identifiers. This enables LPs to model expected yield and for treasury to forecast protocol revenue.
-- **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional auto-creation of on-chain markets is gated behind explicit configuration plus secure key storage.
+- **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional on-chain helpers remain manual-only so production workers never sign transactions without explicit operator action.
 - **Perimeter controls baked in** – Trusted-host filters, configurable CORS allowlists, and CSP/HSTS/COOP headers ship with the API. Docker health checks call native Python probes rather than brittle shell scripts.
 
 ## Horizen Indexing via Goldsky
@@ -39,7 +39,6 @@ The roadmap prioritizes capabilities that increase investor trust:
 2. **Schema safety for worker-first deployments** – Allow the worker to enforce Alembic head state, preventing schema drift when API nodes are temporarily offline.
 3. **Polymarket resilience** – Shared retry logic and metrics across both services, giving institutional partners real SLAs on data freshness.
 4. **Horizen ZEN testnet option** – Spin up a regulated sandbox for exchanges to trial the stack with real capital on a whitelisted network.
-5. **Secrets hardening** – Vault-backed signer abstraction so custody providers never handle plaintext keys.
 
 These milestones ladder up to the same thesis: reliable data fuels confident liquidity.
 

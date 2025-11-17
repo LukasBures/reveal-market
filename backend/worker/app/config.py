@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="RM_")
 
+    app_name: str = Field(default="Reveal Market Worker")
+    environment: str = Field(default="development")
     database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
     redis_url: str = Field(default="redis://redis:6379/0")
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
@@ -145,3 +147,10 @@ def get_settings() -> Settings:
     env_file = os.getenv("SETTINGS_FILE")
     kwargs = {"_env_file": env_file} if env_file else {}
     return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def reload_settings() -> Settings:
+    """Clear cached settings and rebuild from the environment."""
+
+    get_settings.cache_clear()
+    return get_settings()

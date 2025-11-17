@@ -13,6 +13,22 @@ type LandingAccessFormState = {
 
 const resolveAccessCode = () => process.env.LANDING_ACCESS_CODE?.trim() ?? "";
 
+const resolveSiteUrl = () =>
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  process.env.RM_SITE_URL ??
+  process.env.VERCEL_URL ??
+  "http://localhost:3000";
+
+const shouldUseSecureCookie = (): boolean => {
+  const siteUrl = resolveSiteUrl();
+  try {
+    const parsed = new URL(siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`);
+    return parsed.protocol === "https:";
+  } catch {
+    return process.env.NODE_ENV === "production";
+  }
+};
+
 export async function requestLandingAccessAction(
   _prevState: LandingAccessFormState,
   formData: FormData,
@@ -39,7 +55,7 @@ export async function requestLandingAccessAction(
     name: LANDING_ACCESS_COOKIE_NAME,
     value: "granted",
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(),
     sameSite: "lax",
     path: "/",
     maxAge: LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,

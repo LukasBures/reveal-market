@@ -2,7 +2,7 @@
 
 The web experience is our public pitch deck. Every sprint should reinforce why Reveal Market is a differentiated investment opportunity and make it effortless for partners to engage.
 
-## Immediate Polish Gaps (Q1 2025)
+## Immediate Polish Gaps
 
 - **Replace placeholder price chart** – `MarketDetailChart` still renders a mocked area graph. Swap it for real historical liquidity/probability pulled from the backend (or worker summaries) so detail pages show living data instead of a static image.
 - **Global search UX** – Current search only filters the featured grid. Add a `/markets/search` view (with keyboard hints + slugged URLs) that paginates true API results, surfaces category pills, and mirrors the crypto-native instant feedback users expect.

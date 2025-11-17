@@ -4,6 +4,8 @@ Reveal Market delivers a zero-knowledge prediction stack that regulated venues c
 
 Follow progress on X: [@RevealMarket](https://x.com/RevealMarket).
 
+Horizen chain support docs: https://docs.goldsky.com/chains/horizen
+
 ---
 
 ## Repository Map
@@ -39,6 +41,8 @@ Additional docs live in each directory’s README.
 - **API/Worker** – Strict HSTS, CSP, COOP/CORP, Referrer-Policy, and Trusted Host filters are enabled by default. Health checks are native Python scripts, not cURL hacks.
 - **Frontend** – Production headers mirror backend policies; sitemap + robots automatically enumerate investor pages. All docs/legal pages declare canonical URLs and metadata via `lib/seo.ts`. The App Router fetchers now always hit the live API; there are no mock toggles in production.
 - **Logging** – Unified formatter across services (`timestamp | LEVEL | logger | file:line | event | request_id`). Optional rotating file output for regulated deployments, structured JSON-LD for site-wide schema.
+- **Edge canonicalization** – Caddy terminates TLS, forces HTTP→HTTPS, and redirects `www.` (and any stray HTTP hostnames) to `https://revealmarket.xyz` so crawlers only ever see the canonical domain.
+- **SLA telemetry** – Every request logs latency buckets, bytes sent, and cache hit/miss data. The API publishes aggregated metrics to Redis and exposes a live dashboard at `/health/heartbeats`, so you can verify worker/API heartbeats, cache hit rates, and average latency in one place.
 - **Tests** – `./backend/run_tests.sh` (pytest), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests.
 
 ---

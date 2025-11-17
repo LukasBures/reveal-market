@@ -5,7 +5,8 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
-from threading import Event, Lock
+from datetime import UTC, datetime
+from threading import Event, Lock, Thread
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
 from uuid import uuid4
@@ -35,6 +36,7 @@ from app.config import get_settings
 from app.database import get_session, run_migrations
 from app.health import build_health_response
 from app.logging_config import setup_logging
+from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
 from app.security import SecurityHeadersMiddleware
 
@@ -62,6 +64,9 @@ instrumentator = Instrumentator()
 cache_client: Redis | None = None
 _cache_lock = Lock()
 _heartbeat_stop_event: Event | None = None
+_metrics_stop_event: Event | None = None
+request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
+_process_started_at = time.time()
 goldsky_client: GoldskyClient | None = None
 
 MARKETS_STATS_KEY = "markets:stats"
@@ -77,7 +82,7 @@ MARKETS_CACHE_COUNTER = Counter(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _heartbeat_stop_event
+    global _heartbeat_stop_event, _metrics_stop_event
     run_migrations()
     _heartbeat_stop_event = start_heartbeat_logger(
         logger,
@@ -85,10 +90,15 @@ async def lifespan(app: FastAPI):
         interval_seconds=settings.container_heartbeat_seconds,
         message=f"{settings.app_name} container heartbeat",
     )
+    if _metrics_stop_event is None:
+        _metrics_stop_event = _start_metrics_publisher()
     yield
     if _heartbeat_stop_event is not None:
         _heartbeat_stop_event.set()
         _heartbeat_stop_event = None
+    if _metrics_stop_event is not None:
+        _metrics_stop_event.set()
+        _metrics_stop_event = None
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
@@ -130,6 +140,191 @@ if not getattr(app.state, "metrics_instrumented", False):
     instrumentator.instrument(app).expose(app, include_in_schema=False, tags=["metrics"])
     app.state.metrics_instrumented = True
 app.cache_client = cache_client  # type: ignore[attr-defined]
+
+
+def _extract_cache_hit(request: Request | None) -> bool | None:
+    ctx = getattr(request.state, "cache_context", None) if request else None
+    if isinstance(ctx, dict):
+        return ctx.get("cache_hit")
+    return None
+
+
+def _extract_cache_metadata(request: Request | None) -> dict[str, Any]:
+    ctx = getattr(request.state, "cache_context", None) if request else None
+    if isinstance(ctx, dict):
+        return {
+            "cache_key": ctx.get("cache_key"),
+            "cache_source": ctx.get("cache_source"),
+            "cache_hit": ctx.get("cache_hit"),
+        }
+    return {"cache_key": None, "cache_source": None, "cache_hit": None}
+
+
+def _estimate_response_bytes(response) -> int:
+    header_len = response.headers.get("content-length")
+    if header_len:
+        try:
+            return int(header_len)
+        except ValueError:
+            pass
+    body = getattr(response, "body", None)
+    if isinstance(body, (bytes, bytearray)):
+        return len(body)
+    return 0
+
+
+def _publish_api_heartbeat() -> None:
+    client = get_cache_client()
+    if client is None:
+        return
+    snapshot = request_metrics.snapshot()
+    payload = {
+        "service": settings.app_name,
+        "component": "api",
+        "environment": settings.environment,
+        "timestamp": datetime.now(tz=UTC).isoformat(),
+        "uptime_seconds": snapshot.get("window_seconds"),
+        "metrics": {
+            **snapshot,
+            "window_started_at": datetime.fromtimestamp(snapshot["window_started_at"], tz=UTC).isoformat()
+            if snapshot.get("window_started_at")
+            else None,
+            "last_updated_at": datetime.fromtimestamp(snapshot["last_updated_at"], tz=UTC).isoformat()
+            if snapshot.get("last_updated_at")
+            else None,
+        },
+    }
+    try:
+        client.set(
+            settings.api_heartbeat_key,
+            json.dumps(payload),
+            ex=settings.api_heartbeat_ttl_seconds,
+        )
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="api.heartbeat.error",
+            message="failed to publish api heartbeat",
+            error=str(exc),
+        )
+    else:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="api.heartbeat.published",
+            message="published api heartbeat snapshot",
+            requests_total=snapshot.get("total_requests"),
+            cache_hit_rate=snapshot.get("cache_hit_rate"),
+            avg_latency_ms=snapshot.get("avg_latency_ms"),
+        )
+
+
+def _start_metrics_publisher() -> Event:
+    stop_event = Event()
+    interval = max(10, settings.performance_heartbeat_interval_seconds)
+
+    def _run() -> None:
+        while not stop_event.wait(interval):
+            _publish_api_heartbeat()
+
+    thread = Thread(target=_run, name="api-metrics-publisher", daemon=True)
+    thread.start()
+    return stop_event
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _load_heartbeat_payload(key: str) -> dict[str, Any] | None:
+    client = get_cache_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(key)
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="heartbeat.dashboard.redis_error",
+            message="failed to read heartbeat payload",
+            key=key,
+            error=str(exc),
+        )
+        return None
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="heartbeat.dashboard.decode_error",
+            message="invalid heartbeat payload",
+            key=key,
+        )
+        return None
+
+
+def _build_worker_dashboard(now: datetime) -> schemas.HeartbeatMetrics | None:
+    payload = _load_heartbeat_payload(settings.heartbeat_key)
+    if payload is None:
+        return None
+    timestamp = _parse_timestamp(payload.get("timestamp"))
+    status_value: schemas.HealthState
+    if timestamp is None:
+        status_value = "degraded"
+    else:
+        age = (now - timestamp).total_seconds()
+        status_value = "ok" if age <= settings.worker_heartbeat_stale_seconds else "degraded"
+    detail = f"{payload.get('markets_processed', 0)} markets processed"
+    return schemas.HeartbeatMetrics(
+        service=payload.get("service") or "Reveal Market Worker",
+        component=payload.get("component") or "worker",
+        status=status_value,
+        last_heartbeat=timestamp,
+        latency_ms=payload.get("latency_ms"),
+        detail=detail,
+        metrics={
+            "markets_processed": payload.get("markets_processed"),
+            "markets_changed": payload.get("markets_changed"),
+            "resolutions_changed": payload.get("resolutions_changed"),
+        },
+    )
+
+
+def _build_api_dashboard(now: datetime) -> schemas.HeartbeatMetrics | None:
+    payload = _load_heartbeat_payload(settings.api_heartbeat_key)
+    if payload is None:
+        return None
+    timestamp = _parse_timestamp(payload.get("timestamp"))
+    status_value: schemas.HealthState
+    if timestamp is None:
+        status_value = "degraded"
+    else:
+        age = (now - timestamp).total_seconds()
+        status_value = "ok" if age <= settings.api_heartbeat_ttl_seconds else "degraded"
+    metrics_payload = payload.get("metrics") or {}
+    detail = f"{metrics_payload.get('total_requests', 0)} requests recorded"
+    return schemas.HeartbeatMetrics(
+        service=payload.get("service") or settings.app_name,
+        component=payload.get("component") or "api",
+        status=status_value,
+        last_heartbeat=timestamp,
+        latency_ms=metrics_payload.get("avg_latency_ms"),
+        detail=detail,
+        metrics=metrics_payload,
+    )
 
 
 def _connect_cache_with_retry() -> Redis | None:
@@ -408,6 +603,7 @@ async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid4())
     token = set_request_id(request_id)
     start_time = time.perf_counter()
+    request.state.cache_context = {"cache_hit": None, "cache_key": None, "cache_source": None}  # type: ignore[attr-defined]
     log_event(
         logger,
         logging.DEBUG,
@@ -421,6 +617,7 @@ async def request_context_middleware(request: Request, call_next):
         response = await call_next(request)
     except HTTPException as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
+        cache_meta = _extract_cache_metadata(request)
         log_event(
             logger,
             logging.WARNING if 400 <= exc.status_code < 500 else logging.ERROR,
@@ -430,11 +627,22 @@ async def request_context_middleware(request: Request, call_next):
             method=request.method,
             status_code=exc.status_code,
             duration_ms=round(duration_ms, 2),
+            latency_bucket=classify_latency_bucket(duration_ms),
+            cache_hit=cache_meta["cache_hit"],
+            cache_source=cache_meta["cache_source"],
+            cache_key=cache_meta["cache_key"],
+        )
+        request_metrics.record(
+            status_code=exc.status_code,
+            duration_ms=duration_ms,
+            bytes_sent=0,
+            cache_hit=cache_meta["cache_hit"],
         )
         reset_request_id(token)
         raise
     except Exception:
         duration_ms = (time.perf_counter() - start_time) * 1000
+        cache_meta = _extract_cache_metadata(request)
         log_event(
             logger,
             logging.ERROR,
@@ -444,11 +652,24 @@ async def request_context_middleware(request: Request, call_next):
             method=request.method,
             status_code=500,
             duration_ms=round(duration_ms, 2),
+            latency_bucket=classify_latency_bucket(duration_ms),
+            cache_hit=cache_meta["cache_hit"],
+            cache_source=cache_meta["cache_source"],
+            cache_key=cache_meta["cache_key"],
+        )
+        request_metrics.record(
+            status_code=500,
+            duration_ms=duration_ms,
+            bytes_sent=0,
+            cache_hit=cache_meta["cache_hit"],
         )
         reset_request_id(token)
         raise
     duration_ms = (time.perf_counter() - start_time) * 1000
     response.headers["x-request-id"] = request_id
+    cache_meta = _extract_cache_metadata(request)
+    bytes_sent = _estimate_response_bytes(response)
+    latency_bucket = classify_latency_bucket(duration_ms)
     log_event(
         logger,
         logging.INFO,
@@ -458,6 +679,17 @@ async def request_context_middleware(request: Request, call_next):
         method=request.method,
         status_code=response.status_code,
         duration_ms=round(duration_ms, 2),
+        latency_bucket=latency_bucket,
+        bytes_sent=bytes_sent,
+        cache_hit=cache_meta["cache_hit"],
+        cache_source=cache_meta["cache_source"],
+        cache_key=cache_meta["cache_key"],
+    )
+    request_metrics.record(
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+        bytes_sent=bytes_sent,
+        cache_hit=cache_meta["cache_hit"],
     )
     reset_request_id(token)
     return response
@@ -478,8 +710,21 @@ async def health_check(session: Session = Depends(get_session)) -> schemas.Healt
     return await build_health_response(session)
 
 
+@app.get("/health/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
+def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
+    now = datetime.now(tz=UTC)
+    worker_status = _build_worker_dashboard(now)
+    api_status = _build_api_dashboard(now)
+    return schemas.HeartbeatDashboard(
+        generated_at=now,
+        worker=worker_status,
+        api=api_status,
+    )
+
+
 @app.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])
 def list_markets(
+    request: Request,
     status: Annotated[str | None, Query(description="Filter markets by status")] = None,
     category: Annotated[str | None, Query(description="Filter markets by category")] = None,
     oracle: Annotated[str | None, Query(description="Filter markets by oracle address")] = None,
@@ -522,6 +767,7 @@ def list_markets(
     start = time.perf_counter()
     cached = get_json(cache, cache_key)
     if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
         MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
         duration = (time.perf_counter() - start) * 1000
         log_event(
@@ -596,12 +842,14 @@ def list_markets(
         offset=offset,
         result_count=len(market_models),
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:list")
     return market_models
 
 
 @app.get("/categories/{category_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
 def list_markets_by_category(
     category_slug: str,
+    request: Request,
     limit: Annotated[
         int,
         Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
@@ -634,6 +882,7 @@ def list_markets_by_category(
     cache_key = category_cache_key(category_slug_key, limit)
     cached = get_json(cache, cache_key)
     if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
         models_from_cache = _filter_markets_for_visibility(
             _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
         )
@@ -696,12 +945,14 @@ def list_markets_by_category(
         result_count=len(market_models),
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
     return market_models
 
 
 @app.get("/tags/{tag_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
 def list_markets_by_tag(
     tag_slug: str,
+    request: Request,
     limit: Annotated[
         int,
         Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
@@ -734,6 +985,7 @@ def list_markets_by_tag(
     cache_key = tag_cache_key(tag_slug_key, limit)
     cached = get_json(cache, cache_key)
     if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:tag")
         models_from_cache = _filter_markets_for_visibility(
             _augment_market_models([schemas.MarketResponse.model_validate(item) for item in cached])
         )
@@ -778,6 +1030,7 @@ def list_markets_by_tag(
         result_count=len(market_models),
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:tag")
     return market_models
 
 
@@ -802,12 +1055,16 @@ async def list_onchain_markets():
 
 
 @app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
-def market_stats(session: Session = Depends(get_session)) -> list[schemas.MarketStatusBreakdown]:
+def market_stats(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> list[schemas.MarketStatusBreakdown]:
     start = time.perf_counter()
     cache = get_cache_client()
     log_event(logger, logging.DEBUG, "markets.stats.request", "processing market stats request")
     cached = get_json(cache, MARKETS_STATS_KEY)
     if cached is not None:
+        update_cache_context(request, cache_key=MARKETS_STATS_KEY, hit=True, source="markets:stats")
         duration = (time.perf_counter() - start) * 1000
         log_event(
             logger,
@@ -835,11 +1092,13 @@ def market_stats(session: Session = Depends(get_session)) -> list[schemas.Market
         duration_ms=round(duration, 2),
         result_count=len(stats),
     )
+    update_cache_context(request, cache_key=MARKETS_STATS_KEY, hit=False, source="markets:stats")
     return stats
 
 
 @app.get("/markets/suggest", response_model=list[schemas.MarketResponse], tags=["markets"])
 def suggest_markets(
+    request: Request,
     q: Annotated[str, Query(min_length=2, max_length=200, description="Search term for suggestions")],
     limit: Annotated[int, Query(ge=1, le=25, description="Maximum number of suggestions to return")] = 5,
     session: Session = Depends(get_session),
@@ -858,6 +1117,7 @@ def suggest_markets(
     cache_key = suggest_cache_key(normalized_query, limit)
     cached = get_json(cache, cache_key)
     if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:suggest")
         models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
         _augment_market_models(models_from_cache)
         log_event(
@@ -899,11 +1159,16 @@ def suggest_markets(
         result_count=len(filtered),
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:suggest")
     return filtered
 
 
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])
-def read_resolution(condition_id_hex: str, session: Session = Depends(get_session)) -> schemas.ResolutionSummary:
+def read_resolution(
+    condition_id_hex: str,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> schemas.ResolutionSummary:
     start = time.perf_counter()
     cache = get_cache_client()
     log_event(
@@ -917,6 +1182,7 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
     cache_key = resolution_cache_key(normalized_condition)
     cached = get_json(cache, cache_key)
     if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:resolution")
         summary = schemas.ResolutionSummary.model_validate(cached)
         log_event(
             logger,
@@ -1012,11 +1278,16 @@ def read_resolution(condition_id_hex: str, session: Session = Depends(get_sessio
         condition_id=normalized_condition,
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:resolution")
     return summary_model
 
 
 @app.get("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])
-def read_market(event_id: str, session: Session = Depends(get_session)) -> schemas.MarketResponse:
+def read_market(
+    event_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> schemas.MarketResponse:
     cache_key = _market_detail_cache_key(event_id)
     cache = get_cache_client()
     log_event(
@@ -1033,6 +1304,7 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
         duration = (time.perf_counter() - start) * 1000
         model = schemas.MarketResponse.model_validate(cached)
         _apply_market_metadata(model)
+        update_cache_context(request, cache_key=cache_key, hit=True, source="markets:detail")
         log_event(
             logger,
             logging.INFO,
@@ -1065,6 +1337,7 @@ def read_market(event_id: str, session: Session = Depends(get_session)) -> schem
         event_id=event_id,
         result_count=1,
     )
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:detail")
     return response
 
 

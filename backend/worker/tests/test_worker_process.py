@@ -171,6 +171,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
     assert stats["summaries_enqueued"] == 0
+    assert stats["cache_invalidations"] >= 0
 
     with session_factory() as session:
         stored = session.execute(select(Market)).scalars().all()
@@ -181,6 +182,8 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     assert dummy.last_set["ttl"] > 0
     heartbeat = json.loads(dummy.last_set["value"])
     assert heartbeat["markets_processed"] == len(sample_markets)
+    assert heartbeat["markets_created"] == stats["markets_created"]
+    assert heartbeat["cache_invalidations"] == stats["cache_invalidations"]
     assert all(not key.startswith("markets:") for key in dummy.store.keys())
     assert {"market:evt-1", "market:evt-2", "markets:stats", "category:trending"}.issubset(set(invalidated_tags))
 

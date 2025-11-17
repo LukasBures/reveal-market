@@ -1,11 +1,7 @@
 • Backend Gaps
 
-  - Data-assurance features are still absent: there’s no AI summary ledger/provenance trail, no request-scoped latency logging, and no persistent resolution ledger, so /markets can’t yet prove narrative lineage, SLA adherence, or settlement metadata (backend/TODO.md:7, backend/TODO.md:10, backend/
-    TODO.md:19).
-  - Worker observability/resilience work remains: cache invalidation is still coarse, the large worker routines need decomposition, and service heartbeats aren’t exposed via a dashboard, leaving ops blind to drift (backend/TODO.md:16, backend/TODO.md:25, backend/TODO.md:37).
-  - Liquidity automation gaps include missing Polymarket retries/backoff, unmanaged signer secrets, no config hot-reload, and no scalable AI summary sidecar, so ingestion and automation can’t meet enterprise reliability targets (backend/TODO.md:42, backend/TODO.md:45, backend/TODO.md:48, backend/TODO.md:54).
-  - Institutional readiness items—integration-grade pytest-docker suites, OpenTelemetry tracing, autoscaling hooks, richer /markets payloads, and tamper-evident export tooling—are all still on paper, limiting investor diligence support (backend/TODO.md:71, backend/TODO.md:74, backend/TODO.md:81, backend/
-    TODO.md:84, backend/TODO.md:86).
+  - Data-assurance features are still absent: there’s no AI summary ledger/provenance trail and no persistent resolution ledger, so /markets can’t yet prove narrative lineage or settlement metadata (backend/TODO.md:7, backend/TODO.md:19).
+  - Liquidity automation gaps now center on summary worker scaling, API governance, and richer analytics; consult backend/TODO.md:48 onward for remaining work.
 
   Contracts Gaps
 

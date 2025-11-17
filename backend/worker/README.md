@@ -104,14 +104,16 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_RESOLVED_RETENTION_SECONDS` | Age threshold before deleting settled markets. |
 | `RM_RESOLVED_RETENTION_DRY_RUN` | If true, log eligible rows but do not delete. |
 
-### On-chain automation
+### On-chain automation (manual only)
+
+> The worker no longer auto-creates markets. These settings remain for operators who trigger `maybe_create_onchain_market` manually via scripts/CLI.
 
 | Variable | Description |
 | --- | --- |
 | `RM_AUTO_CREATE_ONCHAIN_MARKETS` | Enable `maybe_create_onchain_market`. |
 | `RM_RPC_URL` / `RM_POLYGON_RPC_URL` | RPC endpoint used by web3 clients. |
 | `RM_FACTORY_ADDRESS`, `RM_CONDITIONAL_TOKENS_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS` | Contract addresses. |
-| `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Signer used for factory transactions. Source secrets from Vault/KMS whenever possible. |
+| `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Signer used for factory transactions when invoking helpers manually. |
 | `RM_GAS_PRICE_GWEI`, `RM_MAX_PRIORITY_FEE_GWEI`, `RM_MAX_WEB3_RETRIES`, `RM_DEFAULT_COMMIT_LEAD_SECONDS`, `RM_DEFAULT_REVEAL_LEAD_SECONDS` | Gas + deadline tuning. |
 
 ### Summary enrichment

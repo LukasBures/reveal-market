@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+import signal
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote_plus
@@ -32,9 +33,8 @@ from shared.onchain import ConditionalTokensClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .config import get_settings
+from .config import get_settings, reload_settings
 from .logging_config import setup_logging
-from .onchain import maybe_create_onchain_market
 from .polymarket import MarketPayload, PolymarketClient
 from .prover_client import ProverClient, ProverError, SettlementProofRequest, compute_outcome_hash
 from .summary_jobs import maybe_enqueue_summary_job
@@ -89,11 +89,7 @@ logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
 PROVER_CLIENT: ProverClient | None = None
-if settings.prover_enabled and settings.prover_base_url:
-    PROVER_CLIENT = ProverClient(
-        base_url=settings.prover_base_url,
-        timeout_seconds=settings.prover_timeout_seconds,
-    )
+ 
 
 _schema_checked = False
 
@@ -134,6 +130,62 @@ class CleanupOutcome:
     eligible_rows: int = 0
     dry_run: bool = False
     category_counts: dict[str, int] | None = None
+
+
+@dataclass
+class SyncSummary:
+    changed_events: set[str] = field(default_factory=set)
+    changed_conditions: set[str] = field(default_factory=set)
+    changed_categories: set[str] = field(default_factory=set)
+    changed_tags: set[str] = field(default_factory=set)
+    resolution_cache_updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = field(default_factory=list)
+    stats_dirty: bool = False
+    markets_created: int = 0
+    markets_updated: int = 0
+    markets_deleted: int = 0
+    summaries_enqueued: int = 0
+    proofs_generated: int = 0
+
+    def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
+        return {
+            "markets_processed": markets_processed,
+            "markets_changed": len(self.changed_events),
+            "resolutions_changed": len(self.changed_conditions),
+            "categories_changed": len(self.changed_categories),
+            "tags_changed": len(self.changed_tags),
+            "latency_ms": round(latency_ms, 2),
+            "markets_created": self.markets_created,
+            "markets_updated": self.markets_updated,
+            "markets_deleted": self.markets_deleted,
+            "summaries_enqueued": self.summaries_enqueued,
+            "proofs_generated": self.proofs_generated,
+            "cache_invalidations": cache_invalidations,
+        }
+
+
+@dataclass
+class CacheInvalidationReport:
+    tag_counts: dict[str, int] = field(default_factory=dict)
+
+    def record(self, tag: str, removed: int) -> None:
+        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + max(removed, 0)
+
+    @property
+    def total(self) -> int:
+        return sum(self.tag_counts.values())
+
+    def log(self) -> None:
+        if not self.tag_counts:
+            return
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.cache.invalidate",
+            message="invalidated worker cache tags",
+            tags=list(self.tag_counts.keys()),
+            total_removed=self.total,
+        )
 
 
 # Engine/session are module-level singletons so the worker loop can reuse
@@ -238,14 +290,45 @@ def _ensure_schema() -> SchemaSyncResult:
     return result
 
 
-polymarket_client = PolymarketClient(
-    str(settings.polymarket_api_base),
-    timeout=settings.polymarket_timeout_seconds,
-    request_max_attempts=settings.polymarket_max_retries,
-    request_backoff_seconds=settings.polymarket_retry_backoff_seconds,
-    request_backoff_max_seconds=settings.polymarket_retry_backoff_max_seconds,
-    retry_counter=POLYMARKET_RETRY_COUNTER,
-)
+def _build_polymarket_client() -> PolymarketClient:
+    return PolymarketClient(
+        str(settings.polymarket_api_base),
+        timeout=settings.polymarket_timeout_seconds,
+        request_max_attempts=settings.polymarket_max_retries,
+        request_backoff_seconds=settings.polymarket_retry_backoff_seconds,
+        request_backoff_max_seconds=settings.polymarket_retry_backoff_max_seconds,
+        retry_counter=POLYMARKET_RETRY_COUNTER,
+    )
+
+
+def _build_prover_client() -> ProverClient | None:
+    if settings.prover_enabled and settings.prover_base_url:
+        return ProverClient(
+            base_url=settings.prover_base_url,
+            timeout_seconds=settings.prover_timeout_seconds,
+        )
+    return None
+
+
+polymarket_client = _build_polymarket_client()
+PROVER_CLIENT = _build_prover_client()
+
+
+def _reload_worker_settings(signum=None, frame=None) -> None:  # pragma: no cover - signal handler
+    global settings, polymarket_client, conditional_tokens_client, goldsky_client, PROVER_CLIENT
+    settings = reload_settings()
+    polymarket_client = _build_polymarket_client()
+    goldsky_client = _build_goldsky_client()
+    conditional_tokens_client = _build_conditional_tokens_client()
+    PROVER_CLIENT = _build_prover_client()
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.config.reloaded",
+        message="worker configuration reloaded",
+        signal=signum,
+        cache_namespace=settings.cache_namespace or "",
+    )
 
 
 def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
@@ -317,6 +400,11 @@ def _build_goldsky_client() -> GoldskyClient | None:
 
 conditional_tokens_client = _build_conditional_tokens_client()
 goldsky_client = _build_goldsky_client()
+
+try:  # pragma: no cover - signal availability depends on platform
+    signal.signal(signal.SIGHUP, _reload_worker_settings)
+except (AttributeError, ValueError):
+    pass
 
 
 def _fetch_resolution_snapshot(
@@ -440,7 +528,158 @@ def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) ->
         counter.labels(category=label).inc(count)
 
 
-def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:  # noqa: C901
+def _should_refresh_resolution(existing, now: datetime) -> bool:
+    if existing is None:
+        return True
+    if not existing.resolved:
+        return True
+    if existing.checked_at is None:
+        return True
+    return (now - existing.checked_at).total_seconds() >= settings.resolution_refresh_interval_seconds
+
+
+def _parse_checked_at(value: Any, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return fallback
+    return fallback
+
+
+def _build_resolution_record(summary: dict[str, Any], market: MarketPayload, checked_at: datetime) -> dict[str, Any]:
+    return {
+        "condition_id": summary.get("condition_id") or summary.get("conditionId"),
+        "source": summary.get("source", "conditional_tokens"),
+        "resolved": bool(summary.get("resolved")),
+        "payouts": summary.get("payouts") or [],
+        "winners": summary.get("winners") or [],
+        "outcomes": summary.get("outcomes") or (market.outcomes or []),
+        "oracle": summary.get("oracle"),
+        "question_id": summary.get("questionId"),
+        "transaction_hash": summary.get("transactionHash"),
+        "block_number": summary.get("blockNumber"),
+        "block_timestamp": summary.get("blockTimestamp"),
+        "checked_at": checked_at,
+    }
+
+
+def _collect_market_changes(session: Session, markets: list[MarketPayload], redis_client: Redis | None) -> SyncSummary:
+    summary = SyncSummary()
+    if not markets:
+        return summary
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.persist.batch",
+        message="synchronising markets into database",
+        markets_processed=len(markets),
+    )
+    for market in markets:
+        db_market, outcome = sync_market(session, market)
+        if outcome.market_changed and db_market and db_market.event_id:
+            summary.changed_events.add(db_market.event_id)
+            summary.stats_dirty = True
+        if outcome.market_created:
+            summary.markets_created += 1
+        if outcome.market_updated:
+            summary.markets_updated += 1
+        if outcome.resolution_changed and outcome.condition_id:
+            summary.changed_conditions.add(outcome.condition_id.lower())
+        if outcome.category_slug:
+            summary.changed_categories.add(outcome.category_slug)
+        if outcome.tag_slugs:
+            summary.changed_tags.update(slug for slug in outcome.tag_slugs if slug)
+        if outcome.resolution_cache_payload and outcome.condition_id:
+            summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
+        if maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
+            summary.summaries_enqueued += 1
+        if settings.prover_enabled and PROVER_CLIENT is not None and db_market is not None:
+            summary.proof_jobs.append(
+                (
+                    _snapshot_market_record(db_market),
+                    market,
+                    outcome.condition_id,
+                )
+            )
+    return summary
+
+
+def _apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
+    cleanup_outcome = cleanup_resolved_markets(session, dry_run=settings.resolved_retention_dry_run)
+    if cleanup_outcome.events:
+        summary.changed_events.update(cleanup_outcome.events)
+        summary.stats_dirty = True
+    summary.changed_conditions.update(cleanup_outcome.conditions)
+    summary.changed_categories.update(cleanup_outcome.categories)
+    summary.changed_tags.update(cleanup_outcome.tags)
+    summary.markets_deleted = cleanup_outcome.deleted_rows
+    if cleanup_outcome.category_counts:
+        _record_retention_metrics(cleanup_outcome.category_counts, cleanup_outcome.dry_run)
+
+
+def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> CacheInvalidationReport:
+    report = CacheInvalidationReport()
+    if redis_client is None:
+        return report
+
+    def _invalidate(tag: str) -> None:
+        removed = shared_cache.invalidate_tag(redis_client, tag)
+        report.record(tag, len(removed))
+
+    if summary.changed_events or summary.changed_categories or summary.changed_tags:
+        _invalidate("markets:list")
+        _invalidate("category:trending")
+        _invalidate("markets:suggest")
+    if summary.stats_dirty and summary.changed_events:
+        _invalidate("markets:stats")
+    if summary.stats_dirty and summary.changed_events:
+        _invalidate("markets:stats")
+    for event_id in summary.changed_events:
+        _invalidate(f"market:{event_id}")
+    for condition_id in summary.changed_conditions:
+        _invalidate(f"resolution:{condition_id}")
+    for category_slug in summary.changed_categories:
+        _invalidate(f"category:{category_slug}")
+    if summary.changed_categories:
+        CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(summary.changed_categories))
+    tagged = [slug for slug in summary.changed_tags if slug]
+    for tag_slug in tagged:
+        _invalidate(f"tag:{tag_slug}")
+    if tagged:
+        CACHE_INVALIDATION_COUNTER.labels(type="tag").inc(len(tagged))
+    report.log()
+    return report
+
+
+def _persist_resolution_cache_updates(redis_client: Redis | None, summary: SyncSummary) -> None:
+    if redis_client is None or not summary.resolution_cache_updates:
+        return
+    for condition_id, payload in summary.resolution_cache_updates:
+        shared_cache.set_json(
+            redis_client,
+            resolution_cache_key(condition_id),
+            payload,
+            settings.markets_cache_ttl_seconds,
+        )
+
+
+def _run_prover_jobs(summary: SyncSummary, redis_client: Redis | None) -> int:
+    proofs_generated = 0
+    for snapshot, payload, condition in summary.proof_jobs:
+        if maybe_generate_settlement_proof(
+            redis_client,
+            market_snapshot=snapshot,
+            market_payload=payload,
+            condition_id=condition,
+        ):
+            proofs_generated += 1
+    return proofs_generated
+
+
+def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:
     condition_id = market.condition_id
     if (
         (goldsky_client is None and conditional_tokens_client is None)
@@ -453,48 +692,17 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
     existing = shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     now = datetime.now(UTC)
-    refresh_due = existing is None
 
-    if existing is not None:
-        if not existing.resolved:
-            refresh_due = True
-        elif existing.checked_at is None:
-            refresh_due = True
-        else:
-            refresh_due = (now - existing.checked_at).total_seconds() >= settings.resolution_refresh_interval_seconds
-
-    if not refresh_due:
+    if not _should_refresh_resolution(existing, now):
         return ResolutionOutcome()
 
     summary = _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
     if summary is None:
         return ResolutionOutcome()
 
-    checked_at = summary.get("checkedAt")
-    if isinstance(checked_at, datetime):
-        checked_at_dt = checked_at
-    elif isinstance(checked_at, str):
-        try:
-            checked_at_dt = datetime.fromisoformat(checked_at)
-        except ValueError:
-            checked_at_dt = now
-    else:
-        checked_at_dt = now
-
-    record_payload = {
-        "condition_id": normalized_condition_id,
-        "source": summary.get("source", "conditional_tokens"),
-        "resolved": bool(summary.get("resolved")),
-        "payouts": summary.get("payouts") or [],
-        "winners": summary.get("winners") or [],
-        "outcomes": summary.get("outcomes") or (market.outcomes or []),
-        "oracle": summary.get("oracle"),
-        "question_id": summary.get("questionId"),
-        "transaction_hash": summary.get("transactionHash"),
-        "block_number": summary.get("blockNumber"),
-        "block_timestamp": summary.get("blockTimestamp"),
-        "checked_at": checked_at_dt,
-    }
+    checked_at_dt = _parse_checked_at(summary.get("checkedAt"), now)
+    record_payload = _build_resolution_record(summary, market, checked_at_dt)
+    record_payload["condition_id"] = normalized_condition_id
 
     shared_repository.upsert_resolution(session, record_payload)
     cache_payload = {
@@ -791,11 +999,20 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
     if redis_client is None:
         return
     payload = {
+        "service": settings.app_name,
+        "component": "worker",
+        "environment": settings.environment,
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "markets_processed": stats.get("markets_processed", 0),
         "markets_changed": stats.get("markets_changed", 0),
         "resolutions_changed": stats.get("resolutions_changed", 0),
         "latency_ms": stats.get("latency_ms"),
+        "markets_created": stats.get("markets_created"),
+        "markets_updated": stats.get("markets_updated"),
+        "markets_deleted": stats.get("markets_deleted"),
+        "summaries_enqueued": stats.get("summaries_enqueued"),
+        "proofs_generated": stats.get("proofs_generated"),
+        "cache_invalidations": stats.get("cache_invalidations"),
     }
 
     def _publish() -> bool:
@@ -891,10 +1108,11 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
         "markets_deleted": 0,
         "summaries_enqueued": 0,
         "proofs_generated": 0,
+        "cache_invalidations": 0,
     }
 
 
-def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  # noqa: C901
+def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
     schema_state = _ensure_schema()
@@ -912,160 +1130,48 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:  
         publish_heartbeat(redis_client, stats)
         _propagate_schema_revision(redis_client, schema_state)
         return stats
-    changed_events: set[str] = set()
-    changed_conditions: set[str] = set()
-    changed_categories: set[str] = set()
-    changed_tags: set[str] = set()
-    resolution_cache_updates: list[tuple[str, dict[str, Any]]] = []
-    stats_dirty = False
-    markets_created = 0
-    markets_updated = 0
-    markets_deleted = 0
-    summaries_enqueued = 0
-    proofs_generated = 0
-    proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = []
+
+    summary = SyncSummary()
     try:
         with session_scope() as session:
             if markets:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.persist.batch",
-                    message="synchronising markets into database",
-                    markets_processed=len(markets),
-                )
-                for market in markets:
-                    db_market, outcome = sync_market(session, market)
-                    if outcome.market_changed and db_market and db_market.event_id:
-                        changed_events.add(db_market.event_id)
-                        stats_dirty = True
-                    if outcome.market_created:
-                        markets_created += 1
-                    if outcome.market_updated:
-                        markets_updated += 1
-                    if outcome.resolution_changed and outcome.condition_id:
-                        changed_conditions.add(outcome.condition_id.lower())
-                    if outcome.category_slug:
-                        changed_categories.add(outcome.category_slug)
-                    if outcome.tag_slugs:
-                        changed_tags.update(outcome.tag_slugs)
-                    if outcome.resolution_cache_payload and outcome.condition_id:
-                        resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
-                    maybe_create_onchain_market(settings, db_market, session)
-                    if maybe_enqueue_summary_job(
-                        redis_client,
-                        market_record=db_market,
-                        market_payload=market,
-                    ):
-                        summaries_enqueued += 1
-                    if settings.prover_enabled and PROVER_CLIENT is not None and db_market is not None:
-                        proof_jobs.append(
-                            (
-                                _snapshot_market_record(db_market),
-                                market,
-                                outcome.condition_id,
-                            )
-                        )
-            cleanup_outcome = cleanup_resolved_markets(
-                session,
-                dry_run=settings.resolved_retention_dry_run,
-            )
-            if cleanup_outcome.events:
-                changed_events.update(cleanup_outcome.events)
-                stats_dirty = True
-            changed_conditions.update(cleanup_outcome.conditions)
-            changed_categories.update(cleanup_outcome.categories)
-            changed_tags.update(cleanup_outcome.tags)
-            markets_deleted = cleanup_outcome.deleted_rows
+                summary = _collect_market_changes(session, markets, redis_client)
+            _apply_retention_cleanup(session, summary)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
             "failed to synchronise markets",
             extra={"event": "worker.persist.error", "error": str(exc)},
         )
-        # Skip prover/cache side effects when the DB transaction failed.
         stats = _empty_sync_stats(round(latency_ms, 2))
         publish_heartbeat(redis_client, stats)
         _propagate_schema_revision(redis_client, schema_state)
         return stats
-    for snapshot, payload, condition in proof_jobs:
-        if maybe_generate_settlement_proof(
-            redis_client,
-            market_snapshot=snapshot,
-            market_payload=payload,
-            condition_id=condition,
-        ):
-            proofs_generated += 1
 
-    stats = {
-        "markets_processed": len(markets),
-        "markets_changed": len(changed_events),
-        "resolutions_changed": len(changed_conditions),
-        "categories_changed": len(changed_categories),
-        "tags_changed": len(changed_tags),
-        "latency_ms": round(latency_ms, 2),
-        "markets_created": markets_created,
-        "markets_updated": markets_updated,
-        "markets_deleted": markets_deleted,
-        "summaries_enqueued": summaries_enqueued,
-        "proofs_generated": proofs_generated,
-    }
+    summary.proofs_generated = _run_prover_jobs(summary, redis_client)
+    cache_report = _invalidate_cache_tags(redis_client, summary)
+    stats = summary.to_stats(len(markets), latency_ms, cache_report.total)
+
     log_event(
         logger,
         logging.INFO,
         event="worker.sync.summary",
         message="completed market sync",
         markets_processed=len(markets),
-        markets_created=markets_created,
-        markets_updated=markets_updated,
-        markets_deleted=markets_deleted,
-        resolutions_changed=len(changed_conditions),
-        categories_changed=len(changed_categories),
-        tags_changed=len(changed_tags),
-        summaries_enqueued=summaries_enqueued,
-        proofs_generated=proofs_generated,
+        markets_created=summary.markets_created,
+        markets_updated=summary.markets_updated,
+        markets_deleted=summary.markets_deleted,
+        resolutions_changed=len(summary.changed_conditions),
+        categories_changed=len(summary.changed_categories),
+        tags_changed=len(summary.changed_tags),
+        summaries_enqueued=summary.summaries_enqueued,
+        proofs_generated=summary.proofs_generated,
         latency_ms=round(latency_ms, 2),
+        cache_invalidations=cache_report.total,
     )
+
     publish_heartbeat(redis_client, stats)
     _propagate_schema_revision(redis_client, schema_state)
-    if redis_client is not None and resolution_cache_updates:
-        for condition_id, payload in resolution_cache_updates:
-            shared_cache.set_json(
-                redis_client,
-                resolution_cache_key(condition_id),
-                payload,
-                settings.markets_cache_ttl_seconds,
-            )
-    if redis_client is not None:
-        for event_id in changed_events:
-            shared_cache.invalidate_tag(redis_client, f"market:{event_id}")
-        if stats_dirty and changed_events:
-            shared_cache.invalidate_tag(redis_client, "markets:stats")
-        for condition_id in changed_conditions:
-            shared_cache.invalidate_tag(redis_client, f"resolution:{condition_id}")
-        if changed_events:
-            shared_cache.invalidate_tag(redis_client, "markets:suggest")
-        for category_slug in changed_categories:
-            shared_cache.invalidate_tag(redis_client, f"category:{category_slug}")
-        for tag_slug in changed_tags:
-            shared_cache.invalidate_tag(redis_client, f"tag:{tag_slug}")
-        if changed_events or changed_categories:
-            shared_cache.invalidate_tag(redis_client, "category:trending")
-        if changed_categories:
-            CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(changed_categories))
-        if changed_tags:
-            CACHE_INVALIDATION_COUNTER.labels(type="tag").inc(len(changed_tags))
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.cache.invalidate",
-        message="invalidated markets cache",
-        markets_processed=len(markets),
-        markets_changed=len(changed_events),
-        resolutions_changed=len(changed_conditions),
-        categories_changed=len(changed_categories),
-        tags_changed=len(changed_tags),
-        duration_ms=round(latency_ms, 2),
-    )
+    _persist_resolution_cache_updates(redis_client, summary)
     return stats
 
 

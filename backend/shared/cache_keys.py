@@ -62,3 +62,4 @@ def _slugify(value: str | None) -> str:
         return "*"
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "*"
+

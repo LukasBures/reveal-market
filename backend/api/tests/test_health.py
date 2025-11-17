@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta, timezone
+
 import httpx
 
 
@@ -95,3 +98,96 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
     components = payload["components"]
     assert components["polymarket_api"]["status"] == "degraded"
     assert "timeout" in components["polymarket_api"]["detail"].lower()
+
+
+def test_heartbeat_dashboard_reports_components(client):
+    cache = getattr(client.app, "cache_client")
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    cache.set(
+        "reveal_market_worker:heartbeat",
+        json.dumps(
+            {
+                "service": "Reveal Market Worker",
+                "component": "worker",
+                "timestamp": now_iso,
+                "markets_processed": 7,
+                "markets_changed": 2,
+                "resolutions_changed": 1,
+                "latency_ms": 42.5,
+            }
+        ),
+    )
+    cache.set(
+        "reveal_market_api:heartbeat",
+        json.dumps(
+            {
+                "service": "Reveal Market API",
+                "component": "api",
+                "timestamp": now_iso,
+                "metrics": {"total_requests": 15, "avg_latency_ms": 23.4},
+            }
+        ),
+    )
+
+    response = client.get("/health/heartbeats")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker"]["service"] == "Reveal Market Worker"
+    assert payload["worker"]["metrics"]["markets_processed"] == 7
+    assert payload["api"]["metrics"]["total_requests"] == 15
+
+
+def test_heartbeat_dashboard_handles_missing_payload(client):
+    cache = getattr(client.app, "cache_client")
+    cache.delete("reveal_market_worker:heartbeat")
+    cache.delete("reveal_market_api:heartbeat")
+
+    response = client.get("/health/heartbeats")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker"] is None
+    assert payload["api"] is None
+
+
+def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
+    monkeypatch.setattr("app.main.settings.worker_heartbeat_stale_seconds", 1, raising=False)
+    cache = getattr(client.app, "cache_client")
+    old = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
+    cache.set(
+        "reveal_market_worker:heartbeat",
+        json.dumps(
+            {
+                "service": "Reveal Market Worker",
+                "component": "worker",
+                "timestamp": old.isoformat(),
+                "markets_processed": 1,
+            }
+        ),
+    )
+
+    response = client.get("/health/heartbeats")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker"]["status"] == "degraded"
+
+
+def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
+    monkeypatch.setattr("app.main.settings.api_heartbeat_ttl_seconds", 5, raising=False)
+    cache = getattr(client.app, "cache_client")
+    old = datetime.now(tz=timezone.utc) - timedelta(minutes=10)
+    cache.set(
+        "reveal_market_api:heartbeat",
+        json.dumps(
+            {
+                "service": "Reveal Market API",
+                "component": "api",
+                "timestamp": old.isoformat(),
+                "metrics": {"total_requests": 5},
+            }
+        ),
+    )
+
+    response = client.get("/health/heartbeats")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["api"]["status"] == "degraded"
