@@ -19,4 +19,3 @@ def test_suggest_cache_key_handles_whitespace():
 def test_resolution_cache_key_lowercases_condition():
     key = cache_keys.resolution_cache_key("0xABCDEF")
     assert key == "markets:resolution:0xabcdef"
-

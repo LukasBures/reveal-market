@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 
 

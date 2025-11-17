@@ -89,7 +89,7 @@ logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
 PROVER_CLIENT: ProverClient | None = None
- 
+
 
 _schema_checked = False
 

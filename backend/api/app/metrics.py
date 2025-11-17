@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import time
 from threading import Lock
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 _LATENCY_BUCKETS = (
     (50.0, "<50ms"),
@@ -42,7 +41,7 @@ class RequestMetrics:
         self._max_latency_ms = 0.0
         self._bytes_sent_total = 0
         self._slow_requests = 0
-        self._latency_buckets: Dict[str, int] = {label: 0 for _, label in _LATENCY_BUCKETS}
+        self._latency_buckets: dict[str, int] = {label: 0 for _, label in _LATENCY_BUCKETS}
         self._latency_buckets[">=1000ms"] = 0
 
     def record(
@@ -51,7 +50,7 @@ class RequestMetrics:
         status_code: int,
         duration_ms: float,
         bytes_sent: int,
-        cache_hit: Optional[bool],
+        cache_hit: bool | None,
     ) -> None:
         with self._lock:
             self._total_requests += 1
@@ -74,7 +73,7 @@ class RequestMetrics:
             bucket_label = classify_latency_bucket(duration_ms)
             self._latency_buckets[bucket_label] = self._latency_buckets.get(bucket_label, 0) + 1
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
             now = time.time()
             uptime = now - self._window_started
@@ -95,9 +94,7 @@ class RequestMetrics:
             if self._total_requests > 0:
                 snapshot["avg_latency_ms"] = self._total_latency_ms / self._total_requests
                 known_cache = self._cache_hits + self._cache_misses
-                snapshot["cache_hit_rate"] = (
-                    self._cache_hits / known_cache if known_cache > 0 else None
-                )
+                snapshot["cache_hit_rate"] = self._cache_hits / known_cache if known_cache > 0 else None
             else:
                 snapshot["avg_latency_ms"] = None
                 snapshot["cache_hit_rate"] = None

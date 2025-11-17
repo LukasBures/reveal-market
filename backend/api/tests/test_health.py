@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -101,8 +101,8 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
 
 
 def test_heartbeat_dashboard_reports_components(client):
-    cache = getattr(client.app, "cache_client")
-    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    cache = client.app.cache_client
+    now_iso = datetime.now(tz=UTC).isoformat()
     cache.set(
         "reveal_market_worker:heartbeat",
         json.dumps(
@@ -138,7 +138,7 @@ def test_heartbeat_dashboard_reports_components(client):
 
 
 def test_heartbeat_dashboard_handles_missing_payload(client):
-    cache = getattr(client.app, "cache_client")
+    cache = client.app.cache_client
     cache.delete("reveal_market_worker:heartbeat")
     cache.delete("reveal_market_api:heartbeat")
 
@@ -151,8 +151,8 @@ def test_heartbeat_dashboard_handles_missing_payload(client):
 
 def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
     monkeypatch.setattr("app.main.settings.worker_heartbeat_stale_seconds", 1, raising=False)
-    cache = getattr(client.app, "cache_client")
-    old = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
+    cache = client.app.cache_client
+    old = datetime.now(tz=UTC) - timedelta(minutes=5)
     cache.set(
         "reveal_market_worker:heartbeat",
         json.dumps(
@@ -173,8 +173,8 @@ def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
 
 def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
     monkeypatch.setattr("app.main.settings.api_heartbeat_ttl_seconds", 5, raising=False)
-    cache = getattr(client.app, "cache_client")
-    old = datetime.now(tz=timezone.utc) - timedelta(minutes=10)
+    cache = client.app.cache_client
+    old = datetime.now(tz=UTC) - timedelta(minutes=10)
     cache.set(
         "reveal_market_api:heartbeat",
         json.dumps(
