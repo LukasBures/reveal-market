@@ -9,7 +9,7 @@ const DocsNavPanel = dynamic(
     })),
   {
     loading: () => (
-      <aside className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm">
+      <aside className="sticky top-4 self-start rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm">
         <p className="mb-3 text-xs uppercase tracking-[0.3em] text-slate-500">Documentation</p>
         <div className="space-y-3">
           {[...Array(4)].map((_, index) => (
@@ -38,7 +38,7 @@ export default function DocsLayout({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-12 lg:flex-row">
+    <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[minmax(240px,0.4fr)_minmax(320px,0.6fr)]">
       <DocsNavPanel />
       <article className="flex-1 space-y-6 rounded-2xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
         <div>{children}</div>

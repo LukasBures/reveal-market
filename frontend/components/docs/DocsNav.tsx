@@ -57,7 +57,7 @@ export function DocsNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm">
+    <aside className="sticky top-4 self-start rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm">
       <p className="mb-3 text-xs uppercase tracking-[0.3em] text-slate-500">
         Documentation
       </p>

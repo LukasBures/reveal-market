@@ -2,16 +2,10 @@
 <svg id="Vrstva_2" data-name="Vrstva 2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 96.02 173.03">
   <defs>
     <style>
-      .cls-1 {
-        fill: url(#Nepojmenovaný_přechod_2-2);
-      }
-
-      .cls-1, .cls-2 {
-        fill-rule: evenodd;
-      }
-
+      .cls-1,
       .cls-2 {
-        fill: url(#Nepojmenovaný_přechod_2);
+        fill: #fff;
+        fill-rule: evenodd;
       }
     </style>
     <linearGradient id="Nepojmenovaný_přechod_2" data-name="Nepojmenovaný přechod 2" x1="96.83" y1="46.56" x2="4.42" y2="46.56" gradientUnits="userSpaceOnUse">

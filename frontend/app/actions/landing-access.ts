@@ -1,8 +1,6 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-
 import {
   LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,
   LANDING_ACCESS_COOKIE_NAME,
@@ -10,6 +8,7 @@ import {
 
 type LandingAccessFormState = {
   error?: string;
+  success?: boolean;
 };
 
 const resolveAccessCode = () => process.env.LANDING_ACCESS_CODE?.trim() ?? "";
@@ -46,7 +45,7 @@ export async function requestLandingAccessAction(
     maxAge: LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,
   });
 
-  redirect("/");
+  return { success: true };
 }
 
 export type { LandingAccessFormState };

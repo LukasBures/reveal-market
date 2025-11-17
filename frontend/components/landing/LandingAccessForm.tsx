@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 
 import {
   requestLandingAccessAction,
@@ -13,6 +14,13 @@ const INITIAL_STATE: LandingAccessFormState = {};
 export function LandingAccessForm() {
   const [formVisible, setFormVisible] = useState(false);
   const [state, formAction] = useFormState(requestLandingAccessAction, INITIAL_STATE);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state?.success) {
+      router.refresh();
+    }
+  }, [state?.success, router]);
 
   return (
     <div className="flex w-full flex-col items-center gap-4 text-center">
@@ -44,6 +52,10 @@ export function LandingAccessForm() {
           {state?.error ? (
             <p className="text-sm text-rose-400" role="alert">
               {state.error}
+            </p>
+          ) : state?.success ? (
+            <p className="text-sm text-emerald-300" role="status">
+              Access granted. Loading the app…
             </p>
           ) : null}
           <SubmitButton />
