@@ -130,6 +130,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
+        <link rel="icon" type="image/png" href="/icon/favicon-96x96.png" sizes="96x96" />
+        <link rel="icon" type="image/svg+xml" href="/icon/favicon.svg" />
+        <link rel="shortcut icon" href="/icon/favicon.ico" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icon/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-title" content="Reveal Market" />
+        <link rel="manifest" href="/icon/site.webmanifest" />
       </head>
       <body className="text-white antialiased">
         <AppProviders>

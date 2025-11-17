@@ -101,6 +101,8 @@ fabric.properties
 [Ll]ib64
 [Ll]ocal
 [Ss]cripts
+!frontend/scripts/
+!frontend/scripts/**
 pyvenv.cfg
 .venv
 pip-selfcheck.json
