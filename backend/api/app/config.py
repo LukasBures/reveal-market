@@ -65,6 +65,9 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
     )
+    goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
+    goldsky_api_key: SecretStr | None = Field(default=None)
+    goldsky_timeout_seconds: float = Field(default=5.0, gt=0)
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)

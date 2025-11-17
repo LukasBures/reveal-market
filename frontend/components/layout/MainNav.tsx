@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 
 export function MainNav() {
   return (
@@ -16,12 +17,7 @@ export function MainNav() {
           >
             Docs
           </Link>
-          <Link
-            href="/login"
-            className="rounded-full bg-brand-500 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg shadow-brand-500/40 transition hover:bg-brand-400 sm:px-4 sm:py-1"
-          >
-            Log In
-          </Link>
+          <ConnectWalletButton />
         </nav>
       </div>
     </header>

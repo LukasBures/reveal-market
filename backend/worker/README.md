@@ -9,7 +9,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Domain | Duties |
 | --- | --- |
 | Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. |
-| Resolution tracking | Read Conditional Tokens contract, persist payout vectors in Postgres + Redis, and update market status (`settled`). |
+| Resolution tracking | Prefer Goldsky subgraph data (fallback to Conditional Tokens RPC) to persist payout vectors in Postgres + Redis and update market status (`settled`). |
 | Cache governance | Invalidate per-market tags, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/tags/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, and Prometheus counters (`worker.*`). |
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
@@ -130,6 +130,14 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_SUMMARY_QUEUE_POLL_SECONDS` | Blocking pop timeout for `app.summary_worker`. |
 | `RM_SUMMARY_RETRY_MAX_ATTEMPTS` / `RM_SUMMARY_RETRY_BACKOFF_SECONDS` | Requeue/backoff behaviour before DLQing a job. |
 | `RM_SUMMARY_FALLBACK_ENABLED` | Allow deterministic fallback summaries when the provider is unavailable. |
+
+### Goldsky subgraph
+
+| Variable | Description |
+| --- | --- |
+| `RM_GOLDSKY_SUBGRAPH_URL` | Goldsky GraphQL endpoint that indexes Horizen Conditional Tokens events. |
+| `RM_GOLDSKY_API_KEY` | API key required for private Goldsky projects (leave blank for public endpoints). |
+| `RM_GOLDSKY_TIMEOUT_SECONDS` | HTTP timeout for Goldsky GraphQL requests. |
 
 ### Prover integration
 

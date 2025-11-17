@@ -25,6 +25,12 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional auto-creation of on-chain markets is gated behind explicit configuration plus secure key storage.
 - **Perimeter controls baked in** – Trusted-host filters, configurable CORS allowlists, and CSP/HSTS/COOP headers ship with the API. Docker health checks call native Python probes rather than brittle shell scripts.
 
+## Horizen Indexing via Goldsky
+
+Horizen events (MarketFactory deployments, Conditional Tokens resolutions, rake changes) can now be sourced from Goldsky-managed subgraphs. Provide `RM_GOLDSKY_SUBGRAPH_URL` + `RM_GOLDSKY_API_KEY` and the worker will prefer GraphQL lookups for payout vectors before falling back to direct RPC calls. This gives ops teams fast, filterable history without running dedicated indexers, and it unlocks the roadmap items around persistent resolution ledgers, Horizen ZEN testnet monitoring, and investor-friendly audit exports.
+
+When Goldsky isn’t configured the previous RPC path remains intact, so staging environments can toggle the feature independently.
+
 ## Upcoming Enhancements
 
 The roadmap prioritizes capabilities that increase investor trust:

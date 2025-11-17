@@ -24,6 +24,7 @@ from shared.cache_keys import (
     resolution_cache_key,
     suggest_cache_key,
 )
+from shared.indexers import GoldskyClient
 from shared.logging import log_event, start_heartbeat_logger
 from shared.migrations import get_current_revision
 from shared.migrations import run_migrations as apply_migrations
@@ -279,7 +280,80 @@ def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
     return client
 
 
+def _build_goldsky_client() -> GoldskyClient | None:
+    endpoint = settings.goldsky_subgraph_url
+    if not endpoint:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.goldsky.disabled",
+            message="goldsky subgraph client disabled (missing endpoint)",
+        )
+        return None
+    api_key = settings.goldsky_api_key.get_secret_value() if settings.goldsky_api_key else None
+    try:
+        client = GoldskyClient(
+            str(endpoint),
+            api_key=api_key,
+            timeout_seconds=settings.goldsky_timeout_seconds,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.goldsky.error",
+            message="failed to initialise goldsky client",
+            error=str(exc),
+        )
+        return None
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.goldsky.enabled",
+        message="goldsky subgraph client initialised",
+    )
+    return client
+
+
 conditional_tokens_client = _build_conditional_tokens_client()
+goldsky_client = _build_goldsky_client()
+
+
+def _fetch_resolution_snapshot(
+    condition_id: str,
+    market: MarketPayload,
+    outcome_count_hint: int | None,
+) -> dict[str, Any] | None:
+    """Return the best-effort resolution summary from Goldsky or fallback RPC."""
+    outcomes = market.outcomes or []
+    if goldsky_client is not None:
+        try:
+            summary = goldsky_client.resolution_summary(condition_id, outcomes, outcome_count_hint)
+            if summary:
+                return summary
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.goldsky_failed",
+                message="failed to load resolution from goldsky",
+                condition_id=condition_id,
+                error=str(exc),
+            )
+    if conditional_tokens_client is None:
+        return None
+    try:
+        return conditional_tokens_client.resolution_summary(condition_id, outcomes, outcome_count_hint)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.resolution.fetch_failed",
+            message="failed to read conditional tokens resolution",
+            condition_id=condition_id,
+            error=str(exc),
+        )
+        return None
 
 
 def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
@@ -367,9 +441,10 @@ def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) ->
 
 
 def _apply_resolution(session: Session, db_market, market: MarketPayload) -> ResolutionOutcome:  # noqa: C901
-    client = conditional_tokens_client
     condition_id = market.condition_id
-    if client is None or not isinstance(condition_id, str) or not condition_id.startswith("0x"):
+    if (goldsky_client is None and conditional_tokens_client is None) or not isinstance(condition_id, str) or not condition_id.startswith(
+        "0x"
+    ):
         return ResolutionOutcome()
 
     normalized_condition_id = condition_id.lower()
@@ -389,17 +464,8 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     if not refresh_due:
         return ResolutionOutcome()
 
-    try:
-        summary = client.resolution_summary(normalized_condition_id, market.outcomes or [], outcome_count_hint)
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.resolution.fetch_failed",
-            message="failed to read conditional tokens resolution",
-            condition_id=normalized_condition_id,
-            error=str(exc),
-        )
+    summary = _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
+    if summary is None:
         return ResolutionOutcome()
 
     checked_at = summary.get("checkedAt")

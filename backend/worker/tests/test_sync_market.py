@@ -96,6 +96,7 @@ def test_sync_market_persists_resolution(monkeypatch):
             }
 
     try:
+        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
         monkeypatch.setattr("app.main.conditional_tokens_client", DummyClient(), raising=False)
 
         payload = MarketPayload(
@@ -126,6 +127,61 @@ def test_sync_market_persists_resolution(monkeypatch):
     finally:
         engine.dispose()
         monkeypatch.setattr("app.main.conditional_tokens_client", None, raising=False)
+        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
+
+
+def test_sync_market_uses_goldsky_when_available(monkeypatch):
+    engine, session_factory = create_in_memory_db()
+
+    class DummyGoldsky:
+        def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
+            return {
+                "source": "goldsky_subgraph",
+                "conditionId": condition_id_hex,
+                "resolved": True,
+                "outcomes": outcomes,
+                "payouts": [1, 0],
+                "winners": [{"index": 0, "label": outcomes[0] if outcomes else None, "payout": 1}],
+                "checkedAt": datetime.now(UTC),
+                "oracle": "0xoracle",
+                "questionId": "0x" + "4" * 64,
+                "transactionHash": "0x" + "5" * 64,
+                "blockNumber": 777,
+                "blockTimestamp": datetime.now(UTC),
+            }
+
+    try:
+        monkeypatch.setattr("app.main.goldsky_client", DummyGoldsky(), raising=False)
+        monkeypatch.setattr("app.main.conditional_tokens_client", None, raising=False)
+
+        payload = MarketPayload(
+            event_id="evt-goldsky",
+            title="Goldsky Market",
+            slug="goldsky-market",
+            category="crypto",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.6, 0.4],
+            extra_data={"gamma": {"id": "evt-goldsky"}},
+            condition_id="0x" + "6" * 64,
+        )
+
+        with session_factory() as session:
+            _, outcome = sync_market(session, payload)
+            assert outcome.resolution_changed is True
+            session.commit()
+
+        with session_factory() as session:
+            record = session.execute(
+                select(Resolution).where(Resolution.condition_id == payload.condition_id.lower())
+            ).scalar_one()
+            assert record.source == "goldsky_subgraph"
+            assert record.block_number == 777
+    finally:
+        engine.dispose()
+        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
 
 
 def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
