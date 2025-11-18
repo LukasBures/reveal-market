@@ -44,6 +44,9 @@ const WALLET_PROVIDER_ORIGINS = [
 ];
 const WALLET_PROVIDER_WS = [
   "wss://relay.walletconnect.com",
+  "wss://relay.walletconnect.org",
+  "wss://*.walletconnect.com",
+  "wss://*.walletconnect.org",
   "wss://metamask-sdk.api.cx.metamask.io",
 ];
 

@@ -122,24 +122,6 @@ export function ConnectWalletButton() {
   }, [isModalOpen]);
 
   useEffect(() => {
-    if (connectError) {
-      console.error("Wallet connect error:", connectError);
-    }
-  }, [connectError]);
-
-  useEffect(() => {
-    if (signError) {
-      console.error("Sign message error:", signError);
-    }
-  }, [signError]);
-
-  useEffect(() => {
-    if (switchError) {
-      console.error("Switch chain error:", switchError);
-    }
-  }, [switchError]);
-
-  useEffect(() => {
     setIsMounted(true);
   }, []);
 
