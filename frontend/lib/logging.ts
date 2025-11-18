@@ -13,6 +13,8 @@ const envLevel =
   "info";
 
 const activeLevel: LogLevel = ORDER[envLevel] ? envLevel : "info";
+const browserLoggingEnabled = process.env.NEXT_PUBLIC_ENABLE_BROWSER_LOGS === "true";
+const isBrowser = typeof window !== "undefined";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
@@ -68,27 +70,31 @@ const formatLine = (level: LogLevel, message: string, meta?: Record<string, unkn
 
 const baseLogger = {
   debug(message: string, meta?: Record<string, unknown>) {
-    if (ORDER[activeLevel] <= ORDER.debug) {
+    if (ORDER[activeLevel] <= ORDER.debug && (!isBrowser || browserLoggingEnabled)) {
       console.debug(formatLine("debug", message, meta));
     }
   },
   info(message: string, meta?: Record<string, unknown>) {
-    if (ORDER[activeLevel] <= ORDER.info) {
+    if (ORDER[activeLevel] <= ORDER.info && (!isBrowser || browserLoggingEnabled)) {
       console.info(formatLine("info", message, meta));
     }
   },
   warn(message: string, meta?: Record<string, unknown>) {
-    console.warn(formatLine("warn", message, meta));
+    if (!isBrowser || browserLoggingEnabled) {
+      console.warn(formatLine("warn", message, meta));
+    }
   },
   error(message: string, meta?: Record<string, unknown>) {
-    console.error(formatLine("error", message, meta));
+    if (!isBrowser || browserLoggingEnabled) {
+      console.error(formatLine("error", message, meta));
+    }
   },
 };
 
 let heartbeatStarted = false;
 
 export function ensureHeartbeat(intervalMs = HEARTBEAT_INTERVAL_MS) {
-  if (heartbeatStarted || typeof globalThis === "undefined") {
+  if (heartbeatStarted || typeof globalThis === "undefined" || isBrowser) {
     return;
   }
   heartbeatStarted = true;
