@@ -38,7 +38,7 @@ export default function DocsLayout({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[minmax(240px,0.4fr)_minmax(320px,0.6fr)]">
+    <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 lg:grid-cols-[minmax(240px,0.4fr)_minmax(320px,0.6fr)]">
       <DocsNavPanel />
       <article className="flex-1 space-y-6 rounded-2xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
         <div>{children}</div>

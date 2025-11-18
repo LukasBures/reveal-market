@@ -49,7 +49,7 @@ export function LandingGate() {
   return (
     <div className="landing-noise relative flex min-h-screen flex-col overflow-hidden bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(124,132,255,0.15),transparent_55%),radial-gradient(circle_at_80%_0%,rgba(123,240,94,0.15),transparent_45%)] opacity-70" />
-      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col gap-12 px-6 py-16">
+      <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-1 flex-col gap-12 px-6 py-16">
         <div className="grid gap-8 rounded-[36px] border border-white/10 bg-slate-950/80 p-8 shadow-[0_40px_120px_-60px_rgba(8,47,73,0.8)] lg:grid-cols-[1.1fr_0.9fr]">
           <div className="flex flex-col gap-6 text-center lg:text-left">
             <div className="inline-flex items-center justify-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.55em] text-slate-300 lg:justify-start">

@@ -21,12 +21,13 @@ const baseMarket = {
 };
 
 describe("MarketCard", () => {
-  it("renders headline stats and CTA link", () => {
+  it("renders headline stats, CTA link, and outcome probabilities", () => {
     render(<MarketCard market={{ ...baseMarket, imageUrl: "https://cdn.example/cover.jpg" }} />);
 
     expect(screen.getByRole("link", { name: /card coverage/i })).toHaveAttribute("href", "/markets/evt-card");
     expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.example/cover.jpg");
-    expect(screen.getAllByText("72%").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("72%")).toHaveLength(2);
+    expect(screen.getByText("20%")).toBeInTheDocument();
   });
 
   it("falls back to placeholder when no image exists", () => {

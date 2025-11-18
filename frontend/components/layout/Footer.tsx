@@ -11,7 +11,7 @@ const footerLinks = [
 export function Footer() {
   return (
     <footer className="border-t border-white/10 bg-black/50 backdrop-blur-2xl">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
+      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Link href="/" className="inline-flex items-center gap-3 text-white">
             <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market logo" width={240} height={64} priority />

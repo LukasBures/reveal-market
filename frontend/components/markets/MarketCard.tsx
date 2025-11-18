@@ -7,21 +7,6 @@ type Props = {
   market: MarketSummary;
 };
 
-const currencyFormatter = Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-
-function formatProbability(values?: number[]): string {
-  if (!values || values.length === 0) return "—";
-  const [yes] = values;
-  return `${Math.round((yes ?? 0) * 100)}%`;
-}
-
-function formatLiquidity(value?: number | null): string {
-  if (!value || Number.isNaN(value)) {
-    return "—";
-  }
-  return currencyFormatter.format(value);
-}
-
 const FALLBACK_COLORS: Record<string, string> = {
   politics: "#1d2c9f",
   sports: "#0c1346",
@@ -40,7 +25,7 @@ const buildPlaceholderDataUrl = (label: string) => {
 };
 
 export function MarketCard({ market }: Props) {
-  const yesProbability = formatProbability(market.outcomePrices);
+  const yesProbability = market.outcomePrices?.length ? Math.round((market.outcomePrices[0] ?? 0) * 100) : null;
   const outcomes = market.outcomes ?? [];
   const categoryLabel = market.category ?? "General";
   const extraImage =
@@ -61,16 +46,16 @@ export function MarketCard({ market }: Props) {
     >
       <div className="pointer-events-none absolute -top-12 right-0 h-40 w-40 rounded-full bg-gradient-to-b from-white/10 to-transparent opacity-80 blur-3xl transition duration-200 group-hover:opacity-100" />
       <div className="pointer-events-none absolute inset-0 border border-white/5 opacity-0 transition duration-200 group-hover:opacity-70" />
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-4">
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
-          <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">{market.title}</h3>
+          <h3 className="mt-1 text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
         </div>
       </div>
       <div className="relative flex items-center justify-between rounded-xl border border-white/5 bg-slate-950/60 px-3 py-2 text-sm backdrop-blur">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>
-          <p className="text-2xl font-semibold text-white">{yesProbability}</p>
+          <p className="text-2xl font-semibold text-white">{yesProbability !== null ? `${yesProbability}%` : "—"}</p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
           <Image src="/brand/reveal-wolf-01.png" alt="" width={18} height={18} className="h-4 w-4 rounded-full object-cover" />
@@ -79,18 +64,29 @@ export function MarketCard({ market }: Props) {
       </div>
       {outcomes.length > 0 && (
         <div className="mt-1 space-y-1 text-xs text-slate-300">
-          {outcomes.slice(0, 2).map((outcome, idx) => (
-            <div key={outcome} className="flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5">
-              <span className="truncate">{outcome}</span>
-              <span className="font-semibold text-white">
-                {market.outcomePrices?.[idx]
-                  ? `${Math.round((market.outcomePrices[idx] ?? 0) * 100)}%`
-                  : idx === 0
-                    ? yesProbability
-                    : "—"}
-              </span>
-            </div>
-          ))}
+          {outcomes.slice(0, 2).map((outcome, idx) => {
+            const probability =
+              market.outcomePrices?.[idx] !== undefined
+                ? `${Math.round((market.outcomePrices[idx] ?? 0) * 100)}%`
+                : idx === 0 && yesProbability !== null
+                  ? `${yesProbability}%`
+                  : "—";
+            const hoverColor =
+              idx === 0
+                ? "transition hover:text-emerald-300"
+                : idx === 1
+                  ? "transition hover:text-rose-300"
+                  : "transition hover:text-white";
+            return (
+              <div
+                key={outcome}
+                className={`flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 ${hoverColor}`}
+              >
+                <span className="truncate">{outcome}</span>
+                <span className="font-semibold text-white">{probability}</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </Link>

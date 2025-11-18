@@ -24,17 +24,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
 calc_pytest_workers() {
-  local cpus=1
-  if command -v nproc >/dev/null 2>&1; then
-    cpus="$(nproc 2>/dev/null || echo 1)"
-  elif [[ "$(uname -s)" == "Darwin" ]]; then
-    cpus="$(/usr/sbin/sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+  local override="${PYTEST_WORKER_COUNT:-}"
+  if [[ -n "${override}" ]]; then
+    echo "${override}"
+    return
   fi
-  if [[ -z "${cpus}" || "${cpus}" -le 1 ]]; then
-    echo 1
-  else
-    echo $((cpus - 1))
-  fi
+  echo 4
 }
 
 run_py_tests() {
@@ -64,6 +59,33 @@ run_py_tests() {
 }
 
 run_py_tests "${REPO_ROOT}/backend/api"
+
+run_shared_tests() {
+  local shared_tests_path="backend/shared/tests"
+  local api_env="${REPO_ROOT}/backend/api/.venv"
+  local python_bin="${api_env}/bin/python"
+  if [[ ! -x "${python_bin}" ]]; then
+    log_error "Shared tests rely on the API virtualenv at ${api_env}. Run 'uv sync --project backend/api --extra dev --no-install-project' first."
+    exit 1
+  fi
+  log_step "Running pytest for shared modules"
+  (
+    export VIRTUAL_ENV="${api_env}"
+    PATH="${api_env}/bin:${PATH}"
+    local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
+    local -a pytest_args=()
+    if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
+      pytest_args+=("-n" "${workers}")
+    fi
+    pushd "${REPO_ROOT}" >/dev/null
+    printf '[%s] pytest shared (workers=%s)\n' "$(timestamp)" "${pytest_args[*]:-1}"
+    "${python_bin}" -m pytest "${pytest_args[@]}" "${shared_tests_path}"
+    popd >/dev/null
+  )
+}
+
+run_shared_tests
+
 run_py_tests "${REPO_ROOT}/backend/worker"
 
 log_step "Backend tests completed successfully"

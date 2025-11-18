@@ -29,7 +29,7 @@ export function Hero({ stats }: HeroProps) {
   return (
     <section className="relative overflow-hidden px-4 pb-16 pt-20">
       <div className="pointer-events-none absolute inset-x-0 -top-32 h-96 bg-[radial-gradient(circle_at_50%_-10%,rgba(124,132,255,0.18),transparent_60%)] blur-[140px]" />
-      <div className="relative mx-auto grid max-w-6xl gap-10 rounded-[40px] border border-white/10 bg-black/30 p-8 shadow-[0_40px_120px_-60px_rgba(14,21,56,0.9)] lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="relative mx-auto grid max-w-7xl gap-10 rounded-[40px] border border-white/10 bg-black/30 p-8 shadow-[0_40px_120px_-60px_rgba(14,21,56,0.9)] lg:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-8">
           <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.4em] text-white/80">
             <Image src="/brand/reveal-mark.svg" alt="Reveal Market sigil" width={22} height={32} className="opacity-90" />

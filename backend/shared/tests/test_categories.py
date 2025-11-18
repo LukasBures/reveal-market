@@ -15,5 +15,8 @@ def test_canonical_category_from_raw_matches_keywords():
 
 
 def test_canonical_category_from_raw_uses_tags():
-    tagged = canonical_category_from_raw(None, tags=["Macro", "Crypto"])
-    assert tagged == ("crypto", "Crypto")
+    tagged = canonical_category_from_raw("macro outlook", tags=["Macro"])
+    assert tagged == ("finance", "Finance")
+
+    crypto = canonical_category_from_raw(None, tags=["Macro", "Crypto", "Sports"])
+    assert crypto == ("crypto", "Crypto")

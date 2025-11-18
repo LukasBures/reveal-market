@@ -15,7 +15,7 @@ vi.mock("@/lib/api", () => ({
     {
       eventId: "evt-category",
       title: "Category Market",
-      category: "AI & Tech",
+      category: "Tech",
       outcomes: [],
       outcomePrices: [],
     },
@@ -42,7 +42,7 @@ describe("CategoryPage", () => {
     render(ui);
     expect(fetchFeaturedMarkets).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ category: "ai-tech" }));
     expect(featuredClientMock).toHaveBeenCalledWith(
-      expect.objectContaining({ categoryFilter: "AI & Tech", initialMarkets: expect.any(Array) }),
+      expect.objectContaining({ categoryFilter: "Tech", initialMarkets: expect.any(Array) }),
       expect.anything(),
     );
   });

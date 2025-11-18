@@ -217,7 +217,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10">
+        <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
           <MarketDetailHeader market={market} />
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">

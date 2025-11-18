@@ -16,7 +16,7 @@ const categories = [
   "Finance",
   "Crypto",
   "Geopolitics",
-  "AI & Tech",
+  "Tech",
 ];
 
 type Props = {

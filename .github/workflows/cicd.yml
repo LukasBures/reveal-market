@@ -40,6 +40,9 @@ jobs:
       - name: Run backend tests
         run: ./backend/run_tests.sh
 
+      - name: Run shared backend tests
+        run: uv run --project backend/api -- python -m pytest backend/shared/tests
+
 
   contracts:
     runs-on: ubuntu-latest

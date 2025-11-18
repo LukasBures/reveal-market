@@ -37,7 +37,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   }
   const label = parsed!.label;
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-12 text-white md:gap-10">
+    <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-12 text-white md:gap-10">
       <section className="glass-panel relative overflow-hidden px-4 py-8 sm:px-6 md:px-10">
         <div className="pointer-events-none absolute -right-10 top-0 h-48 w-48 rounded-full bg-brand-400/20 blur-3xl" />
         <p className="text-center text-xs uppercase tracking-[0.35em] text-slate-400 md:text-left">Category</p>

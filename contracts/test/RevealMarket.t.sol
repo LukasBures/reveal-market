@@ -647,6 +647,16 @@ contract RevealMarketTest is Test {
         market.setClaimPaused(false);
     }
 
+    function testSetGuardianRequiresControllerAndNonZero() public {
+        vm.expectRevert(RevealMarket.NotAuthorized.selector);
+        vm.prank(WINNER);
+        market.setGuardian(WINNER);
+
+        vm.expectRevert(RevealMarket.InvalidGuardian.selector);
+        market.setGuardian(address(0));
+        assertEq(market.guardian(), address(this));
+    }
+
     function testUnauthorizedGuardianActionsRevert() public {
         vm.expectRevert(RevealMarket.NotAuthorized.selector);
         vm.prank(WINNER);

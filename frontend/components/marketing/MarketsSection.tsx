@@ -5,7 +5,7 @@ export async function MarketsSection() {
   const markets = await fetchFeaturedMarkets(6);
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-10">
+    <section className="mx-auto max-w-7xl px-4 py-10">
       <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm uppercase tracking-[0.3em] text-slate-400">

@@ -49,7 +49,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   return (
     <div className="relative text-white">
       <Hero stats={callouts} />
-      <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 pb-12">
+      <div className="mx-auto flex max-w-7xl flex-col gap-10 px-4 pb-12">
         <section className="glass-panel p-4 sm:p-6">
           <MarketFilters
             initialSearch={rawSearchQuery}
