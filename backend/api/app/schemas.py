@@ -58,6 +58,16 @@ class MarketBase(BaseModel):
     image_url: str | None = None
     closed: bool | None = None
     uma_resolution_status: str | None = None
+    closes_at: datetime | None = None
+    starts_at: datetime | None = None
+    orders_opened_at: datetime | None = None
+    resolution_source: str | None = None
+    market_maker: str | None = None
+    order_min_size: float | None = None
+    price_tick_size: float | None = None
+    enable_order_book: bool | None = None
+    clob_token_ids: list[str] | None = None
+    image_variants: list[str] | None = None
     summary: str | None = None
     summary_source: str | None = None
     summary_model: str | None = None
@@ -85,6 +95,16 @@ class MarketUpdate(BaseModel):
     image_url: str | None = None
     closed: bool | None = None
     uma_resolution_status: str | None = None
+    closes_at: datetime | None = None
+    starts_at: datetime | None = None
+    orders_opened_at: datetime | None = None
+    resolution_source: str | None = None
+    market_maker: str | None = None
+    order_min_size: float | None = None
+    price_tick_size: float | None = None
+    enable_order_book: bool | None = None
+    clob_token_ids: list[str] | None = None
+    image_variants: list[str] | None = None
 
 
 class MarketRead(MarketBase):
@@ -97,9 +117,7 @@ class MarketRead(MarketBase):
 
 class MarketResponse(MarketRead):
     description: str | None = None
-    resolution_source: str | None = None
     clob_pair_id: str | None = None
-    clob_token_ids: list[str] | None = None
 
 
 class MarketStatusBreakdown(BaseModel):

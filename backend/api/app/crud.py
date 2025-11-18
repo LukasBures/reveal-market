@@ -30,13 +30,21 @@ def get_markets(
 
 
 def get_market_stats(session: Session) -> list[schemas.MarketStatusBreakdown]:
-    stmt = (
-        select(models.Market.status, func.count(models.Market.id))
-        .group_by(models.Market.status)
-        .order_by(models.Market.status.asc())
-    )
+    stmt = select(models.Market.closed, func.count(models.Market.id)).group_by(models.Market.closed)
     rows = session.execute(stmt).all()
-    return [schemas.MarketStatusBreakdown(status=row[0], count=row[1]) for row in rows]
+    live = 0
+    finalized = 0
+    for closed_flag, count in rows:
+        if closed_flag:
+            finalized += count
+        else:
+            live += count
+    total = live + finalized
+    return [
+        schemas.MarketStatusBreakdown(status="live", count=live),
+        schemas.MarketStatusBreakdown(status="finalized", count=finalized),
+        schemas.MarketStatusBreakdown(status="total", count=total),
+    ]
 
 
 def get_market_by_event_id(session: Session, event_id: str) -> models.Market | None:

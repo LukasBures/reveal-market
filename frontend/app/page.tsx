@@ -29,12 +29,12 @@ type PageProps = {
 
 export default async function HomePage({ searchParams }: PageProps) {
   const [stats, kpis] = await Promise.all([fetchMarketStatsBreakdown(), fetchInvestorKpis()]);
-  const totalMarkets = stats.reduce((sum, stat) => sum + stat.count, 0);
-  const liveMarkets = stats
-    .filter((stat) => ["commit", "locked"].includes(stat.status))
-    .reduce((sum, stat) => sum + stat.count, 0);
+  const liveMarkets = stats.find((stat) => stat.status === "live")?.count ?? 0;
+  const finalizedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
+  const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;
   const callouts = [
     { label: "Markets live", value: liveMarkets > 0 ? liveMarkets.toLocaleString() : "—" },
+    { label: "Markets finalized", value: finalizedMarkets > 0 ? finalizedMarkets.toLocaleString() : "—" },
     { label: "Total markets tracked", value: totalMarkets > 0 ? totalMarkets.toLocaleString() : "—" },
     { label: "Audit-ready proofs", value: "Groth16" },
   ];
@@ -51,7 +51,12 @@ export default async function HomePage({ searchParams }: PageProps) {
       <Hero stats={callouts} />
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 pb-12">
         <section className="glass-panel p-4 sm:p-6">
-          <MarketFilters initialSearch={rawSearchQuery} liveMarketsCount={liveMarkets} totalMarketsCount={totalMarkets} />
+          <MarketFilters
+            initialSearch={rawSearchQuery}
+            liveMarketsCount={liveMarkets}
+            finalizedMarketsCount={finalizedMarkets}
+            totalMarketsCount={totalMarkets}
+          />
         </section>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />

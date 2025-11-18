@@ -29,8 +29,9 @@ from shared.indexers import GoldskyClient
 from shared.logging import log_event, start_heartbeat_logger
 from shared.migrations import get_current_revision
 from shared.migrations import run_migrations as apply_migrations
+from shared.models import MarketStatusEnum
 from shared.onchain import ConditionalTokensClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings, reload_settings
@@ -55,14 +56,9 @@ except ImportError:  # pragma: no cover - optional dependency
             return None
 
 
-RETENTION_DELETED_COUNTER = Counter(
-    "worker_retention_deleted_total",
-    "Markets deleted by the retention task",
-    ["category"],
-)
-RETENTION_SKIPPED_COUNTER = Counter(
-    "worker_retention_skipped_total",
-    "Markets eligible for retention but skipped (dry run)",
+RETENTION_METRIC = Counter(
+    "worker_retention_candidates_total",
+    "Markets considered by the retention reporter",
     ["category"],
 )
 
@@ -521,11 +517,10 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
-def _record_retention_metrics(category_counts: dict[str, int], dry_run: bool) -> None:
-    counter = RETENTION_SKIPPED_COUNTER if dry_run else RETENTION_DELETED_COUNTER
+def _record_retention_metrics(category_counts: dict[str, int]) -> None:
     for category, count in category_counts.items():
         label = category or "uncategorized"
-        counter.labels(category=label).inc(count)
+        RETENTION_METRIC.labels(category=label).inc(count)
 
 
 def _should_refresh_resolution(existing, now: datetime) -> bool:
@@ -761,14 +756,26 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
 
 def sync_market(session: Session, market: MarketPayload):
     """Upsert a market row using `event_id` as the natural key."""
+    now = datetime.now(UTC)
+    existing = shared_repository.get_market_by_event_id(session, market.event_id)
     payload = market.model_dump()
     if payload.get("closed") is None:
         payload["closed"] = False
     condition_id = payload.get("condition_id")
     if isinstance(condition_id, str):
         payload["condition_id"] = condition_id.lower()
+    close_deadline = payload.get("closes_at")
+    if close_deadline is None and existing is not None:
+        close_deadline = getattr(existing, "closes_at", None)
+        if close_deadline is not None:
+            payload["closes_at"] = close_deadline
+    should_close = _should_close_market(close_deadline, market.closed, now)
+    payload["closed"] = should_close
+    status_value = payload.get("status") or MarketStatusEnum.COMMIT.value
+    if should_close and status_value not in {MarketStatusEnum.SETTLED.value, MarketStatusEnum.CANCELLED.value}:
+        status_value = MarketStatusEnum.LOCKED.value
+    payload["status"] = status_value
 
-    existing = shared_repository.get_market_by_event_id(session, market.event_id)
     db_market = existing
     market_changed = False
     market_created = False
@@ -843,6 +850,15 @@ def _markets_match(existing, source_updated_at: datetime | None, content_hash: s
     return False, "diff_detected"
 
 
+def _should_close_market(close_deadline: datetime | None, explicit_closed: bool | None, now: datetime) -> bool:
+    if isinstance(explicit_closed, bool) and explicit_closed:
+        return True
+    if isinstance(close_deadline, datetime):
+        deadline = close_deadline if close_deadline.tzinfo else close_deadline.replace(tzinfo=UTC)
+        return deadline <= now
+    return False
+
+
 def cleanup_resolved_markets(  # noqa: C901
     session: Session,
     *,
@@ -860,7 +876,16 @@ def cleanup_resolved_markets(  # noqa: C901
         shared_models.Market.category,
         shared_models.Market.tags,
         shared_models.Market.resolved_at,
-    ).where(shared_models.Market.resolved_at.isnot(None), shared_models.Market.resolved_at < cutoff)
+        shared_models.Market.closes_at,
+        shared_models.Market.closed,
+    ).where(
+        or_(
+            shared_models.Market.resolved_at.isnot(None) & (shared_models.Market.resolved_at < cutoff),
+            shared_models.Market.closed.is_(True)
+            & shared_models.Market.closes_at.isnot(None)
+            & (shared_models.Market.closes_at < cutoff),
+        )
+    )
     records = session.execute(stmt).all()
 
     if not records:
@@ -884,7 +909,11 @@ def cleanup_resolved_markets(  # noqa: C901
 
     for row in records:
         resolved_at = _as_utc(row.resolved_at)
-        if resolved_at is None or resolved_at > cutoff:
+        closes_at = _as_utc(getattr(row, "closes_at", None))
+        is_closed = bool(getattr(row, "closed", False))
+        resolved_expired = resolved_at is not None and resolved_at <= cutoff
+        closed_expired = is_closed and closes_at is not None and closes_at <= cutoff
+        if not resolved_expired and not closed_expired:
             continue
         if row.id is not None:
             ids_to_delete.append(row.id)
@@ -916,21 +945,16 @@ def cleanup_resolved_markets(  # noqa: C901
             category_counts=category_counts,
         )
 
-    if not dry_run:
-        (
-            session.query(shared_models.Market)
-            .where(shared_models.Market.id.in_(ids_to_delete))
-            .delete(synchronize_session=False)
-        )
-    _record_retention_metrics(category_counts, dry_run)
+    # We no longer delete historical markets; retention now only reports metrics.
+    _record_retention_metrics(category_counts)
     log_event(
         logger,
         logging.INFO,
         event="worker.retention.cleanup",
-        message="evaluated resolved markets for retention",
+        message="evaluated resolved markets for retention (historical retention disabled)",
         eligible=eligible,
-        deleted=0 if dry_run else eligible,
-        dry_run=dry_run,
+        deleted=0,
+        dry_run=True,
         cutoff=cutoff.isoformat(),
     )
     return CleanupOutcome(
@@ -938,9 +962,9 @@ def cleanup_resolved_markets(  # noqa: C901
         condition_ids,
         categories,
         tags,
-        deleted_rows=0 if dry_run else eligible,
+        deleted_rows=0,
         eligible_rows=eligible,
-        dry_run=dry_run,
+        dry_run=True,
         category_counts=category_counts,
     )
 

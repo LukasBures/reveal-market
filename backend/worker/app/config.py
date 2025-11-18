@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     polymarket_max_pages: int | None = Field(default=None, ge=1)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
-    polymarket_closed_filter: bool | None = Field(default=None)
+    polymarket_closed_filter: bool | None = Field(default=False)
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)

@@ -21,5 +21,20 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     imageUrl: item.image_url ?? item.imageUrl ?? gammaImage ?? null,
     rakeBps: item.rake_bps ?? item.rakeBps ?? null,
     extraData: item.extra_data ?? item.extraData ?? null,
+    closesAt: item.closes_at ?? item.closesAt ?? item.extra_data?.gamma?.closesAt ?? null,
+    startsAt: item.starts_at ?? item.startsAt ?? item.extra_data?.gamma?.startDate ?? null,
+    ordersOpenedAt: item.orders_opened_at ?? item.ordersOpenedAt ?? null,
+    resolutionSource: item.resolution_source ?? item.resolutionSource ?? null,
+    marketMaker: item.market_maker ?? item.marketMaker ?? null,
+    orderMinSize: item.order_min_size ?? item.orderMinSize ?? null,
+    priceTickSize: item.price_tick_size ?? item.priceTickSize ?? null,
+    enableOrderBook:
+      typeof item.enable_order_book === "boolean"
+        ? item.enable_order_book
+        : typeof item.enableOrderBook === "boolean"
+          ? item.enableOrderBook
+          : null,
+    clobTokenIds: item.clob_token_ids ?? item.clobTokenIds ?? null,
+    imageVariants: item.image_variants ?? item.imageVariants ?? null,
   };
 }

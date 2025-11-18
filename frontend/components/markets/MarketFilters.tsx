@@ -22,6 +22,7 @@ const categories = [
 type Props = {
   initialSearch?: string;
   liveMarketsCount?: number;
+  finalizedMarketsCount?: number;
   totalMarketsCount?: number;
 };
 
@@ -32,7 +33,7 @@ const windowSuggestionCache = new Map<
   { data: MarketSummary[]; expiresAt: number }
 >();
 
-export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCount }: Props) {
+export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarketsCount, totalMarketsCount }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const [search, setSearch] = useState(initialSearch ?? "");
@@ -52,12 +53,19 @@ export function MarketFilters({ initialSearch, liveMarketsCount, totalMarketsCou
         value: typeof liveMarketsCount === "number" && liveMarketsCount > 0 ? liveMarketsCount.toLocaleString() : "—",
       },
       {
+        label: "Finalized markets",
+        value:
+          typeof finalizedMarketsCount === "number" && finalizedMarketsCount > 0
+            ? finalizedMarketsCount.toLocaleString()
+            : "—",
+      },
+      {
         label: "Total markets tracked",
         value:
           typeof totalMarketsCount === "number" && totalMarketsCount > 0 ? totalMarketsCount.toLocaleString() : "—",
       },
     ],
-    [liveMarketsCount, totalMarketsCount],
+    [liveMarketsCount, finalizedMarketsCount, totalMarketsCount],
   );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {

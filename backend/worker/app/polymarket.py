@@ -41,6 +41,16 @@ class MarketPayload(BaseModel):
     uma_resolution_status: str | None = None
     source_updated_at: datetime | None = None
     content_hash: str | None = None
+    starts_at: datetime | None = None
+    orders_opened_at: datetime | None = None
+    resolution_source: str | None = None
+    market_maker: str | None = None
+    order_min_size: float | None = None
+    price_tick_size: float | None = None
+    enable_order_book: bool | None = None
+    clob_token_ids: list[str] | None = None
+    image_variants: list[str] | None = None
+    closes_at: datetime | None = None
 
     @classmethod
     def from_gamma(cls, raw: dict[str, Any]) -> MarketPayload:
@@ -58,7 +68,7 @@ class MarketPayload(BaseModel):
         question_id = raw.get("questionID") or raw.get("questionId")
         image_url = raw.get("image") or raw.get("imageUrl") or raw.get("imageURL")
         closed = raw.get("closed")
-        uma_status = raw.get("umaResolutionStatus") or raw.get("polymarketEventStatus")
+        uma_status = _extract_uma_status(raw)
 
         outcomes = _extract_outcomes(raw.get("outcomes"))
         outcome_prices = _extract_prices(raw.get("outcomePrices"))
@@ -69,6 +79,20 @@ class MarketPayload(BaseModel):
         if canonical_category:
             _, category = canonical_category
         updated_at = _extract_updated_at(raw)
+        closes_at = _extract_close_time(raw)
+        starts_at = _extract_timestamp_candidate(
+            raw.get("startDate") or raw.get("startTime") or raw.get("eventStartTime") or raw.get("eventStartTimestamp"),
+        )
+        orders_opened_at = _extract_timestamp_candidate(raw.get("acceptingOrdersTimestamp"))
+        resolution_source = _clean_string(raw.get("resolutionSource")) or _extract_resolution_source_from_events(
+            raw.get("events")
+        )
+        market_maker = _clean_string(raw.get("marketMakerAddress"))
+        enable_order_book = raw.get("enableOrderBook") if isinstance(raw.get("enableOrderBook"), bool) else None
+        order_min_size = _coerce_float(raw.get("orderMinSize"))
+        price_tick_size = _coerce_float(raw.get("orderPriceMinTickSize"))
+        clob_token_ids = _extract_clob_ids(raw.get("clobTokenIds"))
+        image_variants = _collect_images(raw)
 
         extra_data: dict[str, Any] = {"gamma": raw}
         hash_payload = {
@@ -85,6 +109,16 @@ class MarketPayload(BaseModel):
             "uma_resolution_status": str(uma_status) if uma_status is not None else None,
             "condition_id": str(condition_id) if condition_id is not None else None,
             "question_id": str(question_id) if question_id is not None else None,
+            "closes_at": closes_at.isoformat() if isinstance(closes_at, datetime) else None,
+            "starts_at": starts_at.isoformat() if isinstance(starts_at, datetime) else None,
+            "orders_opened_at": orders_opened_at.isoformat() if isinstance(orders_opened_at, datetime) else None,
+            "resolution_source": resolution_source,
+            "market_maker": market_maker,
+            "order_min_size": order_min_size,
+            "price_tick_size": price_tick_size,
+            "enable_order_book": enable_order_book,
+            "clob_token_ids": clob_token_ids,
+            "image_variants": image_variants,
         }
 
         return cls(
@@ -109,6 +143,16 @@ class MarketPayload(BaseModel):
             uma_resolution_status=str(uma_status) if uma_status is not None else None,
             source_updated_at=updated_at,
             content_hash=_compute_market_hash(hash_payload),
+            closes_at=closes_at,
+            starts_at=starts_at,
+            orders_opened_at=orders_opened_at,
+            resolution_source=resolution_source,
+            market_maker=market_maker,
+            order_min_size=order_min_size,
+            price_tick_size=price_tick_size,
+            enable_order_book=enable_order_book,
+            clob_token_ids=clob_token_ids,
+            image_variants=image_variants,
         )
 
 
@@ -260,10 +304,11 @@ def _request_page(client: httpx.Client, url: str, params: dict[str, Any]) -> htt
 
 
 def _extract_outcomes(outcomes: Any) -> list[str] | None:
-    if not isinstance(outcomes, list):
+    sequence = _coerce_sequence(outcomes)
+    if not sequence:
         return None
     cleaned: list[str] = []
-    for item in outcomes:
+    for item in sequence:
         if isinstance(item, str):
             cleaned.append(item)
         elif isinstance(item, dict):
@@ -274,10 +319,11 @@ def _extract_outcomes(outcomes: Any) -> list[str] | None:
 
 
 def _extract_prices(prices: Any) -> list[float] | None:
-    if not isinstance(prices, list):
+    sequence = _coerce_sequence(prices)
+    if not sequence:
         return None
     cleaned: list[float] = []
-    for value in prices:
+    for value in sequence:
         if isinstance(value, (int, float)):
             cleaned.append(float(value))
         elif isinstance(value, str):
@@ -424,6 +470,29 @@ def _extract_updated_at(raw: dict[str, Any]) -> datetime | None:
     return None
 
 
+def _extract_close_time(raw: dict[str, Any]) -> datetime | None:
+    candidate_keys = [
+        "closesAt",
+        "closes_at",
+        "closeTime",
+        "close_time",
+        "closeDate",
+        "close_date",
+        "endDate",
+        "end_date",
+        "resolutionTime",
+        "resolveTime",
+        "lockTime",
+        "lockedAt",
+    ]
+    for key in candidate_keys:
+        if key in raw:
+            ts = _coerce_timestamp(raw[key])
+            if ts is not None:
+                return ts
+    return None
+
+
 def _coerce_timestamp(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -450,6 +519,107 @@ def _coerce_timestamp(value: Any) -> datetime | None:
             except ValueError:
                 return None
             return _coerce_timestamp(numeric)
+    return None
+
+
+def _extract_timestamp_candidate(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    return _coerce_timestamp(value)
+
+
+def _extract_resolution_source_from_events(events: Any) -> str | None:
+    if not isinstance(events, list):
+        return None
+    for event in events:
+        if isinstance(event, dict):
+            candidate = _clean_string(event.get("resolutionSource"))
+            if candidate:
+                return candidate
+    return None
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _extract_clob_ids(raw_ids: Any) -> list[str] | None:
+    sequence = _coerce_sequence(raw_ids)
+    if not sequence:
+        return None
+    values: list[str] = []
+    for entry in sequence:
+        if isinstance(entry, str):
+            candidate = entry.strip()
+            if candidate:
+                values.append(candidate)
+    return values or None
+
+
+def _collect_images(raw: dict[str, Any]) -> list[str] | None:
+    images: list[str] = []
+    candidates = [raw.get("image"), raw.get("icon"), raw.get("imageUrl"), raw.get("imageURL"), raw.get("coverImage")]
+    events = raw.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if isinstance(event, dict):
+                candidates.extend([event.get("image"), event.get("icon")])
+    seen = set()
+    for candidate in candidates:
+        cleaned = _clean_string(candidate)
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            images.append(cleaned)
+    return images or None
+
+
+def _coerce_sequence(value: Any) -> list[Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return [text]
+        if isinstance(parsed, list):
+            return parsed
+        return [parsed]
+    return None
+
+
+def _extract_uma_status(raw: dict[str, Any]) -> str | None:
+    direct = _clean_string(raw.get("umaResolutionStatus")) or _clean_string(raw.get("polymarketEventStatus"))
+    if direct:
+        return direct
+    sequence = _coerce_sequence(raw.get("umaResolutionStatuses"))
+    if not sequence:
+        return None
+    for entry in sequence:
+        if isinstance(entry, str):
+            candidate = _clean_string(entry)
+            if candidate:
+                return candidate
+        elif isinstance(entry, dict):
+            for key in ("status", "state", "label", "value"):
+                candidate = _clean_string(entry.get(key))
+                if candidate:
+                    return candidate
     return None
 
 

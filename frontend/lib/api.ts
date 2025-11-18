@@ -16,8 +16,13 @@ import { mapApiMarketToSummary } from "./marketMapper";
 const OFFLINE_FALLBACK =
   process.env.NODE_ENV === "development" ? "http://localhost:8000" : "http://127.0.0.1:65535";
 
+const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
+
 export const DEFAULT_API_BASE =
-  process.env.RM_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? OFFLINE_FALLBACK;
+  (preferDockerApi ? process.env.RM_API_BASE_URL : undefined) ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.RM_API_BASE_URL ??
+  OFFLINE_FALLBACK;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
@@ -146,10 +151,20 @@ export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
       return [];
     }
 
-    const stats = payload.map((item) => ({
-      status: String(item?.status ?? "unknown").toLowerCase(),
-      count: Number(item?.count ?? 0),
-    }));
+    const normalized = payload.reduce<Record<string, number>>((acc, item) => {
+      const key = String(item?.status ?? "unknown").toLowerCase();
+      const count = Number(item?.count ?? 0);
+      acc[key] = (acc[key] ?? 0) + (Number.isFinite(count) ? count : 0);
+      return acc;
+    }, {});
+    const live = normalized["live"] ?? 0;
+    const finalized = normalized["finalized"] ?? 0;
+    const total = normalized["total"] ?? live + finalized;
+    const stats: MarketStatusStat[] = [
+      { status: "live", count: live },
+      { status: "finalized", count: finalized },
+      { status: "total", count: total },
+    ];
     logger.info("fetchMarketStatsBreakdown:success", { count: stats.length });
     return stats;
   } catch (error) {
@@ -244,16 +259,11 @@ export async function fetchInvestorKpis(): Promise<InvestorKpis> {
   const stats = statsResult.status === "fulfilled" ? statsResult.value : [];
   const health = healthResult.status === "fulfilled" ? healthResult.value : null;
 
-  const openMarkets = stats
-    .filter((item) => ["commit", "locked"].includes(item.status))
-    .reduce((total, item) => total + item.count, 0);
-
-  const settledMarkets = stats
-    .filter((item) => item.status === "settled")
-    .reduce((total, item) => total + item.count, 0);
+  const liveStat = stats.find((item) => item.status === "live")?.count ?? 0;
+  const finalizedStat = stats.find((item) => item.status === "finalized")?.count ?? 0;
   const snapshot = {
-    openMarkets,
-    settledMarkets,
+    openMarkets: liveStat,
+    settledMarkets: finalizedStat,
     databaseLatencyMs: health?.databaseLatencyMs ?? null,
     lastUpdatedIso: health?.timestamp ?? null,
   };
@@ -307,6 +317,17 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       umaStatus: payload.uma_resolution_status ?? undefined,
       marketAddress: payload.market_address ?? undefined,
       rakeBps: payload.rake_bps ?? undefined,
+      startsAt: payload.starts_at ?? null,
+      closesAt: payload.closes_at ?? payload.commit_deadline ?? null,
+      ordersOpenedAt: payload.orders_opened_at ?? null,
+      resolutionSource: payload.resolution_source ?? undefined,
+      marketMaker: payload.market_maker ?? undefined,
+      orderMinSize: payload.order_min_size ?? undefined,
+      priceTickSize: payload.price_tick_size ?? undefined,
+      enableOrderBook:
+        typeof payload.enable_order_book === "boolean" ? payload.enable_order_book : undefined,
+      clobTokenIds: payload.clob_token_ids ?? undefined,
+      imageVariants: payload.image_variants ?? undefined,
       resolution: resolutionSource
         ? {
             resolved: Boolean(resolutionSource.resolved),

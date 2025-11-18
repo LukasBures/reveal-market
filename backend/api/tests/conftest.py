@@ -73,6 +73,7 @@ def test_database(monkeypatch, tmp_path):
         models.Base.metadata.create_all(bind=engine)
 
     monkeypatch.setattr("app.database.run_migrations", fake_run_migrations, raising=False)
+    monkeypatch.setattr("app.main.run_migrations", fake_run_migrations, raising=False)
 
     yield engine, testing_session_local
 

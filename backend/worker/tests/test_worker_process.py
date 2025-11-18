@@ -331,10 +331,6 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
 def test_cleanup_resolved_markets_removes_expired(monkeypatch):
     engine, session_factory = create_in_memory_db()
     try:
-        deleted_counter = DummyCounter()
-        skipped_counter = DummyCounter()
-        monkeypatch.setattr("app.main.RETENTION_DELETED_COUNTER", deleted_counter, raising=False)
-        monkeypatch.setattr("app.main.RETENTION_SKIPPED_COUNTER", skipped_counter, raising=False)
         expired = Market(
             event_id="evt-old",
             title="Old market",
@@ -363,19 +359,16 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             outcome = cleanup_resolved_markets(session, now=datetime.now(UTC))
             session.commit()
 
-        assert "evt-old" in outcome.events
-        assert "evt-new" not in outcome.events
+        assert outcome.events == {"evt-old"}
         assert "sports" in {slug for slug in outcome.categories if slug}
         assert "gov" in {slug for slug in outcome.tags if slug}
-        assert outcome.deleted_rows == 1
+        assert outcome.deleted_rows == 0
         assert outcome.eligible_rows == 1
-        assert outcome.dry_run is False
-        assert deleted_counter.records and deleted_counter.records[0]["amount"] == 1
-        assert skipped_counter.records == []
+        assert outcome.dry_run is True
 
         with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
-            assert remaining == ["evt-new"]
+            assert set(remaining) == {"evt-old", "evt-new"}
     finally:
         engine.dispose()
 
@@ -495,10 +488,6 @@ def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
 def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
     engine, session_factory = create_in_memory_db()
     try:
-        deleted_counter = DummyCounter()
-        skipped_counter = DummyCounter()
-        monkeypatch.setattr("app.main.RETENTION_DELETED_COUNTER", deleted_counter, raising=False)
-        monkeypatch.setattr("app.main.RETENTION_SKIPPED_COUNTER", skipped_counter, raising=False)
         market = Market(
             event_id="evt-dry",
             title="Dry run",
@@ -526,8 +515,6 @@ def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
         with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
             assert remaining == ["evt-dry"]
-        assert skipped_counter.records and skipped_counter.records[0]["amount"] == 1
-        assert deleted_counter.records == []
     finally:
         engine.dispose()
 
@@ -554,10 +541,12 @@ def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
             outcome = cleanup_resolved_markets(session, now=reference)
             session.commit()
 
-        assert outcome.deleted_rows == 1
+        assert outcome.deleted_rows == 0
+        assert outcome.eligible_rows == 1
+        assert outcome.dry_run is True
         with session_factory() as session:
             remaining = session.execute(select(Market.event_id)).scalars().all()
-            assert remaining == []
+            assert remaining == ["evt-tz"]
     finally:
         engine.dispose()
 

@@ -2,6 +2,10 @@ import "@testing-library/jest-dom/vitest";
 import React from "react";
 import { vi } from "vitest";
 
+if (!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) {
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = "test-wc-project-id";
+}
+
 if (typeof window !== "undefined") {
   try {
     if (window.location?.href === "about:blank") {

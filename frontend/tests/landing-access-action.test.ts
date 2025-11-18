@@ -67,14 +67,15 @@ describe("requestLandingAccessAction", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
-  it("sets the cookie and redirects when the code matches", async () => {
+  it("sets the cookie and returns success when the code matches", async () => {
     process.env.LANDING_ACCESS_CODE = "rm125";
     const { requestLandingAccessAction } = await importActionModule();
     const formData = new FormData();
     formData.set("accessCode", "rm125");
 
-    await requestLandingAccessAction({}, formData);
+    const result = await requestLandingAccessAction({}, formData);
 
+    expect(result).toEqual({ success: true });
     expect(setCookieMock).toHaveBeenCalledWith({
       name: LANDING_ACCESS_COOKIE_NAME,
       value: "granted",
@@ -84,6 +85,6 @@ describe("requestLandingAccessAction", () => {
       path: "/",
       maxAge: LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,
     });
-    expect(redirectMock).toHaveBeenCalledWith("/");
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 });

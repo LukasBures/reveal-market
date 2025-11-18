@@ -13,6 +13,16 @@ fi
 
 cd "${PROJECT_DIR}"
 
+# Load repo-root .env so NEXT_PUBLIC_* variables (WalletConnect, etc.) are
+# available without duplicating files under frontend/.
+ROOT_ENV="${PROJECT_DIR}/../.env"
+if [[ -f "${ROOT_ENV}" ]]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "${ROOT_ENV}"
+  set +a
+fi
+
 # Try to reach the backend API but continue in "offline" mode when it is
 # unavailable. Offline mode points both server + browser env vars at an
 # unroutable loopback address so fetch() calls fail fast without needing the

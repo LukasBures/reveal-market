@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -41,6 +41,16 @@ class Market(Base):
     uma_resolution_status = Column(String(64), nullable=True)
     source_updated_at = Column(DateTime(timezone=True), nullable=True)
     content_hash = Column(String(128), nullable=True)
+    starts_at = Column(DateTime(timezone=True), nullable=True)
+    orders_opened_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_source = Column(String(512), nullable=True)
+    market_maker = Column(String(64), nullable=True)
+    order_min_size = Column(Float, nullable=True)
+    price_tick_size = Column(Float, nullable=True)
+    enable_order_book = Column(Boolean, nullable=True)
+    clob_token_ids = Column(JSON, nullable=True)
+    image_variants = Column(JSON, nullable=True)
+    closes_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     summary = Column(Text, nullable=True)
     summary_source = Column(String(64), nullable=True)

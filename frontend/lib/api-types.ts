@@ -12,6 +12,16 @@ export type MarketSummary = {
   imageUrl?: string | null;
   rakeBps?: number | null;
   extraData?: Record<string, any> | null;
+  closesAt?: string | null;
+  startsAt?: string | null;
+  ordersOpenedAt?: string | null;
+  resolutionSource?: string | null;
+  marketMaker?: string | null;
+  orderMinSize?: number | null;
+  priceTickSize?: number | null;
+  enableOrderBook?: boolean | null;
+  clobTokenIds?: string[] | null;
+  imageVariants?: string[] | null;
 };
 
 export type MarketDetail = MarketSummary & {
@@ -39,6 +49,15 @@ export type MarketDetail = MarketSummary & {
     timestamp?: string;
     latencyMs?: number;
   } | null;
+  startsAt?: string | null;
+  ordersOpenedAt?: string | null;
+  resolutionSource?: string | null;
+  marketMaker?: string | null;
+  orderMinSize?: number | null;
+  priceTickSize?: number | null;
+  enableOrderBook?: boolean | null;
+  clobTokenIds?: string[] | null;
+  imageVariants?: string[] | null;
 };
 
 export type ProofReceipt = {

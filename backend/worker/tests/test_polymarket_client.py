@@ -71,6 +71,37 @@ def test_polymarket_client_handles_pagination():
     assert second.extra_data["gamma"]["slug"] == "market-two"
 
 
+def test_polymarket_client_parses_stringified_arrays():
+    """Markets with JSON-encoded strings for outcomes/prices populate columns."""
+
+    payload = [
+        {
+            "id": "evt-string",
+            "question": "Parsed?",
+            "outcomes": '["Up", "Down"]',
+            "outcomePrices": '["0.12", "0.88"]',
+            "umaResolutionStatuses": '[{"status": "pending"}, {"status": "settled"}]',
+            "clobTokenIds": '["abc", "def"]',
+            "closed": True,
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+    assert len(markets) == 1
+    market = markets[0]
+
+    assert market.outcomes == ["Up", "Down"]
+    assert market.outcome_prices == [0.12, 0.88]
+    assert market.uma_resolution_status == "pending"
+    assert market.clob_token_ids == ["abc", "def"]
+
+
 def test_polymarket_client_derives_category_from_event_series_when_tags_missing():
     """Ensure category falls back to event/series metadata when tags are absent."""
 

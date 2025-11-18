@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
+from alembic.util.exc import CommandError
 
 def _migrations_root() -> Path:
     root = Path(__file__).resolve().parents[1] / "migrations"
@@ -30,7 +31,15 @@ def run_migrations(database_url: str) -> None:
 
     config = _build_alembic_config(database_url)
     config.attributes["configure_logger"] = False
-    command.upgrade(config, "head")
+    try:
+        command.upgrade(config, "head")
+    except CommandError as exc:
+        message = str(exc)
+        if "0002_market_metadata_columns" in message:
+            command.stamp(config, "0001_initial_schema")
+            command.upgrade(config, "head")
+        else:
+            raise
 
 
 def get_current_revision(database_url: str) -> str | None:

@@ -58,6 +58,7 @@ jobs:
     env:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       RM_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'test-wc-project-id' }}
 
     steps:
       - uses: actions/checkout@v4

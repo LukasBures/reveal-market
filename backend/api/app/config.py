@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     polymarket_timeout_seconds: float = Field(default=5.0)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
-    polymarket_closed_filter: bool | None = Field(default=None)
+    polymarket_closed_filter: bool | None = Field(default=False)
     polygon_rpc_url: AnyUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),

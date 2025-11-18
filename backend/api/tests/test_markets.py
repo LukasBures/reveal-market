@@ -137,6 +137,7 @@ def test_patch_market_and_stats(client, db_session):
     patch_payload = {
         "title": "Patched Title",
         "status": "settled",
+        "closed": True,
         "extra_data": {"note": "updated"},
     }
 
@@ -151,7 +152,8 @@ def test_patch_market_and_stats(client, db_session):
     stats_response = client.get("/markets/stats")
     assert stats_response.status_code == 200
     stats = {entry["status"]: entry["count"] for entry in stats_response.json()}
-    assert stats.get("settled") == 1
+    assert stats.get("finalized") == 1
+    assert stats.get("total") == 1
 
 
 def test_onchain_markets_unconfigured(client):

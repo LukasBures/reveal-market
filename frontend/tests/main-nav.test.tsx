@@ -15,15 +15,11 @@ describe("MainNav", () => {
     expect(screen.getByRole("link", { name: /reveal market/i })).toHaveAttribute("href", "/");
   });
 
-  it("shows only the Connect Wallet CTAs (no docs link)", () => {
+  it("renders navigation links and the connect CTA", () => {
     renderWithProviders(<MainNav />);
     expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /docs/i })).not.toBeInTheDocument();
-  });
-
-  it("renders the navigation bar and menu toggle", () => {
-    renderWithProviders(<MainNav />);
+    expect(screen.getByRole("link", { name: /docs/i })).toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /menu/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open navigation/i })).toBeInTheDocument();
   });
 });
