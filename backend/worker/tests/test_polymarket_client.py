@@ -233,3 +233,59 @@ def test_polymarket_client_supports_full_markets_endpoint(monkeypatch):
     assert len(markets) == 1
     assert markets[0].event_id == "evt-custom"
     assert observed["path"] == "/polygon/markets"
+
+
+def test_polymarket_client_appends_extra_filters():
+    """Ensure polymarket-client forwards caller-provided filters (network/active/etc)."""
+
+    observed_params: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_params.append(dict(request.url.params))
+        return httpx.Response(status_code=200, json=[])
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient(
+        "https://gamma.polymarket.example",
+        timeout=1.0,
+        transport=transport,
+        empty_page_tolerance=1,
+    )
+
+    client.fetch_markets(
+        page_size=1,
+        max_pages=1,
+        extra_params={"network": "137", "active": "true", "archived": "false"},
+    )
+
+    assert observed_params
+    first = observed_params[0]
+    assert first["network"] == "137"
+    assert first["active"] == "true"
+    assert first["archived"] == "false"
+
+
+def test_polymarket_client_handles_empty_pages_with_meta_total():
+    """Continue pagination when Gamma temporarily returns empty pages despite meta.total."""
+
+    responses = {
+        0: {"data": [{"id": "evt-1", "question": "First?"}], "meta": {"total": 2}},
+        1: {"data": [], "meta": {"total": 2}},
+        2: {"data": [{"id": "evt-2", "question": "Second?"}], "meta": {"total": 2}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        return httpx.Response(status_code=200, json=responses.get(offset, {"data": []}))
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient(
+        "https://gamma.polymarket.example",
+        timeout=1.0,
+        transport=transport,
+        empty_page_tolerance=2,
+    )
+
+    markets = client.fetch_markets(page_size=1, max_pages=5)
+
+    assert [m.event_id for m in markets] == ["evt-1", "evt-2"]

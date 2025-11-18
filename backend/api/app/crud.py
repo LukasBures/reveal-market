@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from shared import repository as shared_repository
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -75,20 +75,6 @@ def search_markets(session: Session, query: str, limit: int) -> list[models.Mark
     stmt = select(models.Market)
     stmt = _apply_text_search(session, stmt, query or "")
     stmt = stmt.limit(limit)
-    return list(session.scalars(stmt))
-
-
-def get_markets_by_tag(session: Session, tag: str, limit: int) -> list[models.Market]:
-    normalized = (tag or "").strip().lower()
-    if not normalized:
-        return []
-    pattern = f'%"{normalized}"%'
-    stmt = (
-        select(models.Market)
-        .where(func.lower(cast(models.Market.tags, String)).like(pattern))
-        .order_by(models.Market.created_at.desc())
-        .limit(limit)
-    )
     return list(session.scalars(stmt))
 
 

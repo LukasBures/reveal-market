@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     cache_ttl_seconds: int = Field(default=30, ge=1)
+    cacheable_market_limit: int = Field(default=20, ge=1, le=250)
+    market_record_cache_ttl_seconds: int = Field(default=120, ge=30)
+    cache_hydrate_on_startup: bool = Field(default=True)
+    cache_hydrate_limit: int = Field(default=20, ge=1, le=250)
+    cache_refresh_enabled: bool = Field(default=True)
+    cache_refresh_interval_seconds: int = Field(default=180, ge=15)
+    cache_refresh_limit: int = Field(default=20, ge=1, le=250)
     cache_connect_retries: int = Field(default=3, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
     rate_limit_enabled: bool = Field(default=False)
@@ -57,6 +64,7 @@ class Settings(BaseSettings):
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_closed_filter: bool | None = Field(default=False)
+    polymarket_network: str | None = Field(default=None)
     polygon_rpc_url: AnyUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),
@@ -82,7 +90,6 @@ class Settings(BaseSettings):
     cors_allow_credentials: bool = Field(default=False)
     enable_security_headers: bool = Field(default=True)
     market_category_allowlist: list[str] = Field(default_factory=list)
-    market_tag_allowlist: list[str] = Field(default_factory=list)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
     api_heartbeat_key: str = Field(default="reveal_market_api:heartbeat")
     container_heartbeat_seconds: int = Field(default=60, ge=10)
@@ -105,7 +112,6 @@ class Settings(BaseSettings):
         "cors_allow_methods",
         "cors_allow_headers",
         "market_category_allowlist",
-        "market_tag_allowlist",
         "rate_limit_whitelist",
         mode="before",
     )

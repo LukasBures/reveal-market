@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
@@ -170,6 +172,9 @@ class PolymarketClient:
         request_backoff_seconds: float = 0.2,
         request_backoff_max_seconds: float | None = None,
         retry_counter: Any | None = None,
+        rate_limit_requests: int | None = None,
+        rate_limit_window_seconds: float | None = None,
+        empty_page_tolerance: int = 0,
     ) -> None:
         raw_base = str(base_url)
         self.base_url = raw_base.rstrip("/")
@@ -183,6 +188,8 @@ class PolymarketClient:
         )
         self._retryer = None
         self._retry_counter = retry_counter
+        self._rate_limiter = _RateLimiter(rate_limit_requests, rate_limit_window_seconds)
+        self._empty_page_tolerance = max(0, empty_page_tolerance)
 
     def fetch_markets(  # noqa: C901
         self,
@@ -198,6 +205,8 @@ class PolymarketClient:
         markets: list[MarketPayload] = []
         offset = 0
         page = 0
+        empty_pages = 0
+        total_records: int | None = None
 
         with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
             while True:
@@ -213,7 +222,7 @@ class PolymarketClient:
                     params.update({k: v for k, v in extra_params.items() if v is not None})
 
                 url = self._markets_url
-                request_callable = partial(_request_page, client, url, params.copy())
+                request_callable = partial(self._request_page, client, url, params.copy())
                 try:
                     response = self._send_with_retry(request_callable)
                     payload = response.json()
@@ -221,10 +230,28 @@ class PolymarketClient:
                     logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
                     raise
 
+                meta_total = _extract_meta_total(payload)
+                if isinstance(meta_total, int) and meta_total >= 0:
+                    total_records = meta_total
                 records = _extract_page_records(payload)
                 if not records:
-                    logger.debug("polymarket page contained no records", extra={"offset": offset})
+                    empty_pages += 1
+                    logger.debug(
+                        "polymarket page contained no records",
+                        extra={"offset": offset, "empty_pages": empty_pages},
+                    )
+                    if (
+                        total_records is not None
+                        and offset < total_records
+                        and empty_pages <= self._empty_page_tolerance
+                    ):
+                        offset += page_size
+                        continue
+                    if empty_pages <= self._empty_page_tolerance:
+                        offset += page_size
+                        continue
                     break
+                empty_pages = 0
 
                 for raw in records:
                     try:
@@ -237,10 +264,23 @@ class PolymarketClient:
 
                 if max_pages is not None and page >= max_pages:
                     break
+                if total_records is not None and offset >= total_records:
+                    break
                 if len(records) < page_size:
                     break
 
         return markets
+
+    def _request_page(self, client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:
+        self._rate_limiter.acquire()
+        response = client.get(url, params=params)
+        if response.status_code == 429:
+            logger.warning(
+                "polymarket rate limit encountered",
+                extra={"params": params, "status_code": response.status_code},
+            )
+        response.raise_for_status()
+        return response
 
     def _send_with_retry(self, action: Callable[[], httpx.Response]) -> httpx.Response:
         retryer = self._build_retryer()
@@ -300,10 +340,26 @@ class PolymarketClient:
             logger.debug("failed to record polymarket retry metric", extra={"metric_outcome": outcome})
 
 
-def _request_page(client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:
-    response = client.get(url, params=params)
-    response.raise_for_status()
-    return response
+class _RateLimiter:
+    def __init__(self, max_requests: int | None, window_seconds: float | None) -> None:
+        self.max_requests = max_requests if max_requests and max_requests > 0 else None
+        self.window_seconds = window_seconds if window_seconds and window_seconds > 0 else None
+        self._events: deque[float] = deque()
+
+    def acquire(self) -> None:
+        if not self.max_requests or not self.window_seconds:
+            return
+        now = time.monotonic()
+        window_start = now - self.window_seconds
+        while self._events and self._events[0] <= window_start:
+            self._events.popleft()
+        if len(self._events) >= self.max_requests:
+            sleep_for = self.window_seconds - (now - self._events[0])
+            if sleep_for > 0:
+                time.sleep(min(sleep_for, self.window_seconds))
+            self.acquire()
+            return
+        self._events.append(now)
 
 
 def _extract_page_records(payload: Any) -> list[dict[str, Any]]:
@@ -317,6 +373,19 @@ def _extract_page_records(payload: Any) -> list[dict[str, Any]]:
             if isinstance(maybe, list):
                 return [item for item in maybe if isinstance(item, dict)]
     return []
+
+
+def _extract_meta_total(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        total = meta.get("total")
+        if isinstance(total, int):
+            return total
+        if isinstance(total, str) and total.isdigit():
+            return int(total)
+    return None
 
 
 def _extract_outcomes(outcomes: Any) -> list[str] | None:

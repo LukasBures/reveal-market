@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from shared.polymarket import build_polymarket_markets_url
 
 

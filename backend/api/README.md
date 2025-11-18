@@ -8,7 +8,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 
 | Area | What the API handles |
 | --- | --- |
-| Market discovery | `/markets`, `/categories/{slug}`, `/tags/{slug}`, `/markets/suggest` (all Redis-backed) |
+| Market discovery | `/markets`, `/categories/{slug}`, `/markets/suggest` (all Redis-backed) |
 | Market detail & settlement | `/markets/{event_id}` and `/resolution/{condition_id}` with sync invalidation from the worker |
 | Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, and Polymarket; `/metrics` exposes Prometheus counters |
 | Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
@@ -26,8 +26,9 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 3. **Routing**:
    - Read endpoints hit Redis first (`shared.cache.get_json`). Cache keys are tagged (schema tag, logical tags like `markets:list`) for precise invalidation.
    - On cache miss the handler calls `app.crud`, which wraps SQLAlchemy queries around `shared.models`.
-4. **Response shaping**: `schemas.MarketResponse` is augmented with metadata extracted from Polymarket’s `extra_data` block and filtered via tag/category allow-lists.
+4. **Response shaping**: `schemas.MarketResponse` is augmented with metadata extracted from Polymarket’s `extra_data` block and filtered via category allow-lists.
 5. **Cache writes**: payloads are dumped to Redis JSON, TTL’d via `RM_CACHE_TTL_SECONDS`, and tagged for invalidation by the worker.
+6. **Hydration cycle**: On startup (and every `RM_CACHE_REFRESH_INTERVAL_SECONDS` thereafter) the API queries Postgres for the newest `RM_CACHE_HYDRATE_LIMIT` markets and rewrites the homepage cache. That keeps Redis warm even before the first client request and ensures any worker-led Postgres updates are reflected in cache within seconds.
 
 ---
 
@@ -65,11 +66,21 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_DATABASE_POOL_SIZE` / `RM_DATABASE_MAX_OVERFLOW` | Connection pool sizing. |
 | `RM_REDIS_URL` | Redis connection string for caching + health checks. |
 | `RM_CACHE_TTL_SECONDS` | Default TTL for cached responses. |
+| `RM_CACHE_HYDRATE_ON_STARTUP`, `RM_CACHE_HYDRATE_LIMIT` | Toggle and size the Postgres→Redis priming pass that runs during API startup so cold boots still respond instantly. |
+| `RM_CACHE_REFRESH_ENABLED`, `RM_CACHE_REFRESH_INTERVAL_SECONDS`, `RM_CACHE_REFRESH_LIMIT` | Background refresher that rehydrates the newest markets every N seconds so Redis stays aligned with Postgres even without traffic. |
 | `RM_SCHEMA_VERSION_KEY` | Redis key updated by the worker so the API can invalidate caches when schema revisions change. |
 | `RM_ALLOWED_HOSTS` | CSV consumed by Starlette’s TrustedHost middleware. |
 | `RM_CORS_ALLOW_*` | Origins/methods/headers/credentials for CORS. |
 | `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
-| `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
+| `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
+
+### How the pipeline stays fresh
+
+1. **Gamma ingestion (worker)** – The worker polls Polymarket Gamma with Polygon + status filters, normalizes the payload into `MarketPayload`, and upserts rows via `shared.repository`.
+2. **Postgres as source of truth** – Every market mutation runs inside a DB transaction. Once committed, the worker invalidates the relevant Redis tags (`market:{id}`, `markets:list`, etc.).
+3. **API cache hydration** – On startup the API reads the newest markets from Postgres and writes sanitized records to Redis (`market:<event_id>` records + the homepage `markets:list` payload). A background refresher repeats this process every `RM_CACHE_REFRESH_INTERVAL_SECONDS`, so Redis reflects DB state even if no HTTP clients have arrived yet.
+4. **Serving the frontend** – `/markets` (and category endpoints) read from Redis when available. Cache misses fall back to Postgres, reusing the same sanitization logic, and responses reach the frontend in the same shape whether they came from Redis or the DB.
+5. **Search + pagination** – These paths intentionally bypass cache to keep Redis small; Postgres’ indexed queries shoulder the work, while any hits to the homepage automatically benefit from the hydration loop.
 
 ### Polymarket/on-chain
 

@@ -102,7 +102,6 @@ class SyncOutcome:
     market_changed: bool
     resolution_changed: bool
     category_slug: str | None
-    tag_slugs: list[str]
     condition_id: str | None
     resolution_cache_payload: dict[str, Any] | None
     market_created: bool = False
@@ -121,7 +120,6 @@ class CleanupOutcome:
     events: set[str]
     conditions: set[str]
     categories: set[str]
-    tags: set[str]
     deleted_rows: int = 0
     eligible_rows: int = 0
     dry_run: bool = False
@@ -133,7 +131,6 @@ class SyncSummary:
     changed_events: set[str] = field(default_factory=set)
     changed_conditions: set[str] = field(default_factory=set)
     changed_categories: set[str] = field(default_factory=set)
-    changed_tags: set[str] = field(default_factory=set)
     resolution_cache_updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = field(default_factory=list)
     stats_dirty: bool = False
@@ -149,7 +146,6 @@ class SyncSummary:
             "markets_changed": len(self.changed_events),
             "resolutions_changed": len(self.changed_conditions),
             "categories_changed": len(self.changed_categories),
-            "tags_changed": len(self.changed_tags),
             "latency_ms": round(latency_ms, 2),
             "markets_created": self.markets_created,
             "markets_updated": self.markets_updated,
@@ -308,6 +304,9 @@ def _build_polymarket_client() -> PolymarketClient:
         request_backoff_seconds=settings.polymarket_retry_backoff_seconds,
         request_backoff_max_seconds=settings.polymarket_retry_backoff_max_seconds,
         retry_counter=POLYMARKET_RETRY_COUNTER,
+        rate_limit_requests=settings.polymarket_rate_limit_requests,
+        rate_limit_window_seconds=settings.polymarket_rate_limit_window_seconds,
+        empty_page_tolerance=settings.polymarket_empty_page_tolerance,
     )
 
 
@@ -467,6 +466,9 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         order=settings.polymarket_order,
         ascending=settings.polymarket_sort_ascending,
         closed=settings.polymarket_closed_filter,
+        active=settings.polymarket_active_filter,
+        archived=settings.polymarket_archived_filter,
+        network=settings.polymarket_network,
     )
 
     def _log_fetch_retry(attempt: int, exc: BaseException | None) -> None:
@@ -480,6 +482,18 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             error=str(exc) if exc else None,
         )
 
+    def _build_filters() -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if settings.polymarket_active_filter is not None:
+            params["active"] = str(settings.polymarket_active_filter).lower()
+        if settings.polymarket_archived_filter is not None:
+            params["archived"] = str(settings.polymarket_archived_filter).lower()
+        if settings.polymarket_network:
+            params["network"] = settings.polymarket_network
+        return params
+
+    extra_params = _build_filters()
+
     def _fetch() -> list[MarketPayload]:
         return polymarket_client.fetch_markets(
             page_size=settings.polymarket_page_size,
@@ -487,6 +501,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             order=settings.polymarket_order,
             ascending=settings.polymarket_sort_ascending,
             closed=settings.polymarket_closed_filter,
+            extra_params=extra_params,
         )
 
     try:
@@ -619,8 +634,6 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
             summary.changed_conditions.add(outcome.condition_id.lower())
         if outcome.category_slug:
             summary.changed_categories.add(outcome.category_slug)
-        if outcome.tag_slugs:
-            summary.changed_tags.update(slug for slug in outcome.tag_slugs if slug)
         if outcome.resolution_cache_payload and outcome.condition_id:
             summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
         if maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
@@ -643,7 +656,6 @@ def _apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
         summary.stats_dirty = True
     summary.changed_conditions.update(cleanup_outcome.conditions)
     summary.changed_categories.update(cleanup_outcome.categories)
-    summary.changed_tags.update(cleanup_outcome.tags)
     summary.markets_deleted = cleanup_outcome.deleted_rows
     if cleanup_outcome.category_counts:
         _record_retention_metrics(cleanup_outcome.category_counts, cleanup_outcome.dry_run)
@@ -658,7 +670,7 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
         removed = shared_cache.invalidate_tag(redis_client, tag)
         report.record(tag, len(removed))
 
-    if summary.changed_events or summary.changed_categories or summary.changed_tags:
+    if summary.changed_events or summary.changed_categories:
         _invalidate("markets:list")
         _invalidate("category:trending")
         _invalidate("markets:suggest")
@@ -674,11 +686,6 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
         _invalidate(f"category:{category_slug}")
     if summary.changed_categories:
         CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(summary.changed_categories))
-    tagged = [slug for slug in summary.changed_tags if slug]
-    for tag_slug in tagged:
-        _invalidate(f"tag:{tag_slug}")
-    if tagged:
-        CACHE_INVALIDATION_COUNTER.labels(type="tag").inc(len(tagged))
     report.log()
     return report
 
@@ -861,13 +868,10 @@ def sync_market(session: Session, market: MarketPayload):
     resolution_outcome = _apply_resolution(session, db_market, market)
     session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))
-    tag_values = getattr(db_market, "tags", None) or []
-    tag_slugs = [_slugify_token(tag) for tag in tag_values if isinstance(tag, str)]
     return db_market, SyncOutcome(
         market_changed=market_changed,
         resolution_changed=resolution_outcome.changed,
         category_slug=category_slug,
-        tag_slugs=[slug for slug in tag_slugs if slug],
         condition_id=resolution_outcome.condition_id,
         resolution_cache_payload=resolution_outcome.cache_payload,
         market_created=market_created,
@@ -908,7 +912,6 @@ def cleanup_resolved_markets(  # noqa: C901
         shared_models.Market.event_id,
         shared_models.Market.condition_id,
         shared_models.Market.category,
-        shared_models.Market.tags,
         shared_models.Market.resolved_at,
         shared_models.Market.closes_at,
         shared_models.Market.closed,
@@ -927,7 +930,6 @@ def cleanup_resolved_markets(  # noqa: C901
             set(),
             set(),
             set(),
-            set(),
             deleted_rows=0,
             eligible_rows=0,
             dry_run=dry_run,
@@ -938,7 +940,6 @@ def cleanup_resolved_markets(  # noqa: C901
     event_ids: set[str] = set()
     condition_ids: set[str] = set()
     categories: set[str] = set()
-    tags: set[str] = set()
     category_counts: dict[str, int] = {}
 
     for row in records:
@@ -960,11 +961,6 @@ def cleanup_resolved_markets(  # noqa: C901
             categories.add(cat_slug)
         normalized_category = cat_slug or "uncategorized"
         category_counts[normalized_category] = category_counts.get(normalized_category, 0) + 1
-        if isinstance(row.tags, list):
-            for tag in row.tags:
-                slug = _slugify_token(tag)
-                if slug:
-                    tags.add(slug)
 
     eligible = len(ids_to_delete)
     if eligible == 0:
@@ -972,7 +968,6 @@ def cleanup_resolved_markets(  # noqa: C901
             event_ids,
             condition_ids,
             categories,
-            tags,
             deleted_rows=0,
             eligible_rows=0,
             dry_run=dry_run,
@@ -995,7 +990,6 @@ def cleanup_resolved_markets(  # noqa: C901
         event_ids,
         condition_ids,
         categories,
-        tags,
         deleted_rows=0,
         eligible_rows=eligible,
         dry_run=True,
@@ -1159,7 +1153,6 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
         "markets_changed": 0,
         "resolutions_changed": 0,
         "categories_changed": 0,
-        "tags_changed": 0,
         "latency_ms": rounded_latency,
         "markets_created": 0,
         "markets_updated": 0,
@@ -1220,7 +1213,6 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         markets_deleted=summary.markets_deleted,
         resolutions_changed=len(summary.changed_conditions),
         categories_changed=len(summary.changed_categories),
-        tags_changed=len(summary.changed_tags),
         summaries_enqueued=summary.summaries_enqueued,
         proofs_generated=summary.proofs_generated,
         latency_ms=round(latency_ms, 2),
@@ -1393,20 +1385,11 @@ def prime_markets_cache(
 
     duration_ms = (time.perf_counter() - start) * 1000
     result_count = len(payload) if isinstance(payload, list) else 0
-    shared_cache.set_json(redis_client, cache_key, payload, settings.markets_cache_ttl_seconds)
-    schema_tag = shared_cache.get_schema_tag(redis_client, settings.schema_version_key)
-    shared_cache.add_tag(redis_client, schema_tag, cache_key)
-    shared_cache.add_tag(redis_client, "markets:list", cache_key)
-    if isinstance(payload, list):
-        event_tags = [
-            f"market:{item.get('event_id')}" for item in payload if isinstance(item, dict) and item.get("event_id")
-        ]
-        shared_cache.add_tags(redis_client, event_tags, cache_key)
     log_event(
         logger,
         logging.INFO,
         event="worker.cache.primed",
-        message="primed homepage markets cache",
+        message="prefetched homepage markets via API",
         limit=limit,
         offset=offset,
         cache_key=cache_key,
@@ -1427,10 +1410,10 @@ def prime_featured_views(
     redis_client: Redis | None,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
-    summary: dict[str, Any] = {"categories_primed": 0, "tags_primed": 0, "suggestions_primed": 0, "suggestion_ttls": {}}
+    summary: dict[str, Any] = {"categories_primed": 0, "suggestions_primed": 0, "suggestion_ttls": {}}
     if redis_client is None or not settings.api_base_url:
         return summary
-    if not settings.featured_categories and not settings.featured_tags and not settings.featured_suggest_queries:
+    if not settings.featured_categories and not settings.featured_suggest_queries:
         return summary
     base_url = settings.api_base_url.rstrip("/")
     with httpx.Client(timeout=settings.cache_prime_timeout_seconds, transport=transport) as client:
@@ -1448,22 +1431,6 @@ def prime_featured_views(
                     event="worker.cache.featured_category_failed",
                     message="failed to prime category cache",
                     category=category,
-                    error=str(exc),
-                )
-        for tag in settings.featured_tags:
-            slug = quote_plus(tag)
-            params = {"limit": settings.tag_cache_limit}
-            try:
-                response = client.get(f"{base_url}/tags/{slug}", params=params)
-                if response.is_success:
-                    summary["tags_primed"] += 1
-            except Exception as exc:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="worker.cache.featured_tag_failed",
-                    message="failed to prime tag cache",
-                    tag=tag,
                     error=str(exc),
                 )
         for query in settings.featured_suggest_queries:
@@ -1493,10 +1460,8 @@ def prime_featured_views(
         event="worker.cache.featured",
         message="primed featured caches",
         categories=settings.featured_categories,
-        tags=settings.featured_tags,
         suggest_queries=settings.featured_suggest_queries,
         categories_primed=summary["categories_primed"],
-        tags_primed=summary["tags_primed"],
         suggestions_primed=summary["suggestions_primed"],
         suggestion_ttls=summary["suggestion_ttls"],
     )
@@ -1518,7 +1483,6 @@ def record_batch_stats(
         "markets_changed": sync_stats.get("markets_changed", 0),
         "resolutions_changed": sync_stats.get("resolutions_changed", 0),
         "categories_changed": sync_stats.get("categories_changed", 0),
-        "tags_changed": sync_stats.get("tags_changed", 0),
         "latency_ms": sync_stats.get("latency_ms"),
         "prime": prime_stats,
     }
@@ -1531,7 +1495,6 @@ def record_batch_stats(
         markets_processed=payload["markets_processed"],
         markets_changed=payload["markets_changed"],
         categories_changed=payload["categories_changed"],
-        tags_changed=payload["tags_changed"],
         cache_prime_status=prime_stats.get("status"),
         cache_key=prime_stats.get("cache_key"),
     )

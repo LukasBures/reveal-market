@@ -10,7 +10,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | --- | --- |
 | Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. |
 | Resolution tracking | Prefer Goldsky subgraph data (fallback to Conditional Tokens RPC) to persist payout vectors in Postgres + Redis and update market status (`settled`). |
-| Cache governance | Invalidate per-market tags, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/tags/{slug}`, `/markets/suggest`. |
+| Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, and Prometheus counters (`worker.*`). |
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
 | Optional on-chain writes | When `RM_AUTO_CREATE_ONCHAIN_MARKETS=true`, call `MarketFactory.createMarket` with retry/backoff. |
@@ -35,7 +35,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
      - Run `cleanup_resolved_markets` to enforce retention.
      - Publish heartbeats, resolution cache updates, and targeted invalidations.
    - `prime_markets_cache()` warms the homepage payload.
-   - `prime_featured_views()` hits `/categories`, `/tags`, `/markets/suggest` for “featured” cohorts.
+   - `prime_featured_views()` hits `/categories` and `/markets/suggest` for “featured” cohorts.
    - `record_batch_stats()` writes summary JSON to Redis for dashboards.
    - Sleep for `RM_POLL_INTERVAL_SECONDS` minus loop runtime.
 3. **Health**: Docker/compose call `python -m app.healthcheck` (simple DB ping) so orchestrators only start the loop when Postgres is reachable.
@@ -85,8 +85,11 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_POLYMARKET_TIMEOUT_SECONDS` | HTTP timeout per request. |
 | `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_MAX_PAGES` | Pagination controls. |
 | `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_CLOSED_FILTER` | Sorting/filtering toggles. |
+| `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER` | Additional Gamma filters recommended by Polymarket; defaults to active-only, non-archived markets. |
+| `RM_POLYMARKET_NETWORK` | Network identifier (e.g., `137` for Polygon). |
 | `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
 | `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` | Exponential backoff applied when the entire fetch loop fails before a sync cycle completes. |
+| `RM_POLYMARKET_RATE_LIMIT_REQUESTS`, `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` | Sliding-window rate limiter applied before each Gamma request. |
 
 ### Cache priming
 
@@ -96,7 +99,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_PRIME_MARKETS_CACHE_ENABLED` | Toggle for priming `/markets`. |
 | `RM_MARKETS_CACHE_LIMIT`, `RM_MARKETS_CACHE_OFFSET`, `RM_MARKETS_CACHE_TTL_SECONDS`, `RM_CACHE_PRIME_TIMEOUT_SECONDS` | Control the warmed payload + TTL. |
 | `RM_CATEGORY_CACHE_LIMIT`, `RM_TAG_CACHE_LIMIT`, `RM_SUGGEST_CACHE_LIMIT` | Limits for featured priming. |
-| `RM_FEATURED_CATEGORIES`, `RM_FEATURED_TAGS`, `RM_FEATURED_SUGGEST_QUERIES` | Comma-separated lists to warm after each batch. |
+| `RM_FEATURED_CATEGORIES`, `RM_FEATURED_SUGGEST_QUERIES` | Comma-separated lists to warm after each batch. |
 
 ### Retention & summarization
 
@@ -193,7 +196,7 @@ uv run --project . --extra dev pytest -q
 
 Coverage highlights:
 - `tests/test_polymarket.py`: payload normalization, hash computation, dedupe logic.
-- `tests/test_main.py`: cache priming, retention, heartbeat/tags, schema propagation.
+- `tests/test_main.py`: cache priming, retention, heartbeats, schema propagation.
 - `tests/test_onchain.py`: ensures factory actions are guarded and retry semantics work (mocks Tenacity/web3).
 
 Pre-commit helpers:

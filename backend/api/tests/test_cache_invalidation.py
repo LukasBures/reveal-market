@@ -23,6 +23,8 @@ def test_post_market_invalidates_cached_list(client, db_session):
     first = client.get("/markets", params={"limit": 10})
     assert first.status_code == 200
     assert cache_key in api_main.cache_client.store
+    record_key = "market:evt-cache-1"
+    assert record_key in api_main.cache_client.store
 
     payload = {
         "event_id": "evt-cache-new",
@@ -35,6 +37,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
     assert response.status_code == 201
 
     assert cache_key not in api_main.cache_client.store
+    assert record_key in api_main.cache_client.store
 
 
 def test_patch_market_invalidates_detail_and_suggest_cache(client, db_session):

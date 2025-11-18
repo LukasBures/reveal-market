@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import UTC, datetime
 
 import httpx
 from redis.exceptions import RedisError
+from shared.polymarket import build_polymarket_markets_url
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from shared.polymarket import build_polymarket_markets_url
 
 from . import schemas
 from .cache import get_redis_client
 from .config import get_settings
 
 ComponentMap = dict[str, schemas.HealthComponent]
+_POLYMARKET_NETWORK_WARNED = False
+health_logger = logging.getLogger("reveal_market.api.health")
 
 
 async def build_health_response(session: Session) -> schemas.HealthResponse:
@@ -103,8 +106,12 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
     http_start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            base = str(settings.polymarket_api_base)
-            url = build_polymarket_markets_url(base)
+            base = str(settings.polymarket_api_base).rstrip("/")
+            markets_url = build_polymarket_markets_url(base)
+            await client.get(
+                base,
+                timeout=settings.polymarket_timeout_seconds,
+            )
             params = {
                 "limit": 1,
                 "order": settings.polymarket_order,
@@ -112,8 +119,17 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
             }
             if settings.polymarket_closed_filter is not None:
                 params["closed"] = str(settings.polymarket_closed_filter).lower()
+            if settings.polymarket_network:
+                params["network"] = settings.polymarket_network
+            else:
+                global _POLYMARKET_NETWORK_WARNED
+                if not _POLYMARKET_NETWORK_WARNED:
+                    health_logger.warning(
+                        "polymarket network parameter not configured; defaulting to upstream defaults"
+                    )
+                    _POLYMARKET_NETWORK_WARNED = True
             response = await client.get(
-                url,
+                markets_url,
                 params=params,
                 timeout=settings.polymarket_timeout_seconds,
             )

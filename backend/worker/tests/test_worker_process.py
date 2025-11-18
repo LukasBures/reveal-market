@@ -167,7 +167,6 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
     assert stats["categories_changed"] == 2
-    assert stats["tags_changed"] == 0
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
     assert stats["summaries_enqueued"] == 0
@@ -291,13 +290,8 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     summary = prime_markets_cache(dummy, transport=transport)
     assert summary["status"] == "primed"
     assert summary["result_count"] == len(payload)
-    assert dummy.last_set is not None
-    assert dummy.last_set["key"].startswith("markets:list:")
-    assert dummy.last_set["ttl"] == 45
-    cached_payload = json.loads(dummy.last_set["value"])
-    assert cached_payload == payload
-    tag_members = dummy.store.get("cache:tag:markets:list")
-    assert dummy.last_set["key"] in tag_members
+    # priming now relies on the API to populate caches, so redis writes are not expected here.
+    assert dummy.store == {}
 
 
 def test_record_batch_stats_publishes_metrics(monkeypatch):
@@ -309,7 +303,6 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
         "markets_changed": 4,
         "resolutions_changed": 1,
         "categories_changed": 2,
-        "tags_changed": 3,
         "latency_ms": 55.2,
     }
     prime_stats = {"status": "primed", "cache_key": "markets:list:*"}
@@ -324,7 +317,6 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
     assert payload["markets_changed"] == 4
     assert payload["resolutions_changed"] == 1
     assert payload["categories_changed"] == 2
-    assert payload["tags_changed"] == 3
     assert payload["prime"] == prime_stats
 
 
@@ -361,7 +353,6 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
 
         assert outcome.events == {"evt-old"}
         assert "sports" in {slug for slug in outcome.categories if slug}
-        assert "gov" in {slug for slug in outcome.tags if slug}
         assert outcome.deleted_rows == 0
         assert outcome.eligible_rows == 1
         assert outcome.dry_run is True
@@ -373,7 +364,7 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
         engine.dispose()
 
 
-def test_prime_featured_views_prefetches_categories_and_tags(monkeypatch):
+def test_prime_featured_views_prefetches_categories_and_suggestions(monkeypatch):
     dummy = DummyRedis()
     requests: list[str] = []
 
@@ -387,20 +378,16 @@ def test_prime_featured_views_prefetches_categories_and_tags(monkeypatch):
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(app.main.settings, "api_base_url", "http://api:8000", raising=False)
     monkeypatch.setattr(app.main.settings, "featured_categories", ["Politics"], raising=False)
-    monkeypatch.setattr(app.main.settings, "featured_tags", ["BTC halving"], raising=False)
     monkeypatch.setattr(app.main.settings, "featured_suggest_queries", ["Alpha query"], raising=False)
     monkeypatch.setattr(app.main.settings, "category_cache_limit", 7, raising=False)
-    monkeypatch.setattr(app.main.settings, "tag_cache_limit", 5, raising=False)
     monkeypatch.setattr(app.main.settings, "suggest_cache_limit", 4, raising=False)
 
     summary = prime_featured_views(dummy, transport=transport)
 
     assert summary["categories_primed"] == 1
-    assert summary["tags_primed"] == 1
     assert summary["suggestions_primed"] == 1
     assert summary["suggestion_ttls"]["Alpha query"] == 30
     assert any("/categories/Politics" in url and "limit=7" in url for url in requests)
-    assert any("/tags/BTC+halving" in url and "limit=5" in url for url in requests)
     assert any("/markets/suggest" in url and "limit=4" in url for url in requests)
 
 

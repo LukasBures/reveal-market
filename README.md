@@ -80,14 +80,15 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 
 ### Live market ingestion
 
-- Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com` and `RM_POLYMARKET_CLOSED_FILTER=false` in `.env` (bare metal) or `docker-compose.yml` (containers) so the worker ingests active markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` / `RM_MARKET_TAG_ALLOWLIST` empty until you want to curate narratives.
+- Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com`, `RM_POLYMARKET_NETWORK=137`, `RM_POLYMARKET_ACTIVE_FILTER=true`, `RM_POLYMARKET_ARCHIVED_FILTER=false`, and `RM_POLYMARKET_CLOSED_FILTER=false` so the worker ingests only active Polygon markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` empty until you want to curate narratives.
+- Tune Gamma rate limiting via `RM_POLYMARKET_RATE_LIMIT_REQUESTS` / `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` when running multiple workers so you stay under Polymarket’s quotas.
 - The worker automatically retries failed Polymarket syncs with exponential backoff (configure `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, and `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` if you need longer windows during outages).
 - Keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker auto-applies schema updates (e.g., the `markets.tags` column) before syncing.
 - After changing env, restart the worker (`./run_local.sh worker` or `docker compose restart worker`) so it repulls the Gamma feed, writes fresh rows to Postgres, and refreshes Redis caches the frontend reads.
 - `/markets` search and the `/markets/suggest` endpoint are backed by a Postgres full-text index (`markets_search_vector_idx`). Run `alembic upgrade head` (or restart the worker/API containers) whenever new migrations land so the index stays current. Client-side search suggestions now flow through a Next.js API route that reuses this backend endpoint, so missing indexes immediately show up in the UI.
 - The stack never seeds mock data—every response flows from Polymarket via the worker. Keep the worker running (Docker restarts it automatically) so it continues syncing markets into Postgres/Redis.
 - Flip `RM_RATE_LIMIT_ENABLED=true` (optionally tune `RM_RATE_LIMIT_REQUESTS_PER_WINDOW` / `RM_RATE_LIMIT_WINDOW_SECONDS`) to enable the built-in Redis-backed rate limiter so public traffic can’t starve the ingestion path. Use `RM_RATE_LIMIT_WHITELIST` for trusted VPNs/ops hosts.
-- The worker keeps recently resolved markets for 24h (`RM_RESOLVED_RETENTION_SECONDS`) and materializes featured categories/tags into Redis so `/categories/<slug>` and `/tags/<slug>` respond instantly without hitting Gamma/Polygon.
+- The worker keeps recently resolved markets for 24h (`RM_RESOLVED_RETENTION_SECONDS`) and materializes featured categories into Redis so `/categories/<slug>` responds instantly without hitting Gamma/Polygon.
 
 Environment variables follow the `RM_` prefix (see each service README). Security headers can be tuned with `RM_ALLOWED_HOSTS`, CORS lists, and CSP overrides.
 

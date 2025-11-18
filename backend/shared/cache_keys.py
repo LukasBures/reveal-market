@@ -4,7 +4,6 @@ import re
 
 MARKETS_LIST_PREFIX = "markets:list"
 CATEGORY_PREFIX = "markets:category"
-TAG_PREFIX = "markets:tag"
 SUGGEST_PREFIX = "markets:suggest"
 RESOLUTION_PREFIX = "markets:resolution"
 PROOF_PREFIX = "proofs:receipt"
@@ -35,11 +34,6 @@ def markets_list_cache_key(
 def category_cache_key(category: str, limit: int) -> str:
     slug = _slugify(category)
     return f"{CATEGORY_PREFIX}:{slug}|limit={limit}"
-
-
-def tag_cache_key(tag: str, limit: int) -> str:
-    slug = _slugify(tag)
-    return f"{TAG_PREFIX}:{slug}|limit={limit}"
 
 
 def suggest_cache_key(query: str, limit: int) -> str:

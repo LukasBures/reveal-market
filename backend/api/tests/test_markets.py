@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import app.main as api_main
 from app import crud, models
 from prometheus_client import REGISTRY
-from shared.cache_keys import category_cache_key, suggest_cache_key, tag_cache_key
+from shared.cache_keys import category_cache_key, markets_list_cache_key, suggest_cache_key
 
 
 def _make_market(
@@ -284,11 +284,11 @@ def test_markets_cache_metrics_track_hits_and_misses(client, db_session):
     miss_before = _cache_metric("miss")
     hit_before = _cache_metric("hit")
 
-    response_one = client.get("/markets")
+    response_one = client.get("/markets", params={"limit": 10})
     assert response_one.status_code == 200
     assert _cache_metric("miss") == miss_before + 1
 
-    response_two = client.get("/markets")
+    response_two = client.get("/markets", params={"limit": 10})
     assert response_two.status_code == 200
     assert _cache_metric("hit") == hit_before + 1
 
@@ -346,33 +346,6 @@ def test_category_endpoint_populates_trending_with_general_feed(client, db_sessi
     assert {item["event_id"] for item in payload} == {"evt-trend-a", "evt-trend-b"}
 
 
-def test_tag_endpoint_filters_and_caches(client, db_session):
-    market = _make_market("evt-tag1", "Tagged Market", category="news", oracle="0xaaa", status="commit")
-    market.tags = ["BTC Halving", "Crypto"]
-    db_session.add(market)
-    db_session.commit()
-
-    response = client.get("/tags/btc-halving", params={"limit": 10})
-    assert response.status_code == 200
-    payload = response.json()
-    assert len(payload) == 1
-    assert payload[0]["event_id"] == "evt-tag1"
-
-    cache_key = tag_cache_key("btc-halving", 10)
-    assert cache_key in api_main.cache_client.store
-    db_session.query(models.Market).delete()
-    db_session.commit()
-    cached = client.get("/tags/btc-halving", params={"limit": 10})
-    assert cached.status_code == 200
-    assert len(cached.json()) == 1
-    assert cached.json()[0]["event_id"] == "evt-tag1"
-
-
-def test_tag_endpoint_validates_slug(client):
-    resp = client.get("/tags/unknown")
-    assert resp.status_code == 404
-
-
 def test_category_cache_respects_allowlist(client, db_session):
     original_allow = list(api_main.settings.market_category_allowlist)
     api_main.settings.market_category_allowlist = []
@@ -392,17 +365,6 @@ def test_category_cache_respects_allowlist(client, db_session):
         assert cached.json() == []
     finally:
         api_main.settings.market_category_allowlist = original_allow
-
-
-def test_tag_endpoint_accepts_encoded_spaces(client, db_session):
-    market = _make_market("evt-tag-space", "Gov Market", category="news", oracle="0xgov", status="commit")
-    market.tags = ["Gov shutdown"]
-    db_session.add(market)
-    db_session.commit()
-
-    resp = client.get("/tags/gov%20shutdown", params={"limit": 5})
-    assert resp.status_code == 200
-    assert resp.json()[0]["event_id"] == "evt-tag-space"
 
 
 def test_suggest_endpoint_serves_cache_when_source_removed(client, db_session):
@@ -447,20 +409,14 @@ def test_create_market_invalidates_list_cache(client, db_session):
     assert {item["event_id"] for item in second.json()} == {"evt-cache-base", "evt-cache-new"}
 
 
-def test_markets_cache_normalizes_search_query(client, db_session):
+def test_market_search_requests_not_cached(client, db_session):
     db_session.add(_make_market("evt-search", "AI Boom", category="tech", oracle="0xaaa", status="commit"))
     db_session.commit()
 
-    initial = client.get("/markets", params={"search": "AI", "limit": 5})
-    assert initial.status_code == 200
-    assert {item["event_id"] for item in initial.json()} == {"evt-search"}
-
-    db_session.query(models.Market).delete()
-    db_session.commit()
-
-    cached = client.get("/markets", params={"search": "ai", "limit": 5})
-    assert cached.status_code == 200
-    assert {item["event_id"] for item in cached.json()} == {"evt-search"}
+    response = client.get("/markets", params={"search": "AI", "limit": 5})
+    assert response.status_code == 200
+    cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0)
+    assert cache_key not in api_main.cache_client.store
 
 
 def test_patch_market_invalidates_detail_cache(client, db_session):
@@ -574,7 +530,6 @@ def test_market_allowlists_filter_results(client, db_session):
         oracle="0xoracle",
         status="commit",
     )
-    market_allowed.tags = ["gov-shutdown", "macro"]
 
     market_blocked = _make_market(
         "evt-blocked",
@@ -583,33 +538,27 @@ def test_market_allowlists_filter_results(client, db_session):
         oracle="0xoracle",
         status="commit",
     )
-    market_blocked.tags = ["equities"]
 
     db_session.add_all([market_allowed, market_blocked])
     db_session.commit()
 
     original_categories = list(api_main.settings.market_category_allowlist)
-    original_tags = list(api_main.settings.market_tag_allowlist)
     api_main.settings.market_category_allowlist = ["sports"]
-    api_main.settings.market_tag_allowlist = ["gov-shutdown"]
 
     try:
-        response = client.get("/markets")
+        response = client.get("/markets", params={"limit": 10})
         assert response.status_code == 200
         payload = response.json()
         assert len(payload) == 1
         market = payload[0]
         assert market["event_id"] == "evt-allowed"
-        assert market["tags"] == ["gov-shutdown", "macro"]
 
-        # cached result should still respect filters
-        cached_response = client.get("/markets")
+        cached_response = client.get("/markets", params={"limit": 10})
         assert cached_response.status_code == 200
         cached_payload = cached_response.json()
         assert [item["event_id"] for item in cached_payload] == ["evt-allowed"]
     finally:
         api_main.settings.market_category_allowlist = original_categories
-        api_main.settings.market_tag_allowlist = original_tags
 
 
 def test_list_markets_by_category_handles_unknown_slug(client):
@@ -629,7 +578,7 @@ def test_list_markets_by_category_uses_cache(client, db_session, monkeypatch):
     db_session.add(allowed)
     db_session.commit()
 
-    first = client.get("/categories/politics")
+    first = client.get("/categories/politics", params={"limit": 10})
     assert first.status_code == 200
     assert [item["event_id"] for item in first.json()] == ["evt-politics"]
 
@@ -637,40 +586,9 @@ def test_list_markets_by_category_uses_cache(client, db_session, monkeypatch):
         raise AssertionError("category query should be served from cache")
 
     monkeypatch.setattr(crud, "get_markets", fail)
-    cached = client.get("/categories/politics")
+    cached = client.get("/categories/politics", params={"limit": 10})
     assert cached.status_code == 200
     assert [item["event_id"] for item in cached.json()] == ["evt-politics"]
-
-
-def test_list_markets_by_tag_handles_unknown_slug(client):
-    response = client.get("/tags/unknown-tag")
-    assert response.status_code == 404
-    assert response.json()["detail"] == "tag_not_found"
-
-
-def test_list_markets_by_tag_normalizes_slug_and_caches(client, db_session, monkeypatch):
-    tagged = _make_market(
-        "evt-tagged",
-        "Shutdown Tracker",
-        category="Politics",
-        oracle="0xoracle",
-        status="commit",
-    )
-    tagged.tags = ["Gov shutdown", "Macro"]
-    db_session.add(tagged)
-    db_session.commit()
-
-    first = client.get("/tags/gov-shutdown")
-    assert first.status_code == 200
-    assert [item["event_id"] for item in first.json()] == ["evt-tagged"]
-
-    def fail(*args, **kwargs):  # pragma: no cover - defensive
-        raise AssertionError("tag query should be served from cache")
-
-    monkeypatch.setattr(crud, "get_markets_by_tag", fail)
-    cached = client.get("/tags/Gov%20Shutdown")
-    assert cached.status_code == 200
-    assert [item["event_id"] for item in cached.json()] == ["evt-tagged"]
 
 
 def test_create_market_requires_mandatory_fields(client):

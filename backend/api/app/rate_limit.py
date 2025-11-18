@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
-from typing import Callable
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from redis import Redis
+from shared.logging import log_event
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.config import Settings
-from shared.logging import log_event
 
 logger = logging.getLogger("reveal_market.api.rate_limit")
 
@@ -146,7 +146,9 @@ class RateLimitMiddleware:
                 remaining=result.remaining,
             )
             headers["Retry-After"] = str(result.retry_after_seconds)
-            response = JSONResponse({"detail": "rate_limit_exceeded"}, status_code=HTTP_429_TOO_MANY_REQUESTS, headers=headers)
+            response = JSONResponse(
+                {"detail": "rate_limit_exceeded"}, status_code=HTTP_429_TOO_MANY_REQUESTS, headers=headers
+            )
             await response(scope, receive, send)
             return
 

@@ -48,27 +48,24 @@ def test_market_metadata_enrichment_applies_description_and_tokens(client, db_se
     assert enriched["clob_token_ids"] == ["A", "B"]
 
 
-def test_allowlists_filter_markets_by_category_and_tag(monkeypatch, client, db_session):
+def test_category_allowlist_filters_markets(monkeypatch, client, db_session):
     db_session.add_all(
         [
             _make_market(
                 "evt-allowed",
                 "Allowed Finance",
                 category="Finance",
-                tags=["btc", "macro"],
             ),
             _make_market(
                 "evt-blocked",
                 "Blocked Sports",
                 category="Sports",
-                tags=["nba"],
             ),
         ]
     )
     db_session.commit()
 
     monkeypatch.setattr(api_main.settings, "market_category_allowlist", ["Finance"], raising=False)
-    monkeypatch.setattr(api_main.settings, "market_tag_allowlist", ["btc"], raising=False)
 
     response = client.get("/markets")
     assert response.status_code == 200

@@ -34,7 +34,6 @@ export function FeaturedMarketsClient({
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const hasAppendedRef = useRef(false);
 
   const DEFAULT_BATCH = 20;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
@@ -53,16 +52,27 @@ export function FeaturedMarketsClient({
     setMarkets(initialMarkets);
     setHasMore(initialMarkets.length >= pageSize);
     setAutoLoadCount(0);
-    hasAppendedRef.current = false;
   }, [initialMarkets, pageSize, filterSignature]);
 
   useEffect(() => {
-    if (!refreshedMarkets || hasAppendedRef.current) {
+    if (!refreshedMarkets) {
       return;
     }
-    setMarkets(refreshedMarkets);
-    setHasMore(true);
-  }, [refreshedMarkets]);
+    setMarkets((prev) => {
+      const seen = new Set<string>();
+      const merged: MarketSummary[] = [];
+      const pushUnique = (item: MarketSummary) => {
+        if (!item.eventId || seen.has(item.eventId)) {
+          return;
+        }
+        seen.add(item.eventId);
+        merged.push(item);
+      };
+      refreshedMarkets.forEach(pushUnique);
+      prev.forEach(pushUnique);
+      return merged.slice(0, maxItems);
+    });
+  }, [refreshedMarkets, maxItems]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -95,9 +105,6 @@ export function FeaturedMarketsClient({
           setHasMore(computedHasMore);
           if (mode === "auto" && nextItems.length > 0) {
             setAutoLoadCount((count) => count + 1);
-          }
-          if (nextItems.length > 0) {
-            hasAppendedRef.current = true;
           }
         } catch (error) {
           logger.clientError("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
