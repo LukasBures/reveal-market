@@ -89,6 +89,38 @@ const baseLogger = {
       console.error(formatLine("error", message, meta));
     }
   },
+  clientWarn(message: string, meta?: Record<string, unknown>) {
+    if (isBrowser) {
+      console.warn(formatLine("warn", message, meta));
+      const source = process.env.NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT;
+      if (source) {
+        fetch(source, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ level: "warn", message, meta }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } else {
+      baseLogger.warn(message, meta);
+    }
+  },
+  clientError(message: string, meta?: Record<string, unknown>) {
+    if (isBrowser) {
+      console.error(formatLine("error", message, meta));
+      const source = process.env.NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT;
+      if (source) {
+        fetch(source, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ level: "error", message, meta }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } else {
+      baseLogger.error(message, meta);
+    }
+  },
 };
 
 let heartbeatStarted = false;

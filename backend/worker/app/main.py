@@ -227,6 +227,7 @@ def _run_with_retries[T](
     max_attempts: int,
     base_backoff: float,
     max_backoff: float | None = None,
+    on_retry: Callable[[int, BaseException | None], None] | None = None,
 ) -> T:
     """Execute an action with optional retry semantics using tenacity."""
 
@@ -243,10 +244,23 @@ def _run_with_retries[T](
     if max_backoff is not None and max_backoff > 0:
         wait_kwargs["max"] = max_backoff
 
+    def _before_sleep(retry_state):
+        if on_retry is None:
+            return
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        try:
+            on_retry(retry_state.attempt_number, exc)
+        except Exception:  # pragma: no cover - logging must not break retries
+            logger.debug(
+                "retry callback raised",
+                extra={"attempt": retry_state.attempt_number, "error": str(exc) if exc else None},
+            )
+
     retryer = Retrying(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(**wait_kwargs),
         retry=retry_if_exception_type(Exception),
+        before_sleep=_before_sleep,
         reraise=True,
     )
     return retryer(action)
@@ -455,13 +469,33 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         closed=settings.polymarket_closed_filter,
     )
 
-    try:
-        markets = polymarket_client.fetch_markets(
+    def _log_fetch_retry(attempt: int, exc: BaseException | None) -> None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.fetch.retry",
+            message="retrying polymarket fetch",
+            attempt=attempt,
+            max_attempts=settings.polymarket_sync_max_attempts,
+            error=str(exc) if exc else None,
+        )
+
+    def _fetch() -> list[MarketPayload]:
+        return polymarket_client.fetch_markets(
             page_size=settings.polymarket_page_size,
             max_pages=settings.polymarket_max_pages,
             order=settings.polymarket_order,
             ascending=settings.polymarket_sort_ascending,
             closed=settings.polymarket_closed_filter,
+        )
+
+    try:
+        markets = _run_with_retries(
+            _fetch,
+            settings.polymarket_sync_max_attempts,
+            settings.polymarket_sync_retry_backoff_seconds,
+            settings.polymarket_sync_retry_backoff_max_seconds,
+            on_retry=_log_fetch_retry if settings.polymarket_sync_max_attempts > 1 else None,
         )
     except Exception as exc:
         POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()

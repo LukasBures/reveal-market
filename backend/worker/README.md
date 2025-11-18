@@ -86,6 +86,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_MAX_PAGES` | Pagination controls. |
 | `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_CLOSED_FILTER` | Sorting/filtering toggles. |
 | `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
+| `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` | Exponential backoff applied when the entire fetch loop fails before a sync cycle completes. |
 
 ### Cache priming
 

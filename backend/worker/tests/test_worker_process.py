@@ -419,6 +419,7 @@ def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         extra_data={"gamma": {"id": "evt-success"}},
     )
 
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
     monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", lambda **kwargs: [payload], raising=False)
     before = _fetch_counter("success")
 
@@ -432,11 +433,42 @@ def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     def always_fail(**kwargs):
         raise RuntimeError("fatal failure")
 
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
     monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", always_fail, raising=False)
     before = _fetch_counter("error")
     with pytest.raises(RuntimeError):
         app.main.fetch_markets_from_polymarket()
     assert _fetch_counter("error") == before + 1
+
+
+def test_fetch_markets_from_polymarket_retries(monkeypatch):
+    payload = MarketPayload(
+        event_id="evt-retry",
+        title="Retry",
+        category="sports",
+        oracle="polymarket",
+        status="commit",
+        extra_data={"gamma": {"id": "evt-retry"}},
+    )
+
+    attempts = {"count": 0}
+
+    def flaky_fetch(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("temporary failure")
+        return [payload]
+
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 2, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", flaky_fetch, raising=False)
+
+    markets, _ = app.main.fetch_markets_from_polymarket()
+
+    assert attempts["count"] == 2
+    assert markets[0].event_id == "evt-retry"
 
 
 def test_publish_heartbeat_retries_on_failure(monkeypatch):

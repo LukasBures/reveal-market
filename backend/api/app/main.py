@@ -32,12 +32,13 @@ from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import crud, schemas
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.database import get_session, run_migrations
 from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
+from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
 
 try:
@@ -59,6 +60,12 @@ CANONICAL_TAGS = {
 setup_logging("reveal_market.api")
 
 settings = get_settings()
+
+
+def _current_settings() -> Settings:
+    return settings
+
+
 logger = logging.getLogger("reveal_market.api")
 instrumentator = Instrumentator()
 cache_client: Redis | None = None
@@ -378,6 +385,10 @@ def get_cache_client() -> Redis | None:
             if cache_client is not None:
                 app.cache_client = cache_client  # type: ignore[attr-defined]
     return cache_client
+
+
+rate_limiter = RateLimiter(_current_settings, get_cache_client)
+app.add_middleware(RateLimitMiddleware, settings=_current_settings, limiter=rate_limiter)
 
 
 def _build_goldsky_client() -> GoldskyClient | None:

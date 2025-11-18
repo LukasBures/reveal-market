@@ -12,17 +12,9 @@ import type {
 import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
+import { getServerEnv } from "./serverEnv";
 
-const OFFLINE_FALLBACK =
-  process.env.NODE_ENV === "development" ? "http://localhost:8000" : "http://127.0.0.1:65535";
-
-const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
-
-export const DEFAULT_API_BASE =
-  (preferDockerApi ? process.env.RM_API_BASE_URL : undefined) ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.RM_API_BASE_URL ??
-  OFFLINE_FALLBACK;
+export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;

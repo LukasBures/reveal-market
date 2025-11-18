@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = Field(default=30, ge=1)
     cache_connect_retries: int = Field(default=3, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
+    rate_limit_enabled: bool = Field(default=False)
+    rate_limit_requests_per_window: int = Field(default=300, ge=1)
+    rate_limit_window_seconds: int = Field(default=60, ge=1)
+    rate_limit_whitelist: list[str] = Field(default_factory=list)
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)
@@ -102,6 +106,7 @@ class Settings(BaseSettings):
         "cors_allow_headers",
         "market_category_allowlist",
         "market_tag_allowlist",
+        "rate_limit_whitelist",
         mode="before",
     )
     @classmethod

@@ -173,3 +173,30 @@ def test_polymarket_client_respects_closed_filter_and_extra_params():
     assert sent_params["limit"] == "5"
     assert sent_params["offset"] == "0"
     assert sent_params["customFlag"] == "alpha"
+
+
+def test_polymarket_client_handles_wrapped_payload():
+    """Support Gamma responses that wrap markets inside a data/items container."""
+
+    payload = {
+        "data": [
+            {
+                "id": "wrapped-1",
+                "question": "Wrapped market?",
+                "outcomes": ["Yes", "No"],
+                "outcomePrices": [0.5, 0.5],
+            }
+        ],
+        "meta": {"total": 1},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+
+    markets = client.fetch_markets(page_size=10, max_pages=1)
+
+    assert len(markets) == 1
+    assert markets[0].event_id == "wrapped-1"

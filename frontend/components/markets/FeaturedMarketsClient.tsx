@@ -100,7 +100,7 @@ export function FeaturedMarketsClient({
             hasAppendedRef.current = true;
           }
         } catch (error) {
-          logger.error("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
+          logger.clientError("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
           setHasMore(false);
         }
       });

@@ -55,7 +55,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24 }: Props) {
             setHasMore(false);
           }
         } catch (error) {
-          logger.error("ProofsClient:loadMore_failed", { error: (error as Error).message });
+          logger.clientError("ProofsClient:loadMore_failed", { error: (error as Error).message });
           setHasMore(false);
         }
       });

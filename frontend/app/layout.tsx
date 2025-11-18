@@ -18,6 +18,7 @@ import {
   LANDING_ACCESS_COOKIE_NAME,
   isLandingGateEnabled,
 } from "@/lib/access-gate";
+import { serverEnv } from "@/lib/serverEnv";
 
 export const dynamic = "force-dynamic";
 
@@ -33,13 +34,9 @@ const displayFont = localFont({
 
 const SITE_URL = absoluteUrl("/");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.RM_API_BASE_URL ??
-  "http://localhost:8000";
 const API_ORIGIN = (() => {
   try {
-    return new URL(API_BASE).origin;
+    return new URL(serverEnv.apiBaseUrl).origin;
   } catch {
     return null;
   }

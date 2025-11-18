@@ -218,23 +218,23 @@ class PolymarketClient:
                     logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
                     raise
 
-                if not isinstance(payload, list) or not payload:
+                records = _extract_page_records(payload)
+                if not records:
+                    logger.debug("polymarket page contained no records", extra={"offset": offset})
                     break
 
-                for raw in payload:
-                    if not isinstance(raw, dict):
-                        continue
+                for raw in records:
                     try:
                         markets.append(MarketPayload.from_gamma(raw))
                     except (ValidationError, ValueError) as exc:
                         logger.warning("skipping polymarket record: %s", exc)
 
-                offset += len(payload)
+                offset += len(records)
                 page += 1
 
                 if max_pages is not None and page >= max_pages:
                     break
-                if len(payload) < page_size:
+                if len(records) < page_size:
                     break
 
         return markets
@@ -301,6 +301,19 @@ def _request_page(client: httpx.Client, url: str, params: dict[str, Any]) -> htt
     response = client.get(url, params=params)
     response.raise_for_status()
     return response
+
+
+def _extract_page_records(payload: Any) -> list[dict[str, Any]]:
+    """Return a list of dict records from Gamma responses."""
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("data", "markets", "items"):
+            maybe = payload.get(key)
+            if isinstance(maybe, list):
+                return [item for item in maybe if isinstance(item, dict)]
+    return []
 
 
 def _extract_outcomes(outcomes: Any) -> list[str] | None:
