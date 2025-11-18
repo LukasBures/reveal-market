@@ -267,9 +267,34 @@ def _ensure_schema() -> SchemaSyncResult:
 
     global _schema_checked
     result = SchemaSyncResult()
-    if _schema_checked or not settings.run_migrations_on_startup:
+    if _schema_checked:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.schema.already_checked",
+            message="schema state already verified earlier in lifecycle",
+            run_migrations=settings.run_migrations_on_startup,
+        )
         return result
-    apply_migrations(settings.database_url)
+    if not settings.run_migrations_on_startup:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.schema.migrations_disabled",
+            message="skipping schema migrations due to configuration",
+        )
+        return result
+    try:
+        apply_migrations(settings.database_url)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.schema.migration_failed",
+            message="alembic migrations failed to apply",
+            error=str(exc),
+        )
+        raise
     revision = get_current_revision(settings.database_url)
     if revision is None:
         log_event(
@@ -458,7 +483,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
     start = time.perf_counter()
     log_event(
         logger,
-        logging.DEBUG,
+        logging.INFO,
         event="worker.fetch.start",
         message="fetching markets from polymarket",
         page_size=settings.polymarket_page_size,
@@ -614,14 +639,24 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
     summary = SyncSummary()
     if not markets:
         return summary
+    total_markets = len(markets)
     log_event(
         logger,
         logging.INFO,
         event="worker.persist.batch",
         message="synchronising markets into database",
-        markets_processed=len(markets),
+        markets_processed=total_markets,
     )
-    for market in markets:
+    for index, market in enumerate(markets, start=1):
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.market.sync_start",
+            message="processing market payload",
+            event_id=market.event_id,
+            batch_index=index,
+            batch_total=total_markets,
+        )
         db_market, outcome = sync_market(session, market)
         if outcome.market_changed and db_market and db_market.event_id:
             summary.changed_events.add(db_market.event_id)
@@ -722,6 +757,15 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
         or not isinstance(condition_id, str)
         or not condition_id.startswith("0x")
     ):
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.resolution.skipped_unavailable",
+            message="skipping resolution sync because prerequisites not met",
+            condition_id=condition_id,
+            goldsky_enabled=goldsky_client is not None,
+            conditional_tokens_enabled=conditional_tokens_client is not None,
+        )
         return ResolutionOutcome()
 
     normalized_condition_id = condition_id.lower()
@@ -730,10 +774,28 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     now = datetime.now(UTC)
 
     if not _should_refresh_resolution(existing, now):
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.resolution.skip_refresh",
+            message="existing resolution snapshot still within freshness window",
+            condition_id=normalized_condition_id,
+            last_checked=getattr(existing, "checked_at", None).isoformat()
+            if getattr(existing, "checked_at", None)
+            else None,
+            resolved=getattr(existing, "resolved", None),
+        )
         return ResolutionOutcome()
 
     summary = _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
     if summary is None:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.resolution.snapshot_missing",
+            message="resolution snapshot could not be loaded",
+            condition_id=normalized_condition_id,
+        )
         return ResolutionOutcome()
 
     checked_at_dt = _parse_checked_at(summary.get("checkedAt"), now)
@@ -817,6 +879,16 @@ def sync_market(session: Session, market: MarketPayload):
         status_value = MarketStatusEnum.LOCKED.value
     payload["status"] = status_value
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.market.payload_ready",
+        message="prepared market payload for persistence",
+        event_id=market.event_id,
+        existing=existing is not None,
+        should_close=should_close,
+        status=status_value,
+    )
     db_market = existing
     market_changed = False
     market_created = False
@@ -842,7 +914,7 @@ def sync_market(session: Session, market: MarketPayload):
         if match:
             log_event(
                 logger,
-                logging.DEBUG,
+                logging.INFO,
                 event="worker.market.skip_update",
                 message="skipping market update (no changes detected)",
                 event_id=market.event_id,
@@ -1166,9 +1238,33 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.sync.begin",
+        message="starting worker sync tick",
+        poll_interval_seconds=settings.poll_interval_seconds,
+    )
     schema_state = _ensure_schema()
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.schema.state",
+        message="schema check finished for sync tick",
+        changed=schema_state.changed,
+        current_revision=schema_state.current_revision,
+        previous_revision=schema_state.previous_revision,
+    )
     try:
         markets, latency_ms = fetch_markets_from_polymarket()
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.sync.fetch_complete",
+            message="polymarket fetch returned payloads",
+            markets_fetched=len(markets),
+            latency_ms=round(latency_ms, 2),
+        )
     except Exception as exc:
         stats = _empty_sync_stats()
         log_event(
@@ -1187,6 +1283,13 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         with session_scope() as session:
             if markets:
                 summary = _collect_market_changes(session, markets, redis_client)
+            else:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.persist.no_markets",
+                    message="skipping DB persistence because no markets were returned",
+                )
             _apply_retention_cleanup(session, summary)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
@@ -1235,9 +1338,23 @@ def maybe_generate_settlement_proof(
     """Call the prover service when settlements change so downstream services can audit proofs."""
 
     if not settings.prover_enabled or PROVER_CLIENT is None:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.proof.disabled",
+            message="settlement proof generation is disabled or client unavailable",
+            prover_enabled=settings.prover_enabled,
+        )
         return False
     normalized_condition = condition_id or market_snapshot.get("condition_id")
     if not normalized_condition:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.proof.no_condition",
+            message="skipping proof generation due to missing condition id",
+            event_id=market_snapshot.get("event_id"),
+        )
         return False
     request = SettlementProofRequest(
         event_id=str(market_snapshot.get("event_id") or "unknown"),
@@ -1252,6 +1369,14 @@ def maybe_generate_settlement_proof(
         market_address=_normalize_market_address(market_snapshot.get("market_address")),
         circuit_version=1,
         metadata=_build_proof_metadata(market_payload),
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.proof.request_ready",
+        message="constructed settlement proof request",
+        event_id=request.event_id,
+        condition_id=request.condition_id,
     )
     try:
         response = PROVER_CLIENT.generate_settlement_proof(request)

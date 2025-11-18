@@ -54,15 +54,14 @@ def _pop_job(redis_client: Redis) -> SummaryJob | None:
     _, raw = result
     payload = raw if isinstance(raw, str) else raw.decode("utf-8")
     job = SummaryJob.from_json(payload)
-    if logger.isEnabledFor(logging.DEBUG):
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.summary.job_received",
-            message="pulled summary job from queue",
-            job_id=job.job_id,
-            event_id=job.event_id,
-        )
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.summary.job_received",
+        message="pulled summary job from queue",
+        job_id=job.job_id,
+        event_id=job.event_id,
+    )
     return job
 
 
@@ -129,16 +128,15 @@ def run_summary_worker() -> None:
 def process_job(job: SummaryJob, redis_client: Redis, client: SummaryClient) -> bool:
     """Process a single summary job; return True on success."""
 
-    if logger.isEnabledFor(logging.DEBUG):
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.summary.processing",
-            message="processing summary job",
-            job_id=job.job_id,
-            event_id=job.event_id,
-            attempts=job.attempts,
-        )
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.summary.processing",
+        message="processing summary job",
+        job_id=job.job_id,
+        event_id=job.event_id,
+        attempts=job.attempts,
+    )
     try:
         result = client.generate(job)
     except SummaryClientError as exc:

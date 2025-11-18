@@ -76,52 +76,49 @@ def maybe_enqueue_summary_job(
     """Queue a summary enrichment job when the market lacks a fresh AI narrative."""
 
     if redis_client is None or not settings.summary_enabled:
-        if logger.isEnabledFor(logging.DEBUG):
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.summary.skip_disabled",
-                message="summary enrichment disabled or redis unavailable",
-                event_id=getattr(market_record, "event_id", None),
-            )
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.summary.skip_disabled",
+            message="summary enrichment disabled or redis unavailable",
+            event_id=getattr(market_record, "event_id", None),
+            summary_enabled=settings.summary_enabled,
+        )
         return False
 
     description = _extract_description(market_payload.extra_data or {})
     if not description:
-        if logger.isEnabledFor(logging.DEBUG):
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.summary.skip_no_description",
-                message="market missing description; skipping summary job",
-                event_id=market_record.event_id,
-            )
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.summary.skip_no_description",
+            message="market missing description; skipping summary job",
+            event_id=market_record.event_id,
+        )
         return False
 
     now = datetime.now(UTC)
     needs_summary, reason = _needs_summary(market_record, now)
     if not needs_summary:
-        if logger.isEnabledFor(logging.DEBUG):
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.summary.skip_fresh",
-                message="market summary is still fresh",
-                event_id=market_record.event_id,
-                reason=reason,
-            )
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.summary.skip_fresh",
+            message="market summary is still fresh",
+            event_id=market_record.event_id,
+            reason=reason,
+        )
         return False
     inflight, age_seconds = _request_inflight(market_record, now)
     if inflight:
-        if logger.isEnabledFor(logging.DEBUG):
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.summary.skip_inflight",
-                message="summary request already in-flight",
-                event_id=market_record.event_id,
-                age_seconds=age_seconds,
-            )
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.summary.skip_inflight",
+            message="summary request already in-flight",
+            event_id=market_record.event_id,
+            age_seconds=age_seconds,
+        )
         return False
 
     job = SummaryJob(
