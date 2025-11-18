@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 
 const navLinks = [
@@ -10,6 +11,13 @@ const navLinks = [
   { href: "/proofs", label: "Proofs" },
   { href: "/docs", label: "Docs" },
 ] as const;
+
+const rawHomeLink = (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
+const fallbackHomeRoute: Route = "/";
+const internalHomeHref: Route = rawHomeLink && rawHomeLink.startsWith("/")
+  ? (rawHomeLink as Route)
+  : fallbackHomeRoute;
+const externalHomeHref = /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
 
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -33,13 +41,23 @@ export function MainNav() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
       <div className="absolute inset-y-0 right-8 hidden w-40 bg-brand-500/10 blur-3xl lg:block" aria-hidden="true" />
       <div className="relative mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
-        <Link
-          href="/"
-          className="flex items-center gap-3 text-white transition hover:opacity-90"
-          onClick={() => setIsMobileMenuOpen(false)}
-        >
-          <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
-        </Link>
+        {externalHomeHref ? (
+          <a
+            href={externalHomeHref}
+            className="flex items-center gap-3 text-white transition hover:opacity-90"
+            onClick={() => setIsMobileMenuOpen(false)}
+          >
+            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
+          </a>
+        ) : (
+          <Link
+            href={internalHomeHref}
+            className="flex items-center gap-3 text-white transition hover:opacity-90"
+            onClick={() => setIsMobileMenuOpen(false)}
+          >
+            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
+          </Link>
+        )}
         <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
           {navLinks.map((link) => (
             <Link key={link.href} href={link.href} className="transition hover:text-white">

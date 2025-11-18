@@ -26,6 +26,7 @@ body {
   letter-spacing: 0.01em;
   position: relative;
   overflow-x: hidden;
+  overflow-y: scroll;
   scrollbar-gutter: stable both-edges;
 }
 
@@ -97,12 +98,6 @@ body::after {
   }
   100% {
     transform: translate3d(-4%, 10%, 0) scale(1);
-  }
-}
-
-@supports not (scrollbar-gutter: stable both-edges) {
-  body {
-    overflow-y: scroll;
   }
 }
 
