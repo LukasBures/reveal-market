@@ -65,7 +65,6 @@ export function MarketCard({ market }: Props) {
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
           <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">{market.title}</h3>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{categoryLabel}</p>
         </div>
       </div>
       <div className="relative flex items-center justify-between rounded-xl border border-white/5 bg-slate-950/60 px-3 py-2 text-sm backdrop-blur">
