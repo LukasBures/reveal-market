@@ -139,6 +139,7 @@ class Settings(BaseSettings):
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)
+    market_progress_log_intervals: int = Field(default=10, ge=1)
 
     @field_validator("featured_categories", "featured_suggest_queries", mode="before")
     @classmethod

@@ -133,14 +133,15 @@ def maybe_enqueue_summary_job(
     )
     redis_client.lpush(settings.summary_queue_key, job.to_json())
     market_record.summary_requested_at = now
-    log_event(
-        logger,
-        logging.INFO,
-        event="worker.summary.enqueued",
-        message="queued market for AI summary enrichment",
-        event_id=market_record.event_id,
-        job_id=job.job_id,
-    )
+    if logger.isEnabledFor(logging.DEBUG):
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.summary.enqueued",
+            message="queued market for AI summary enrichment",
+            event_id=market_record.event_id,
+            job_id=job.job_id,
+        )
     return True
 
 

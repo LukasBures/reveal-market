@@ -647,16 +647,26 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
         message="synchronising markets into database",
         markets_processed=total_markets,
     )
+    progress_log_step = max(total_markets // max(settings.market_progress_log_intervals, 1), 1)
     for index, market in enumerate(markets, start=1):
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.market.sync_start",
-            message="processing market payload",
-            event_id=market.event_id,
-            batch_index=index,
-            batch_total=total_markets,
-        )
+        if index % progress_log_step == 0 or index == 1 or index == total_markets:
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.persist.progress",
+                message="market sync progress",
+                processed=index,
+                total=total_markets,
+            )
+        if index % progress_log_step == 0 or index == total_markets:
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.persist.progress",
+                message="market sync progress",
+                processed=index,
+                total=total_markets,
+            )
         db_market, outcome = sync_market(session, market)
         if outcome.market_changed and db_market and db_market.event_id:
             summary.changed_events.add(db_market.event_id)
@@ -693,7 +703,7 @@ def _apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
     summary.changed_categories.update(cleanup_outcome.categories)
     summary.markets_deleted = cleanup_outcome.deleted_rows
     if cleanup_outcome.category_counts:
-        _record_retention_metrics(cleanup_outcome.category_counts, cleanup_outcome.dry_run)
+        _record_retention_metrics(cleanup_outcome.category_counts)
 
 
 def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> CacheInvalidationReport:
@@ -757,15 +767,16 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
         or not isinstance(condition_id, str)
         or not condition_id.startswith("0x")
     ):
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.resolution.skipped_unavailable",
-            message="skipping resolution sync because prerequisites not met",
-            condition_id=condition_id,
-            goldsky_enabled=goldsky_client is not None,
-            conditional_tokens_enabled=conditional_tokens_client is not None,
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.skipped_unavailable",
+                message="skipping resolution sync because prerequisites not met",
+                condition_id=condition_id,
+                goldsky_enabled=goldsky_client is not None,
+                conditional_tokens_enabled=conditional_tokens_client is not None,
+            )
         return ResolutionOutcome()
 
     normalized_condition_id = condition_id.lower()
@@ -774,28 +785,30 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     now = datetime.now(UTC)
 
     if not _should_refresh_resolution(existing, now):
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.resolution.skip_refresh",
-            message="existing resolution snapshot still within freshness window",
-            condition_id=normalized_condition_id,
-            last_checked=getattr(existing, "checked_at", None).isoformat()
-            if getattr(existing, "checked_at", None)
-            else None,
-            resolved=getattr(existing, "resolved", None),
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.skip_refresh",
+                message="existing resolution snapshot still within freshness window",
+                condition_id=normalized_condition_id,
+                last_checked=getattr(existing, "checked_at", None).isoformat()
+                if getattr(existing, "checked_at", None)
+                else None,
+                resolved=getattr(existing, "resolved", None),
+            )
         return ResolutionOutcome()
 
     summary = _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
     if summary is None:
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.resolution.snapshot_missing",
-            message="resolution snapshot could not be loaded",
-            condition_id=normalized_condition_id,
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.snapshot_missing",
+                message="resolution snapshot could not be loaded",
+                condition_id=normalized_condition_id,
+            )
         return ResolutionOutcome()
 
     checked_at_dt = _parse_checked_at(summary.get("checkedAt"), now)
@@ -879,16 +892,17 @@ def sync_market(session: Session, market: MarketPayload):
         status_value = MarketStatusEnum.LOCKED.value
     payload["status"] = status_value
 
-    log_event(
-        logger,
-        logging.INFO,
-        event="worker.market.payload_ready",
-        message="prepared market payload for persistence",
-        event_id=market.event_id,
-        existing=existing is not None,
-        should_close=should_close,
-        status=status_value,
-    )
+    if logger.isEnabledFor(logging.DEBUG):
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.market.payload_ready",
+            message="prepared market payload for persistence",
+            event_id=market.event_id,
+            existing=existing is not None,
+            should_close=should_close,
+            status=status_value,
+        )
     db_market = existing
     market_changed = False
     market_created = False
@@ -900,40 +914,43 @@ def sync_market(session: Session, market: MarketPayload):
         db_market = shared_repository.upsert_market(session, payload)
         market_changed = True
         market_created = True
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.market.created",
-            message="market created from polymarket feed",
-            event_id=market.event_id,
-            status=payload.get("status"),
-            category=payload.get("category"),
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.market.created",
+                message="market created from polymarket feed",
+                event_id=market.event_id,
+                status=payload.get("status"),
+                category=payload.get("category"),
+            )
     else:
         match, match_reason = _markets_match(existing, incoming_updated_at, incoming_hash)
         if match:
-            log_event(
-                logger,
-                logging.INFO,
-                event="worker.market.skip_update",
-                message="skipping market update (no changes detected)",
-                event_id=market.event_id,
-                reason=match_reason,
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.market.skip_update",
+                    message="skipping market update (no changes detected)",
+                    event_id=market.event_id,
+                    reason=match_reason,
+                )
         else:
             db_market = shared_repository.upsert_market(session, payload)
             market_changed = True
             market_updated = True
-            log_event(
-                logger,
-                logging.INFO,
-                event="worker.market.updated",
-                message="market updated from polymarket feed",
-                event_id=market.event_id,
-                status=payload.get("status"),
-                category=payload.get("category"),
-                match_reason=match_reason,
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.market.updated",
+                    message="market updated from polymarket feed",
+                    event_id=market.event_id,
+                    status=payload.get("status"),
+                    category=payload.get("category"),
+                    match_reason=match_reason,
+                )
 
     if market.rake_bps is not None and db_market is not None:
         db_market.rake_bps = market.rake_bps
@@ -1284,12 +1301,13 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
             if markets:
                 summary = _collect_market_changes(session, markets, redis_client)
             else:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.persist.no_markets",
-                    message="skipping DB persistence because no markets were returned",
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.persist.no_markets",
+                        message="skipping DB persistence because no markets were returned",
+                    )
             _apply_retention_cleanup(session, summary)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
