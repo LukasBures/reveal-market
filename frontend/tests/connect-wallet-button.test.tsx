@@ -98,20 +98,29 @@ describe("ConnectWalletButton", () => {
     vi.clearAllMocks();
   });
 
-  it("renders all supported connectors and triggers connect", () => {
+  it("opens the modal, enforces the terms acknowledgement, and connects with the selected wallet", () => {
     render(<ConnectWalletButton />);
 
-    const walletConnectButton = screen.getByRole("button", { name: /walletconnect/i });
+    fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
+
+    const walletConnectButton = screen.getByRole("button", { name: /^walletconnect/i });
     expect(screen.getByRole("button", { name: /metamask/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /injected/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rabby/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /coinbase wallet/i })).toBeInTheDocument();
-    expect(walletConnectButton).toBeEnabled();
 
     fireEvent.click(walletConnectButton);
+    const checkbox = screen.getByRole("checkbox", { name: /i have read/i });
+    let connectCta = screen.getByRole("button", { name: /connect with walletconnect/i });
+    expect(connectCta).toBeDisabled();
+
+    fireEvent.click(checkbox);
+    connectCta = screen.getByRole("button", { name: /connect with walletconnect/i });
+    fireEvent.click(connectCta);
+
     expect(currentConnectState.connect).toHaveBeenCalledWith({ connector: walletConnectConnector });
   });
 
-  it("shows the connected state with disconnect, signing, and chain controls", async () => {
+  it("allows managing a connected session inside the modal", () => {
     currentAccountState = {
       address: "0x1234567890abcdef1234567890abcdef12345678",
       chain: { id: 1, name: "Ethereum" },
@@ -120,8 +129,9 @@ describe("ConnectWalletButton", () => {
 
     render(<ConnectWalletButton />);
 
-    expect(screen.getByText("0x1234…5678")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /0x1234…5678/i })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: /0x1234…5678/i }));
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
     expect(currentDisconnectState.disconnect).toHaveBeenCalledTimes(1);
 
@@ -129,8 +139,7 @@ describe("ConnectWalletButton", () => {
     fireEvent.click(signButton);
     expect(currentSignMessageState.signMessageAsync).toHaveBeenCalled();
 
-    const switchButton = screen.getByRole("button", { name: /base/i });
-    fireEvent.click(switchButton);
+    fireEvent.click(screen.getByRole("button", { name: /^base$/i }));
     expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: baseChain.id });
   });
 
@@ -138,8 +147,9 @@ describe("ConnectWalletButton", () => {
     currentConnectState.connectors = [];
 
     render(<ConnectWalletButton />);
+    fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
 
-    expect(screen.getByText(/wallet connectors unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/wallet connectors are initializing/i)).toBeInTheDocument();
   });
 
   it("disables signing when the message input is empty", () => {
@@ -152,6 +162,7 @@ describe("ConnectWalletButton", () => {
     currentSignMessageState.signMessageAsync = signSpy;
 
     render(<ConnectWalletButton />);
+    fireEvent.click(screen.getByRole("button", { name: /0x9999/i }));
 
     const input = screen.getByPlaceholderText(/enter a message/i);
     fireEvent.change(input, { target: { value: "   " } });
@@ -171,8 +182,8 @@ describe("ConnectWalletButton", () => {
     currentSwitchChainState.switchChain = undefined;
 
     render(<ConnectWalletButton />);
-
-    const baseButton = screen.getByRole("button", { name: /base/i });
+    fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
+    const baseButton = screen.getByRole("button", { name: /^base$/i });
     expect(baseButton).toBeDisabled();
   });
 });

@@ -18,12 +18,17 @@ const WALLET_PROVIDER_ORIGINS = [
   "https://*.alchemy.com",
   "https://*.infura.io",
   "https://rpc.ankr.com",
-  // Coinbase Wallet endpoints
+  // MetaMask telemetry used by their SDK
+  "https://metamask-sdk.api.cx.metamask.io",
+  "https://mm-sdk-analytics.api.cx.metamask.io",
+  // Coinbase Wallet endpoints (app + analytics)
   "https://wallet.coinbase.com",
   "https://www.walletlink.org",
   "https://api.wallet.coinbase.com",
   "https://avatars.coinbase.com",
-  // WalletConnect infrastructure + modal assets
+  "https://cca-lite.coinbase.com",
+  "https://cca.coinbase.com",
+  // WalletConnect infrastructure + explorer
   "https://*.walletconnect.com",
   "https://relay.walletconnect.com",
   "https://registry.walletconnect.com",
@@ -34,8 +39,13 @@ const WALLET_PROVIDER_ORIGINS = [
   "https://images.walletconnect.com",
   "https://walletconnect.org",
   "https://walletconnect.com",
+  "https://api.web3modal.org",
+  "https://pulse.walletconnect.org",
 ];
-const WALLET_PROVIDER_WS = ["wss://relay.walletconnect.com"];
+const WALLET_PROVIDER_WS = [
+  "wss://relay.walletconnect.com",
+  "wss://metamask-sdk.api.cx.metamask.io",
+];
 
 const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
 if (IS_PRODUCTION) {
@@ -43,7 +53,11 @@ if (IS_PRODUCTION) {
   connectSrc.push(...GA_ORIGINS);
 }
 
-const walletFrameOrigins = ["https://verify.walletconnect.org", "https://*.walletconnect.com"];
+const walletFrameOrigins = [
+  "https://verify.walletconnect.org",
+  "https://*.walletconnect.com",
+  "https://wallet.coinbase.com",
+];
 
 const csp = [
   "default-src 'self'",
