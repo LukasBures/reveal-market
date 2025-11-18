@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,7 +18,8 @@ type ConnectorOption = {
   label: string;
   connectorId: Connector["id"];
   description: string;
-  icon: string;
+  iconSrc: string;
+  iconAlt: string;
 };
 
 const CONNECTOR_UI: ConnectorOption[] = [
@@ -26,101 +28,52 @@ const CONNECTOR_UI: ConnectorOption[] = [
     label: "MetaMask",
     connectorId: "metaMask",
     description: "Official extension",
-    icon: "metamask",
+    iconSrc: "/wallet-icons/metamask.svg",
+    iconAlt: "MetaMask",
   },
   {
     id: "rabby",
     label: "Rabby",
     connectorId: "injected",
     description: "Rabby + injected",
-    icon: "rabby",
+    iconSrc: "/wallet-icons/rabby.svg",
+    iconAlt: "Rabby",
   },
   {
     id: "coinbase",
     label: "Coinbase Wallet",
     connectorId: "coinbaseWallet",
     description: "Browser & mobile",
-    icon: "coinbase",
+    iconSrc: "/wallet-icons/coinbasewallet.svg",
+    iconAlt: "Coinbase Wallet",
   },
   {
     id: "okx",
     label: "OKX Wallet",
     connectorId: "injected",
     description: "OKX, Bitget, Brave",
-    icon: "okx",
+    iconSrc: "/wallet-icons/okx.svg",
+    iconAlt: "OKX Wallet",
   },
   {
     id: "trust",
     label: "Trust Wallet",
     connectorId: "walletConnect",
     description: "WalletConnect (mobile)",
-    icon: "trust",
+    iconSrc: "/wallet-icons/trust.svg",
+    iconAlt: "Trust Wallet",
   },
   {
     id: "walletconnect",
     label: "WalletConnect",
     connectorId: "walletConnect",
     description: "QR code & all others",
-    icon: "walletConnect",
+    iconSrc: "/wallet-icons/walletconnect.svg",
+    iconAlt: "WalletConnect",
   },
 ] as const;
 
 type ConnectorMap = Record<string, Connector | undefined>;
-
-function ConnectorIcon({ id }: { id: string }) {
-  switch (id) {
-    case "metaMask":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <path d="M16 2L6 12l10 6 10-6z" fill="#f6851b" />
-          <path d="M6 12l4 16 6-6 6 6 4-16-10 6z" fill="#ed8e24" />
-        </svg>
-      );
-    case "coinbaseWallet":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <rect width="32" height="32" rx="16" fill="#0052ff" />
-          <rect x="10" y="10" width="12" height="12" rx="6" fill="white" />
-        </svg>
-      );
-    case "rabby":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <rect width="32" height="32" rx="16" fill="#ff5c82" />
-          <path d="M10 18c3-1 9-1 12 0l-2 6H12z" fill="white" />
-        </svg>
-      );
-    case "okx":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <rect width="32" height="32" rx="6" fill="black" />
-          <path d="M7 10h5v12H7zM20 10h5v12h-5zM13 14h6v4h-6z" fill="white" />
-        </svg>
-      );
-    case "trust":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <path d="M16 4l8 3v8c0 5.5-3.5 10.5-8 13-4.5-2.5-8-7.5-8-13V7z" fill="#2a72de" />
-          <path d="M16 6.2l6 2.2v6.6c0 4.3-2.4 8.3-6 10.7-3.6-2.4-6-6.4-6-10.7V8.4z" fill="white" />
-        </svg>
-      );
-    case "walletConnect":
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <path
-            d="M8 13.5c2.7-2.8 7.1-2.8 9.8 0l.2.2.2-.2c2.7-2.8 7.1-2.8 9.8 0l4.2 4.4-3 3-4.2-4.3c-1.2-1.3-3.2-1.3-4.4 0l-.2.2-.2-.2c-1.2-1.3-3.2-1.3-4.4 0L11 21l-3-3z"
-            fill="#4196fc"
-          />
-        </svg>
-      );
-    default:
-      return (
-        <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-          <circle cx="16" cy="16" r="14" fill="#7c84ff" />
-        </svg>
-      );
-  }
-}
 
 function formatAddress(address?: string | null) {
   if (!address) {
@@ -310,12 +263,18 @@ export function ConnectWalletButton() {
                             setSelectedOption(option);
                             setAcceptedTerms(false);
                           }}
-                          className={`flex items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+                          className={`group flex items-center gap-4 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
                             isSelected ? "border-brand-400 bg-brand-500/20" : "border-white/15 bg-white/5"
                           }`}
                         >
-                          <span className="flex h-16 w-16 flex-none items-center justify-center rounded-3xl bg-white/10">
-                            <ConnectorIcon id={option.icon} />
+                          <span className="flex h-16 w-16 flex-none items-center justify-center rounded-3xl bg-white/10 transition-transform duration-200 group-hover:scale-105">
+                            <Image
+                              src={option.iconSrc}
+                              alt={option.iconAlt}
+                              width={64}
+                              height={64}
+                              className="h-12 w-12 object-contain"
+                            />
                           </span>
                           <span>
                             {option.label}
