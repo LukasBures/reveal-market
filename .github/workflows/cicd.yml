@@ -34,6 +34,9 @@ jobs:
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
 
+      - name: Pre-commit checks
+        run: uv run pre-commit run --all-files
+
       - name: Run backend tests
         run: ./backend/run_tests.sh
 

@@ -13,8 +13,24 @@
 
 set -euo pipefail
 
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_info() {
+  printf '[%s] %s\n' "$(timestamp)" "$*"
+}
+
+log_warn() {
+  printf '[%s] WARN: %s\n' "$(timestamp)" "$*" >&2
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_ENV_FILE="${ROOT_DIR}/.env"
+DEFAULT_ENV_FILE="${ROOT_DIR}/.env.prod"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 SKIP_PROOVER_CHECK="${SKIP_PROOVER_CHECK:-false}"
 PROOVER_BUILD_DIR="${ROOT_DIR}/proover/circuits/build"
@@ -25,13 +41,8 @@ PROOVER_REQUIRED_FILES=(
 )
 DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required to deploy the stack" >&2
-  exit 1
-fi
-
 prune_docker_artifacts() {
-  echo "Pruning unused Docker images, containers, and build cache..."
+  log_step "Pruning unused Docker images, containers, and build cache"
   docker system prune -af >/dev/null
   docker builder prune -af >/dev/null || true
 }
@@ -41,12 +52,11 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE_CMD=("docker-compose")
 else
-  echo "docker compose or docker-compose is required" >&2
+  log_warn "docker compose or docker-compose is required"
   exit 1
 fi
 
 cd "${ROOT_DIR}"
-prune_docker_artifacts
 
 calc_parallel_builds() {
   local cpus
@@ -77,6 +87,7 @@ Usage: ./run_prod.sh [options] [compose up args...]
   --skip-build           Skip the docker compose build step (useful when pulling pre-built images).
   --env-file <path>      Override the env file check (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
   --skip-proover-check   Skip Groth16 artifact validation (not recommended).
+  --prune                Run 'docker system prune -af' and 'docker builder prune -af' before building.
   -h, --help             Show this help text.
 EOF
 }
@@ -93,7 +104,7 @@ EOF
 
 check_proover_artifacts() {
   if [[ "${SKIP_PROOVER_CHECK}" == "true" ]]; then
-    echo "Skipping Groth16 prover artifact validation (per flag)."
+    log_warn "Skipping Groth16 prover artifact validation (per flag)."
     return
   fi
 
@@ -106,17 +117,15 @@ check_proover_artifacts() {
   done
 
   if (( ${#missing[@]} > 0 )); then
-    echo "Groth16 artifacts missing; running proover/circuits/generate_keys.sh ..."
+    log_warn "Groth16 artifacts missing; running proover/circuits/generate_keys.sh ..."
     (cd "${ROOT_DIR}/proover/circuits" && bash generate_keys.sh)
   fi
 }
 
 check_caddyfile() {
   if [[ ! -f "${DEFAULT_CADDY_FILE}" ]]; then
-    cat <<EOF
-Missing Caddyfile at ${DEFAULT_CADDY_FILE}
-Commit the desired config to docker/caddy/Caddyfile before deploying.
-EOF
+    log_warn "Missing Caddyfile at ${DEFAULT_CADDY_FILE}"
+    log_warn "Commit the desired config to docker/caddy/Caddyfile before deploying."
     exit 1
   fi
 }
@@ -126,12 +135,14 @@ WAIT_FLAG=()
 if supports_wait_flag; then
   WAIT_FLAG+=("--wait")
 fi
+COMPOSE_ENV_ARGS=()
 
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 
 RUN_BUILD="true"
+RUN_PRUNE="false"
 UP_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -156,6 +167,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_PROOVER_CHECK="true"
       shift
       ;;
+    --prune)
+      RUN_PRUNE="true"
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -172,27 +187,55 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! command -v docker >/dev/null 2>&1; then
+  log_warn "docker is required to deploy the stack"
+  exit 1
+fi
+
 check_env_file
 check_proover_artifacts
 check_caddyfile
 
-echo "Validating docker compose files..."
-"${COMPOSE_CMD[@]}" config >/dev/null
-
-if [[ "${RUN_BUILD}" == "true" ]]; then
-  echo "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})..."
-  "${COMPOSE_CMD[@]}" build --parallel --pull
-else
-  echo "Skipping docker compose build step (per --skip-build)."
+if [[ "${RUN_PRUNE}" == "true" ]]; then
+  prune_docker_artifacts
 fi
 
-echo "Starting services in detached mode..."
-UP_CMD=("${COMPOSE_CMD[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}")
+SUPPORTS_ENV_FILE=false
+if [[ "${COMPOSE_CMD[1]-}" == "compose" ]]; then
+  SUPPORTS_ENV_FILE=true
+fi
+
+if [[ "${SUPPORTS_ENV_FILE}" == false && "${ENV_FILE}" != "${DEFAULT_ENV_FILE}" ]]; then
+  log_warn "compose CLI (${COMPOSE_CMD[*]}) does not support --env-file. Rename env file to .env or use docker compose."
+  exit 1
+fi
+
+if [[ -n "${ENV_FILE}" && -f "${ENV_FILE}" && "${SUPPORTS_ENV_FILE}" == true ]]; then
+  COMPOSE_ENV_ARGS+=(--env-file "${ENV_FILE}")
+fi
+
+log_step "Validating docker compose files"
+log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} config"
+"${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
+
+if [[ "${RUN_BUILD}" == "true" ]]; then
+  log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
+  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull
+else
+  log_warn "Skipping docker compose build step (per --skip-build)."
+fi
+
+log_step "Starting services in detached mode"
+UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}")
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
+log_info "Running: ${UP_CMD[*]}"
 "${UP_CMD[@]}"
 
-"${COMPOSE_CMD[@]}" ps
+log_step "Service status"
+log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} ps"
+"${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps
 
-echo "Deployment complete."
+log_step "Deployment complete"

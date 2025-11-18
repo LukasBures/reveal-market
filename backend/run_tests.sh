@@ -7,10 +7,20 @@
 
 set -euo pipefail
 
-# Resolve repo root once so PYTHONPATH includes both services. Allow overrides
-# via PYTHON_BIN for hermetic builds.
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
+log_error() {
+  printf '[%s] ERROR: %s\n' "$(timestamp)" "$*" >&2
+}
+
+# Resolve repo root once so PYTHONPATH includes both services.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_PY_BIN="${PYTHON_BIN:-$(command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)}"
 export PYTHONPATH="${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
 calc_pytest_workers() {
@@ -29,7 +39,7 @@ calc_pytest_workers() {
 
 run_py_tests() {
   local service_dir="$1"
-  echo "==> Running pytest in ${service_dir}"
+  log_step "Running pytest in ${service_dir}"
   pushd "${service_dir}" >/dev/null
   local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
   local -a pytest_args=()
@@ -40,13 +50,14 @@ run_py_tests() {
   local venv_path="${service_dir}/.venv"
   local python_bin="${venv_path}/bin/python"
   if [[ ! -x "${python_bin}" ]]; then
-    echo "Error: expected virtualenv at ${venv_path}. Run 'uv sync --project ${service_dir} --extra dev --no-install-project' first." >&2
+    log_error "Expected virtualenv at ${venv_path}. Run 'uv sync --project ${service_dir} --extra dev --no-install-project' first."
     exit 1
   fi
 
   (
     export VIRTUAL_ENV="${venv_path}"
     PATH="${venv_path}/bin:${PATH}"
+    printf '[%s] pytest %s (workers=%s)\n' "$(timestamp)" "$(basename "${service_dir}")" "${pytest_args[*]:-1}"
     "${python_bin}" -m pytest "${pytest_args[@]}"
   )
   popd >/dev/null
@@ -55,4 +66,4 @@ run_py_tests() {
 run_py_tests "${REPO_ROOT}/backend/api"
 run_py_tests "${REPO_ROOT}/backend/worker"
 
-echo "Backend tests completed successfully."
+log_step "Backend tests completed successfully"

@@ -5,18 +5,28 @@
 
 set -euo pipefail
 
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
+log_error() {
+  printf '[%s] ERROR: %s\n' "$(timestamp)" "$*" >&2
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 run_section() {
   local name="$1"
   local script_path="$2"
 
-  echo "=============================="
-  echo "Running ${name} tests"
-  echo "=============================="
+  log_step "Running ${name} tests"
 
   if [[ ! -x "${script_path}" ]]; then
-    echo "Error: ${script_path} is missing or not executable" >&2
+    log_error "${script_path} is missing or not executable"
     exit 1
   fi
 
@@ -28,5 +38,4 @@ run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh"
 run_section "contracts" "${ROOT_DIR}/contracts/run_tests.sh"
 run_section "proover" "${ROOT_DIR}/proover/run_tests.sh"
 
-echo "=============================="
-echo "All test suites completed."
+log_step "All test suites completed successfully"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import app.main as api_main
 from app import crud, models
@@ -106,3 +107,33 @@ def test_hydrate_markets_cache_populates_from_db(client, db_session):
     assert set(payload["event_ids"]) == {"evt-hydrate-1", "evt-hydrate-2"}
     for event_id in payload["event_ids"]:
         assert f"market:{event_id}" in cache_store
+
+
+def test_cache_refresh_worker_disables_when_setting_false(monkeypatch):
+    monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", False, raising=False)
+    stop_event = api_main._start_cache_refresh_worker()
+    assert stop_event is None
+
+
+def test_cache_refresh_worker_triggers_hydration(monkeypatch):
+    calls: list[dict[str, int | None]] = []
+
+    def fake_hydrate(*, source: str, limit: int | None = None):
+        calls.append({"source": source, "limit": limit})
+        return {"status": "hydrated", "limit": limit}
+
+    monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", True, raising=False)
+    monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.05, raising=False)
+    monkeypatch.setattr(api_main.settings, "cache_refresh_limit", 7, raising=False)
+    monkeypatch.setattr(api_main, "hydrate_markets_cache", fake_hydrate, raising=False)
+
+    stop_event = api_main._start_cache_refresh_worker()
+    assert stop_event is not None
+    try:
+        time.sleep(0.12)
+    finally:
+        stop_event.set()
+
+    assert calls
+    assert calls[0]["source"] == "refresh"
+    assert calls[0]["limit"] == 7

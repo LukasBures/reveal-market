@@ -4,23 +4,48 @@
 
 set -euo pipefail
 
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
+log_warn() {
+  printf '[%s] WARN: %s\n' "$(timestamp)" "$*" >&2
+}
+
+log_error() {
+  printf '[%s] ERROR: %s\n' "$(timestamp)" "$*" >&2
+}
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v npm >/dev/null 2>&1; then
-  echo "npm is required to run frontend tests." >&2
+  log_error "npm is required to run frontend tests."
   exit 1
 fi
 
 cd "${PROJECT_DIR}"
 
-# Load repo-root .env so NEXT_PUBLIC_* variables (WalletConnect, etc.) are
-# available without duplicating files under frontend/.
-ROOT_ENV="${PROJECT_DIR}/../.env"
-if [[ -f "${ROOT_ENV}" ]]; then
+# Load repo-root .env so NEXT_PUBLIC_* variables propagate.
+ROOT_ENV_LOCAL="${PROJECT_DIR}/../.env.local"
+ROOT_ENV_PROD="${PROJECT_DIR}/../.env.prod"
+if [[ -f "${ROOT_ENV_LOCAL}" ]]; then
+  log_step "Loading environment from ${ROOT_ENV_LOCAL}"
   # shellcheck disable=SC1090
   set -a
-  source "${ROOT_ENV}"
+  source "${ROOT_ENV_LOCAL}"
   set +a
+elif [[ -f "${ROOT_ENV_PROD}" ]]; then
+  log_warn ".env.local not found; falling back to ${ROOT_ENV_PROD}"
+  set -a
+  # shellcheck disable=SC1090
+  source "${ROOT_ENV_PROD}"
+  set +a
+else
+  log_warn "No env file (.env.local or .env.prod) found; using current environment."
 fi
 
 # Try to reach the backend API but continue in "offline" mode when it is
@@ -33,19 +58,20 @@ OFFLINE_API_BASE="http://127.0.0.1:65535"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
 
 if curl -fsS --max-time "${API_TIMEOUT}" "${CHECK_URL}" >/dev/null 2>&1; then
-  echo "Frontend API reachable at ${CHECK_URL}"
+  log_step "Frontend API reachable at ${CHECK_URL}"
   export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
   export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-${DEFAULT_API_BASE}}"
 else
-  echo "Frontend API ${CHECK_URL} is unreachable; running tests in offline mode."
-  echo "Requests will target ${OFFLINE_API_BASE} so fetch() short-circuits locally."
+  log_warn "Frontend API ${CHECK_URL} is unreachable; running tests in offline mode targeting ${OFFLINE_API_BASE}"
   export RM_API_BASE_URL="${OFFLINE_API_BASE}"
   export NEXT_PUBLIC_API_BASE_URL="${OFFLINE_API_BASE}"
 fi
 
-# Run lint before build to fail fast on lint errors. Build runs `next build`,
-# which also validates types and static props.
+# Run lint before build to fail fast on lint errors.
+log_step "Running frontend lint"
 npm run lint
+
+log_step "Running frontend build"
 npm run build
 
-echo "Frontend lint + build completed."
+log_step "Frontend lint + build completed successfully"

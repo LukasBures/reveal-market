@@ -103,6 +103,39 @@ class DummyCounter:
         return _Recorder(record)
 
 
+def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    class DummyClient:
+        def fetch_markets(self, **kwargs):
+            captured.update(kwargs)
+            return []
+
+    monkeypatch.setattr(app.main, "polymarket_client", DummyClient(), raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_page_size", 25, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_max_pages", 4, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_order", "updatedAt", raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_sort_ascending", False, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_closed_filter", False, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_active_filter", True, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_archived_filter", False, raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_network", "137", raising=False)
+
+    markets, latency = app.main.fetch_markets_from_polymarket()
+
+    assert markets == []
+    assert latency >= 0
+    assert captured["page_size"] == 25
+    assert captured["max_pages"] == 4
+    assert captured["order"] == "updatedAt"
+    assert captured["ascending"] is False
+    assert captured["closed"] is False
+    extra = captured["extra_params"]
+    assert extra["active"] == "true"
+    assert extra["archived"] == "false"
+    assert extra["network"] == "137"
+
+
 def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path, caplog):
     db_url = f"sqlite:///{tmp_path / 'worker.db'}"
     engine = create_engine(db_url, future=True)

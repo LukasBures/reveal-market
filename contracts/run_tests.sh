@@ -4,18 +4,30 @@
 
 set -euo pipefail
 
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
+log_warn() {
+  printf '[%s] WARN: %s\n' "$(timestamp)" "$*" >&2
+}
+
 CONTRACTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v forge >/dev/null 2>&1; then
-  echo "Skipping contracts tests: forge not found on PATH" >&2
+  log_warn "Skipping contracts tests: forge not found on PATH"
   exit 0
 fi
 
 pushd "${CONTRACTS_DIR}" >/dev/null
-# `forge build` compiles + keeps gas snapshots current; `forge test` runs unit,
-# fuzz, and invariant tests defined in the workspace.
+log_step "forge build"
 forge build
+log_step "forge test"
 forge test
 popd >/dev/null
 
-echo "Contracts tests completed successfully."
+log_step "Contracts tests completed successfully"
