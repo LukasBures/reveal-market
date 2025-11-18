@@ -200,3 +200,36 @@ def test_polymarket_client_handles_wrapped_payload():
 
     assert len(markets) == 1
     assert markets[0].event_id == "wrapped-1"
+
+
+def test_polymarket_client_supports_full_markets_endpoint(monkeypatch):
+    """Allow RM_POLYMARKET_API_BASE to include the markets segment already."""
+
+    observed = {"path": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["path"] = request.url.path
+        return httpx.Response(
+            status_code=200,
+            json=[
+                {
+                    "id": "evt-custom",
+                    "question": "Custom endpoint?",
+                    "outcomes": ["Yes", "No"],
+                    "outcomePrices": [0.5, 0.5],
+                }
+            ],
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient(
+        "https://gamma.polymarket.example/polygon/markets",
+        timeout=1.0,
+        transport=transport,
+    )
+
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+
+    assert len(markets) == 1
+    assert markets[0].event_id == "evt-custom"
+    assert observed["path"] == "/polygon/markets"

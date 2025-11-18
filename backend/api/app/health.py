@@ -8,6 +8,7 @@ import httpx
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from shared.polymarket import build_polymarket_markets_url
 
 from . import schemas
 from .cache import get_redis_client
@@ -102,7 +103,8 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
     http_start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            base = str(settings.polymarket_api_base).rstrip("/")
+            base = str(settings.polymarket_api_base)
+            url = build_polymarket_markets_url(base)
             params = {
                 "limit": 1,
                 "order": settings.polymarket_order,
@@ -111,7 +113,7 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
             if settings.polymarket_closed_filter is not None:
                 params["closed"] = str(settings.polymarket_closed_filter).lower()
             response = await client.get(
-                f"{base}/markets",
+                url,
                 params=params,
                 timeout=settings.polymarket_timeout_seconds,
             )

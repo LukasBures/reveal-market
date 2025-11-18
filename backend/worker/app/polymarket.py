@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 from shared.categories import canonical_category_from_raw
+from shared.polymarket import build_polymarket_markets_url
 
 logger = logging.getLogger("reveal_market.worker.polymarket")
 
@@ -170,7 +171,9 @@ class PolymarketClient:
         request_backoff_max_seconds: float | None = None,
         retry_counter: Any | None = None,
     ) -> None:
-        self.base_url = str(base_url).rstrip("/")
+        raw_base = str(base_url)
+        self.base_url = raw_base.rstrip("/")
+        self._markets_url = build_polymarket_markets_url(raw_base)
         self.timeout = timeout
         self._transport = transport
         self._request_max_attempts = max(1, int(request_max_attempts))
@@ -209,7 +212,7 @@ class PolymarketClient:
                 if extra_params:
                     params.update({k: v for k, v in extra_params.items() if v is not None})
 
-                url = f"{self.base_url}/markets"
+                url = self._markets_url
                 request_callable = partial(_request_page, client, url, params.copy())
                 try:
                     response = self._send_with_retry(request_callable)
