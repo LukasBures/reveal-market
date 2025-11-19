@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import React from "react";
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 if (!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) {
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = "test-wc-project-id";
@@ -78,3 +78,34 @@ vi.mock("next/font/local", () => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/wagmi", () => ({
+  wagmiConfig: {},
+}));
+
+vi.mock("wagmi", () => {
+  const noop = vi.fn();
+  return {
+    WagmiProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    useAccount: () => ({ address: undefined, chain: undefined, status: "disconnected" }),
+    useConnect: () => ({ connect: noop, connectors: [], status: "idle", error: null }),
+    useDisconnect: () => ({ disconnect: noop }),
+    useSignMessage: () => ({ data: null, error: null, isPending: false, signMessageAsync: noop }),
+    useSwitchChain: () => ({ chains: [], error: null, isPending: false, switchChain: noop }),
+    useConfig: () => ({}),
+  };
+});
+
+const defaultFetchMock = vi.fn(async () => ({
+  ok: true,
+  status: 200,
+  json: async () => [],
+}));
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", defaultFetchMock);
+});
+
+afterEach(() => {
+  defaultFetchMock.mockReset();
+});

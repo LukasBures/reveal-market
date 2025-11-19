@@ -9,10 +9,11 @@ export type ServerEnv = {
 function resolveApiBase(): string {
   const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
   const offlineFallback = process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000";
+  const explicitBase = process.env.RM_API_BASE_URL ?? null;
   const selectedBase =
-    (preferDockerApi ? process.env.RM_API_BASE_URL : undefined) ??
+    (preferDockerApi && explicitBase ? explicitBase : null) ??
+    explicitBase ??
     process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.RM_API_BASE_URL ??
     null;
 
   if (selectedBase) {
@@ -36,10 +37,10 @@ function assertValidUrl(value: string, label: string): string {
   }
 }
 
-export const serverEnv: ServerEnv = Object.freeze({
-  apiBaseUrl: resolveApiBase(),
-});
-
 export function getServerEnv(): ServerEnv {
-  return serverEnv;
+  return Object.freeze({
+    apiBaseUrl: resolveApiBase(),
+  });
 }
+
+export const serverEnv = getServerEnv();

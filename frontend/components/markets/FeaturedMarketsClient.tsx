@@ -14,7 +14,7 @@ import { categorySlugFromLabel } from "@/lib/slugs";
  * We auto-load up to three batches via IntersectionObserver to give users a lazy-loading feel
  * before they need to press the button. After that the CTA becomes the explicit interaction.
  */
-const AUTO_LOAD_BATCHES = 3;
+export const AUTO_LOAD_BATCHES = 3;
 
 type ClientProps = {
   initialMarkets: MarketSummary[];

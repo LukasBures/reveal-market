@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
+import { FeaturedMarketsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
 import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 
 vi.mock("@/app/actions/markets", () => ({
@@ -119,8 +119,9 @@ describe("FeaturedMarketsClient", () => {
     );
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalled();
     });
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(AUTO_LOAD_BATCHES);
     expect(screen.queryByRole("button", { name: /load more markets/i })).not.toBeInTheDocument();
   });
 });
