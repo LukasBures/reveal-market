@@ -55,14 +55,21 @@ fi
 DEFAULT_API_BASE="${RM_API_BASE_URL:-${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}}"
 CHECK_URL="${DEFAULT_API_BASE%/}/health"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
+OFFLINE_API_BASE="http://127.0.0.1:65535"
+STRICT_API_CHECK="${FRONTEND_REQUIRE_API:-false}"
 
 if curl -fsS --max-time "${API_TIMEOUT}" "${CHECK_URL}" >/dev/null 2>&1; then
   log_step "Frontend API reachable at ${CHECK_URL}"
   export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
   export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-${DEFAULT_API_BASE}}"
 else
-  log_error "Frontend API ${CHECK_URL} is unreachable. Start the backend stack (./run_local.sh) before running frontend tests."
-  exit 1
+  if [[ "${STRICT_API_CHECK}" == "true" ]]; then
+    log_error "Frontend API ${CHECK_URL} is unreachable. Start the backend stack (./run_local.sh) before running frontend tests."
+    exit 1
+  fi
+  log_warn "Frontend API ${CHECK_URL} is unreachable; running in offline mode targeting ${OFFLINE_API_BASE}"
+  export RM_API_BASE_URL="${OFFLINE_API_BASE}"
+  export NEXT_PUBLIC_API_BASE_URL="${OFFLINE_API_BASE}"
 fi
 
 # Run lint before build to fail fast on lint errors.
