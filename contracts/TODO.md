@@ -2,6 +2,11 @@
 
 Smart-contract credibility is the clearest signal that Reveal Market handles investor capital with institutional rigor. The objectives below prioritize features that harden settlement guarantees, grow treasury yield, and prepare the protocol for broader distribution.
 
+### TL;DR priorities
+1. **Finalize Groth16 production rollout** – Ship real keys, rotation tooling, and replay persistence so every zk receipt is audit-ready.
+2. **Codify governance & ops** – Consume deployment manifests, add invariants/fuzzing, and rehearse ownership/guardian transfers so institutional partners can trust admin flows.
+3. **Unlock treasury & expansion** – Implement rake overrides/flexible routing plus Horizen testnet + verifier registry work to unblock new venues and multi-chain pilots.
+
 ## Phase 1 – Credible Settlement Layer (Highest Leverage)
 
 - **Groth16 verifier hardening**

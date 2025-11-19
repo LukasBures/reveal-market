@@ -2,6 +2,11 @@
 
 Every enhancement below ties directly to investor confidence, liquidity depth, or partner readiness. Prioritize work that amplifies these signals.
 
+### TL;DR priorities
+1. **Ship provenance** – Build the AI summary ledger + persistent resolution ledger so `/markets` can surface audited narratives and payout history on every response.
+2. **Mirror on-chain + automate ops** – Stream contract events into Postgres/Redis and add the resolution automation loop so rake economics and settlements stay in sync without manual babysitting.
+3. **Scale liquidity telemetry** – Deliver summary-worker scaling, cache/versioning guardrails, and richer rake/heartbeat dashboards so institutional partners can monitor SLAs in real time.
+
 ## Pillar 1 – Data Assurance & Transparency (High Priority)
 
 - **AI summary ledger + provenance**

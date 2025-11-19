@@ -2,6 +2,11 @@
 
 The web experience is our public pitch deck. Every sprint should reinforce why Reveal Market is a differentiated investment opportunity and make it effortless for partners to engage.
 
+### TL;DR priorities
+1. **Replace placeholders with live data** – Build the real market chart + dedicated search experience and wire proof filters/exports so every surface reflects actual backend signals.
+2. **Reinforce trust storytelling** – Refresh hero copy, add segmentation + investor proof points, and ship partner badges/testimonials so visitors instantly understand our differentiation.
+3. **Instrument diligence funnels** – Deliver the metrics hub, tailored lead flows, and due-diligence vault/live status views so institutional teams can self-serve readiness proof.
+
 ## Immediate Polish Gaps
 
 - **Replace placeholder price chart** – `MarketDetailChart` still renders a mocked area graph. Swap it for real historical liquidity/probability pulled from the backend (or worker summaries) so detail pages show living data instead of a static image.

@@ -20,8 +20,8 @@ def test_log_event_embeds_event_and_custom_fields(caplog):
         )
     assert any(record.event == "unit.test" for record in caplog.records)
     record = caplog.records[0]
-    assert getattr(record, "correlation_id") == "abc123"
-    assert getattr(record, "attempt") == 2
+    assert record.correlation_id == "abc123"
+    assert record.attempt == 2
     assert "structured message" in record.getMessage()
 
 

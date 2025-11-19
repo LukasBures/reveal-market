@@ -190,6 +190,8 @@ cd backend/api
 uv run --project . --extra dev pytest -q
 ```
 
+`./backend/run_tests.sh` fans pytest across four workers per suite by default. Set `PYTEST_WORKER_COUNT=<n>` to override the level of parallelism (for example, throttling CI runners or squeezing more throughput out of a high-core workstation).
+
 What the suite covers:
 - Route contracts (200/404/422 behaviors, cache behavior via fakes)
 - Allowlist filtering, slug decoding, metadata augmentation

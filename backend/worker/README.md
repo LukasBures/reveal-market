@@ -194,6 +194,8 @@ cd backend/worker
 uv run --project . --extra dev pytest -q
 ```
 
+The shared `./backend/run_tests.sh` wrapper enables four pytest workers per suite by default; override via `PYTEST_WORKER_COUNT=<n>` when you need more (or fewer) concurrent jobs.
+
 Coverage highlights:
 - `tests/test_polymarket.py`: payload normalization, hash computation, dedupe logic.
 - `tests/test_main.py`: cache priming, retention, heartbeats, schema propagation.

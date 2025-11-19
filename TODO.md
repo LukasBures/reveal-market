@@ -1,48 +1,62 @@
-• Backend Gaps
+# Reveal Market Backlog Snapshot
 
-  - Data-assurance features are still absent: there’s no AI summary ledger/provenance trail and no persistent resolution ledger, so /markets can’t yet prove narrative lineage or settlement metadata (backend/TODO.md:7, backend/TODO.md:19).
-  - Liquidity automation gaps now center on summary worker scaling, API governance, and richer analytics; consult backend/TODO.md:48 onward for remaining work.
+Use this doc as the index for outstanding cross-team work. Each area has a dedicated `TODO.md`; the bullets below highlight the current top priorities so planning conversations start in the right place.
 
-  Contracts Gaps
+## Snapshot priorities (Nov 2025)
+- **Backend** – Ship an auditable AI summary ledger, persist on-chain resolution data inside Postgres/Redis, and expand automation/analytics so `/markets` responses always come with provenance, rake history, and SLA-backed telemetry.
+- **Contracts** – Finish the Groth16 production rollout (keys + rotation tooling), add replay-proof observability, and harden governance via deployment artifacts, invariants/fuzzing, and rehearsed ownership/guardian transfers before broader exchange integrations.
+- **Frontend** – Replace placeholder data (charts/search), add diligence-ready proofs/filters, refresh trust messaging, and introduce investor-facing metrics hubs plus responsive docs navigation so stakeholders see polished, real data everywhere.
+- **Proover** – Profile rapidsnark, expose Prometheus metrics, add artifact validation + setup ergonomics, and document the roadmap for embedding/upgrading the proving backend to keep zk claims credible.
 
-  - Groth16 verifier work isn’t complete: production keys, rotation tooling, and proof replay persistence remain missing, so zk settlement can’t yet be audited end-to-end (contracts/TODO.md:7, contracts/TODO.md:10).
-  - Deployment/ops tooling such as consuming last-deployment.json, adding invariants/fuzz gates, and rehearsing ownership or guardian transfers is still outstanding, leaving governance brittle (contracts/TODO.md:16, contracts/TODO.md:19, contracts/TODO.md:22).
-  - Treasury mechanics—validated rake overrides, flexible routing, metadata lifecycle definitions, and guardian operating models—are still unimplemented, so revenue reporting and compliance narratives can’t be backed by code/tests (contracts/TODO.md:27, contracts/TODO.md:30, contracts/TODO.md:33, contracts/
-    TODO.md:36).
-  - Expansion readiness like Horizen ZEN testnet tooling, upgradeable verifier registry, gas regression gates, cross-chain planning, and backend-aligned settlement helpers have yet to start, blocking multi-chain/institutional pilots (contracts/TODO.md:39, contracts/TODO.md:44, contracts/TODO.md:47,
-    contracts/TODO.md:50, contracts/TODO.md:53).
+Refer to the service-specific TODO files for deep context and acceptance criteria.
 
-  Frontend Gaps
+## Backend gaps
 
-  - Immediate polish work is undone: the market detail chart still shows mock data, global search lacks a dedicated view, docs nav isn’t mobile-friendly, proofs lack filters/exports, partner trust banners are missing, and an accessibility sweep hasn’t happened (frontend/TODO.md:7-12).
-  - Narrative foundation items—hero copy refresh, segmented messaging, investor KPI proof points, social credibility, and reorganized docs—are still pending, so the site can’t yet address different stakeholder personas (frontend/TODO.md:16-29).
-  - Transparency/conversion tooling like a metrics hub, tailored lead forms, case studies, and localized credibility badges haven’t shipped, limiting diligence funnels (frontend/TODO.md:33-43).
-  - Partnership workflow support (due-diligence vault, live ops status, roadmap calendar, hardened performance/accessibility) remains unbuilt, so enterprise visitors can’t self-serve readiness signals (frontend/TODO.md:47-58).
-  - Engineering enhancements—dynamic imports, scalable proof pagination, client-side structured logging, and cache-aware fetch helpers—are outstanding, so the app still ships heavier bundles and has limited observability/control over stale data (frontend/TODO.md:72-88).
+- Data-assurance features—AI summary provenance, persistent resolution ledgers, and on-chain mirroring—are still missing, so `/markets` cannot yet prove narrative lineage or settlement metadata in audits.
+- Liquidity automation work (summary worker scaling, API governance, richer rake analytics) is outstanding; these features tie directly to deal velocity.
 
-  Proover Gaps
+See `backend/TODO.md` for full scope and sequencing.
 
-  - Performance profiling and possible rapidsnark pooling/daemonization haven’t been implemented, so prover latency bottlenecks are unknown (proover/TODO.md:5-7).
-  - Observability lacks Prometheus exports and rolling latency/concurrency metrics, preventing production-grade monitoring (proover/TODO.md:9-11).
-  - Artifact management helpers (pre-boot validation, packaged circuit assets) are missing, leaving operators to handle keys manually (proover/TODO.md:13-15).
-  - Security/ergonomics work—dedicated linting in CI, non-root usage guidance, .env.proover samples, and env validation—is incomplete, so hardening and setup remain ad hoc (proover/TODO.md:17-23).
-  - Longer-term roadmap items like cgo-based rapidsnark embedding and documented upgrade procedures are still open, so future-proofing the prover isn’t addressed (proover/TODO.md:25-27).
+## Contracts gaps
 
+- Groth16 verifier work is incomplete: production keys, rotation tooling, and proof replay persistence remain undone, preventing end-to-end zk audits.
+- Deployment/ops tooling (consuming `last-deployment.json`, invariants/fuzz gates, guardian transfer drills) is still required to make governance credible.
+- Treasury mechanics (validated rake overrides, flexible routing, metadata lifecycle definitions, guardian operating models) and expansion-readiness (Horizen ZEN testnet, verifier registry, gas regression gates, cross-chain alignment) have yet to begin.
 
+See `contracts/TODO.md` for the detailed roadmap.
 
+## Frontend gaps
 
-  1. Limit what you cache
-      - Reduce limit on cached endpoints (e.g. cache only the latest 20 markets per key). For deeper pagination, skip caching entirely or shorten TTL to a few seconds.
-      - Avoid caching search results with unique queries. Set a minimum length and maybe don’t tag/filter them so they won’t reappear.
-  2. Trim payloads before caching
-      - In the API, build a “cache-safe” version of each market: drop extra_data.gamma, events, clobSnapshots, etc., keeping only fields the frontend reads. You can still return the full payload from Postgres, but cache the slimmed copy. That alone cuts size by ~90%.
-  3. Shorter TTLs / no priming
-      - Keep RM_MARKETS_CACHE_TTL_SECONDS low (30 s is fine) and consider disabling RM_PRIME_MARKETS_CACHE_ENABLED so the worker isn’t eagerly generating keys you never read. Let demand drive caching.
-  4. Cap total keys
-      - Use Redis keyspace notifications/metrics to watch how many markets:list:* keys exist. If it explodes, clamp offsets or implement a simple LRU: before writing, delete random old keys (or use Redis maxmemory-policy allkeys-lru with maxmemory 3gb so Redis handles it).
-  5. Clean other structures
-      - Ensure summary workers are running so the queues drain.
-      - If you don’t use proofs, leave RM_PROVER_ENABLED=false so the worker never writes proofs:receipt:*.
+- Immediate polish—live market charts, full search experience, responsive docs nav, proof filters/exports, trust banners, and accessibility sweeps—hasn’t landed.
+- Narrative/credibility systems (hero refresh, segmented messaging, KPI proof points, testimonials, reorganized docs, metrics hub, lead forms, case studies, localized trust badges) remain in flight.
+- Partnership workflows (due-diligence vault, live ops status, roadmap calendar, performance hardening) and engineering foundations (dynamic imports, scalable proof pagination, structured logging, cache-aware fetch helpers) are still queued.
+
+See `frontend/TODO.md` for prioritization.
+
+## Proover gaps
+
+- Performance profiling, concurrency tuning, and potential rapidsnark pooling are unbuilt, so we lack latency guarantees.
+- Observability needs Prometheus exports and rolling latency/concurrency metrics, alongside artifact validation helpers and non-root/hardening documentation.
+- Ergonomics (sample envs, input validation) and the longer-term roadmap (cgo embedding, upgrade procedures) remain outstanding.
+
+See `proover/TODO.md` for specifics.
+
+---
+
+## Redis cache guardrails
+
+1. **Limit what you cache**
+    - Reduce limit on cached endpoints (e.g. cache only the latest 20 markets per key). For deeper pagination, skip caching entirely or shorten TTL to a few seconds.
+    - Avoid caching search results with unique queries. Set a minimum length and maybe don’t tag/filter them so they won’t reappear.
+2. **Trim payloads before caching**
+    - In the API, build a “cache-safe” version of each market: drop extra_data.gamma, events, clobSnapshots, etc., keeping only fields the frontend reads. You can still return the full payload from Postgres, but cache the slimmed copy. That alone cuts size by ~90%.
+3. **Shorter TTLs / no priming**
+    - Keep RM_MARKETS_CACHE_TTL_SECONDS low (30 s is fine) and consider disabling RM_PRIME_MARKETS_CACHE_ENABLED so the worker isn’t eagerly generating keys you never read. Let demand drive caching.
+4. **Cap total keys**
+    - Use Redis keyspace notifications/metrics to watch how many markets:list:* keys exist. If it explodes, clamp offsets or implement a simple LRU: before writing, delete random old keys (or use Redis maxmemory-policy allkeys-lru with maxmemory 3gb so Redis handles it).
+5. **Clean other structures**
+    - Ensure summary workers are running so the queues drain.
+    - If you don’t use proofs, leave RM_PROVER_ENABLED=false so the worker never writes proofs:receipt:*.
       - Periodically purge old schema tags or set a TTL when writing them.
 
   With trimmed payloads (~20 KB per market) and a handful of cached cohorts (say 10 keys), Redis would sit well under 500 MB. Even if you keep 100 keys you’d still be <2 GB. The key is to stop storing the giant Gamma blobs and avoid caching every permutation. Use redis-cli INFO memory and SCAN markets:list:*

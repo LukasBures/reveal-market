@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from app.onchain import fetch_factory_markets
 from shared.onchain import OnChainConfigurationError
 
@@ -19,8 +18,10 @@ class _DummyCall:
 class _DummyFunctions:
     def __init__(self, addresses: list[str]):
         self._addresses = addresses
+        # Mirror the camelCase ABI entry to match production interactions.
+        self.getMarkets = self.get_markets
 
-    def getMarkets(self) -> _DummyCall:
+    def get_markets(self) -> _DummyCall:
         return _DummyCall(self._addresses)
 
 

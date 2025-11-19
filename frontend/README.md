@@ -74,6 +74,8 @@ Useful scripts:
 
 Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, etc.) if you prefer a single entry point.
 
+> **API dependency:** Keep the backend stack (API + worker + Postgres + Redis + prover) running when you invoke `npm run build`, `frontend/run_tests.sh`, or the repo-root `./run_tests.sh`. Those flows ping `/health` before building to ensure data fetches hit a real FastAPI instance.
+
 ### Wallet connections
 
 `Connect Wallet` in the main nav is powered by Wagmi 2 + WalletConnect v2 with viem transports for Mainnet, Base, and zkSync. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online. WalletConnect stays available everywhere via QR/deep links.
@@ -150,7 +152,7 @@ If you introduce new components, test at these breakpoints:
   1. `npm run lint`
   2. `npm run test`
   3. Manually inspect `/`, `/categories/politics`, `/markets/<eventId>` in responsive mode.
-  4. For CI parity run `./frontend/run_tests.sh`, which verifies the API at `NEXT_PUBLIC_API_BASE_URL` is reachable before linting/building.
+  4. For CI parity run `./frontend/run_tests.sh`, which now fails fast if the API at `NEXT_PUBLIC_API_BASE_URL` can’t answer `/health`.
 
 CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 

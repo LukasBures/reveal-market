@@ -11,7 +11,7 @@ type Props = {
 
 export function MarketsPreviewClient({ initialMarkets }: Props) {
   const { data, refetch, isFetching } = useFeaturedMarkets({
-    limit: 6,
+    limit: 9,
     initialData: initialMarkets,
   });
 

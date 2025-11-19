@@ -24,7 +24,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
-    if (typeof options?.offset === "number" && !options?.category) {
+    if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
     }
     if (options?.searchQuery && !options.category) {

@@ -38,10 +38,15 @@ jobs:
         run: uv run pre-commit run --all-files
 
       - name: Run backend tests
+        env:
+          PYTEST_WORKER_COUNT: 4
         run: ./backend/run_tests.sh
 
       - name: Run shared backend tests
-        run: uv run --project backend/api -- python -m pytest backend/shared/tests
+        env:
+          PYTHONPATH: backend
+          PYTEST_WORKER_COUNT: 4
+        run: uv run --project backend/api -- python -m pytest -n "${PYTEST_WORKER_COUNT}" backend/shared/tests
 
 
   contracts:

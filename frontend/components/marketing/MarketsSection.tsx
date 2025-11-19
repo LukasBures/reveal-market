@@ -2,7 +2,7 @@ import { fetchFeaturedMarkets } from "@/lib/api";
 import { MarketsPreviewClient } from "./MarketsPreview";
 
 export async function MarketsSection() {
-  const markets = await fetchFeaturedMarkets(6);
+  const markets = await fetchFeaturedMarkets(9);
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-10">

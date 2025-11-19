@@ -73,10 +73,10 @@ export function MarketCard({ market }: Props) {
                   : "—";
             const hoverColor =
               idx === 0
-                ? "transition hover:text-emerald-300"
+                ? "transition hover:bg-emerald-500/20"
                 : idx === 1
-                  ? "transition hover:text-rose-300"
-                  : "transition hover:text-white";
+                  ? "transition hover:bg-rose-500/25"
+                  : "transition hover:bg-white/10";
             return (
               <div
                 key={outcome}

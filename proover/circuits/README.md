@@ -41,3 +41,5 @@ After running the script:
 3. Mount `build/settlement_final.zkey` (and `build/settlement_js/` if you need the witness builder) inside the `proover` container so it can generate proofs.
 
 > ⚠️ This circuit is intentionally lightweight. Extend it with additional checks (ticket commitment hashes, rake accounting, etc.) before calling the system production-ready.
+
+`./run_local.sh` and `./run_prod.sh` refuse to start the prover unless the artifacts listed above exist under `proover/circuits/build`. Set `SKIP_PROOVER_CHECK=true` only when you have already mounted audited assets elsewhere.

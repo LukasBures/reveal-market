@@ -138,6 +138,15 @@ If the artifacts are missing or the Groth16 toolchain fails, the service exits w
 
 > **CI note:** `go test ./...` now includes an integration test that exercises the full request → witness → rapidsnark pipeline using deterministic stub binaries plus fresh artifacts created in `t.TempDir()`. GitHub Actions additionally installs rapidsnark and verifies `rapidsnark --version` so we know the binary is runnable in automation.
 
+## Testing
+
+```bash
+cd proover
+./run_tests.sh            # wraps `go test -v ./...`
+```
+
+The script is also invoked by repo-root `./run_tests.sh`, keeping local workflows aligned with CI’s Go job.
+
 ## Observability
 
 - Logs follow the global format (`timestamp | LEVEL | proover | file:line | event | request_id | json`).

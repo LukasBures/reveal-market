@@ -8,11 +8,12 @@
 ## Build, Test, and Development Commands
 - `make api` / `make worker` – Build + run individual Docker services (includes Postgres/Redis dependencies).
 - `make test` – Runs `./backend/run_tests.sh` (API + worker pytest suites).
-- `backend/run_tests.sh` – Discovers Poetry/venv envs and executes pytest with asyncio plugins.
+- `backend/run_tests.sh` – Discovers Poetry/venv envs and executes pytest with asyncio plugins, defaulting to four workers per suite (override via `PYTEST_WORKER_COUNT`).
 - `forge build`, `forge test` (inside `contracts/`) – Compile/test Solidity. `contracts/run_local.sh [full]` for full pipeline.
 - `npm run dev|build|start|lint|test` (inside `frontend/`) – Next.js workflows. `npm run test` executes Vitest + Testing Library.
 - `./run_local.sh` – Build every Docker image with `--no-cache` and launch the full stack (API, worker, frontend, Postgres, Redis).
 - `./run_prod.sh` – Build with cache + start stack detached (production/VPS flow).
+- `./run_tests.sh` – Sequential test harness (backend → frontend → contracts → proover). Frontend stage requires the backend stack to answer `/health` or it fails fast.
 
 ## Coding Style & Naming Conventions
 - Python: PEP 8, Black 120 cols, isort, Flake8 (`make fmt` / `pre-commit`).
@@ -41,6 +42,7 @@
 - Maintain the unified logging format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
 - Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
+- `frontend/run_tests.sh` no longer offers an offline mode—start the backend stack (or point `NEXT_PUBLIC_API_BASE_URL` at staging) before invoking it locally or through automation.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
 - The bundled `proover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if the compiled artifacts under `proover/circuits/build` are missing. Always mount fresh proving/verifying keys (see `proover/circuits/`) before representing the stack as production-grade zk.
 
@@ -54,6 +56,7 @@
 - **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
 - **Polymarket client** – `backend/worker/app/polymarket.py` now captures loop variables safely, but still lacks robust retries/backoff for the entire sync; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
 - **Prover reality** – `proover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `proover/circuits/build`). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
+- **Testing defaults** – Pytest fan-out is pinned to four workers (API, shared modules, worker) unless `PYTEST_WORKER_COUNT` overrides; expect this concurrency when validating suites locally or in CI.
 
 ### Frontend (Next.js)
 - **SEO/AI readiness** – Metadata centralised in `lib/seo.ts`. Every docs/legal/about page imports `docsMetadata` so canonical URLs + keywords stay consistent. `app/sitemap.ts`/`app/robots.ts` update automatically.
@@ -73,6 +76,7 @@
   - **contracts**: install Foundry via `foundryup`, execute `./contracts/run_local.sh full`.
   - **frontend**: setup Node 20, boot the Docker backend stack (Postgres/Redis/proover/api/worker), install deps, then run `npm run lint`, `npm run test`, and `npm run build` against the live API.
 - `.github/workflows/contracts-ci.yml` exists for legacy Forge-only runs; keep it unless instructed otherwise.
+- Repo-root `./run_tests.sh` matches CI ordering (backend → frontend → contracts → proover) to simplify pre-push validation; ensure the backend stack is reachable before invoking it so the frontend stage doesn’t fail the run.
 
 ---
 

@@ -270,7 +270,7 @@ def _ensure_schema() -> SchemaSyncResult:
     if _schema_checked:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.schema.already_checked",
             message="schema state already verified earlier in lifecycle",
             run_migrations=settings.run_migrations_on_startup,
@@ -279,7 +279,7 @@ def _ensure_schema() -> SchemaSyncResult:
     if not settings.run_migrations_on_startup:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.schema.migrations_disabled",
             message="skipping schema migrations due to configuration",
         )
@@ -652,16 +652,7 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
         if index % progress_log_step == 0 or index == 1 or index == total_markets:
             log_event(
                 logger,
-                logging.INFO,
-                event="worker.persist.progress",
-                message="market sync progress",
-                processed=index,
-                total=total_markets,
-            )
-        if index % progress_log_step == 0 or index == total_markets:
-            log_event(
-                logger,
-                logging.INFO,
+                logging.DEBUG,
                 event="worker.persist.progress",
                 message="market sync progress",
                 processed=index,
@@ -1182,7 +1173,7 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
     else:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.heartbeat.published",
             message="published worker heartbeat",
             markets_processed=payload["markets_processed"],
@@ -1265,7 +1256,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     schema_state = _ensure_schema()
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.schema.state",
         message="schema check finished for sync tick",
         changed=schema_state.changed,
@@ -1358,7 +1349,7 @@ def maybe_generate_settlement_proof(
     if not settings.prover_enabled or PROVER_CLIENT is None:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.proof.disabled",
             message="settlement proof generation is disabled or client unavailable",
             prover_enabled=settings.prover_enabled,
@@ -1368,7 +1359,7 @@ def maybe_generate_settlement_proof(
     if not normalized_condition:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.proof.no_condition",
             message="skipping proof generation due to missing condition id",
             event_id=market_snapshot.get("event_id"),
@@ -1390,7 +1381,7 @@ def maybe_generate_settlement_proof(
     )
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.proof.request_ready",
         message="constructed settlement proof request",
         event_id=request.event_id,
@@ -1418,7 +1409,7 @@ def maybe_generate_settlement_proof(
         )
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.proof.generated",
         message="cached settlement proof receipt",
         event_id=market_snapshot.get("event_id"),

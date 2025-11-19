@@ -2,6 +2,11 @@
 
 This backlog tracks the work still outstanding before the prover can be considered production grade. Keep it close to the code so every change to the prover acknowledges the remaining gaps.
 
+### TL;DR priorities
+1. **Profile + tune rapidsnark** – Benchmark the witness/proving pipeline and decide whether pooling or daemonization is required to hit latency targets.
+2. **Expose real observability** – Promote expvar data to Prometheus, add percentile/concurrency metrics, and validate artifacts before boot so ops can trust SLAs.
+3. **Harden operator ergonomics** – Ship env samples, validation, and documented upgrade paths (including future cgo embedding research) so non-Docker deployments stay secure.
+
 1. **Performance tuning**
    - Benchmark rapidsnark invocation vs. witness generation to identify the current bottleneck.
    - Consider pooling rapidsnark subprocesses or switching to a long-lived daemon to eliminate process spawn overhead once profiling confirms it helps.

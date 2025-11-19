@@ -81,6 +81,8 @@ Reproducible tests are part of the trust story. Backend services now target Pyth
 
 Both `.venv` directories stay ignored by git. `uv` keeps them consistent with the `pyproject.toml` + `uv.lock` definitions, so CI, local shells, and the Docker images all share the exact dependency graph.
 
+`./backend/run_tests.sh` automatically sets `-n 4` for every pytest invocation (API, shared modules, worker) so local runs match CI’s concurrency. Override via `PYTEST_WORKER_COUNT=<n>` if you’re on a smaller dev box or want to test with extra workers.
+
 ## Logging Consistency
 
 Each service now bootstraps a production-grade logger at process start. The format matches `timestamp | LEVEL | logger | file:line | event | message | request_id=<value>` so API, worker, and scripts emit comparable lines. Control verbosity with `LOG_LEVEL`, and opt into rotating files by setting `LOG_TO_FILE=true` (optional knobs: `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`). All logs still stream to stdout for container aggregation, ensuring Docker/Kubernetes collectors see exactly the same structure across services.

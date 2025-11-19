@@ -121,6 +121,8 @@ forge test --gas-report
 
 Use `./run_local.sh` for the standard build/test/snapshot flow. `./run_local.sh full` adds fuzzing (`FOUNDRY_PROFILE=ci.fuzz`) and coverage reports.
 
+Prefer `./contracts/run_tests.sh` (also invoked by repo-root `./run_tests.sh`) when you just need a quick `forge build && forge test` cycle; it mirrors CI’s steps and exits early if Foundry isn’t installed.
+
 ### Testing Coverage
 
 - `test/RevealMarket.t.sol` – Unit tests for each path (commits, claims, refunds, proof guards, events).
