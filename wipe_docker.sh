@@ -7,15 +7,17 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Stopping running containers..."
-if [ -n "$(docker ps -q)" ]; then
-  docker stop "$(docker ps -q)"
+running_containers=$(docker ps -q)
+if [[ -n "${running_containers}" ]]; then
+  docker stop ${running_containers}
 else
   echo "No running containers."
 fi
 
 echo "Removing all containers..."
-if [ -n "$(docker ps -aq)" ]; then
-  docker rm -f "$(docker ps -aq)"
+all_containers=$(docker ps -aq)
+if [[ -n "${all_containers}" ]]; then
+  docker rm -f ${all_containers}
 else
   echo "No containers to remove."
 fi
