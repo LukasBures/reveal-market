@@ -10,6 +10,10 @@ import { logger } from "@/lib/logging";
 import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 import { categorySlugFromLabel } from "@/lib/slugs";
 
+/**
+ * We auto-load up to three batches via IntersectionObserver to give users a lazy-loading feel
+ * before they need to press the button. After that the CTA becomes the explicit interaction.
+ */
 const AUTO_LOAD_BATCHES = 3;
 
 type ClientProps = {
@@ -21,6 +25,9 @@ type ClientProps = {
   emptyNotice?: string;
 };
 
+/**
+ * Client component that hydrates featured markets with lazy loading, auto-refresh, and pagination.
+ */
 export function FeaturedMarketsClient({
   initialMarkets,
   pageSize = DEFAULT_PAGE_SIZE,
@@ -49,6 +56,7 @@ export function FeaturedMarketsClient({
   });
 
   useEffect(() => {
+    // Always kick off a refresh when the component mounts so SSR payloads stay current.
     setMarkets(initialMarkets);
     setHasMore(initialMarkets.length >= pageSize);
     setAutoLoadCount(0);

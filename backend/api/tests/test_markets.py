@@ -305,7 +305,7 @@ def test_category_endpoint_caches_results(client, db_session):
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-cat1"
 
-    cache_key = category_cache_key("sports", 5)
+    cache_key = category_cache_key("sports", 5, 0)
     assert cache_key in api_main.cache_client.store
     db_session.query(models.Market).delete()
     db_session.commit()

@@ -2,8 +2,8 @@ from shared import cache_keys
 
 
 def test_category_cache_key_slugifies_hyphenated_input():
-    key = cache_keys.category_cache_key("AI & Tech", 18)
-    assert key == "markets:category:ai-tech|limit=18"
+    key = cache_keys.category_cache_key("AI & Tech", 18, 5)
+    assert key == "markets:category:ai-tech|limit=18|offset=5"
 
 
 def test_suggest_cache_key_handles_whitespace():

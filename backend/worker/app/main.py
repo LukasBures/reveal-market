@@ -311,7 +311,7 @@ def _ensure_schema() -> SchemaSyncResult:
         result.changed = previous_revision != revision
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.schema.synced",
             message="applied migrations and recorded schema revision",
             revision=revision,
@@ -357,7 +357,7 @@ def _reload_worker_settings(signum=None, frame=None) -> None:  # pragma: no cove
     PROVER_CLIENT = _build_prover_client()
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.config.reloaded",
         message="worker configuration reloaded",
         signal=signum,
@@ -389,7 +389,7 @@ def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
         return None
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.resolution.enabled",
         message="conditional tokens client initialised",
         contract_address=contract_address,
@@ -425,7 +425,7 @@ def _build_goldsky_client() -> GoldskyClient | None:
         return None
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.goldsky.enabled",
         message="goldsky subgraph client initialised",
     )
@@ -483,7 +483,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
     start = time.perf_counter()
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.fetch.start",
         message="fetching markets from polymarket",
         page_size=settings.polymarket_page_size,
@@ -552,7 +552,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.fetch.success",
             message="retrieved markets from polymarket",
             count=len(markets),
@@ -642,7 +642,7 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
     total_markets = len(markets)
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.persist.batch",
         message="synchronising markets into database",
         markets_processed=total_markets,
@@ -818,7 +818,7 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
 
     log_event(
         logger,
-        logging.INFO if record_payload["resolved"] else logging.DEBUG,
+        logging.DEBUG,
         event="worker.resolution.persisted",
         message="persisted conditional tokens resolution snapshot",
         condition_id=normalized_condition_id,
@@ -845,7 +845,7 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
         db_market.resolved_at = checked_at_dt
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.resolution.detected",
             message="polymarket resolution detected",
             condition_id=normalized_condition_id,
@@ -1058,7 +1058,7 @@ def cleanup_resolved_markets(  # noqa: C901
     _record_retention_metrics(category_counts)
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.retention.cleanup",
         message="evaluated resolved markets for retention (historical retention disabled)",
         eligible=eligible,
@@ -1102,7 +1102,7 @@ def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResu
 
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.schema.version_cached",
         message="published schema revision for cache tagging",
         revision=state.current_revision,
@@ -1117,7 +1117,7 @@ def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResu
             invalidated = shared_cache.invalidate_tag(redis_client, tag)
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 event="worker.schema.cache_reset",
                 message="invalidated schema-tagged cache entries",
                 tag=tag,
@@ -1173,7 +1173,7 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
     else:
         log_event(
             logger,
-            logging.DEBUG,
+            logging.INFO,
             event="worker.heartbeat.published",
             message="published worker heartbeat",
             markets_processed=payload["markets_processed"],
@@ -1267,7 +1267,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         markets, latency_ms = fetch_markets_from_polymarket()
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.sync.fetch_complete",
             message="polymarket fetch returned payloads",
             markets_fetched=len(markets),
@@ -1318,7 +1318,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         logger,
         logging.INFO,
         event="worker.sync.summary",
-        message="completed market sync",
+        message="updated markets from polymarket feed",
         markets_processed=len(markets),
         markets_created=summary.markets_created,
         markets_updated=summary.markets_updated,
@@ -1330,6 +1330,8 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         latency_ms=round(latency_ms, 2),
         cache_invalidations=cache_report.total,
     )
+    # INFO-level summary above mirrors the start-of-tick log so operators always see
+    # a single before/after line even when DEBUG logs are disabled.
 
     publish_heartbeat(redis_client, stats)
     _propagate_schema_revision(redis_client, schema_state)
@@ -1521,7 +1523,7 @@ def prime_markets_cache(
     result_count = len(payload) if isinstance(payload, list) else 0
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.cache.primed",
         message="prefetched homepage markets via API",
         limit=limit,
@@ -1590,7 +1592,7 @@ def prime_featured_views(
 
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.cache.featured",
         message="primed featured caches",
         categories=settings.featured_categories,
@@ -1623,7 +1625,7 @@ def record_batch_stats(
     shared_cache.set_json(redis_client, settings.batch_stats_key, payload, settings.batch_stats_ttl_seconds)
     log_event(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         event="worker.batch_stats.published",
         message="recorded worker batch stats",
         markets_processed=payload["markets_processed"],

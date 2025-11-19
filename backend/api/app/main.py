@@ -1016,6 +1016,7 @@ def list_markets_by_category(
         int,
         Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
     ] = settings.default_page_size,
+    offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
@@ -1027,6 +1028,7 @@ def list_markets_by_category(
         message="processing category listing",
         category_slug=category_slug,
         limit=limit,
+        offset=offset,
     )
     category_value = _decode_slug(category_slug)
     lookup = _canonical_category_lookup(category_value)
@@ -1041,8 +1043,8 @@ def list_markets_by_category(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
-    cache_key = category_cache_key(category_slug_key, limit)
-    cache_enabled = cache is not None and _should_cache_market_list(limit, 0, None)
+    cache_key = category_cache_key(category_slug_key, limit, offset)
+    cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
@@ -1074,15 +1076,16 @@ def list_markets_by_category(
         category_label=category_label,
         trending=trending_category,
         limit=limit,
+        offset=offset,
     )
     if trending_category:
-        markets = crud.get_markets(session, limit=limit, offset=0)
+        markets = crud.get_markets(session, limit=limit, offset=offset)
     else:
-        markets = crud.get_markets(session, category=category_label, limit=limit, offset=0)
+        markets = crud.get_markets(session, category=category_label, limit=limit, offset=offset)
     market_models = _filter_markets_for_visibility(
         _augment_market_models([schemas.MarketResponse.model_validate(m) for m in markets])
     )
-    if not market_models and not trending_category:
+    if not market_models and not trending_category and offset == 0:
         fallback_matches = _fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
             market_models = _filter_markets_for_visibility(_augment_market_models(fallback_matches))
@@ -1094,6 +1097,7 @@ def list_markets_by_category(
             message="no markets available for category",
             category_slug=category_slug_key,
             limit=limit,
+            offset=offset,
         )
     if cache_enabled and market_models:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
@@ -1108,6 +1112,7 @@ def list_markets_by_category(
         message="cached category markets",
         category_slug=category_slug_key,
         limit=limit,
+        offset=offset,
         result_count=len(market_models),
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
     )

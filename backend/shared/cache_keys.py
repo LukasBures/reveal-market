@@ -31,9 +31,9 @@ def markets_list_cache_key(
     return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
 
 
-def category_cache_key(category: str, limit: int) -> str:
+def category_cache_key(category: str, limit: int, offset: int = 0) -> str:
     slug = _slugify(category)
-    return f"{CATEGORY_PREFIX}:{slug}|limit={limit}"
+    return f"{CATEGORY_PREFIX}:{slug}|limit={limit}|offset={offset}"
 
 
 def suggest_cache_key(query: str, limit: int) -> str:
