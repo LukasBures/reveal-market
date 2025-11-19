@@ -1,4 +1,5 @@
 import type { MarketDetail } from "@/lib/api-types";
+import { formatDate, formatDateTime } from "@/lib/formatters";
 
 type Props = {
   market: MarketDetail;
@@ -14,20 +15,20 @@ export function MarketDetailHeader({ market }: Props) {
         <div className="text-center md:text-left">
           <h1 className="text-3xl font-semibold text-white md:text-[2.75rem]">{market.title}</h1>
           <p className="text-sm text-slate-400">
-            Last updated {market.updatedAt ? new Date(market.updatedAt).toLocaleString() : "recently"}
+            Last updated {market.updatedAt ? formatDateTime(market.updatedAt) : "recently"}
           </p>
         </div>
         <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-300 md:min-w-[260px] md:px-6">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500">
             <span>Commit close</span>
             <span className="text-base font-semibold text-white">
-              {market.commitDeadline ? new Date(market.commitDeadline).toLocaleDateString() : "TBA"}
+              {market.commitDeadline ? formatDate(market.commitDeadline) : "TBA"}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500">
             <span>Reveal close</span>
             <span className="text-base font-semibold text-white">
-              {market.revealDeadline ? new Date(market.revealDeadline).toLocaleDateString() : "TBA"}
+              {market.revealDeadline ? formatDate(market.revealDeadline) : "TBA"}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500">

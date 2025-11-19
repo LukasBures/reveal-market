@@ -22,6 +22,31 @@ type ConnectorOption = {
   iconAlt: string;
 };
 
+type WagmiError = Error & { shortMessage?: string | undefined };
+
+const formatErrorMessage = (error?: Error | null) => {
+  if (!error) {
+    return null;
+  }
+  const candidate =
+    typeof (error as WagmiError).shortMessage === "string" && (error as WagmiError).shortMessage?.trim()
+      ? (error as WagmiError).shortMessage
+      : error.message;
+  if (!candidate) {
+    return null;
+  }
+  let sanitized = candidate
+    .replace(/\s*\(version:[^)]+\)\s*$/i, "")
+    .replace(/\bversion:\s*@?[\w./@-]+\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const versionIndex = sanitized.toLowerCase().indexOf("version:");
+  if (versionIndex !== -1) {
+    sanitized = sanitized.slice(0, versionIndex).trim();
+  }
+  return sanitized || "Unable to connect. Please try again.";
+};
+
 const CONNECTOR_UI: ConnectorOption[] = [
   {
     id: "metamask",
@@ -107,6 +132,9 @@ export function ConnectWalletButton() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const modalTitleId = "wallet-modal-title";
   const [isMounted, setIsMounted] = useState(false);
+  const connectErrorMessage = formatErrorMessage(connectError);
+  const signErrorMessage = formatErrorMessage(signError);
+  const switchErrorMessage = formatErrorMessage(switchError);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -267,11 +295,7 @@ export function ConnectWalletButton() {
                     })}
                   </div>
                 )}
-                {connectError ? (
-                  <p className="text-xs text-rose-300">
-                    {connectError.message || "Unable to connect. Please try again."}
-                  </p>
-                ) : null}
+                {connectErrorMessage ? <p className="text-xs text-rose-300">{connectErrorMessage}</p> : null}
               </div>
               {selectedOption ? (
                 <div className="space-y-4 rounded-2xl border border-white/10 bg-black/30 p-4">
@@ -376,7 +400,7 @@ export function ConnectWalletButton() {
                       {signature ? (
                         <p className="text-[11px] text-white/70">Signature: {formatSignature(signature)}</p>
                       ) : null}
-                      {signError ? <p className="text-[11px] text-rose-300">{signError.message}</p> : null}
+                      {signErrorMessage ? <p className="text-[11px] text-rose-300">{signErrorMessage}</p> : null}
                     </div>
                   </div>
 
@@ -400,7 +424,7 @@ export function ConnectWalletButton() {
                         </button>
                       ))}
                     </div>
-                    {switchError ? <p className="text-[11px] text-rose-300">{switchError.message}</p> : null}
+                    {switchErrorMessage ? <p className="text-[11px] text-rose-300">{switchErrorMessage}</p> : null}
                   </div>
                 </>
               ) : null}

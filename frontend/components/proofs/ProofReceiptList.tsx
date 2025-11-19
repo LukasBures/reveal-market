@@ -1,4 +1,5 @@
 import type { ProofReceipt } from "@/lib/api-types";
+import { formatDateTime } from "@/lib/formatters";
 
 type Props = {
   receipts: ProofReceipt[];
@@ -107,18 +108,7 @@ function shorten(value: string, visible = 6): string {
 }
 
 function formatTimestamp(timestamp?: string) {
-  if (!timestamp) {
-    return "—";
-  }
-
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(timestamp));
-  } catch {
-    return timestamp;
-  }
+  return formatDateTime(timestamp);
 }
 
 function formatBigInt(value: string) {

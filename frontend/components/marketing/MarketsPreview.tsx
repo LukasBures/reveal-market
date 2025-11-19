@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import type { MarketSummary } from "@/lib/api-types";
 import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
+import { formatDateTime, formatUsd } from "@/lib/formatters";
 
 type Props = {
   initialMarkets: MarketSummary[];
@@ -42,17 +43,13 @@ export function MarketsPreviewClient({ initialMarkets }: Props) {
             <span>
               Commit ends:{" "}
               <strong className="text-white">
-                {market.commitDeadline
-                  ? new Date(market.commitDeadline).toLocaleString()
-                  : "TBA"}
+                {market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
               </strong>
             </span>
             <span>
               Reveal ends:{" "}
               <strong className="text-white">
-                {market.revealDeadline
-                  ? new Date(market.revealDeadline).toLocaleString()
-                  : "TBA"}
+                {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}
               </strong>
             </span>
           </div>
@@ -61,12 +58,8 @@ export function MarketsPreviewClient({ initialMarkets }: Props) {
               {market.status ?? "unknown"}
             </span>
             <span className="text-slate-300">
-              Liquidity: $
-              {market.liquidityUsd
-                ? market.liquidityUsd.toLocaleString(undefined, {
-                    maximumFractionDigits: 0,
-                  })
-                : "—"}
+              Liquidity:{" "}
+              {market.liquidityUsd ? formatUsd(market.liquidityUsd, { maximumFractionDigits: 0 }) : "—"}
             </span>
           </div>
         </article>

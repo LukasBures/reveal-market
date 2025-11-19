@@ -2,6 +2,7 @@
 
 import type { MarketDetail } from "@/lib/api-types";
 import Link from "next/link";
+import { formatDateTime, formatUsd } from "@/lib/formatters";
 
 type Props = {
   market: MarketDetail;
@@ -88,19 +89,6 @@ const normalizeBps = (value: number | null): number | null => {
   return Math.round(value);
 };
 
-const formatUsd = (value: number | null): string => {
-  if (value === null) {
-    return "—";
-  }
-  const abs = Math.abs(value);
-  const formatter = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: abs >= 1000 ? 0 : abs >= 10 ? 2 : 4,
-  });
-  return formatter.format(value);
-};
-
 const formatProbability = (value: number | null): string => {
   if (value === null) {
     return "—";
@@ -116,10 +104,6 @@ const formatBps = (value: number | null): string => {
   }
   return `${value} bps`;
 };
-
-function formatDate(input?: string | null) {
-  return input ? new Date(input).toLocaleString() : "—";
-}
 
 export function MarketDetailSidebar({ market }: Props) {
   const resolution = market.resolution ?? (market.extraData?.resolution as any);
@@ -194,7 +178,7 @@ export function MarketDetailSidebar({ market }: Props) {
         </div>
         <div className="flex items-center justify-between">
           <span>Created</span>
-          <span className="text-white">{formatDate(market.createdAt)}</span>
+          <span className="text-white">{formatDateTime(market.createdAt)}</span>
         </div>
         <div className="flex items-center justify-between">
           <span>Liquidity</span>
@@ -204,11 +188,11 @@ export function MarketDetailSidebar({ market }: Props) {
       <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <span>Commit deadline</span>
-          <span className="text-white">{formatDate(market.commitDeadline)}</span>
+          <span className="text-white">{formatDateTime(market.commitDeadline)}</span>
         </div>
         <div className="flex items-center justify-between">
           <span>Reveal deadline</span>
-          <span className="text-white">{formatDate(market.revealDeadline)}</span>
+          <span className="text-white">{formatDateTime(market.revealDeadline)}</span>
         </div>
         {tags.length > 0 && (
           <div>

@@ -8,6 +8,7 @@ import type { MarketSummary } from "@/lib/api-types";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
+import { formatNumber } from "@/lib/formatters";
 
 const categories = [
   "Trending",
@@ -50,19 +51,24 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
     () => [
       {
         label: "Live markets",
-        value: typeof liveMarketsCount === "number" && liveMarketsCount > 0 ? liveMarketsCount.toLocaleString() : "—",
+        value:
+          typeof liveMarketsCount === "number" && liveMarketsCount > 0
+            ? formatNumber(liveMarketsCount)
+            : "—",
       },
       {
         label: "Finalized markets",
         value:
           typeof finalizedMarketsCount === "number" && finalizedMarketsCount > 0
-            ? finalizedMarketsCount.toLocaleString()
+            ? formatNumber(finalizedMarketsCount)
             : "—",
       },
       {
         label: "Total markets tracked",
         value:
-          typeof totalMarketsCount === "number" && totalMarketsCount > 0 ? totalMarketsCount.toLocaleString() : "—",
+          typeof totalMarketsCount === "number" && totalMarketsCount > 0
+            ? formatNumber(totalMarketsCount)
+            : "—",
       },
     ],
     [liveMarketsCount, finalizedMarketsCount, totalMarketsCount],

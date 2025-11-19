@@ -5,6 +5,7 @@ import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/ma
 import { buildMetadata } from "@/lib/seo";
 import { fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
 import { Hero } from "@/components/marketing/Hero";
+import { formatNumber } from "@/lib/formatters";
 
 export const metadata: Metadata = buildMetadata({
   title: "Reveal Market | Live Prediction Markets",
@@ -33,9 +34,9 @@ export default async function HomePage({ searchParams }: PageProps) {
   const finalizedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
   const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;
   const callouts = [
-    { label: "Markets live", value: liveMarkets > 0 ? liveMarkets.toLocaleString() : "—" },
-    { label: "Markets finalized", value: finalizedMarkets > 0 ? finalizedMarkets.toLocaleString() : "—" },
-    { label: "Total markets tracked", value: totalMarkets > 0 ? totalMarkets.toLocaleString() : "—" },
+    { label: "Markets live", value: liveMarkets > 0 ? formatNumber(liveMarkets) : "—" },
+    { label: "Markets finalized", value: finalizedMarkets > 0 ? formatNumber(finalizedMarkets) : "—" },
+    { label: "Total markets tracked", value: totalMarkets > 0 ? formatNumber(totalMarkets) : "—" },
     { label: "Audit-ready proofs", value: "Groth16" },
   ];
 
