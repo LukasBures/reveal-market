@@ -71,6 +71,7 @@ jobs:
 
 
   contracts:
+    needs: precommit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +87,7 @@ jobs:
 
 
   frontend:
+    needs: precommit
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
@@ -125,6 +127,7 @@ jobs:
 
 
   proover:
+    needs: precommit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

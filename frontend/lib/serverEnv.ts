@@ -6,16 +6,15 @@ export type ServerEnv = {
   apiBaseUrl: string;
 };
 
-const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
-const offlineFallback = process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000";
-
-const selectedBase =
-  (preferDockerApi ? process.env.RM_API_BASE_URL : undefined) ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.RM_API_BASE_URL ??
-  null;
-
 function resolveApiBase(): string {
+  const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
+  const offlineFallback = process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000";
+  const selectedBase =
+    (preferDockerApi ? process.env.RM_API_BASE_URL : undefined) ??
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.RM_API_BASE_URL ??
+    null;
+
   if (selectedBase) {
     return assertValidUrl(selectedBase, "API base URL");
   }

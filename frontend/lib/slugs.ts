@@ -9,6 +9,7 @@ const CATEGORY_MAP: Record<string, string> = {
   'geopolitics': 'Geopolitics',
   'earnings': 'Earnings',
   'tech': 'Tech',
+  'ai-tech': 'AI & Tech',
   'culture': 'Culture',
   'world': 'World',
   'economy': 'Economy',
