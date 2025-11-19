@@ -57,6 +57,7 @@ def setup_logging(service_name: str) -> None:
         logging.getLogger(noisy).propagate = True
 
     logging.getLogger(service_name).propagate = True
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger(service_name).info(
         "logging initialized",
         extra={"event": "logging.init", "log_to_file": log_to_file, "log_dir": str(log_dir)},

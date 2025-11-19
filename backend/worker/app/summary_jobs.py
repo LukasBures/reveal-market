@@ -78,7 +78,7 @@ def maybe_enqueue_summary_job(
     if redis_client is None or not settings.summary_enabled:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.summary.skip_disabled",
             message="summary enrichment disabled or redis unavailable",
             event_id=getattr(market_record, "event_id", None),
@@ -90,7 +90,7 @@ def maybe_enqueue_summary_job(
     if not description:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.summary.skip_no_description",
             message="market missing description; skipping summary job",
             event_id=market_record.event_id,
@@ -102,7 +102,7 @@ def maybe_enqueue_summary_job(
     if not needs_summary:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.summary.skip_fresh",
             message="market summary is still fresh",
             event_id=market_record.event_id,
@@ -113,7 +113,7 @@ def maybe_enqueue_summary_job(
     if inflight:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.summary.skip_inflight",
             message="summary request already in-flight",
             event_id=market_record.event_id,
