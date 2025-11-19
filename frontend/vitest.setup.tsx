@@ -79,7 +79,7 @@ vi.mock("next/font/local", () => ({
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/src/lib/wagmi", () => ({
+vi.mock("@/lib/wagmi", () => ({
   wagmiConfig: {},
 }));
 
@@ -102,10 +102,15 @@ const defaultFetchMock = vi.fn(async () => ({
   json: async () => [],
 }));
 
+Object.defineProperty(globalThis, "fetch", {
+  value: defaultFetchMock,
+  writable: true,
+});
+
 beforeEach(() => {
-  vi.stubGlobal("fetch", defaultFetchMock);
+  defaultFetchMock.mockClear();
 });
 
 afterEach(() => {
-  defaultFetchMock.mockReset();
+  defaultFetchMock.mockClear();
 });
