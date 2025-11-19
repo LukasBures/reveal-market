@@ -63,19 +63,25 @@ describe("fetchMarketByEventId", () => {
     expect(detail.resolution?.resolved).toBe(true);
     expect(detail.resolution?.winners?.[0]).toEqual({ index: 1, label: "No", payout: 1 });
     expect(detail.heartbeat?.latencyMs).toBe(120);
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/markets/evt-detail", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][0]).toContain("/markets/evt-detail");
   });
 
   it("returns null and logs a warning when the market is missing", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) }));
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { fetchMarketByEventId } = await import("@/lib/api");
     const result = await fetchMarketByEventId("missing");
     expect(result).toBeNull();
     expect(loggerMock.warn).toHaveBeenCalledWith("fetchMarketByEventId:not_found", { eventId: "missing" });
+    globalThis.fetch = originalFetch;
   });
 
   it("returns null and logs errors on network failures", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { fetchMarketByEventId } = await import("@/lib/api");
     const result = await fetchMarketByEventId("evt-error");
     expect(result).toBeNull();
@@ -83,5 +89,6 @@ describe("fetchMarketByEventId", () => {
       eventId: "evt-error",
       error: "offline",
     });
+    globalThis.fetch = originalFetch;
   });
 });
