@@ -75,6 +75,45 @@ def test_sync_market_inserts_and_updates():
         engine.dispose()
 
 
+def test_sync_market_reuses_prefetched_instance(monkeypatch):
+    engine, session_factory = create_in_memory_db()
+    try:
+        base_payload = MarketPayload(
+            event_id="evt-prefetch",
+            title="Prefetch Market",
+            slug="prefetch-market",
+            category="finance",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.5, 0.5],
+            extra_data={"gamma": {"id": "evt-prefetch"}},
+        )
+
+        with session_factory() as session:
+            sync_market(session, base_payload)
+            session.commit()
+
+        with session_factory() as session:
+            existing = session.execute(select(Market).where(Market.event_id == "evt-prefetch")).scalar_one()
+            updated = base_payload.model_copy(update={"title": "Prefetched Update"})
+
+            def _unexpected(*args, **kwargs):
+                raise AssertionError("should not refetch market when prefetched instance is provided")
+
+            monkeypatch.setattr("app.main.shared_repository.get_market_by_event_id", _unexpected, raising=False)
+
+            sync_market(session, updated, existing_market=existing)
+            session.commit()
+
+        with session_factory() as session:
+            stored = session.execute(select(Market).where(Market.event_id == "evt-prefetch")).scalar_one()
+            assert stored.title == "Prefetched Update"
+    finally:
+        engine.dispose()
+
+
 def test_sync_market_persists_resolution(monkeypatch):
     engine, session_factory = create_in_memory_db()
 
@@ -206,10 +245,10 @@ def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         call_count = 0
         original_upsert = app.main.shared_repository.upsert_market
 
-        def tracked_upsert(session, data):
+        def tracked_upsert(session, data, existing=None):
             nonlocal call_count
             call_count += 1
-            return original_upsert(session, data)
+            return original_upsert(session, data, existing)
 
         monkeypatch.setattr("app.main.shared_repository.upsert_market", tracked_upsert, raising=False)
 

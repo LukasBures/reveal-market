@@ -47,7 +47,7 @@ def test_invalidate_tag_deletes_registered_keys():
     cache.add_tag(client, "markets:list", "markets:list|offset=0")
     cache.add_tag(client, "markets:list", "markets:list|offset=1")
     removed = cache.invalidate_tag(client, "markets:list")
-    assert set(removed) == {"markets:list|offset=0", "markets:list|offset=1"}
+    assert removed == 2
     assert "markets:list|offset=0" not in client.store
     assert "markets:list|offset=1" not in client.store
 

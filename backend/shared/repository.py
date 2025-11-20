@@ -18,10 +18,14 @@ def get_market_by_event_id(session: Session, event_id: str) -> models.Market | N
     return session.scalars(stmt).first()
 
 
-def upsert_market(session: Session, data: Mapping[str, Any]) -> models.Market:
+def upsert_market(
+    session: Session,
+    data: Mapping[str, Any],
+    existing: models.Market | None = None,
+) -> models.Market:
     """Insert or update a market row based on the provided field mapping."""
     payload = dict(data)
-    market = get_market_by_event_id(session, payload["event_id"])
+    market = existing or get_market_by_event_id(session, payload["event_id"])
     if market is None:
         market = models.Market(**payload)
         session.add(market)

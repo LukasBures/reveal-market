@@ -183,7 +183,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
 
     def fake_invalidate(_, tag: str):
         invalidated_tags.append(tag)
-        return []
+        return 1
 
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
     caplog.set_level(logging.DEBUG, logger="reveal_market.worker")
@@ -249,7 +249,7 @@ def test_process_once_publishes_schema_revision(monkeypatch):
 
     def fake_invalidate(redis_client, tag: str):
         invalidated.append(tag)
-        return []
+        return 0
 
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
 

@@ -221,16 +221,30 @@ def add_tags(client: Redis | None, tags: Sequence[str], key: str) -> None:
         add_tag(client, tag, key)
 
 
-def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
-    """Invalidate all cache keys associated with a tag."""
+def invalidate_tag(client: Redis | None, tag: str) -> int:
+    """Invalidate all cache keys associated with a tag and return the removal count."""
 
     if client is None:
-        return []
+        return 0
     storage_key = _tag_storage_key(tag)
+    removed = 0
     try:
-        members = list(client.smembers(storage_key))
-        if members:
-            client.delete(*members)
+        scan_iter = getattr(client, "sscan_iter", None)
+        iterator = scan_iter(storage_key, count=512) if callable(scan_iter) else iter(client.smembers(storage_key))
+        unlink = getattr(client, "unlink", None)
+        delete_fn = unlink if callable(unlink) else client.delete
+        batch: list[str] = []
+        for member in iterator:
+            if not member:
+                continue
+            batch.append(member)
+            if len(batch) >= 512:
+                delete_fn(*batch)
+                removed += len(batch)
+                batch.clear()
+        if batch:
+            delete_fn(*batch)
+            removed += len(batch)
         client.delete(storage_key)
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
@@ -239,9 +253,9 @@ def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
                 event="cache.tag.invalidated",
                 message="cache tag invalidated",
                 tag=tag,
-                keys=len(members),
+                keys=removed,
             )
-        return members
+        return removed
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -251,7 +265,7 @@ def invalidate_tag(client: Redis | None, tag: str) -> list[str]:
             tag=tag,
             error=str(exc),
         )
-        return []
+        return 0
 
 
 def get_schema_tag(client: Redis | None, schema_version_key: str) -> str:

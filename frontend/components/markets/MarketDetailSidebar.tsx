@@ -2,7 +2,7 @@
 
 import type { MarketDetail } from "@/lib/api-types";
 import Link from "next/link";
-import { formatDateTime, formatUsd } from "@/lib/formatters";
+import { formatDate, formatDateTime, formatUsd } from "@/lib/formatters";
 
 type Props = {
   market: MarketDetail;

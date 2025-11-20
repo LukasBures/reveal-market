@@ -7,7 +7,7 @@ import logging
 import re
 import signal
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -161,7 +161,9 @@ class CacheInvalidationReport:
     tag_counts: dict[str, int] = field(default_factory=dict)
 
     def record(self, tag: str, removed: int) -> None:
-        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + max(removed, 0)
+        if removed <= 0:
+            return
+        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + removed
 
     @property
     def total(self) -> int:
@@ -635,10 +637,29 @@ def _build_resolution_record(summary: dict[str, Any], market: MarketPayload, che
     }
 
 
+def _load_existing_markets(
+    session: Session,
+    markets: Sequence[MarketPayload],
+) -> dict[str, shared_models.Market]:
+    event_ids = [market.event_id for market in markets if isinstance(market.event_id, str)]
+    if not event_ids:
+        return {}
+    existing: dict[str, shared_models.Market] = {}
+    chunk_size = 500
+    for start in range(0, len(event_ids), chunk_size):
+        chunk = event_ids[start : start + chunk_size]
+        stmt = select(shared_models.Market).where(shared_models.Market.event_id.in_(chunk))
+        for record in session.scalars(stmt):
+            if record.event_id:
+                existing[record.event_id] = record
+    return existing
+
+
 def _collect_market_changes(session: Session, markets: list[MarketPayload], redis_client: Redis | None) -> SyncSummary:
     summary = SyncSummary()
     if not markets:
         return summary
+    existing_records = _load_existing_markets(session, markets)
     total_markets = len(markets)
     log_event(
         logger,
@@ -658,7 +679,10 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
                 processed=index,
                 total=total_markets,
             )
-        db_market, outcome = sync_market(session, market)
+        prefetched = existing_records.get(market.event_id)
+        db_market, outcome = sync_market(session, market, existing_market=prefetched)
+        if db_market and isinstance(db_market.event_id, str):
+            existing_records[db_market.event_id] = db_market
         if outcome.market_changed and db_market and db_market.event_id:
             summary.changed_events.add(db_market.event_id)
             summary.stats_dirty = True
@@ -704,14 +728,12 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
 
     def _invalidate(tag: str) -> None:
         removed = shared_cache.invalidate_tag(redis_client, tag)
-        report.record(tag, len(removed))
+        report.record(tag, removed)
 
     if summary.changed_events or summary.changed_categories:
         _invalidate("markets:list")
         _invalidate("category:trending")
         _invalidate("markets:suggest")
-    if summary.stats_dirty and summary.changed_events:
-        _invalidate("markets:stats")
     if summary.stats_dirty and summary.changed_events:
         _invalidate("markets:stats")
     for event_id in summary.changed_events:
@@ -861,10 +883,14 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     )
 
 
-def sync_market(session: Session, market: MarketPayload):
-    """Upsert a market row using `event_id` as the natural key."""
+def sync_market(
+    session: Session,
+    market: MarketPayload,
+    existing_market: shared_models.Market | None = None,
+):
+    """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
     now = datetime.now(UTC)
-    existing = shared_repository.get_market_by_event_id(session, market.event_id)
+    existing = existing_market or shared_repository.get_market_by_event_id(session, market.event_id)
     payload = market.model_dump()
     if payload.get("closed") is None:
         payload["closed"] = False
@@ -902,7 +928,7 @@ def sync_market(session: Session, market: MarketPayload):
     incoming_hash = getattr(market, "content_hash", None)
 
     if existing is None:
-        db_market = shared_repository.upsert_market(session, payload)
+        db_market = shared_repository.upsert_market(session, payload, existing)
         market_changed = True
         market_created = True
         if logger.isEnabledFor(logging.DEBUG):
@@ -928,7 +954,7 @@ def sync_market(session: Session, market: MarketPayload):
                     reason=match_reason,
                 )
         else:
-            db_market = shared_repository.upsert_market(session, payload)
+            db_market = shared_repository.upsert_market(session, payload, existing)
             market_changed = True
             market_updated = True
             if logger.isEnabledFor(logging.DEBUG):
@@ -1121,7 +1147,7 @@ def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResu
                 event="worker.schema.cache_reset",
                 message="invalidated schema-tagged cache entries",
                 tag=tag,
-                keys=len(invalidated),
+                keys=invalidated,
             )
 
 

@@ -22,6 +22,17 @@ Additional docs live in each directory’s README.
 
 ---
 
+## Current Capabilities
+
+- **FastAPI surface area** – `/markets`, `/categories/{slug}`, `/markets/suggest`, `/proofs`, and `/health` are live today with CSP/HSTS/COOP hardening, schema-based request/response models, Redis-backed caching (schema-tag aware), and Prometheus metrics. The API also publishes structured request metrics into Redis so `/health/heartbeats` immediately surfaces slow requests or cache-miss spikes.
+- **Ingestion/automation worker** – The worker runs Alembic migrations on boot, streams active Polymarket markets, prefetches existing rows to minimize Postgres roundtrips, writes sanitized payloads into Postgres + Redis, and invalidates tagged caches per event/category/resolution. It exposes batch stats, publishes heartbeats, hydrates featured caches, and queues Groth16 proof jobs and AI summary jobs when enabled.
+- **Frontend** – The Next.js 15 app consumes the live API for every page render, enforces the same security headers, emits sitemap/robots automatically, and ships fully responsive marketing + docs surfaces. Linting, type-checking, and production builds run in CI and require a reachable backend stack before they start.
+- **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI.
+- **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `proover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
+- **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/run_local.sh full`, and `./run_tests.sh` are the same flows used in CI (`.github/workflows/ci.yml`). Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
+
+---
+
 ## Investment Snapshot
 
 - **Outcome markets as yield** – Treasury-first rake capture and institutional fee-sharing make markets balance-sheet friendly instead of speculative emissions.

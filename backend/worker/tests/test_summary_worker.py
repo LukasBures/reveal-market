@@ -62,7 +62,7 @@ def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
 
     def fake_invalidate(redis_client, tag):
         invalidated.append(tag)
-        return []
+        return 0
 
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
 
@@ -115,7 +115,7 @@ def test_process_job_requeues_on_failure(monkeypatch):
         def generate(self, job):
             raise SummaryClientError("boom")
 
-    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: [], raising=False)
+    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: 0, raising=False)
     result = process_job(job, redis_client, FailingClient())
     assert result is False
     assert job.attempts == 1
@@ -141,7 +141,7 @@ def test_process_job_dead_letters_after_max_attempts(monkeypatch):
         def generate(self, job):
             raise SummaryClientError("boom")
 
-    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: [], raising=False)
+    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: 0, raising=False)
     result = process_job(job, redis_client, FailingClient())
     assert result is False
     dlq_entries = redis_client.queues.get(summary_worker.settings.summary_dead_letter_key, [])
