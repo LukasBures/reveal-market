@@ -20,6 +20,23 @@ repos:
         types_or: [python, pyi, jupyter]
         require_serial: true
         additional_dependencies: ["ruff>=0.6.9"]
+      - id: forge-snapshot
+        name: forge snapshot (contracts/* workspaces)
+        description: "Regenerate gas snapshots when contracts change"
+        entry: |
+          bash -c '
+            set -e
+            ROOT="$(git rev-parse --show-toplevel)"
+            for DIR in "$ROOT"/contracts/*; do
+              [ -d "$DIR" ] || continue
+              [ -f "$DIR/foundry.toml" ] || continue
+              cd "$DIR"
+              forge snapshot --check
+            done
+          '
+        language: system
+        pass_filenames: false
+        files: ^contracts/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

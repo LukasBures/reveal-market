@@ -58,7 +58,7 @@ WORKDIR /hedger
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/hedger:/hedger/shared \
+    PYTHONPATH=/hedger \
     PATH="/hedger/.venv/bin:$PATH"
 
 RUN apt-get update -qq \

@@ -7,10 +7,11 @@ const ORDER: Record<LogLevel, number> = {
   error: 40,
 };
 
+const defaultLevel: LogLevel = "info";
 const envLevel =
   (process.env.NEXT_PUBLIC_LOG_LEVEL as LogLevel | undefined) ||
   (process.env.LOG_LEVEL as LogLevel | undefined) ||
-  "info";
+  defaultLevel;
 
 const activeLevel: LogLevel = ORDER[envLevel] ? envLevel : "info";
 const browserLoggingEnabled = process.env.NEXT_PUBLIC_ENABLE_BROWSER_LOGS === "true";
@@ -56,11 +57,22 @@ const extractCaller = () => {
 };
 
 const formatLine = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
-  const timestamp = formatTimestamp();
-  const location = extractCaller();
-  const payload: Record<string, unknown> = meta ? { ...meta } : {};
-  const serialized = Object.keys(payload).length > 0 ? JSON.stringify(payload) : "{}";
-  return `${timestamp} | ${level.toUpperCase()} | ${LOGGER_NAME} | ${location} | ${message} | ${serialized}`;
+  const payload: Record<string, unknown> = {
+    timestamp: formatTimestamp(),
+    level: level.toUpperCase(),
+    logger: LOGGER_NAME,
+    location: extractCaller(),
+    event: message,
+    message,
+    service: LOGGER_NAME,
+    request_id: meta?.request_id ?? "-",
+  };
+  if (meta) {
+    Object.entries(meta).forEach(([key, value]) => {
+      payload[key] = value;
+    });
+  }
+  return JSON.stringify(payload);
 };
 
 const baseLogger = {

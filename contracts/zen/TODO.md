@@ -1,17 +1,24 @@
-# Contracts MVP Checklist
+# ZEN Contracts TODO / Hardening Backlog
 
-Only the items below block us from shipping contracts in an MVP.
+## Proof / Commitments
+- Replace the rolling `commitmentsRoot = keccak256(prevRoot, ticketHash)` with a canonical Merkle accumulator (Keccak leaves, fixed ordering, MMR/frontier) so Merkle proofs are meaningful and circuit-compatible. Update public signals + circuits accordingly.
+- If sticking with Merkle: add tests for inclusion/exclusion, proof ordering, and failure cases; reject zero-length proofs unless single-leaf root matches.
+- Bind settlement to a stored `circuitHash` public signal to prevent replay across verifier upgrades; consider storing `expectedInputs` too.
 
-1. **Production Groth16 rollout**
-   - Finalize audited proving/verifying keys, publish their hashes on-chain, and document the rotation procedure (including `last-deployment.json` ingestion).
-   - Update deployment scripts/tests to fail if circuit hashes drift from the deployed verifier.
+## Risk / Accounting
+- Add invariant/fuzz tests ensuring `escrow + float + paidOut >= totalLiability` across all flows (commit/settle/claim/refund). Current invariants cover a subset.
+- Consider per-claimer payout caps to avoid extreme multipliers if MAX_PAYOUT_MULTIPLIER is raised in future.
 
-2. **Proof replay persistence**
-   - Emit/store `proofNonce` + settlement receipts so the backend (and auditors) can prove no proof was replayed or altered.
-   - Wire the worker/API to surface this data under `/proofs`.
+## Deployment / Ops
+- Update deployment docs/runbooks to match native-only collateral, 12 public signals, and max payout multiplier rules.
+- Add a sanity lint/CI step for forge-lint in the contracts job.
 
-3. **Guardian/ownership operations**
-   - Rehearse and document the `Ownable2Step` + guardian transfer runbooks (Factory, RakeManager, Verifier) so we can rotate keys before onboarding capital.
-   - Add tests/invariants that validate the runbook steps.
+## Observability
+- Add events for factory risk sync failures (currently silent) if you want explicit alerts on accounting drift.
 
-Once these three deliverables land we can credibly operate the contracts for MVP-scale capital.
+## Merkle/Circuit Alignment
+- Decide on final Merkle leaf encoding (ticketHash vs keccak(ticketHash)) and keep circuit/public-signals consistent; document this in README + docs/settlement-circuit.md.
+
+## Tests
+- Add property/invariant tests for pause/guardian controls across multiple actors; fuzz commit/settle/claim sequences with random pause toggles.
+- Add fuzz for proof replay attempts with mismatched circuitHash/version/market address once circuitHash is surfaced.

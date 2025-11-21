@@ -98,8 +98,8 @@ fabric.properties
 [Bb]in
 [Ii]nclude
 [Ll]ib
-!contracts/base/lib/
-!contracts/base/lib/**
+!contracts/polygon/lib/
+!contracts/polygon/lib/**
 [Ll]ib64
 [Ll]ocal
 [Ss]cripts

@@ -15,13 +15,13 @@ contract VerifierStubTest is Test {
     }
 
     function testVerifyProofAlwaysSucceeds() public {
-        uint256[12] memory pubSignals;
+        uint256[10] memory pubSignals;
         bool success = verifier.verifyProof(bytes(""), pubSignals);
         assertTrue(success);
     }
 
     function testVerifyProofEmitsEvent() public {
-        uint256[12] memory pubSignals;
+        uint256[10] memory pubSignals;
         vm.expectEmit(true, true, false, true);
         emit VerifierStub.ProofChecked(true, address(this));
         verifier.verifyProof(bytes(""), pubSignals);
@@ -40,17 +40,17 @@ contract Groth16VerifierTest is Test {
             uint256[2][2] memory delta2,
             uint256[2][] memory ic
         ) = _demoVerifyingKey();
-        verifier = new Verifier(alpha1, beta2, gamma2, delta2, ic, keccak256("demo"), 12);
+        verifier = new Verifier(alpha1, beta2, gamma2, delta2, ic, keccak256("demo"), 10);
     }
 
     function testVerifyProofFailsWithMalformedBytes() public {
-        uint256[12] memory signals = _demoSignals();
+        uint256[10] memory signals = _demoSignals();
         vm.expectRevert(Verifier.InvalidProofEncoding.selector);
         verifier.verifyProof(hex"1234", signals);
     }
 
     function testVerifyProofReturnsFalseForInvalidProof() public view {
-        uint256[12] memory signals = _demoSignals();
+        uint256[10] memory signals = _demoSignals();
         bool success = verifier.verifyProof(new bytes(32 * 8), signals);
         assertFalse(success);
     }
@@ -59,7 +59,7 @@ contract Groth16VerifierTest is Test {
         uint256[2][] memory ic = new uint256[2][](2);
         ic[0] = [uint256(1), uint256(2)];
         ic[1] = [uint256(1), uint256(2)];
-        vm.expectRevert(abi.encodeWithSelector(Verifier.InvalidVerifyingKeyLength.selector, 2, 13));
+        vm.expectRevert(abi.encodeWithSelector(Verifier.InvalidVerifyingKeyLength.selector, 2, 11));
         bytes32 altHash = keccak256(bytes("alt"));
         verifier.setVerifyingKey([uint256(1), uint256(2)], _g2(), _g2(), _g2(), ic, altHash);
     }
@@ -68,7 +68,7 @@ contract Groth16VerifierTest is Test {
         (, , , , uint256[2][] memory ic) = _demoVerifyingKey();
         vm.expectEmit(true, false, false, true);
         bytes32 updatedHash = keccak256(bytes("updated"));
-        emit Verifier.VerifyingKeyUpdated(updatedHash, 12);
+        emit Verifier.VerifyingKeyUpdated(updatedHash, 10);
         verifier.setVerifyingKey([uint256(1), uint256(2)], _g2(), _g2(), _g2(), ic, updatedHash);
     }
 
@@ -106,14 +106,14 @@ contract Groth16VerifierTest is Test {
             uint256[2][] memory
         )
     {
-        uint256[2][] memory ic = new uint256[2][](13);
+        uint256[2][] memory ic = new uint256[2][](11);
         for (uint256 i = 0; i < ic.length; ++i) {
             ic[i] = [uint256(1), uint256(2)];
         }
         return ([uint256(1), uint256(2)], _g2(), _g2(), _g2(), ic);
     }
 
-    function _demoSignals() private pure returns (uint256[12] memory signals) {
+    function _demoSignals() private pure returns (uint256[10] memory signals) {
         signals[0] = 10;
         signals[1] = 20;
         signals[2] = 30;
@@ -122,10 +122,8 @@ contract Groth16VerifierTest is Test {
         signals[5] = uint256(keccak256("outcome")) % FIELD;
         signals[6] = 1;
         signals[7] = 42;
-        signals[8] = uint256(uint160(address(0xBEEF)));
+        signals[8] = 0;
         signals[9] = 0;
-        signals[10] = 0;
-        signals[11] = 0;
     }
 
     function _g2() private pure returns (uint256[2][2] memory point) {

@@ -170,10 +170,10 @@ func (p *groth16Prover) runCommand(ctx context.Context, binary string, args []st
 			msg = err.Error()
 		}
 		logLine("error", "prover.command.failed", map[string]any{
-			"stage":   stage,
-			"binary":  binary,
-			"error":   msg,
-			"args":    args,
+			"stage":  stage,
+			"binary": binary,
+			"error":  msg,
+			"args":   args,
 		})
 		return newInternalError(fmt.Errorf("%s failed: %s", stage, msg))
 	}
@@ -444,43 +444,68 @@ func parseFlexibleBigInt(value string) (*big.Int, error) {
 var bn128Modulus = mustBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617")
 
 func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
-	totalPool, err := parsePositiveDecimal(req.TotalPool, "total_pool")
+	merkleRoot, err := parseHexField(req.MerkleRoot, "merkle_root")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-	winningPool, err := parsePositiveDecimal(req.WinningPool, "winning_pool")
+	marketID, err := parseFlexibleNumber(req.MarketID, "market_id")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-	if winningPool.Cmp(totalPool) > 0 {
-		return nil, newValidationError("winning_pool must be <= total_pool")
-	}
-
-	outcomeHash, err := parseHexField(req.OutcomeHash, "outcome_hash")
+	winningOutcome, err := parseFlexibleNumber(req.WinningOutcome, "winning_outcome_id")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-	marketAddress, err := parseHexField(defaultString(req.MarketAddress, "0x0"), "market_address")
+	totalEscrow, err := parsePositiveDecimal(req.TotalEscrow, "total_escrow")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-	nonce, err := parseFlexibleNumber(req.Nonce, "nonce")
+	totalLiability, err := parsePositiveDecimal(req.TotalLiability, "total_liability")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-
-	version := big.NewInt(int64(req.CircuitVersion))
-	if version.Sign() <= 0 {
-		version = big.NewInt(1)
+	rakeBps, err := parseNonNegativeDecimal(req.RakeBps, "rake_bps")
+	if err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	if rakeBps.Cmp(big.NewInt(10_000)) > 0 {
+		return nil, newValidationError("rake_bps must be <= 10000")
+	}
+	if len(req.PoolTotals) != 2 {
+		return nil, newValidationError("pool_totals must contain two entries")
+	}
+	poolYes, err := parseNonNegativeDecimal(req.PoolTotals[0], "pool_totals[0]")
+	if err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	poolNo, err := parseNonNegativeDecimal(req.PoolTotals[1], "pool_totals[1]")
+	if err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	sumPools := new(big.Int).Add(poolYes, poolNo)
+	if sumPools.Cmp(totalEscrow) != 0 {
+		return nil, newValidationError("pool_totals must sum to total_escrow")
+	}
+	commitmentsCount := big.NewInt(int64(len(req.Tickets)))
+	if commitmentsCount.Sign() == 0 {
+		return nil, newValidationError("commitments_count must be > 0")
+	}
+	circuitHash, err := parseHexField(req.CircuitHash, "circuit_hash")
+	if err != nil {
+		return nil, newValidationError(err.Error())
 	}
 
 	inputs := map[string]string{
-		"totalPool":      fieldElement(totalPool).String(),
-		"winningPool":    fieldElement(winningPool).String(),
-		"outcomeHash":    fieldElement(outcomeHash).String(),
-		"circuitVersion": fieldElement(version).String(),
-		"nonce":          fieldElement(nonce).String(),
-		"marketAddress":  fieldElement(marketAddress).String(),
+		"merkleRoot":       fieldElement(merkleRoot).String(),
+		"marketId":         fieldElement(marketID).String(),
+		"winningOutcomeId": fieldElement(winningOutcome).String(),
+		"totalEscrow":      fieldElement(totalEscrow).String(),
+		"totalLiability":   fieldElement(totalLiability).String(),
+		"rakeBps":          fieldElement(rakeBps).String(),
+		"poolTotalYes":     fieldElement(poolYes).String(),
+		"poolTotalNo":      fieldElement(poolNo).String(),
+		"commitmentsCount": fieldElement(commitmentsCount).String(),
+		"circuitHashInput": fieldElement(circuitHash).String(),
 	}
 	return inputs, nil
 }
@@ -496,6 +521,21 @@ func parsePositiveDecimal(value string, field string) (*big.Int, error) {
 	}
 	if num.Sign() <= 0 {
 		return nil, fmt.Errorf("%s must be > 0", field)
+	}
+	return num, nil
+}
+
+func parseNonNegativeDecimal(value string, field string) (*big.Int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, fmt.Errorf("%s required", field)
+	}
+	num, ok := new(big.Int).SetString(trimmed, 10)
+	if !ok {
+		return nil, fmt.Errorf("%s must be decimal", field)
+	}
+	if num.Sign() < 0 {
+		return nil, fmt.Errorf("%s must be >= 0", field)
 	}
 	return num, nil
 }

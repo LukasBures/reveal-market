@@ -4,6 +4,7 @@
 # Include service sources so Docker builds have access to code
 !backend/
 !frontend/
+!hedger/
 !shared/
 !pyproject.toml
 !uv.lock

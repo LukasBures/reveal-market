@@ -20,7 +20,6 @@ contract FactoryLifecycleTest is Test {
     bytes32 private constant OUTCOME_HASH = keccak256("HOME");
     bytes32 private constant WIN_SALT = bytes32(uint256(555));
     bytes32 private constant LOSE_SALT = bytes32(uint256(777));
-    uint256 private proofNonce;
 
     function setUp() public {
         implementation = new RevealMarket();
@@ -45,14 +44,14 @@ contract FactoryLifecycleTest is Test {
 
         // commit winner with coverage provided by float
         vm.deal(WINNER, 1 ether);
-        bytes32 winHash = keccak256(abi.encodePacked(WINNER, OUTCOME_HASH, WIN_SALT));
+        bytes32 winHash = _ticketHash(address(market), WINNER, 1 ether, WIN_SALT);
         vm.prank(WINNER);
         market.commit{value: 1 ether}(winHash, 1 ether);
 
         // pause commits globally
         factory.setGlobalCommitPaused(true);
         vm.deal(LOSER, 1 ether);
-        bytes32 loseHash = keccak256(abi.encodePacked(LOSER, keccak256("AWAY"), LOSE_SALT));
+        bytes32 loseHash = _ticketHash(address(market), LOSER, 1 ether, LOSE_SALT);
         vm.prank(LOSER);
         vm.expectRevert(RevealMarket.CommitPaused.selector);
         market.commit{value: 1 ether}(loseHash, 1 ether);
@@ -63,11 +62,11 @@ contract FactoryLifecycleTest is Test {
         assertTrue(market.claimsPaused());
 
         vm.warp(params.commitDeadline + 1);
-        market.lock();
+        market.lock(winHash, market.commitmentsCount());
         vm.prank(ORACLE);
         market.postResult(OUTCOME_HASH);
 
-        uint256[12] memory signals = _buildSignals(market, 1 ether);
+        uint256[10] memory signals = _buildSignals(market);
         market.verifyAndSettle("", signals);
 
         // unblock claims
@@ -75,7 +74,7 @@ contract FactoryLifecycleTest is Test {
         uint256 winnerBalanceBefore = WINNER.balance;
         vm.prank(WINNER);
         bytes32[] memory proof = new bytes32[](0);
-        market.claim(0, "HOME", WIN_SALT, proof);
+        market.claim(0, "HOME", WIN_SALT, 0, proof);
         assertGt(WINNER.balance, winnerBalanceBefore);
 
         // guardian rotation
@@ -85,27 +84,30 @@ contract FactoryLifecycleTest is Test {
         assertTrue(market.claimsPaused());
     }
 
-    function _buildSignals(RevealMarket market, uint256 winningStake)
-        internal
-        returns (uint256[12] memory signals)
-    {
-        uint256 grossPool = market.userEscrow() + market.houseFloat();
-        uint256 rakeAmount = (market.userEscrow() * rakeManager.rakeBps()) / 10_000;
-        uint256 netEscrow = market.userEscrow() - rakeAmount;
-        uint256 grossPayout = (winningStake * market.payoutMultiplier()) / market.WAD();
-        uint256 liability = grossPayout;
+    function _buildSignals(RevealMarket market) internal returns (uint256[10] memory signals) {
+        uint256 totalEscrow = market.userEscrow();
+        uint256 rakeBps = rakeManager.rakeBps();
+        uint256 rakeAmount = (totalEscrow * rakeBps) / 10_000;
+        uint256 netEscrow = totalEscrow - rakeAmount;
+        uint256 netPool = netEscrow + market.houseFloat();
+        uint256 liability = totalEscrow * market.payoutMultiplier() / market.WAD();
+        if (liability > netPool) {
+            liability = netPool;
+        }
 
-        signals[0] = winningStake;
-        signals[1] = liability;
-        signals[2] = grossPool;
-        signals[3] = rakeAmount;
-        signals[4] = market.payoutMultiplier();
-        signals[5] = uint256(OUTCOME_HASH);
-        signals[6] = market.CIRCUIT_VERSION();
-        signals[7] = ++proofNonce;
-        signals[8] = uint256(uint160(address(market)));
-        signals[9] = liability > netEscrow ? liability - netEscrow : 0;
-        signals[10] = uint256(market.commitmentsRoot());
-        signals[11] = uint256(keccak256(abi.encodePacked(WINNER, OUTCOME_HASH, WIN_SALT)));
+        signals[0] = uint256(market.commitmentsRoot());
+        signals[1] = market.marketId();
+        signals[2] = uint256(OUTCOME_HASH);
+        signals[3] = totalEscrow;
+        signals[4] = liability;
+        signals[5] = rakeBps;
+        signals[6] = totalEscrow;
+        signals[7] = 0;
+        signals[8] = market.commitmentsCount();
+        signals[9] = uint256(market.circuitHash());
+    }
+
+    function _ticketHash(address market, address user, uint256 amount, bytes32 salt) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(market, user, OUTCOME_HASH, amount, salt));
     }
 }

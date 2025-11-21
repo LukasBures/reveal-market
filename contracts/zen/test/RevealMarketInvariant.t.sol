@@ -12,6 +12,7 @@ contract RevealMarketHandler is Test {
     RevealMarket public market;
     address public constant ORACLE = address(0xA11CE);
     address payable public constant TREASURY = payable(address(0xB0B));
+    bytes32[] private tickets;
 
     constructor() {
         RakeManager rakeManager = new RakeManager(address(this), TREASURY, 100);
@@ -38,11 +39,17 @@ contract RevealMarketHandler is Test {
         amount = bound(amount, 0.01 ether, 1 ether);
         vm.deal(address(this), amount);
         market.commit{value: amount}(ticketHash, amount);
+        tickets.push(ticketHash);
     }
 
     function lock() external {
         vm.warp(market.commitDeadline() + 1);
-        market.lock();
+        if (tickets.length == 0) return;
+        bytes32 root = tickets[0];
+        for (uint256 i = 1; i < tickets.length; ++i) {
+            root = keccak256(abi.encodePacked(root, tickets[i]));
+        }
+        market.lock(root, market.commitmentsCount());
     }
 
     function setPauses(bool commitPaused, bool claimPaused) external {

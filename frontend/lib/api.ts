@@ -99,7 +99,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     }
     const url = new URL(endpoint, DEFAULT_API_BASE);
     params.forEach((value, key) => url.searchParams.set(key, value));
-    logger.info("fetchFeaturedMarkets:request", {
+    logger.debug("fetchFeaturedMarkets:request", {
       endpoint: url.toString(),
       limit,
       offset: options?.offset,
@@ -123,7 +123,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
 
     const payload = await response.json();
     const items = Array.isArray(payload) ? payload : payload?.items ?? [];
-    logger.info("fetchFeaturedMarkets:success", {
+    logger.debug("fetchFeaturedMarkets:success", {
       limit,
       category: options?.category,
       searchQuery: options?.searchQuery,
@@ -155,7 +155,7 @@ export async function fetchMarketSuggestions(
   url.searchParams.set("q", trimmed);
 
   try {
-    logger.info("fetchMarketSuggestions:request", {
+    logger.debug("fetchMarketSuggestions:request", {
       endpoint: url.toString(),
       limit,
       query: trimmed,
@@ -176,7 +176,7 @@ export async function fetchMarketSuggestions(
       return [];
     }
     const mapped = payload.map(mapApiMarketToSummary);
-    logger.info("fetchMarketSuggestions:success", { query: trimmed, count: mapped.length });
+    logger.debug("fetchMarketSuggestions:success", { query: trimmed, count: mapped.length });
     return mapped;
   } catch (error) {
     logOfflineAwareError("fetchMarketSuggestions", error);
@@ -217,7 +217,7 @@ export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
       { status: "finalized", count: finalized },
       { status: "total", count: total },
     ];
-    logger.info("fetchMarketStatsBreakdown:success", { count: stats.length });
+    logger.debug("fetchMarketStatsBreakdown:success", { count: stats.length });
     return stats;
   } catch (error) {
     logOfflineAwareError("fetchMarketStatsBreakdown", error);
@@ -231,7 +231,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
   }
   try {
     const endpoint = `${DEFAULT_API_BASE}/health`;
-    logger.info("fetchHealthSnapshot:request", { endpoint, baseUrl: DEFAULT_API_BASE });
+    logger.debug("fetchHealthSnapshot:request", { endpoint, baseUrl: DEFAULT_API_BASE });
     const response = await fetch(endpoint, {
       next: { revalidate: 45 },
     });
@@ -256,7 +256,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
           }
         : null,
     };
-    logger.info("fetchHealthSnapshot:success", {
+    logger.debug("fetchHealthSnapshot:success", {
       status: snapshot.status,
     });
     return snapshot;

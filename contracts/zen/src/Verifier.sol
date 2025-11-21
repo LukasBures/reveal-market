@@ -82,7 +82,7 @@ contract Verifier is IVerifier, Ownable2Step {
     }
 
     /// @inheritdoc IVerifier
-    function verifyProof(bytes calldata proofData, uint256[12] calldata pubSignals) external view override returns (bool) {
+    function verifyProof(bytes calldata proofData, uint256[10] calldata pubSignals) external view override returns (bool) {
         if (_ic.length == 0) revert VerifyingKeyNotSet();
         if (pubSignals.length != EXPECTED_INPUTS) {
             revert ProofInputLengthMismatch(EXPECTED_INPUTS, pubSignals.length);

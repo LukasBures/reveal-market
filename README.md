@@ -16,8 +16,9 @@ Horizen chain support docs: https://docs.goldsky.com/chains/horizen
 | `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, structured logging, Polymarket + on-chain sync, pytest suite. |
 | `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components, zero mock fallbacks. |
 | `contracts/zen` | Foundry workspace for the Horizen deployment. | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
-| `contracts/base` | Foundry workspace for the Base deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
+| `contracts/polygon` | Foundry workspace for the Polygon deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
 | `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
+| `hedger/` | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
 
 Additional docs live in each directory’s README.
 
@@ -28,8 +29,9 @@ Additional docs live in each directory’s README.
 - **FastAPI surface area** – `/markets`, `/categories/{slug}`, `/markets/suggest`, `/proofs`, and `/health` are live today with CSP/HSTS/COOP hardening, schema-based request/response models, Redis-backed caching (schema-tag aware), and Prometheus metrics. The API also publishes structured request metrics into Redis so `/health/heartbeats` immediately surfaces slow requests or cache-miss spikes.
 - **Ingestion/automation worker** – The worker runs Alembic migrations on boot, streams active Polymarket markets, prefetches existing rows to minimize Postgres roundtrips, writes sanitized payloads into Postgres + Redis, and invalidates tagged caches per event/category/resolution. It exposes batch stats, publishes heartbeats, hydrates featured caches, and queues Groth16 proof jobs and AI summary jobs when enabled.
 - **Frontend** – The Next.js 15 app consumes the live API for every page render, enforces the same security headers, emits sitemap/robots automatically, and ships fully responsive marketing + docs surfaces. Linting, type-checking, and production builds run in CI and require a reachable backend stack before they start.
-- **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI. Both `contracts/zen` (Horizen) and `contracts/base` (Base LP vault + hedging) run via shared wrappers.
+- **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI. Both `contracts/zen` (Horizen) and `contracts/polygon` (Polygon LP vault + hedging) run via shared wrappers.
 - **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `prover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
+- **Hedger** – FastAPI admin surface with Prometheus metrics; tracks exposures (YES/NO), FX haircuts, risk limits, and emits buy/sell/unwind hedge instructions with slippage gates. Uses Redis locks/idempotency + DB offsets for replay safety, hydrates state from Postgres on restart, and builds prover payloads from stored commits/outcomes before marking markets resolved. Metrics include exposures, coverage, LP utilization, float, PnL placeholders, event lag, hedge executions, and settlement/prover latency.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/run_local.sh full`, and `./run_tests.sh` are the same flows used in CI (`.github/workflows/ci.yml`). Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
 
 ---
@@ -62,10 +64,6 @@ Additional docs live in each directory’s README.
 ## Quick Start
 
 ```bash
-# Clone & bootstrap
-git clone https://github.com/RevealMarket/reveal-market.git
-cd reveal-market
-
 # Backend (Python 3.12 + uv)
 uv sync --project backend/api --extra dev --no-install-project
 uv sync --project backend/worker --extra dev --no-install-project
@@ -77,6 +75,10 @@ cd frontend && npm install && npm run dev
 
 # Contracts (runs both Base + Zen workspaces)
 cd contracts && ./run_tests.sh
+
+# Hedger (FastAPI + exposure/hedging engine)
+uv sync --project hedger --extra dev --no-install-project
+cd hedger && ./run_tests.sh
 
 # Full docker stack (API, worker, frontend, Postgres, Redis, prover)
 ./run_local.sh

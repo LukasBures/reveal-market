@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     fx_timeout_seconds: int = Field(default=5)
     fx_max_age_seconds: int = Field(default=120)
     fx_haircut_bps: int = Field(default=500, description="FX haircut in basis points (500 = 5%)")
+    fx_fallback_price: Decimal = Field(default=Decimal("1"), description="Fallback ZEN/USD price when feed is down")
 
     redis_lock_ttl_seconds: int = Field(default=10)
     redis_idempotency_ttl_seconds: int = Field(default=86400)

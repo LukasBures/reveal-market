@@ -10,7 +10,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .admin import router as admin_router
 from .config import get_settings
-from .logging_config import log_event, setup_logging, start_heartbeat_logger
+from .local_logging import log_event, start_heartbeat_logger
+from .logging_config import setup_logging
 from .service import HedgerService
 
 

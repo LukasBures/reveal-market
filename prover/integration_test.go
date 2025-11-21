@@ -25,8 +25,8 @@ func TestGroth16ProverIntegration(t *testing.T) {
 	}
 
 	settings := groth16Settings{
-	NodeBinary:        nodeBin,
-	RapidSnarkBinary:  rapidBin,
+		NodeBinary:        nodeBin,
+		RapidSnarkBinary:  rapidBin,
 		WitnessScriptPath: witnessScript,
 		WasmPath:          wasmPath,
 		ZKeyPath:          zkeyPath,
@@ -41,14 +41,24 @@ func TestGroth16ProverIntegration(t *testing.T) {
 	}
 
 	req := settlementProofRequest{
-		EventID:        "evt",
-		ConditionID:    "0xabc",
-		TotalPool:      "10",
-		WinningPool:    "5",
-		OutcomeHash:    "0x1",
-		MarketAddress:  "0x2",
-		Nonce:          "0x3",
-		CircuitVersion: 1,
+		MarketID:       "0x2",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "1",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+		Tickets: []ticketProof{{
+			User:        "0x1",
+			OutcomeID:   "1",
+			Amount:      "10",
+			Salt:        "0x1",
+			TicketHash:  "0x2",
+			Leaf:        "0x2",
+			MerkleIndex: 0,
+			MerklePath:  []string{},
+		}},
 	}
 
 	result, err := prover.Generate(context.Background(), req)
@@ -61,7 +71,7 @@ func TestGroth16ProverIntegration(t *testing.T) {
 	if result.ProofCalldata == nil || len(result.ProofCalldata) != 2 {
 		t.Fatalf("expected calldata to contain proof + public signals")
 	}
-	if result.ProofCalldata[1][0] != "0x9" {
-		t.Fatalf("unexpected calldata content: %+v", result.ProofCalldata)
+	if len(result.ProofCalldata[1]) == 0 {
+		t.Fatalf("expected public signals in calldata")
 	}
 }

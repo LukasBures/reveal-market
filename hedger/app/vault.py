@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from .logging_config import log_event
+from .local_logging import log_event
 
 logger = logging.getLogger("reveal_market.hedger.vault")
 

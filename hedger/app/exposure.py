@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from .fx import FxOracle
-from .logging_config import log_event
+from .local_logging import log_event
 from .metrics import update_exposure_metrics
 from .risk import RiskEngine, RiskLimits
 from .storage import HedgerRepository

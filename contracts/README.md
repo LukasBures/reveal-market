@@ -3,7 +3,7 @@
 This directory now namespaces chain-specific workspaces:
 
 - `zen/` – Reveal Market contracts targeting the Horizen/ZEN appchain (Foundry workspace with `src/`, `test/`, `script/`, `lib/`, docs, cache, run scripts, etc.).
-- `base/` – Base chain LP vault + hedging plumbing (self-contained Foundry workspace with its own `lib/`, `src/`, `test/`, and run scripts).
+- `polygon/` – Polygon hedging LP vault (self-contained Foundry workspace with its own `lib/`, `src/`, `test/`, and run scripts).
 
 Notes
 - CI/build tooling runs each workspace separately (see `.github/workflows/cicd.yml` and `contracts/run_tests.sh`).

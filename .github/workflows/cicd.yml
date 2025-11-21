@@ -103,7 +103,7 @@ jobs:
         run: uv run --project hedger -- python -m pytest -q
 
 
-  contracts-base:
+  contracts-polygon:
     needs: precommit
     runs-on: ubuntu-latest
     steps:
@@ -116,8 +116,8 @@ jobs:
         with:
           version: nightly
 
-      - name: Base contracts pipeline
-        working-directory: contracts/base
+      - name: Polygon contracts pipeline
+        working-directory: contracts/polygon
         run: ./run_tests.sh
 
   contracts-zen:
@@ -227,7 +227,7 @@ jobs:
     needs:
       - backend
       - hedger
-      - contracts-base
+      - contracts-polygon
       - contracts-zen
       - frontend
       - prover

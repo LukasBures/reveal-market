@@ -96,7 +96,7 @@ contract Deploy is ScriptBase {
             verifierAddress,
             oracle,
             circuitHash,
-            implementation.CIRCUIT_VERSION()
+            expectedInputs
         );
 
         // Example (optional):
@@ -150,7 +150,7 @@ contract Deploy is ScriptBase {
         address verifier,
         address oracle,
         bytes32 circuitHash,
-        uint256 circuitVersion
+        uint256 expectedInputs
     ) private {
         string memory root = "deploy";
         string memory json = HEVM.serializeAddress(root, "rakeManager", address(rakeManager));
@@ -159,7 +159,7 @@ contract Deploy is ScriptBase {
         json = HEVM.serializeAddress(root, "marketFactory", address(factory));
         json = HEVM.serializeAddress(root, "oracle", oracle);
         json = HEVM.serializeBytes32(root, "circuitHash", circuitHash);
-        json = HEVM.serializeUint(root, "circuitVersion", circuitVersion);
+        json = HEVM.serializeUint(root, "expectedInputs", expectedInputs);
 
         string memory outputPath = "contracts/cache/last-deployment.json";
         HEVM.writeJson(json, outputPath);

@@ -5,8 +5,16 @@ import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-import httpx
-from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
+try:
+    import httpx
+except ImportError:  # pragma: no cover - handled via runtime guard
+    httpx = None  # type: ignore[assignment]
+try:
+    from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
+except ImportError:  # pragma: no cover - handled at runtime when _fetch_quote used
+    AsyncRetrying = None  # type: ignore[assignment]
+    RetryError = None  # type: ignore[assignment]
+    retry_if_exception_type = stop_after_attempt = wait_exponential = None  # type: ignore[assignment]
 
 from .types import FxQuote
 
@@ -25,7 +33,14 @@ class FxOracle:
         max_age_seconds: int,
         client: httpx.AsyncClient | None = None,
         retry_attempts: int = 3,
+        fallback_zen_usd: Decimal = Decimal("1"),
     ):
+        if client is None and httpx is None:
+            raise ImportError("httpx is required for FxOracle; install hedger dependencies (uv sync --project hedger)")
+        if AsyncRetrying is None:
+            raise ImportError(
+                "tenacity is required for FxOracle; install hedger dependencies (uv sync --project hedger)"
+            )
         self.feed_url = feed_url
         self.haircut_bps = haircut_bps
         self.timeout_seconds = timeout_seconds
@@ -34,6 +49,7 @@ class FxOracle:
         self._quote: FxQuote | None = None
         self._lock = asyncio.Lock()
         self._retry_attempts = retry_attempts
+        self._fallback_zen_usd = fallback_zen_usd
 
     async def get_quote(self) -> FxQuote:
         async with self._lock:
@@ -60,6 +76,7 @@ class FxOracle:
         return datetime.now(UTC) - quote.fetched_at > timedelta(seconds=self.max_age_seconds)
 
     async def _fetch_quote(self) -> FxQuote:
+        fallback_quote = FxQuote(zen_usd=self._fallback_zen_usd, fetched_at=datetime.now(UTC))
         try:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self._retry_attempts),
@@ -85,9 +102,27 @@ class FxOracle:
                     )
                     return quote
         except RetryError as exc:
-            raise RuntimeError(f"Failed to fetch FX price after retries: {exc}") from exc
+            logger.warning(
+                "FX feed unavailable; using fallback price",
+                extra={
+                    "event": "fx.refresh.fallback",
+                    "feed_url": self.feed_url,
+                    "fallback_zen_usd": str(self._fallback_zen_usd),
+                    "error": str(exc),
+                },
+            )
+            return fallback_quote
         except (InvalidOperation, httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError(f"Invalid FX feed response: {exc}") from exc
+            logger.warning(
+                "FX feed returned invalid response; using fallback price",
+                extra={
+                    "event": "fx.refresh.fallback",
+                    "feed_url": self.feed_url,
+                    "fallback_zen_usd": str(self._fallback_zen_usd),
+                    "error": str(exc),
+                },
+            )
+            return fallback_quote
 
     def stale(self) -> bool:
         return self._quote is None or self._is_stale(self._quote)

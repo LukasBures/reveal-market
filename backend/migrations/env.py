@@ -16,7 +16,9 @@ from shared.models import Base  # noqa: E402
 
 config = context.config
 
-if config.config_file_name is not None:
+# Only apply Alembic's fileConfig if caller asked for it. We set
+# `configure_logger=False` when invoking migrations so app logging stays unified.
+if config.attributes.get("configure_logger", True) and config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

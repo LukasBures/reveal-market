@@ -71,20 +71,32 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 | --- | --- | --- |
 | `/healthz` | GET | Returns status, backend mode, circuit hash, uptime, and last heartbeat/proof timestamps. |
 | `/heartbeat` | GET | Lightweight liveness check used by Docker. |
-| `/api/v1/proofs/settlement` | POST | Accepts the worker payload and responds with Groth16 proof data. |
+| `/api/v1/proofs/settlement` | POST | Accepts the settlement payload and responds with Groth16 proof data. |
 
-**Request body** mirrors `SettlementProofRequest` from `backend/worker/app/prover_client.py`:
+**Request body** mirrors `settlementProofRequest`:
 
 ```jsonc
 {
-  "event_id": "evt-123",
-  "condition_id": "0xabc...",
-  "total_pool": "123456",
-  "winning_pool": "34567",
-  "outcome_hash": "0x...",
-  "market_address": "0x...",
-  "nonce": "deadbeef",
-  "circuit_version": 1,
+  "marketId": "0x1234",
+  "merkleRoot": "0xabc...",
+  "winningOutcomeId": "1",
+  "poolTotals": ["7000000000000000000", "3000000000000000000"],
+  "totalEscrow": "10000000000000000000",
+  "totalLiability": "9000000000000000000",
+  "rakeBps": "100",
+  "circuitHash": "0xdead...",
+  "tickets": [
+    {
+      "user": "0x111...",
+      "outcomeId": "1",
+      "amount": "1000000000000000000",
+      "salt": "0x1",
+      "ticketHash": "0x2",
+      "leaf": "0x2",
+      "merklePath": [],
+      "merkleIndex": 0
+    }
+  ],
   "metadata": {}
 }
 ```
@@ -102,7 +114,7 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
   "backend": "groth16-rapidsnark",
   "circuit_hash": "0x...",
   "prover_version": "dev",
-  "request_nonce": "deadbeef",
+  "request_id": "req-1",
   "generated_at": "2024-01-01T00:00:00Z",
   "warnings": ["failed to compute solidity calldata"] // optional
 }
@@ -131,7 +143,7 @@ Errors are returned as JSON with `error` and `message` fields (`invalid_request`
    ```bash
    curl -X POST http://localhost:8085/api/v1/proofs/settlement \
      -H "Content-Type: application/json" \
-     -d '{"event_id":"evt","condition_id":"0xabc","total_pool":"100","winning_pool":"10","outcome_hash":"0x01","market_address":"0xabc","nonce":"01","circuit_version":1}'
+     -d '{"marketId":"0x123","merkleRoot":"0xbeef","winningOutcomeId":"1","poolTotals":["70","30"],"totalEscrow":"100","totalLiability":"90","rakeBps":"100","circuitHash":"0xdead","tickets":[{"user":"0x1","outcomeId":"1","amount":"10","salt":"0x1","ticketHash":"0x2","leaf":"0x2","merklePath":[],"merkleIndex":0}]}'
    ```
 
 If the artifacts are missing or the Groth16 toolchain fails, the service exits with a non-zero status so orchestrators can alert immediately—no mock mode is available.

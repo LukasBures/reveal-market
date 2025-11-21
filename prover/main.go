@@ -22,30 +22,43 @@ func init() {
 	log.SetFlags(0)
 }
 
-// settlementProofRequest mirrors backend/worker's payload.
+// ticketProof captures a single commitment input used by the prover.
+type ticketProof struct {
+	User        string   `json:"user"`
+	OutcomeID   string   `json:"outcomeId"`
+	Amount      string   `json:"amount"`
+	Salt        string   `json:"salt"`
+	TicketHash  string   `json:"ticketHash"`
+	Leaf        string   `json:"leaf"`
+	MerklePath  []string `json:"merklePath"`
+	MerkleIndex uint64   `json:"merkleIndex"`
+}
+
+// settlementProofRequest mirrors the worker payload for settlement proofs.
 type settlementProofRequest struct {
-	EventID        string            `json:"event_id"`
-	ConditionID    string            `json:"condition_id"`
-	TotalPool      string            `json:"total_pool"`
-	WinningPool    string            `json:"winning_pool"`
-	OutcomeHash    string            `json:"outcome_hash"`
-	MarketAddress  string            `json:"market_address"`
-	Nonce          string            `json:"nonce"`
-	CircuitVersion int               `json:"circuit_version"`
+	MarketID       string            `json:"marketId"`
+	MerkleRoot     string            `json:"merkleRoot"`
+	WinningOutcome string            `json:"winningOutcomeId"`
+	PoolTotals     []string          `json:"poolTotals"`
+	TotalEscrow    string            `json:"totalEscrow"`
+	TotalLiability string            `json:"totalLiability"`
+	RakeBps        string            `json:"rakeBps"`
+	CircuitHash    string            `json:"circuitHash"`
+	Tickets        []ticketProof     `json:"tickets"`
 	Metadata       map[string]string `json:"metadata"`
 }
 
 // settlementProofResponse is returned to callers after Groth16 generation.
 type settlementProofResponse struct {
-	Proof          string      `json:"proof"`
-	PublicSignals  []string    `json:"public_signals"`
-	CircuitHash    string      `json:"circuit_hash"`
-	GeneratedAt    string      `json:"generated_at"`
-	ProverVersion  string      `json:"prover_version"`
-	RequestNonce   string      `json:"request_nonce"`
-	Backend        string      `json:"backend"`
-	ProofCalldata  [][]string  `json:"proof_calldata,omitempty"`
-	Warnings       []string    `json:"warnings,omitempty"`
+	Proof         string     `json:"proof"`
+	PublicSignals []string   `json:"public_signals"`
+	CircuitHash   string     `json:"circuit_hash"`
+	GeneratedAt   string     `json:"generated_at"`
+	ProverVersion string     `json:"prover_version"`
+	RequestID     string     `json:"request_id"`
+	Backend       string     `json:"backend"`
+	ProofCalldata [][]string `json:"proof_calldata,omitempty"`
+	Warnings      []string   `json:"warnings,omitempty"`
 }
 
 // proofResult is the internal representation returned by a proverEngine.
@@ -232,20 +245,20 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	start := time.Now().UTC()
 
 	logLine("info", "prover.request.accepted", map[string]any{
-		"event_id":     req.EventID,
-		"condition_id": req.ConditionID,
-		"request_id":   requestID,
-		"backend":      a.prover.Backend(),
+		"market_id":   req.MarketID,
+		"merkle_root": req.MerkleRoot,
+		"request_id":  requestID,
+		"backend":     a.prover.Backend(),
 	})
 
 	result, err := a.prover.Generate(ctx, req)
 	if err != nil {
 		recordProofFailure()
 		logLine("error", "prover.request.failed", map[string]any{
-			"event_id":     req.EventID,
-			"condition_id": req.ConditionID,
-			"error":        err.Error(),
-			"request_id":   requestID,
+			"market_id":   req.MarketID,
+			"merkle_root": req.MerkleRoot,
+			"error":       err.Error(),
+			"request_id":  requestID,
 		})
 		return settlementProofResponse{}, err
 	}
@@ -253,13 +266,13 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	a.lastProofAt.Store(now)
 
 	logFields := map[string]any{
-		"event_id":     req.EventID,
-		"condition_id": req.ConditionID,
-		"request_id":   requestID,
-		"backend":      a.prover.Backend(),
-		"duration_ms":  time.Since(start).Milliseconds(),
-		"proof_size":   len(result.Proof),
-		"warnings":     len(result.Warnings),
+		"market_id":   req.MarketID,
+		"merkle_root": req.MerkleRoot,
+		"request_id":  requestID,
+		"backend":     a.prover.Backend(),
+		"duration_ms": time.Since(start).Milliseconds(),
+		"proof_size":  len(result.Proof),
+		"warnings":    len(result.Warnings),
 	}
 	if len(result.Warnings) > 0 {
 		logFields["warning_messages"] = result.Warnings
@@ -273,7 +286,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		CircuitHash:   a.circuitHash,
 		GeneratedAt:   formatMillis(now),
 		ProverVersion: a.cfg.Version,
-		RequestNonce:  req.Nonce,
+		RequestID:     requestID,
 		Backend:       a.prover.Backend(),
 		ProofCalldata: result.ProofCalldata,
 		Warnings:      result.Warnings,
@@ -294,16 +307,22 @@ type proverEngine interface {
 
 func validateRequest(req settlementProofRequest) error {
 	switch {
-	case strings.TrimSpace(req.EventID) == "":
-		return errors.New("event_id required")
-	case strings.TrimSpace(req.ConditionID) == "":
-		return errors.New("condition_id required")
-	case strings.TrimSpace(req.TotalPool) == "":
-		return errors.New("total_pool required")
-	case strings.TrimSpace(req.WinningPool) == "":
-		return errors.New("winning_pool required")
-	case strings.TrimSpace(req.Nonce) == "":
-		return errors.New("nonce required")
+	case strings.TrimSpace(req.MarketID) == "":
+		return errors.New("marketId required")
+	case strings.TrimSpace(req.MerkleRoot) == "":
+		return errors.New("merkleRoot required")
+	case strings.TrimSpace(req.WinningOutcome) == "":
+		return errors.New("winningOutcomeId required")
+	case strings.TrimSpace(req.TotalEscrow) == "":
+		return errors.New("totalEscrow required")
+	case strings.TrimSpace(req.TotalLiability) == "":
+		return errors.New("totalLiability required")
+	case strings.TrimSpace(req.RakeBps) == "":
+		return errors.New("rakeBps required")
+	case len(req.PoolTotals) != 2:
+		return errors.New("poolTotals must contain two entries (YES and NO)")
+	case len(req.Tickets) == 0:
+		return errors.New("tickets required")
 	default:
 		return nil
 	}
@@ -369,9 +388,9 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeError(w http.ResponseWriter, status int, code string, message string, err error) {
 	if err != nil {
 		logLine("warn", "prover.response.error", map[string]any{
-			"code":    code,
-			"error":   err.Error(),
-			"status":  status,
+			"code":   code,
+			"error":  err.Error(),
+			"status": status,
 		})
 	}
 	payload := map[string]any{

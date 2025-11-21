@@ -11,8 +11,8 @@ from redis.asyncio import Redis
 from .config import Settings
 from .exposure import ExposureLedger
 from .fx import FxOracle
+from .local_logging import log_event
 from .locks import RedisLockManager
-from .logging_config import log_event
 from .metrics import (
     HEDGE_EXECUTIONS,
     record_event_lag,
@@ -49,6 +49,7 @@ class HedgerService:
             haircut_bps=settings.fx_haircut_bps,
             timeout_seconds=settings.fx_timeout_seconds,
             max_age_seconds=settings.fx_max_age_seconds,
+            fallback_zen_usd=settings.fx_fallback_price,
         )
         self.polymarket_client = PolymarketClient(
             base_url=settings.polymarket_api_base,

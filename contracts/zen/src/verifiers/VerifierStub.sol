@@ -17,14 +17,23 @@ contract VerifierStub is IVerifier {
     event ProofChecked(bool success, address indexed caller);
 
     bool private _shouldVerify = true;
+    bytes32 private _circuitHash;
 
     /// @notice Configure whether the stub should report success.
     function setShouldVerify(bool value) external {
         _shouldVerify = value;
     }
 
+    function setCircuitHash(bytes32 hash) external {
+        _circuitHash = hash;
+    }
+
+    function circuitHash() external view returns (bytes32) {
+        return _circuitHash;
+    }
+
     /// @inheritdoc IVerifier
-    function verifyProof(bytes calldata, uint256[12] calldata) external override returns (bool success) {
+    function verifyProof(bytes calldata, uint256[10] calldata) external override returns (bool success) {
         emit ProofChecked(_shouldVerify, msg.sender);
         return _shouldVerify;
     }

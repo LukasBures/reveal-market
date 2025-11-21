@@ -180,21 +180,21 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
 
         market = implementation.clone();
         uint256 marketSize = params.maxMarketSize == 0 ? marketMaxSize : params.maxMarketSize;
-        RevealMarket(payable(market))
-            .initialize(
-            params.eventId,
-            params.commitDeadline,
-            params.revealDeadline,
-            params.oracle,
-            verifier,
-            rakeManager,
-            treasury,
-            guardian,
-            params.rakeBpsOverride,
-            params.payoutMultiplier,
-            params.payoutCurve,
-            marketSize
-        );
+        RevealMarket.InitConfig memory cfg = RevealMarket.InitConfig({
+            eventId: params.eventId,
+            commitDeadline: params.commitDeadline,
+            revealDeadline: params.revealDeadline,
+            oracle: params.oracle,
+            verifier: verifier,
+            rakeManager: rakeManager,
+            treasury: treasury,
+            guardian: guardian,
+            rakeBpsOverride: params.rakeBpsOverride,
+            payoutMultiplier: params.payoutMultiplier,
+            payoutCurve: params.payoutCurve,
+            maxMarketSize: marketSize
+        });
+        RevealMarket(payable(market)).initialize(cfg);
 
         _markets.push(market);
         isMarket[market] = true;

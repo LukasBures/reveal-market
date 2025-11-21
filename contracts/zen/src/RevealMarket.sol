@@ -31,19 +31,32 @@ contract RevealMarket is ReentrancyGuard {
         bool claimed;
     }
 
-    struct SettlementSignals {
-        uint256 winningStake;
-        uint256 totalLiability;
-        uint256 grossPool;
-        uint256 rakeAmount;
+    struct InitConfig {
+        string eventId;
+        uint256 commitDeadline;
+        uint256 revealDeadline;
+        address oracle;
+        address verifier;
+        address rakeManager;
+        address treasury;
+        address guardian;
+        uint256 rakeBpsOverride;
         uint256 payoutMultiplier;
-        bytes32 outcomeHash;
-        uint256 version;
-        bytes32 nonce;
-        address market;
-        uint256 floatUsed;
+        PayoutCurve payoutCurve;
+        uint256 maxMarketSize;
+    }
+
+    struct SettlementSignals {
         bytes32 commitmentsRoot;
-        bytes32 winningCommitmentsRoot;
+        uint256 marketId;
+        uint256 winningOutcomeId;
+        uint256 totalEscrow;
+        uint256 totalLiability;
+        uint256 rakeBps;
+        uint256 poolTotalYes;
+        uint256 poolTotalNo;
+        uint256 commitmentsCount;
+        bytes32 circuitHash;
     }
 
     event Initialized(
@@ -111,9 +124,7 @@ contract RevealMarket is ReentrancyGuard {
     error ProofVerificationFailed();
     error ProofOutcomeMismatch();
     error ProofTotalsMismatch();
-    error ProofVersionMismatch();
-    error InvalidProofNonce();
-    error ProofNonceUsed();
+    error CircuitHashMismatch();
     error InvalidMarketAddress();
     error InvalidPayoutMultiplier();
     error LiabilityExceedsCoverage(uint256 required, uint256 available);
@@ -124,7 +135,6 @@ contract RevealMarket is ReentrancyGuard {
     error CommitmentNotFound();
 
     uint256 public constant WAD = 1e18;
-    uint256 public constant CIRCUIT_VERSION = 2;
     uint256 public constant MAX_PAYOUT_MULTIPLIER = 5e18; // 5x cap for odds to avoid extreme exposure.
     address public constant ZEN = address(0);
 
@@ -144,6 +154,8 @@ contract RevealMarket is ReentrancyGuard {
     bool public claimsPaused;
     uint256 public cancellationTimestamp;
     uint256 public maxMarketSize;
+    bytes32 public circuitHash;
+    uint256 public marketId;
 
     string private _cancellationReason;
 
@@ -157,7 +169,6 @@ contract RevealMarket is ReentrancyGuard {
     uint256 public rakePaid;
     uint256 public paidOut;
     uint256 public claimedWinningStake;
-    bytes32 public lastProofNonce;
     bytes32 public commitmentsRoot;
     bytes32 public winningCommitmentsRoot;
     uint256 public commitmentsCount;
@@ -169,7 +180,6 @@ contract RevealMarket is ReentrancyGuard {
 
     bool private _initialized;
     bool private _settlementInProgress;
-    mapping(bytes32 => bool) internal _consumedProofNonces;
     mapping(bytes32 => bool) public commitmentExists;
     mapping(address => Ticket[]) public userTickets;
 
@@ -194,54 +204,42 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Initializes the market clone (ZEN-only collateral).
-    function initialize(
-        string calldata eventId_,
-        uint256 commitDeadline_,
-        uint256 revealDeadline_,
-        address oracle_,
-        address verifier_,
-        address rakeManager_,
-        address treasury_,
-        address guardian_,
-        uint256 rakeBpsOverride_,
-        uint256 payoutMultiplier_,
-        PayoutCurve payoutCurve_,
-        uint256 maxMarketSize_
-    ) external {
+    function initialize(InitConfig calldata cfg) external {
         if (_initialized) revert AlreadyInitialized();
-        if (oracle_ == address(0)) revert InvalidOracle();
-        if (verifier_ == address(0)) revert InvalidVerifier();
-        if (rakeManager_ == address(0)) revert InvalidRakeManager();
-        if (treasury_ == address(0)) revert InvalidTreasury();
-        if (guardian_ == address(0)) revert InvalidGuardian();
-        if (payoutMultiplier_ == 0 || payoutMultiplier_ > MAX_PAYOUT_MULTIPLIER) revert InvalidPayoutMultiplier();
-        if (commitDeadline_ <= block.timestamp) revert InvalidTimestamp();
-        if (revealDeadline_ <= commitDeadline_) revert InvalidTimestamp();
-        uint256 maxRake = IRakeManager(rakeManager_).maxRakeBps();
-        if (rakeBpsOverride_ > maxRake) revert InvalidRakeBps();
+        if (cfg.oracle == address(0)) revert InvalidOracle();
+        if (cfg.verifier == address(0)) revert InvalidVerifier();
+        if (cfg.rakeManager == address(0)) revert InvalidRakeManager();
+        if (cfg.treasury == address(0)) revert InvalidTreasury();
+        if (cfg.guardian == address(0)) revert InvalidGuardian();
+        if (cfg.payoutMultiplier == 0 || cfg.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) revert InvalidPayoutMultiplier();
+        if (cfg.commitDeadline <= block.timestamp) revert InvalidTimestamp();
+        if (cfg.revealDeadline <= cfg.commitDeadline) revert InvalidTimestamp();
+        if (cfg.rakeBpsOverride > IRakeManager(cfg.rakeManager).maxRakeBps()) revert InvalidRakeBps();
 
-        eventId = eventId_;
-        commitDeadline = commitDeadline_;
-        revealDeadline = revealDeadline_;
-        oracle = oracle_;
-        verifier = verifier_;
-        rakeManager = rakeManager_;
-        treasury = treasury_;
+        eventId = cfg.eventId;
+        commitDeadline = cfg.commitDeadline;
+        revealDeadline = cfg.revealDeadline;
+        oracle = cfg.oracle;
+        verifier = cfg.verifier;
+        rakeManager = cfg.rakeManager;
+        treasury = cfg.treasury;
         factory = msg.sender;
-        guardian = guardian_;
-        rakeBpsOverride = rakeBpsOverride_;
-        payoutMultiplier = payoutMultiplier_;
-        payoutCurve = payoutCurve_;
-        maxMarketSize = maxMarketSize_;
+        guardian = cfg.guardian;
+        rakeBpsOverride = cfg.rakeBpsOverride;
+        payoutMultiplier = cfg.payoutMultiplier;
+        payoutCurve = cfg.payoutCurve;
+        maxMarketSize = cfg.maxMarketSize;
+        circuitHash = IVerifier(cfg.verifier).circuitHash();
+        marketId = uint256(uint160(address(this)));
 
         phase = Phase.Commit;
         _initialized = true;
 
         emit Initialized(
-            eventId_, oracle_, commitDeadline_, revealDeadline_, guardian_, payoutMultiplier_, payoutCurve_, maxMarketSize_
+            eventId, oracle, commitDeadline, revealDeadline, guardian, payoutMultiplier, payoutCurve, maxMarketSize
         );
-        if (rakeBpsOverride_ > 0) {
-            emit RakeConfigured(rakeBpsOverride_);
+        if (cfg.rakeBpsOverride > 0) {
+            emit RakeConfigured(cfg.rakeBpsOverride);
         }
     }
 
@@ -262,7 +260,6 @@ contract RevealMarket is ReentrancyGuard {
 
         userEscrow = newEscrow;
         maxLiability = newLiability;
-        commitmentsRoot = keccak256(abi.encodePacked(commitmentsRoot, ticketHash));
         commitmentsCount += 1;
         emit MaxLiabilityUpdated(newLiability);
 
@@ -284,8 +281,18 @@ contract RevealMarket is ReentrancyGuard {
         _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
     }
 
-    /// @notice Locks the market once the commit deadline has elapsed.
-    function lock() external onlyPhase(Phase.Commit) onlyAfter(commitDeadline) {
+    /// @notice Locks the market once the commit deadline has elapsed and stores the canonical commitments root.
+    function lock(bytes32 commitmentsRoot_, uint256 commitmentsCount_)
+        external
+        onlyPhase(Phase.Commit)
+        onlyAfter(commitDeadline)
+    {
+        if (msg.sender != oracle && msg.sender != guardian && msg.sender != factory) revert NotAuthorized();
+        if (commitmentsRoot_ == bytes32(0)) revert InvalidProofLayout();
+        if (commitmentsCount_ == 0 || commitmentsCount_ != commitmentsCount) revert InvalidProofLayout();
+        commitmentsRoot = commitmentsRoot_;
+        winningCommitmentsRoot = commitmentsRoot_;
+        commitmentsCount = commitmentsCount_;
         phase = Phase.Locked;
         emit Locked();
     }
@@ -298,63 +305,57 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Verifies a zero-knowledge proof and settles the market atomically.
-    function verifyAndSettle(bytes calldata proof, uint256[12] calldata pubSignals)
+    function verifyAndSettle(bytes calldata proof, uint256[10] calldata pubSignals)
         external
         onlyPhase(Phase.Locked)
         nonReentrant
     {
         if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
         if (winningOutcomeHash == bytes32(0)) revert WinningPoolNotSet();
+        if (commitmentsRoot == bytes32(0) || commitmentsCount == 0) revert InvalidProofLayout();
 
         SettlementSignals memory signals = _decodeSignals(pubSignals);
-        if (signals.outcomeHash != winningOutcomeHash) revert ProofOutcomeMismatch();
-        if (signals.version != CIRCUIT_VERSION) revert ProofVersionMismatch();
-        if (signals.market != address(this)) revert InvalidMarketAddress();
-        if (signals.nonce == bytes32(0)) revert InvalidProofNonce();
-        if (_consumedProofNonces[signals.nonce]) revert ProofNonceUsed();
-        if (signals.payoutMultiplier != payoutMultiplier) revert InvalidPayoutMultiplier();
-        if (signals.payoutMultiplier == 0 || signals.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) {
-            revert InvalidPayoutMultiplier();
-        }
         if (signals.commitmentsRoot != commitmentsRoot) revert InvalidProofLayout();
-        if (signals.winningCommitmentsRoot == bytes32(0)) revert InvalidProofLayout();
+        if (signals.commitmentsCount != commitmentsCount) revert InvalidProofLayout();
+        if (signals.marketId != marketId) revert InvalidMarketAddress();
+        if (signals.circuitHash != circuitHash) revert CircuitHashMismatch();
 
-        uint256 grossPool = userEscrow + houseFloat;
-        if (signals.grossPool != grossPool) revert ProofTotalsMismatch();
+        bytes32 winningId = bytes32(signals.winningOutcomeId);
+        if (winningId != winningOutcomeHash) revert ProofOutcomeMismatch();
 
-        uint256 netEscrow = IRakeManager(rakeManager).takeRake(ZEN, userEscrow, rakeBpsOverride);
-        uint256 expectedRake = userEscrow - netEscrow;
-        if (signals.rakeAmount != expectedRake) revert ProofTotalsMismatch();
+        uint256 expectedPool = signals.poolTotalYes + signals.poolTotalNo;
+        if (expectedPool != signals.totalEscrow) revert ProofTotalsMismatch();
+        if (signals.totalEscrow != userEscrow) revert ProofTotalsMismatch();
+        uint256 appliedRake = appliedRakeBps();
+        if (signals.rakeBps != appliedRake) revert InvalidRakeBps();
 
-        uint256 liabilityExpected = _estimatePayout(signals.winningStake);
-        if (signals.totalLiability != liabilityExpected) revert ProofTotalsMismatch();
-
-        if (signals.floatUsed > houseFloat) revert LiabilityExceedsCoverage(signals.floatUsed, houseFloat);
-
+        uint256 expectedRakeAmount = (signals.totalEscrow * signals.rakeBps) / 10_000;
+        uint256 netEscrow = signals.totalEscrow - expectedRakeAmount;
         uint256 netPool = netEscrow + houseFloat;
-        if (signals.floatUsed > netPool) revert LiabilityExceedsCoverage(signals.floatUsed, netPool);
         if (signals.totalLiability > netPool) revert LiabilityExceedsCoverage(signals.totalLiability, netPool);
 
         bool success = IVerifier(verifier).verifyProof(proof, pubSignals);
         emit ProofVerified(success);
-        emit ProofReceipt(signals.nonce, verifier, success);
+        emit ProofReceipt(signals.commitmentsRoot, verifier, success);
         if (!success) revert ProofVerificationFailed();
 
-        _consumedProofNonces[signals.nonce] = true;
-        lastProofNonce = signals.nonce;
         _settlementInProgress = true;
 
-        winningPool = signals.winningStake;
-        totalLiability = signals.totalLiability;
-        maxLiability = signals.totalLiability;
-        rakePaid = signals.rakeAmount;
-        floatReservedAtSettlement = signals.floatUsed;
+        rakePaid = expectedRakeAmount;
         if (rakePaid > userEscrow) revert ProofTotalsMismatch();
         if (rakePaid > 0) {
             SafeTransferLib.safeTransferETH(treasury, rakePaid);
         }
+
         userEscrow = netEscrow;
-        winningCommitmentsRoot = signals.winningCommitmentsRoot;
+        winningCommitmentsRoot = commitmentsRoot;
+        winningPool = signals.poolTotalYes;
+        if (signals.winningOutcomeId == 1) {
+            winningPool = signals.poolTotalNo;
+        }
+        totalLiability = signals.totalLiability;
+        maxLiability = signals.totalLiability;
+        floatReservedAtSettlement = 0;
         settledAt = block.timestamp;
         phase = Phase.Settled;
 
@@ -369,7 +370,13 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Claims winnings by revealing the committed outcome.
-    function claim(uint256 ticketId, string calldata outcome, bytes32 salt, bytes32[] calldata merkleProof)
+    function claim(
+        uint256 ticketId,
+        string calldata outcome,
+        bytes32 salt,
+        uint256 leafIndex,
+        bytes32[] calldata merkleProof
+    )
         external
         nonReentrant
         onlyPhase(Phase.Settled)
@@ -385,14 +392,18 @@ contract RevealMarket is ReentrancyGuard {
         bytes32 outcomeHash = _hashOutcome(outcome);
         if (outcomeHash != winningOutcomeHash) revert TicketLoses();
 
-        bytes32 reconstructed = _hashCommit(msg.sender, outcomeHash, salt);
+        bytes32 reconstructed = _hashCommit(msg.sender, outcomeHash, ticket.amount, salt);
         if (reconstructed != ticket.commitHash) revert TicketLoses();
         if (!commitmentExists[reconstructed]) revert CommitmentNotFound();
         if (winningCommitmentsRoot == bytes32(0)) revert InvalidProofLayout();
-        if (merkleProof.length == 0) {
-            if (reconstructed != winningCommitmentsRoot) revert InvalidMerkleProof();
-        } else if (!_verifyMerkle(reconstructed, winningCommitmentsRoot, merkleProof)) {
-            revert InvalidMerkleProof();
+        if (commitmentsCount == 1) {
+            if (merkleProof.length != 0 || reconstructed != winningCommitmentsRoot) revert InvalidMerkleProof();
+        } else {
+            if (merkleProof.length == 0) revert InvalidMerkleProof();
+            if (leafIndex >= commitmentsCount) revert InvalidMerkleProof();
+            if (!_verifyMerkle(reconstructed, winningCommitmentsRoot, merkleProof, leafIndex)) {
+                revert InvalidMerkleProof();
+            }
         }
 
         ticket.claimed = true;
@@ -488,7 +499,7 @@ contract RevealMarket is ReentrancyGuard {
         bytes32 outcomeHash = _hashOutcome(outcome);
         if (outcomeHash != winningOutcomeHash) return (0, false);
 
-        bytes32 reconstructed = _hashCommit(user, outcomeHash, salt);
+        bytes32 reconstructed = _hashCommit(user, outcomeHash, ticket.amount, salt);
         if (reconstructed != ticket.commitHash) return (0, false);
 
         payout = _estimatePayout(ticket.amount);
@@ -631,39 +642,25 @@ contract RevealMarket is ReentrancyGuard {
         }
     }
 
-    function _hashCommit(address user, bytes32 outcomeHash, bytes32 salt) internal pure returns (bytes32 result) {
-        assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, shl(96, user))
-            mstore(add(ptr, 0x14), outcomeHash)
-            mstore(add(ptr, 0x34), salt)
-            result := keccak256(ptr, 0x54)
-            mstore(0x40, add(ptr, 0x60))
-        }
+    function _hashCommit(address user, bytes32 outcomeHash, uint256 amount, bytes32 salt)
+        internal
+        view
+        returns (bytes32 result)
+    {
+        result = keccak256(abi.encodePacked(address(this), user, outcomeHash, amount, salt));
     }
 
-    function _decodeSignals(uint256[12] calldata pubSignals) internal pure returns (SettlementSignals memory signals) {
-        signals.winningStake = pubSignals[0];
-        signals.totalLiability = pubSignals[1];
-        signals.grossPool = pubSignals[2];
-        signals.rakeAmount = pubSignals[3];
-        signals.payoutMultiplier = pubSignals[4];
-        signals.outcomeHash = bytes32(pubSignals[5]);
-        signals.version = pubSignals[6];
-        signals.nonce = bytes32(pubSignals[7]);
-        signals.market = _decodeMarketAddress(pubSignals[8]);
-        signals.floatUsed = pubSignals[9];
-        signals.commitmentsRoot = bytes32(pubSignals[10]);
-        signals.winningCommitmentsRoot = bytes32(pubSignals[11]);
-    }
-
-    function _decodeMarketAddress(uint256 raw) private pure returns (address) {
-        if (raw >> 160 != 0) revert InvalidMarketAddress();
-        unchecked {
-            // casting to uint160 is safe because upper 96 bits are enforced to be zero above
-            // forge-lint: disable-next-line(unsafe-typecast)
-            return address(uint160(raw));
-        }
+    function _decodeSignals(uint256[10] calldata pubSignals) internal pure returns (SettlementSignals memory signals) {
+        signals.commitmentsRoot = bytes32(pubSignals[0]);
+        signals.marketId = pubSignals[1];
+        signals.winningOutcomeId = pubSignals[2];
+        signals.totalEscrow = pubSignals[3];
+        signals.totalLiability = pubSignals[4];
+        signals.rakeBps = pubSignals[5];
+        signals.poolTotalYes = pubSignals[6];
+        signals.poolTotalNo = pubSignals[7];
+        signals.commitmentsCount = pubSignals[8];
+        signals.circuitHash = bytes32(pubSignals[9]);
     }
 
     function _getTicket(address user, uint256 ticketId) private view returns (Ticket storage) {
@@ -676,10 +673,20 @@ contract RevealMarket is ReentrancyGuard {
         return address(this).balance;
     }
 
-    function _verifyMerkle(bytes32 leaf, bytes32 root, bytes32[] calldata proof) internal pure returns (bool) {
+    function _verifyMerkle(bytes32 leaf, bytes32 root, bytes32[] calldata proof, uint256 index)
+        internal
+        pure
+        returns (bool)
+    {
         bytes32 computed = leaf;
         for (uint256 i = 0; i < proof.length; ++i) {
-            computed = keccak256(abi.encodePacked(computed, proof[i]));
+            bytes32 sibling = proof[i];
+            if ((index & 1) == 1) {
+                computed = keccak256(abi.encodePacked(sibling, computed));
+            } else {
+                computed = keccak256(abi.encodePacked(computed, sibling));
+            }
+            index >>= 1;
         }
         return computed == root;
     }

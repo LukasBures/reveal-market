@@ -6,7 +6,7 @@ from decimal import Decimal
 import httpx
 from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from .logging_config import log_event
+from .local_logging import log_event
 from .types import HedgeAction, OutcomeSide
 
 logger = logging.getLogger("reveal_market.hedger.polymarket")
