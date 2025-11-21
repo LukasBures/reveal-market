@@ -40,8 +40,6 @@ export function MarketDetailMetadata({ market }: Props) {
       : undefined;
 
   const items: MetadataItem[] = [
-    { label: "Condition ID", value: market.conditionId, mono: true },
-    { label: "Question ID", value: market.questionId, mono: true },
     { label: "UMA status", value: market.umaStatus ?? "pending" },
     { label: "Market address", value: market.marketAddress, mono: true },
     { label: "Event ID", value: market.eventId },
@@ -84,7 +82,7 @@ export function MarketDetailMetadata({ market }: Props) {
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Prediction metadata</p>
           <h2 className="text-2xl font-semibold text-white">Identifiers & provenance</h2>
           <p className="text-slate-400">
-            Mirror of an UMA-backed feed with immutable IDs for downstream systems.
+            Backed by the Reveal Market ledger with immutable IDs, so downstream systems can reconcile settlements and audits without chasing upstream quirks.
           </p>
         </div>
       </div>

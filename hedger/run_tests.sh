@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Run Hedger pytest suite with consistent worker fan-out and venv discovery.
+# Mirrors the backend runner style so local + CI behave the same.
+
+set -euo pipefail
+
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+log_step() {
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+}
+
+log_error() {
+  printf '[%s] ERROR: %s\n' "$(timestamp)" "$*" >&2
+}
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
+
+calc_pytest_workers() {
+  local override="${PYTEST_WORKER_COUNT:-}"
+  if [[ -n "${override}" ]]; then
+    echo "${override}"
+    return
+  fi
+  echo 4
+}
+
+has_xdist() {
+  local python_bin="$1"
+  "${python_bin}" - <<'PY'
+import importlib.util
+print(bool(importlib.util.find_spec("xdist")))
+PY
+}
+
+run_py_tests() {
+  local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
+  local -a pytest_args=()
+
+  local venv_path="${ROOT_DIR}/.venv"
+  local python_bin="${venv_path}/bin/python"
+  local ruff_bin="${venv_path}/bin/ruff"
+  if [[ ! -x "${python_bin}" ]]; then
+    log_error "Expected virtualenv at ${venv_path}. Run 'uv sync --project hedger --extra dev --no-install-project' first."
+    exit 1
+  fi
+
+  # Lint first if ruff is available.
+  if [[ -x "${ruff_bin}" ]]; then
+    log_step "ruff check (hedger)"
+    "${ruff_bin}" check app tests
+  fi
+
+  if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
+    if [[ "$(has_xdist "${python_bin}")" == "True" ]]; then
+      pytest_args+=("-n" "${workers}")
+    else
+      log_step "pytest-xdist not installed; running single-worker"
+    fi
+  fi
+
+  log_step "pytest (hedger) args=${pytest_args[*]:-single}"
+  (
+    export VIRTUAL_ENV="${venv_path}"
+    PATH="${venv_path}/bin:${PATH}"
+    "${python_bin}" -m pytest "${pytest_args[@]}"
+  )
+}
+
+run_py_tests

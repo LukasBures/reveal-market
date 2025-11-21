@@ -198,7 +198,7 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis proover api worker`) so the API answers at `NEXT_PUBLIC_API_BASE_URL` before running `npm run build`. |
+| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis prover api worker`) so the API answers at `NEXT_PUBLIC_API_BASE_URL` before running `npm run build`. |
 | CSP violations in dev | Update `next.config.mjs` to include any new external domains (fonts, analytics, etc.). |
 | Scroll layouts jitter on mobile | Confirm `body` retains `scrollbar-gutter` and that new sections don’t override `overflow`. |
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |

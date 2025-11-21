@@ -15,7 +15,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
 | AI narratives | Surfaces pre-generated `summary`/`summary_source`/`summary_model` fields produced by the enrichment worker so clients never call the LLM synchronously |
 
-> **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The `proover` container emits real Groth16 proofs (rapidsnark + the Circom artifacts under `proover/circuits/build`) and fails fast if those files are missing. Refresh the proving/verifying keys via `proover/circuits/generate_keys.sh` before promising zk-grade receipts to partners.
+> **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The `prover` container emits real Groth16 proofs (rapidsnark + the Circom artifacts under `prover/circuits/build`) and fails fast if those files are missing. Refresh the proving/verifying keys via `prover/circuits/generate_keys.sh` before promising zk-grade receipts to partners.
 
 ---
 
@@ -150,6 +150,7 @@ curl -H "accept: application/json" http://localhost:8000/markets
   - Schema tag (`schema:<rev>`), so when migrations land the worker can nuke the whole cohort.
   - Logical tags (`markets:list`, `market:{event_id}`, `resolution:{condition_id}`) so the worker invalidates only impacted entries after it writes new data.
 - TTL defaults to `RM_CACHE_TTL_SECONDS` (30s). Override per route if needed.
+- If Redis is offline/unreachable, endpoints now bypass the cache entirely, log the bypass, and avoid registering tags—preventing misleading “cache miss” logs and dangling tag sets during outages. Category caches only tag results when a payload is actually written.
 
 ---
 

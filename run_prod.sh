@@ -32,9 +32,9 @@ log_step() {
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.prod"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
-SKIP_PROOVER_CHECK="${SKIP_PROOVER_CHECK:-false}"
-PROOVER_BUILD_DIR="${ROOT_DIR}/proover/circuits/build"
-PROOVER_REQUIRED_FILES=(
+SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
+PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
+PROVER_REQUIRED_FILES=(
   "settlement_js/generate_witness.js"
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
@@ -86,7 +86,7 @@ usage() {
 Usage: ./run_prod.sh [options] [compose up args...]
   --skip-build           Skip the docker compose build step (useful when pulling pre-built images).
   --env-file <path>      Override the env file check (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
-  --skip-proover-check   Skip Groth16 artifact validation (not recommended).
+  --skip-prover-check   Skip Groth16 artifact validation (not recommended).
   --prune                Run 'docker system prune -af' and 'docker builder prune -af' before building.
   -h, --help             Show this help text.
 EOF
@@ -102,23 +102,23 @@ EOF
   fi
 }
 
-check_proover_artifacts() {
-  if [[ "${SKIP_PROOVER_CHECK}" == "true" ]]; then
+check_prover_artifacts() {
+  if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
     log_warn "Skipping Groth16 prover artifact validation (per flag)."
     return
   fi
 
   local missing=()
-  for rel_path in "${PROOVER_REQUIRED_FILES[@]}"; do
-    local full_path="${PROOVER_BUILD_DIR}/${rel_path}"
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    local full_path="${PROVER_BUILD_DIR}/${rel_path}"
     if [[ ! -f "${full_path}" ]]; then
       missing+=("${rel_path}")
     fi
   done
 
   if (( ${#missing[@]} > 0 )); then
-    log_warn "Groth16 artifacts missing; running proover/circuits/generate_keys.sh ..."
-    (cd "${ROOT_DIR}/proover/circuits" && bash generate_keys.sh)
+    log_warn "Groth16 artifacts missing; running prover/circuits/generate_keys.sh ..."
+    (cd "${ROOT_DIR}/prover/circuits" && bash generate_keys.sh)
   fi
 }
 
@@ -163,8 +163,8 @@ while [[ $# -gt 0 ]]; do
       ENV_FILE="${1#*=}"
       shift
       ;;
-    --skip-proover-check)
-      SKIP_PROOVER_CHECK="true"
+    --skip-prover-check)
+      SKIP_PROVER_CHECK="true"
       shift
       ;;
     --prune)
@@ -193,7 +193,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 check_env_file
-check_proover_artifacts
+check_prover_artifacts
 check_caddyfile
 
 if [[ "${RUN_PRUNE}" == "true" ]]; then

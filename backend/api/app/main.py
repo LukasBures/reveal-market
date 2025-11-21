@@ -59,12 +59,10 @@ _heartbeat_stop_event: Event | None = None
 _metrics_stop_event: Event | None = None
 _cache_refresh_stop_event: Event | None = None
 request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
-_process_started_at = time.time()
 goldsky_client: GoldskyClient | None = None
 
 MARKETS_STATS_KEY = "markets:stats"
 MARKET_DETAIL_PREFIX = "markets:detail"
-MARKET_RESOLUTION_PREFIX = "markets:resolution"
 
 MARKETS_CACHE_COUNTER = Counter(
     "markets_cache_requests_total",
@@ -1104,19 +1102,34 @@ def list_markets_by_category(
         _write_market_list_cache(cache, cache_key, market_models)
         add_tag(cache, schema_tag, cache_key)
         add_tag(cache, "markets:category", cache_key)
-    add_tag(cache, f"category:{category_slug_key}", cache_key)
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.category.cache_miss",
-        message="cached category markets",
-        category_slug=category_slug_key,
-        limit=limit,
-        offset=offset,
-        result_count=len(market_models),
-        duration_ms=round((time.perf_counter() - start) * 1000, 2),
-    )
-    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
+        add_tag(cache, f"category:{category_slug_key}", cache_key)
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.category.cache_miss",
+            message="cached category markets",
+            category_slug=category_slug_key,
+            limit=limit,
+            offset=offset,
+            result_count=len(market_models),
+            duration_ms=duration_ms,
+        )
+        update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
+    else:
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.category.cache_bypass",
+            message="served category markets without cache write",
+            category_slug=category_slug_key,
+            limit=limit,
+            offset=offset,
+            result_count=len(market_models),
+            duration_ms=duration_ms,
+        )
+        update_cache_context(request, cache_key=None, hit=False, source="markets:category")
     return market_models
 
 
@@ -1147,6 +1160,7 @@ def market_stats(
 ) -> list[schemas.MarketStatusBreakdown]:
     start = time.perf_counter()
     cache = get_cache_client()
+    cache_available = cache is not None
     log_event(logger, logging.DEBUG, "markets.stats.request", "processing market stats request")
     cached = get_json(cache, MARKETS_STATS_KEY)
     if cached is not None:
@@ -1164,21 +1178,34 @@ def market_stats(
         return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
     stats = crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
-    schema_tag = get_schema_tag(cache, settings.schema_version_key)
-    set_json(cache, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
-    add_tag(cache, schema_tag, MARKETS_STATS_KEY)
-    add_tag(cache, "markets:stats", MARKETS_STATS_KEY)
     duration = (time.perf_counter() - start) * 1000
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.stats.cache_miss",
-        message="cached fresh market stats",
-        cache_hit=False,
-        duration_ms=round(duration, 2),
-        result_count=len(stats),
-    )
-    update_cache_context(request, cache_key=MARKETS_STATS_KEY, hit=False, source="markets:stats")
+    if cache_available:
+        schema_tag = get_schema_tag(cache, settings.schema_version_key)
+        set_json(cache, MARKETS_STATS_KEY, payload, settings.cache_ttl_seconds)
+        add_tag(cache, schema_tag, MARKETS_STATS_KEY)
+        add_tag(cache, "markets:stats", MARKETS_STATS_KEY)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.stats.cache_miss",
+            message="cached fresh market stats",
+            cache_hit=False,
+            duration_ms=round(duration, 2),
+            result_count=len(stats),
+        )
+        cache_key = MARKETS_STATS_KEY
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.stats.cache_bypass",
+            message="served market stats without cache",
+            cache_hit=False,
+            duration_ms=round(duration, 2),
+            result_count=len(stats),
+        )
+        cache_key = None
+    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:stats")
     return stats
 
 
@@ -1191,6 +1218,7 @@ def suggest_markets(
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
     cache = get_cache_client()
+    cache_available = cache is not None
     log_event(
         logger,
         logging.DEBUG,
@@ -1231,21 +1259,33 @@ def suggest_markets(
             limit=limit,
         )
     payload = [item.model_dump(mode="json") for item in filtered]
-    schema_tag = get_schema_tag(cache, settings.schema_version_key)
-    set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
-    add_tag(cache, schema_tag, cache_key)
-    add_tag(cache, "markets:suggest", cache_key)
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.suggest.cache_miss",
-        message="cached suggestion results",
-        query=normalized_query,
-        limit=limit,
-        result_count=len(filtered),
-        duration_ms=round((time.perf_counter() - start) * 1000, 2),
-    )
-    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:suggest")
+    if cache_available:
+        schema_tag = get_schema_tag(cache, settings.schema_version_key)
+        set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+        add_tag(cache, schema_tag, cache_key)
+        add_tag(cache, "markets:suggest", cache_key)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.suggest.cache_miss",
+            message="cached suggestion results",
+            query=normalized_query,
+            limit=limit,
+            result_count=len(filtered),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.suggest.cache_bypass",
+            message="served suggestions without cache",
+            query=normalized_query,
+            limit=limit,
+            result_count=len(filtered),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+    update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:suggest")
     return filtered
 
 
@@ -1257,6 +1297,7 @@ def read_resolution(
 ) -> schemas.ResolutionSummary:
     start = time.perf_counter()
     cache = get_cache_client()
+    cache_available = cache is not None
     log_event(
         logger,
         logging.DEBUG,
@@ -1347,24 +1388,36 @@ def read_resolution(
         )
 
     summary_model = schemas.ResolutionSummary.model_validate(summary)
-    cache_payload = summary_model.model_dump(mode="json", by_alias=True)
-    if summary_model.checked_at is not None:
-        cache_payload["checkedAt"] = summary_model.checked_at.isoformat()
-    if summary_model.block_timestamp is not None:
-        cache_payload["blockTimestamp"] = summary_model.block_timestamp.isoformat()
-    schema_tag = get_schema_tag(cache, settings.schema_version_key)
-    set_json(cache, cache_key, cache_payload, settings.cache_ttl_seconds)
-    add_tag(cache, schema_tag, cache_key)
-    add_tag(cache, f"resolution:{normalized_condition}", cache_key)
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.resolution.cache_miss",
-        message="cached resolution summary",
-        condition_id=normalized_condition,
-        duration_ms=round((time.perf_counter() - start) * 1000, 2),
+    if cache_available:
+        cache_payload = summary_model.model_dump(mode="json", by_alias=True)
+        if summary_model.checked_at is not None:
+            cache_payload["checkedAt"] = summary_model.checked_at.isoformat()
+        if summary_model.block_timestamp is not None:
+            cache_payload["blockTimestamp"] = summary_model.block_timestamp.isoformat()
+        schema_tag = get_schema_tag(cache, settings.schema_version_key)
+        set_json(cache, cache_key, cache_payload, settings.cache_ttl_seconds)
+        add_tag(cache, schema_tag, cache_key)
+        add_tag(cache, f"resolution:{normalized_condition}", cache_key)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.resolution.cache_miss",
+            message="cached resolution summary",
+            condition_id=normalized_condition,
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.resolution.cache_bypass",
+            message="served resolution without cache",
+            condition_id=normalized_condition,
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
+    update_cache_context(
+        request, cache_key=cache_key if cache_available else None, hit=False, source="markets:resolution"
     )
-    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:resolution")
     return summary_model
 
 
@@ -1376,6 +1429,7 @@ def read_market(
 ) -> schemas.MarketResponse:
     cache_key = _market_detail_cache_key(event_id)
     cache = get_cache_client()
+    cache_available = cache is not None
     log_event(
         logger,
         logging.DEBUG,
@@ -1408,22 +1462,34 @@ def read_market(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     response = schemas.MarketResponse.model_validate(market)
     _apply_market_metadata(response)
-    schema_tag = get_schema_tag(cache, settings.schema_version_key)
-    set_json(cache, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
-    add_tag(cache, schema_tag, cache_key)
-    add_tag(cache, f"market:{event_id}", cache_key)
     duration = (time.perf_counter() - start) * 1000
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.detail.cache_miss",
-        message="cached fresh market detail",
-        cache_hit=False,
-        duration_ms=round(duration, 2),
-        event_id=event_id,
-        result_count=1,
-    )
-    update_cache_context(request, cache_key=cache_key, hit=False, source="markets:detail")
+    if cache_available:
+        schema_tag = get_schema_tag(cache, settings.schema_version_key)
+        set_json(cache, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
+        add_tag(cache, schema_tag, cache_key)
+        add_tag(cache, f"market:{event_id}", cache_key)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.detail.cache_miss",
+            message="cached fresh market detail",
+            cache_hit=False,
+            duration_ms=round(duration, 2),
+            event_id=event_id,
+            result_count=1,
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.detail.cache_bypass",
+            message="served market detail without cache",
+            cache_hit=False,
+            duration_ms=round(duration, 2),
+            event_id=event_id,
+            result_count=1,
+        )
+    update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:detail")
     return response
 
 

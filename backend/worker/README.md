@@ -15,9 +15,16 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
 | Optional on-chain writes | When `RM_AUTO_CREATE_ONCHAIN_MARKETS=true`, call `MarketFactory.createMarket` with retry/backoff. |
 | AI enrichment | Queue summary jobs whenever a market lacks a narrative and process them via `app.summary_worker`. |
-| Proof receipts | When enabled, call the `proover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
+| Proof receipts | When enabled, call the `prover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
 
-> The `proover` container emits real Groth16 receipts (`rapidsnark` + the Circom artifacts under `proover/circuits/build`) and fails hard if the artifacts are missing. Mount fresh proving/verifying keys generated via `proover/circuits/generate_keys.sh` before sharing proofs with downstream systems.
+> The `prover` container emits real Groth16 receipts (`rapidsnark` + the Circom artifacts under `prover/circuits/build`) and fails hard if the artifacts are missing. Mount fresh proving/verifying keys generated via `prover/circuits/generate_keys.sh` before sharing proofs with downstream systems.
+
+---
+
+## Operational Notes
+
+- Resolution sync stays lean: unused change flags were removed while keeping the persisted payload + cache content identical, so heartbeats and invalidations still reflect real state changes without extra bookkeeping.
+- Redis remains optional for background work; when it is unavailable the worker keeps writing to Postgres and simply skips cache writes/invalidations instead of failing the sync loop.
 
 ---
 
@@ -150,7 +157,7 @@ All environment variables begin with `RM_`. Notable groups:
 | Variable | Description |
 | --- | --- |
 | `RM_PROVER_ENABLED` | Toggle settlement-proof requests. When false, the worker skips prover calls entirely. |
-| `RM_PROVER_BASE_URL` | Base URL for the `proover` container (defaults to `http://proover:8085` in docker-compose). |
+| `RM_PROVER_BASE_URL` | Base URL for the `prover` container (defaults to `http://prover:8085` in docker-compose). |
 | `RM_PROVER_TIMEOUT_SECONDS` | HTTP timeout when calling the prover service. |
 | `RM_PROOF_CACHE_PREFIX` / `RM_PROOF_CACHE_TTL_SECONDS` | Redis key namespace + TTL for cached proof receipts. |
 
@@ -173,7 +180,7 @@ LOG_LEVEL=DEBUG uv run --project . python run.py
 uv run --project . python -m app.summary_worker
 
 # Optional: start the prover locally (needed when `RM_PROVER_ENABLED=true`)
-docker compose up proover
+docker compose up prover
 ```
 
 Tips:

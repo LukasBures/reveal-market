@@ -32,6 +32,10 @@ _LOG_RECORD_RESERVED = {
     "threadName",
 }
 
+# Disable truncation so logs always include the full payload.
+MAX_LINE_LEN = 0
+MAX_PAYLOAD_LEN = 0
+
 _request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
@@ -76,16 +80,14 @@ def log_event(
 ) -> None:
     """Emit a formatted log message that embeds event metadata."""
 
-    structured_fields = dict(fields)
+    if not logger.isEnabledFor(level):
+        return
 
-    suffix = ""
-    if structured_fields:
-        serialized = " ".join(f"{key}={value}" for key, value in structured_fields.items())
-        suffix = f" {serialized}"
+    structured_fields = dict(fields)
 
     extra_fields = {key: value for key, value in structured_fields.items() if key not in _LOG_RECORD_RESERVED}
     extra_fields["event"] = event
-    logger.log(level, f"[{event}] {message}{suffix}", extra=extra_fields)
+    logger.log(level, f"[{event}] {message}", extra=extra_fields)
 
 
 class StructuredFormatter(logging.Formatter):
@@ -96,9 +98,11 @@ class StructuredFormatter(logging.Formatter):
         self.service_name = service_name
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        # ISO-8601 with millisecond precision to keep log lines compact.
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         level = record.levelname.upper()
         logger_name = record.name or self.service_name
+        request_id = getattr(record, "request_id", None) or get_request_id() or "-"
         pathname = getattr(record, "pathname", None)
         lineno = getattr(record, "lineno", None)
         if pathname and lineno:
@@ -106,7 +110,6 @@ class StructuredFormatter(logging.Formatter):
         else:
             location = "-"
         event = getattr(record, "event", record.getMessage() or "log")
-        request_id = getattr(record, "request_id", None) or "-"
 
         payload: dict[str, object] = {}
         for key, value in record.__dict__.items():
@@ -116,8 +119,22 @@ class StructuredFormatter(logging.Formatter):
         if record.getMessage():
             payload.setdefault("message", record.getMessage())
         payload.setdefault("service", self.service_name)
-        serialized = json.dumps(payload, default=str) if payload else "{}"
-        return f"{timestamp} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"
+        serialized = self._compact_payload(payload)
+        line = f"{timestamp} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"
+        if MAX_LINE_LEN and len(line) > MAX_LINE_LEN:
+            allowed_payload_len = max(8, MAX_LINE_LEN - (len(line) - len(serialized)))
+            if len(serialized) > allowed_payload_len:
+                serialized = serialized[:allowed_payload_len]
+                line = f"{timestamp} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"
+        return line
+
+    def _compact_payload(self, payload: dict[str, object]) -> str:
+        if not payload:
+            return "{}"
+        serialized = json.dumps(payload, default=str, separators=(",", ":"))
+        if MAX_PAYLOAD_LEN and len(serialized) > MAX_PAYLOAD_LEN:
+            return serialized[:MAX_PAYLOAD_LEN]
+        return serialized
 
 
 def start_heartbeat_logger(
@@ -135,7 +152,7 @@ def start_heartbeat_logger(
         while not stop_event.is_set():
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 event="service.heartbeat",
                 message=message or f"{service_name} is alive",
                 service=service_name,
@@ -145,7 +162,7 @@ def start_heartbeat_logger(
                 break
         log_event(
             logger,
-            logging.DEBUG,
+            logging.INFO,
             event="service.heartbeat.stop",
             message="heartbeat logger stopping",
             service=service_name,

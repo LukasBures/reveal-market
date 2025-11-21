@@ -86,7 +86,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      proover:
+      prover:
         condition: service_healthy
     # Expose FastAPI on the host so docs + frontend can talk to it directly.
     ports:
@@ -127,7 +127,7 @@ services:
       RM_API_BASE_URL: http://api:8000
       RM_MARKETS_CACHE_LIMIT: 18
       RM_PROVER_ENABLED: ${RM_PROVER_ENABLED:-false}
-      RM_PROVER_BASE_URL: http://proover:8085
+      RM_PROVER_BASE_URL: http://prover:8085
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,6 +145,48 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.5"
+          memory: 384M
+
+  hedger:
+    build:
+      context: .
+      dockerfile: docker/hedger/Dockerfile
+    container_name: reveal-market-hedger
+    restart: unless-stopped
+    init: true
+    environment:
+      MODE: ${MODE:-prod}
+      HEDGER_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
+      HEDGER_REDIS_URL: redis://redis:6379/0
+      HEDGER_POLYMARKET_API_BASE: https://gamma-api.polymarket.com
+      HEDGER_FX_FEED_URL: ${HEDGER_FX_FEED_URL:-https://gamma-api.polymarket.com/prices/zen-usd}
+      HEDGER_FX_HAIRCUT_BPS: ${HEDGER_FX_HAIRCUT_BPS:-500}
+      HEDGER_API_HOST: 0.0.0.0
+      HEDGER_API_PORT: 8090
+      HEDGER_PROVER_BASE_URL: http://prover:8085
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      prover:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 1
       resources:
@@ -207,14 +249,14 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  proover:
+  prover:
     build:
       context: .
-      dockerfile: docker/proover/Dockerfile
-    container_name: reveal-market-proover
+      dockerfile: docker/prover/Dockerfile
+    container_name: reveal-market-prover
     restart: unless-stopped
     volumes:
-      - ./proover/circuits:/app/circuits:ro
+      - ./prover/circuits:/app/circuits:ro
     environment:
       PROVER_LISTEN_ADDR: 0.0.0.0:8085
       PROVER_HEARTBEAT_SECONDS: 60

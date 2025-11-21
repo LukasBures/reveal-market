@@ -18,8 +18,62 @@ export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
+const FORCE_OFFLINE = process.env.RM_FORCE_OFFLINE === "true";
+
+const normalizeBase = (value: string) => {
+  try {
+    return new URL(value).toString().replace(/\/$/, "");
+  } catch {
+    return value.replace(/\/$/, "");
+  }
+};
+
+const OFFLINE_FALLBACK_BASE = normalizeBase(process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000");
+const API_BASE_NORMALIZED = normalizeBase(DEFAULT_API_BASE);
+const IS_OFFLINE_BASE = API_BASE_NORMALIZED === OFFLINE_FALLBACK_BASE;
+const SHOULD_SKIP_NETWORK = FORCE_OFFLINE && IS_OFFLINE_BASE;
+
+const hostIsLocal = (() => {
+  try {
+    const parsed = new URL(DEFAULT_API_BASE);
+    return ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+})();
+
+const isNetworkUnavailable = (error: unknown) => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("econnrefused") ||
+    message.includes("enotfound") ||
+    message.includes("timed out")
+  );
+};
+
+const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
+  const message = error instanceof Error ? error.message : String(error ?? "unknown");
+  const payload = meta ? { ...meta, error: message } : { error: message };
+  if ((IS_OFFLINE_BASE || hostIsLocal) && isNetworkUnavailable(error)) {
+    logger.debug(`${scope}:offline`, { baseUrl: DEFAULT_API_BASE, ...payload });
+    return;
+  }
+  logger.error(`${scope}:error`, payload);
+};
+
+const maybeShortCircuitOffline = (scope: string) => {
+  if (SHOULD_SKIP_NETWORK) {
+    logger.debug(`${scope}:offline_skip`, { baseUrl: DEFAULT_API_BASE });
+    return true;
+  }
+  return false;
+};
 
 export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
+  if (maybeShortCircuitOffline("fetchFeaturedMarkets")) {
+    return [];
+  }
   try {
     let endpoint = "/markets";
     const params = new URLSearchParams();
@@ -78,7 +132,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     });
     return items.map(mapApiMarketToSummary);
   } catch (error) {
-    logger.error("fetchFeaturedMarkets:error", { error: (error as Error).message });
+    logOfflineAwareError("fetchFeaturedMarkets", error);
     return [];
   }
 }
@@ -88,6 +142,9 @@ export async function fetchMarketSuggestions(
   limit = 5,
   options?: { revalidate?: number },
 ): Promise<MarketSummary[]> {
+  if (maybeShortCircuitOffline("fetchMarketSuggestions")) {
+    return [];
+  }
   const trimmed = query.trim();
   if (trimmed.length < 2) {
     return [];
@@ -122,12 +179,15 @@ export async function fetchMarketSuggestions(
     logger.info("fetchMarketSuggestions:success", { query: trimmed, count: mapped.length });
     return mapped;
   } catch (error) {
-    logger.error("fetchMarketSuggestions:error", { error: (error as Error).message });
+    logOfflineAwareError("fetchMarketSuggestions", error);
     return [];
   }
 }
 
 export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
+  if (maybeShortCircuitOffline("fetchMarketStatsBreakdown")) {
+    return [];
+  }
   try {
     const response = await fetch(`${DEFAULT_API_BASE}/markets/stats`, {
       next: { revalidate: 60 },
@@ -160,12 +220,15 @@ export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
     logger.info("fetchMarketStatsBreakdown:success", { count: stats.length });
     return stats;
   } catch (error) {
-    logger.error("fetchMarketStatsBreakdown:error", { error: (error as Error).message });
+    logOfflineAwareError("fetchMarketStatsBreakdown", error);
     return [];
   }
 }
 
 export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
+  if (maybeShortCircuitOffline("fetchHealthSnapshot")) {
+    return null;
+  }
   try {
     const endpoint = `${DEFAULT_API_BASE}/health`;
     logger.info("fetchHealthSnapshot:request", { endpoint, baseUrl: DEFAULT_API_BASE });
@@ -198,7 +261,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
     });
     return snapshot;
   } catch (error) {
-    logger.error("fetchHealthSnapshot:error", { error: (error as Error).message });
+    logOfflineAwareError("fetchHealthSnapshot", error);
     return null;
   }
 }
@@ -207,6 +270,9 @@ export async function fetchProofReceipts(
   limit = 20,
   options?: { offset?: number },
 ): Promise<{ receipts: ProofReceipt[]; error?: string }> {
+  if (maybeShortCircuitOffline("fetchProofReceipts")) {
+    return { receipts: [], error: "offline" };
+  }
   const offset = Math.max(0, options?.offset ?? 0);
 
   const url = new URL(`${DEFAULT_API_BASE}/proofs`);
@@ -237,7 +303,7 @@ export async function fetchProofReceipts(
     }
     return { receipts: [] };
   } catch (error) {
-    logger.error("fetchProofReceipts:error", { error: (error as Error).message, offset });
+    logOfflineAwareError("fetchProofReceipts", error, { offset });
     return { receipts: [], error: (error as Error).message };
   }
 }
@@ -264,6 +330,9 @@ export async function fetchInvestorKpis(): Promise<InvestorKpis> {
 }
 
 export async function fetchMarketByEventId(eventId: string): Promise<MarketDetail | null> {
+  if (maybeShortCircuitOffline("fetchMarketByEventId")) {
+    return null;
+  }
   try {
     const detailUrl = `${DEFAULT_API_BASE}/markets/${eventId}`;
     logger.info("fetchMarketByEventId:request", { eventId, endpoint: detailUrl });
@@ -345,7 +414,7 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     logger.info("fetchMarketByEventId:success", { eventId });
     return detail;
   } catch (error) {
-    logger.error("fetchMarketByEventId:error", { eventId, error: (error as Error).message });
+    logOfflineAwareError("fetchMarketByEventId", error, { eventId });
     return null;
   }
 }

@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Environment-driven configuration for the hedger."""
+
+    model_config = SettingsConfigDict(env_prefix="HEDGER_", env_file=".env", extra="ignore")
+
+    environment: str = Field(
+        default="prod",
+        validation_alias=AliasChoices("HEDGER_ENVIRONMENT", "MODE", "ENVIRONMENT"),
+    )
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("HEDGER_LOG_LEVEL", "LOG_LEVEL"),
+    )
+    api_host: str = Field(default="0.0.0.0")  # noqa: S104 - service must bind for docker/compose
+    api_port: int = Field(default=8090)
+
+    database_url: str = Field(
+        default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market",
+        validation_alias=AliasChoices("HEDGER_DATABASE_URL", "RM_DATABASE_URL"),
+    )
+    redis_url: str = Field(
+        default="redis://redis:6379/0",
+        validation_alias=AliasChoices("HEDGER_REDIS_URL", "RM_REDIS_URL"),
+    )
+
+    polymarket_api_base: str = Field(default="https://gamma-api.polymarket.com")
+    polymarket_timeout_seconds: int = Field(default=10)
+    polymarket_retry_attempts: int = Field(default=3)
+    polymarket_retry_backoff_seconds: float = Field(default=0.5)
+
+    fx_feed_url: str = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
+    fx_timeout_seconds: int = Field(default=5)
+    fx_max_age_seconds: int = Field(default=120)
+    fx_haircut_bps: int = Field(default=500, description="FX haircut in basis points (500 = 5%)")
+
+    redis_lock_ttl_seconds: int = Field(default=10)
+    redis_idempotency_ttl_seconds: int = Field(default=86400)
+    commit_stream_name: str = Field(default="horizen_commits")
+
+    max_slippage_bps: int = Field(default=100, description="Maximum acceptable slippage for hedges")
+
+    risk_max_global_exposure_usd: Decimal = Field(default=Decimal("250000"))
+    risk_max_per_market_usd: Decimal = Field(default=Decimal("75000"))
+    risk_coverage_ratio_target: float = Field(default=0.98)
+    risk_lp_utilization_limit: float = Field(default=0.85)
+    float_min_zen: Decimal = Field(default=Decimal("5000"))
+
+    settlement_poll_seconds: int = Field(default=20)
+    heartbeat_interval_seconds: int = Field(default=60)
+    event_poll_interval_seconds: int = Field(default=10)
+    run_migrations_on_startup: bool = Field(default=True)
+    metrics_enabled: bool = Field(default=True)
+
+    prover_base_url: str = Field(default="http://prover:8085")
+    prover_timeout_seconds: int = Field(default=30)
+    bridge_endpoint: str = Field(default="https://bridge.revealmarket.xyz/submit")
+    lp_vault_address: str = Field(default="0x0000000000000000000000000000000000000000")
+
+
+def get_settings() -> Settings:
+    """Load settings once per process."""
+
+    from functools import lru_cache
+
+    @lru_cache(maxsize=1)
+    def _load() -> Settings:
+        return Settings()  # type: ignore[call-arg]
+
+    return _load()

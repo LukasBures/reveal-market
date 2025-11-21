@@ -52,9 +52,10 @@ def setup_logging(service_name: str) -> None:
 
     logging.basicConfig(level=log_level, handlers=handlers, force=True)
 
-    for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access", "sqlalchemy"):
+    for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access", "sqlalchemy", "alembic"):
         logging.getLogger(noisy).handlers = []
         logging.getLogger(noisy).propagate = True
+    logging.getLogger("alembic").setLevel(logging.WARNING)
 
     logging.getLogger(service_name).propagate = True
     logging.getLogger("httpx").setLevel(logging.WARNING)

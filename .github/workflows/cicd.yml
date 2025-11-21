@@ -25,11 +25,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock') }}
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
+          uv sync --project hedger --extra dev --no-install-project --frozen
       - name: Pre-commit checks
         run: uv run pre-commit run --all-files
 
@@ -51,12 +52,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock') }}
 
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
+          uv sync --project hedger --extra dev --no-install-project --frozen
 
       - name: Run backend tests
         env:
@@ -70,20 +72,70 @@ jobs:
         run: uv run --project backend/api -- python -m pytest -n "${PYTEST_WORKER_COUNT}" backend/shared/tests
 
 
-  contracts:
+  hedger:
     needs: precommit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('hedger/uv.lock') }}
+
+      - name: Sync hedger dependencies
+        run: |
+          uv sync --project hedger --extra dev --no-install-project --frozen
+
+      - name: Lint hedger
+        run: uv run --project hedger -- ruff check app tests
+
+      - name: Hedger tests
+        run: uv run --project hedger -- python -m pytest -q
+
+
+  contracts-base:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
 
-      - name: Contracts pipeline
-        working-directory: contracts
-        run: ./run_local.sh full
+      - name: Base contracts pipeline
+        working-directory: contracts/base
+        run: ./run_tests.sh
+
+  contracts-zen:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Zen contracts pipeline
+        working-directory: contracts/zen
+        run: ./run_tests.sh
 
 
   frontend:
@@ -126,7 +178,7 @@ jobs:
         run: npm run build
 
 
-  proover:
+  prover:
     needs: precommit
     runs-on: ubuntu-latest
     steps:
@@ -134,12 +186,12 @@ jobs:
 
       - name: Cache Go modules
         uses: actions/cache@v4
-        if: ${{ hashFiles('proover/go.sum') != '' }}
+        if: ${{ hashFiles('prover/go.sum') != '' }}
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('proover/go.sum') }}
+          key: go-${{ runner.os }}-${{ hashFiles('prover/go.sum') }}
           restore-keys: |
             go-${{ runner.os }}-
 
@@ -161,12 +213,12 @@ jobs:
           echo "${RS_DIR}/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
-      - name: Run proover tests
-        working-directory: proover
+      - name: Run prover tests
+        working-directory: prover
         run: ./run_tests.sh -v
 
       - name: Go vet
-        working-directory: proover
+        working-directory: prover
         run: go vet -v ./...
 
 
@@ -174,9 +226,11 @@ jobs:
     # Only run deploy if ALL tests passed
     needs:
       - backend
-      - contracts
+      - hedger
+      - contracts-base
+      - contracts-zen
       - frontend
-      - proover
+      - prover
 
     # Only deploy on main branch
     if: github.ref == 'refs/heads/main'

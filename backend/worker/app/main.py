@@ -41,7 +41,7 @@ from .prover_client import ProverClient, ProverError, SettlementProofRequest, co
 from .summary_jobs import maybe_enqueue_summary_job
 
 try:
-    from prometheus_client import Counter
+    from prometheus_client import REGISTRY, CollectorRegistry, Counter
 except ImportError:  # pragma: no cover - optional dependency
 
     class Counter:  # type: ignore[override]
@@ -55,26 +55,44 @@ except ImportError:  # pragma: no cover - optional dependency
         def inc(amount: float = 1.0) -> None:
             return None
 
+    class CollectorRegistry:  # type: ignore[override]
+        pass
 
-RETENTION_METRIC = Counter(
+    REGISTRY = None  # type: ignore[assignment]
+
+
+def _safe_counter(name: str, documentation: str, labelnames: list[str]) -> Counter:
+    """Register a Counter while tolerating duplicate registrations in test processes."""
+
+    registry = REGISTRY
+    try:
+        return Counter(name, documentation, labelnames, registry=registry)
+    except ValueError:
+        existing = getattr(registry, "_names_to_collectors", {}).get(name) if registry else None
+        if isinstance(existing, Counter):
+            return existing
+        return Counter(name, documentation, labelnames, registry=CollectorRegistry())
+
+
+RETENTION_METRIC = _safe_counter(
     "worker_retention_candidates_total",
     "Markets considered by the retention reporter",
     ["category"],
 )
 
-CACHE_INVALIDATION_COUNTER = Counter(
+CACHE_INVALIDATION_COUNTER = _safe_counter(
     "worker_cache_invalidations_total",
     "Number of cache invalidations triggered by the worker",
     ["type"],
 )
 
-POLYMARKET_FETCH_COUNTER = Counter(
+POLYMARKET_FETCH_COUNTER = _safe_counter(
     "worker_polymarket_fetch_total",
     "Outcome of Polymarket fetch attempts",
     ["outcome"],
 )
 
-POLYMARKET_RETRY_COUNTER = Counter(
+POLYMARKET_RETRY_COUNTER = _safe_counter(
     "worker_polymarket_retry_total",
     "Retry outcomes for individual Polymarket HTTP requests",
     ["outcome"],
@@ -836,7 +854,6 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     block_ts = cache_payload.get("block_timestamp")
     if isinstance(block_ts, datetime):
         cache_payload["block_timestamp"] = block_ts.isoformat()
-    changed = True
 
     log_event(
         logger,
@@ -858,7 +875,6 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
             }
         },
     )
-    changed = True
 
     if record_payload["resolved"]:
         db_market.status = "settled"
@@ -877,9 +893,9 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
     else:
         db_market.resolved_at = None
     return ResolutionOutcome(
-        changed=changed,
+        changed=True,
         condition_id=normalized_condition_id,
-        cache_payload=cache_payload if changed else None,
+        cache_payload=cache_payload,
     )
 
 
@@ -1199,7 +1215,7 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
     else:
         log_event(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             event="worker.heartbeat.published",
             message="published worker heartbeat",
             markets_processed=payload["markets_processed"],
@@ -1344,15 +1360,14 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         logger,
         logging.INFO,
         event="worker.sync.summary",
-        message="updated markets from polymarket feed",
-        markets_processed=len(markets),
-        markets_created=summary.markets_created,
-        markets_updated=summary.markets_updated,
-        markets_deleted=summary.markets_deleted,
-        resolutions_changed=len(summary.changed_conditions),
-        categories_changed=len(summary.changed_categories),
-        summaries_enqueued=summary.summaries_enqueued,
-        proofs_generated=summary.proofs_generated,
+        message="sync tick complete",
+        processed=len(markets),
+        created=summary.markets_created,
+        updated=summary.markets_updated,
+        deleted=summary.markets_deleted,
+        resolutions=len(summary.changed_conditions),
+        summaries=summary.summaries_enqueued,
+        proofs=summary.proofs_generated,
         latency_ms=round(latency_ms, 2),
         cache_invalidations=cache_report.total,
     )

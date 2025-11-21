@@ -99,6 +99,7 @@ revealmarket.xyz {
   #  ACCESS LOGGING (uses supported JSON encoder w/ filter wrapper)
   # ------------------------------------------------------------------
   log {
+    level WARN
     output stdout
 
     # JSON encoder is guaranteed to exist in caddy:2

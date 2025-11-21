@@ -30,10 +30,9 @@ describe("MarketDetailMetadata", () => {
     render(<MarketDetailMetadata market={baseMarket} />);
 
     expect(screen.getByText("Identifiers & provenance")).toBeInTheDocument();
-    expect(screen.getByText(baseMarket.conditionId!)).toBeInTheDocument();
+    expect(screen.getByText(baseMarket.marketAddress!)).toBeInTheDocument();
     expect(screen.getByText("#fed")).toBeInTheDocument();
     expect(screen.getByText("#macro")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /copy condition id/i })).toBeInTheDocument();
   });
 
   it("hides tags when metadata missing", () => {
@@ -41,13 +40,12 @@ describe("MarketDetailMetadata", () => {
       ...baseMarket,
       tags: [],
       slug: undefined,
-      conditionId: undefined,
-      questionId: undefined,
+      marketAddress: undefined,
     };
 
     render(<MarketDetailMetadata market={market} />);
 
     expect(screen.queryByText("#fed")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /copy condition id/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(baseMarket.marketAddress!)).not.toBeInTheDocument();
   });
 });

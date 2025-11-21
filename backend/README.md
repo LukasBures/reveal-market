@@ -13,7 +13,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 
 > **Reality check**
 >
-> - The bundled `proover` service now boots a Groth16 pipeline (Circom witness generation + `rapidsnark`) and halts startup if the artifacts under `proover/circuits/build` are missing. Always refresh the proving/verifying keys via `proover/circuits/generate_keys.sh` before marketing the stack as zk-auditable.
+> - The bundled `prover` service now boots a Groth16 pipeline (Circom witness generation + `rapidsnark`) and halts startup if the artifacts under `prover/circuits/build` are missing. Always refresh the proving/verifying keys via `prover/circuits/generate_keys.sh` before marketing the stack as zk-auditable.
 > - Worker ingestion targets Polymarket’s Gamma API; when the upstream dataset returns `image_url = null`, the frontend falls back to deterministic placeholders. Populate `extra_data.image_url` via the worker once you negotiate richer feeds.
 > - All environments, including local Docker, rely on the live backend—mock API toggles have been removed from the frontend.
 
@@ -52,6 +52,12 @@ These milestones ladder up to the same thesis: reliable data fuels confident liq
 - **Integration optionality** – Exchanges can embed only the API, enterprises can operate both API and worker in their own VPC, or sovereign partners can tap our managed service. The shared codebase ensures consistency across every deployment.
 - **Observability built in** – Audit teams receive structured logs (request IDs, cache hit ratios, fetch latency) and Prometheus series capturing every pipeline stage.
 - **Token-aligned upside** – Because protocol fees are captured at the API layer and mirrored on-chain, governance decisions about rake, settlement cadence, and new markets create tangible upside for future token holders.
+
+## Operational Hardening
+
+- Cache paths now explicitly bypass Redis when it is unavailable. Endpoints log the bypass, skip tag pollution, and keep request metrics accurate instead of claiming a “cache miss” that never wrote to Redis.
+- Category caches only register tags when a payload is actually written, preventing dangling invalidation sets during oversized/offset queries.
+- Resolution persistence in the worker was simplified to drop unused state flags, keeping the sync loop lean while still emitting cache payloads for downstream services.
 
 To learn how the backend can power your venue, reach out at hello@revealmarket.xyz or via [X](https://x.com/RevealMarket). We are actively onboarding exchanges, OTC desks, and liquidity programs who want transparent exposure to the next generation of prediction markets.
 

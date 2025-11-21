@@ -23,6 +23,14 @@ services:
       # Mount migrations for parity with the API container (worker can run cleanup scripts).
       - ./backend/migrations:/worker/migrations
 
+  hedger:
+    environment:
+      MODE: dev
+      HEDGER_LOG_LEVEL: DEBUG
+    volumes:
+      - ./hedger/app:/hedger/app
+      - ./backend/shared:/hedger/shared
+
   frontend:
     # Alternate docs hostname used by the marketing site in development.
     environment:

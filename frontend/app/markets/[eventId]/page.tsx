@@ -6,7 +6,6 @@ import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
-import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 
 const MarketDetailMetadataPanel = dynamic(
@@ -79,10 +78,22 @@ const clampDescription = (copy: string, maxLength = MARKET_DESCRIPTION_MAX_LENGT
   copy.length > maxLength ? `${copy.slice(0, maxLength - 1).trim()}…` : copy;
 
 const resolveMarketImage = (market: MarketDetail): string | undefined => {
-  if (typeof market.imageUrl === "string") {
-    const trimmed = market.imageUrl.trim();
-    if (trimmed) {
-      return trimmed;
+  const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
+    | Record<string, any>
+    | null;
+  const gamma = extraData?.gamma as Record<string, any> | undefined;
+  const candidates = [
+    market.imageUrl,
+    extraData?.image_url,
+    extraData?.imageUrl,
+    gamma?.image_url,
+    gamma?.imageUrl,
+    gamma?.cover_image,
+    gamma?.coverImage,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
     }
   }
   return undefined;
@@ -213,21 +224,21 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const canonicalPath = buildMarketPath(canonicalEventId);
   const contextCopy = selectMarketCopy(market);
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
+  const coverImage = resolveMarketImage(market);
 
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
-          <MarketDetailHeader market={market} />
+          <MarketDetailHeader market={market} coverImage={coverImage} />
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">
-              <MarketDetailChart />
-              <MarketDetailOutcomes market={market} />
-              <MarketDetailMetadataPanel market={market} />
               <section className="rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
                 <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
                 <p className="mt-3">{contextCopy}</p>
               </section>
+              <MarketDetailOutcomes market={market} />
+              <MarketDetailMetadataPanel market={market} />
             </div>
             <MarketDetailSidebarPanel market={market} />
           </div>

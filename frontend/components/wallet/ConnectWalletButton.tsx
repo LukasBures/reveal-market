@@ -160,6 +160,50 @@ export function ConnectWalletButton() {
     }, {});
   }, [connectors]);
 
+  const isMobileBrowser = useMemo(() => {
+    if (!isMounted || typeof navigator === "undefined") {
+      return false;
+    }
+    return /android|iphone|ipad|ipod|iemobile|blackberry|bb10/i.test(navigator.userAgent);
+  }, [isMounted]);
+
+  const providerFlags = useMemo(() => {
+    if (!isMounted || typeof window === "undefined") {
+      return { ethereum: null as any };
+    }
+    const ethereum = (window as any).ethereum;
+    return { ethereum };
+  }, [isMounted]);
+
+  const availableOptions = useMemo(() => {
+    return CONNECTOR_UI.filter((option) => {
+      const connector = connectorsById[option.connectorId];
+      if (!connector) return false;
+      const ready = (connector as any).ready ?? true;
+      if (!ready) return false;
+      if (!isMounted) return true;
+      if (!isMobileBrowser) return true;
+      if (option.connectorId === "walletConnect") return true;
+      const ethereum = providerFlags.ethereum;
+      if (!ethereum) return false;
+      if (option.connectorId === "metaMask") return Boolean(ethereum.isMetaMask);
+      if (option.connectorId === "coinbaseWallet") return Boolean(ethereum.isCoinbaseWallet);
+      if (option.connectorId === "injected") {
+        return Boolean(ethereum && !ethereum.isMetaMask && !ethereum.isCoinbaseWallet);
+      }
+      return false;
+    });
+  }, [connectorsById, isMobileBrowser, isMounted, providerFlags]);
+
+  useEffect(() => {
+    if (!selectedOption) return;
+    const stillAvailable = availableOptions.some((option) => option.id === selectedOption.id);
+    if (!stillAvailable) {
+      setSelectedOption(null);
+      setAcceptedTerms(false);
+    }
+  }, [availableOptions, selectedOption]);
+
   const isConnected = accountStatus === "connected" && Boolean(address);
   const isConnecting = connectStatus === "pending";
 
@@ -251,13 +295,13 @@ export function ConnectWalletButton() {
             <div className="mt-5 space-y-4">
               <div className="space-y-3">
                 <p className="text-[11px] uppercase tracking-[0.35em] text-white/50">Wallet providers</p>
-                {connectors.length === 0 ? (
+                {availableOptions.length === 0 ? (
                   <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-center text-xs text-white/70">
-                    Wallet connectors are initializing. Please wait…
+                    No compatible wallets detected on this device. Try WalletConnect or switch devices.
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {CONNECTOR_UI.map((option) => {
+                    {availableOptions.map((option) => {
                       const connector = connectorsById[option.connectorId];
                       const disabled = !connector || isConnecting;
                       const isSelected = selectedOption?.id === option.id;

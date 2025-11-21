@@ -48,23 +48,43 @@ export function MainNav() {
         {externalHomeHref ? (
           <a
             href={externalHomeHref}
-            className="flex items-center gap-3 text-white transition hover:opacity-90"
+            className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
+            <Image
+              src="/brand/reveal-logo-wordmark.svg"
+              alt="Reveal Market"
+              width={200}
+              height={56}
+              priority
+              className="h-10 w-auto select-none"
+              draggable={false}
+            />
           </a>
         ) : (
           <Link
             href={internalHomeHref}
-            className="flex items-center gap-3 text-white transition hover:opacity-90"
+            className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market" width={200} height={56} priority className="h-10 w-auto" />
+            <Image
+              src="/brand/reveal-logo-wordmark.svg"
+              alt="Reveal Market"
+              width={200}
+              height={56}
+              priority
+              className="h-10 w-auto select-none"
+              draggable={false}
+            />
           </Link>
         )}
-        <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
+        <nav className="hidden items-center gap-8 text-base font-semibold tracking-wide text-white/80 md:flex">
           {navLinks.map((link) => (
-            <Link key={link.href} href={link.href} className="transition hover:text-white">
+            <Link
+              key={link.href}
+              href={link.href}
+              className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+            >
               {link.label}
             </Link>
           ))}

@@ -1,58 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ----------------------------------------------------------------------
-# Local Dev Runner for Forge (Contracts)
-# ----------------------------------------------------------------------
-# This script:
-#  1. Builds all contracts
-#  2. Runs all tests with gas reports
-#  3. Validates gas snapshot (regression check)
-#  4. Optionally runs coverage & fuzz suites
-# ----------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="${SCRIPT_DIR}/base"
+ZEN_DIR="${SCRIPT_DIR}/zen"
 
-echo "=============================="
-echo "🏗️  STEP 1: Building contracts"
-echo "=============================="
-forge build
-echo "✅ Build complete"
+for workspace in "${BASE_DIR}" "${ZEN_DIR}"; do
+  if [[ ! -x "${workspace}/run_local.sh" ]]; then
+    echo "Workspace runner missing at ${workspace}/run_local.sh" >&2
+    exit 1
+  fi
+done
+
+echo "==== Running BASE workspace ===="
+(cd "${BASE_DIR}" && ./run_local.sh "$@")
 echo
-
-echo "=============================="
-echo "🧪  STEP 2: Running tests"
-echo "=============================="
-forge test --gas-report --fail-fast
-echo "✅ Tests complete"
-echo
-
-echo "=============================="
-echo "📊  STEP 3: Checking gas snapshot"
-echo "=============================="
-if forge snapshot --check; then
-  echo "✅ Gas snapshot matches baseline"
-else
-  echo "⚠️  Gas snapshot changed — review .gas-snapshot diffs"
-  echo "   To update snapshot: run 'forge snapshot'"
-fi
-echo
-
-# ----------------------------------------------------------------------
-# Optional: Run fuzz & coverage in dedicated mode
-# ----------------------------------------------------------------------
-if [[ "${1:-}" == "full" ]]; then
-  echo "=============================="
-  echo "🎯  STEP 4: Running extended fuzz tests"
-  echo "=============================="
-  FOUNDRY_PROFILE=ci.fuzz forge test --match-test testFuzz --gas-report || true
-  echo
-
-  echo "=============================="
-  echo "🧮  STEP 5: Generating coverage report"
-  echo "=============================="
-  forge coverage --report summary || true
-  echo "✅ Coverage report generated"
-fi
-
-echo "=============================="
-echo "✅  All steps finished successfully!"
-echo "=============================="
+echo "==== Running ZEN workspace ===="
+(cd "${ZEN_DIR}" && ./run_local.sh "$@")

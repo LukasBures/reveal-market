@@ -52,10 +52,11 @@ def setup_logging(service_name: str) -> None:
 
     logging.basicConfig(level=log_level, handlers=handlers, force=True)
 
-    # Let uvicorn/sqlalchemy reuse the same root handlers.
-    for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access", "sqlalchemy"):
+    # Let uvicorn/sqlalchemy/alembic reuse the same root handlers.
+    for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access", "sqlalchemy", "alembic"):
         logging.getLogger(noisy).handlers = []
         logging.getLogger(noisy).propagate = True
+    logging.getLogger("alembic").setLevel(logging.WARNING)
 
     logging.getLogger(service_name).propagate = True
     logging.getLogger(service_name).info(

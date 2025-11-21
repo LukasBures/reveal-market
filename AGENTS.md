@@ -13,7 +13,7 @@
 - `npm run dev|build|start|lint|test` (inside `frontend/`) – Next.js workflows. `npm run test` executes Vitest + Testing Library.
 - `./run_local.sh` – Build every Docker image with `--no-cache` and launch the full stack (API, worker, frontend, Postgres, Redis).
 - `./run_prod.sh` – Build with cache + start stack detached (production/VPS flow).
-- `./run_tests.sh` – Sequential test harness (backend → frontend → contracts → proover). Frontend stage requires the backend stack to answer `/health` or it fails fast.
+- `./run_tests.sh` – Sequential test harness (backend → frontend → contracts → prover). Frontend stage requires the backend stack to answer `/health` or it fails fast.
 
 ## Coding Style & Naming Conventions
 - Python: PEP 8, Black 120 cols, isort, Flake8 (`make fmt` / `pre-commit`).
@@ -44,7 +44,7 @@
 - Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
 - `frontend/run_tests.sh` no longer offers an offline mode—start the backend stack (or point `NEXT_PUBLIC_API_BASE_URL` at staging) before invoking it locally or through automation.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
-- The bundled `proover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if the compiled artifacts under `proover/circuits/build` are missing. Always mount fresh proving/verifying keys (see `proover/circuits/`) before representing the stack as production-grade zk.
+- The bundled `prover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if the compiled artifacts under `prover/circuits/build` are missing. Always mount fresh proving/verifying keys (see `prover/circuits/`) before representing the stack as production-grade zk.
 
 ## Agent Notes
 
@@ -55,7 +55,7 @@
 - **Worker** – `backend/worker/app/main.py` pulls Polymarket feeds, writes markets/resolutions, and emits Redis heartbeats. On-chain helpers (`maybe_create_onchain_market`) remain for manual use, but the worker no longer invokes them automatically. `worker/app/healthcheck.py` verifies Postgres connectivity for Docker. Logs mirror the API format.
 - **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
 - **Polymarket client** – `backend/worker/app/polymarket.py` now captures loop variables safely, but still lacks robust retries/backoff for the entire sync; if upstream reliability work starts, wire it through tenacity and emit metrics (see TODO).
-- **Prover reality** – `proover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `proover/circuits/build`). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
+- **Prover reality** – `prover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `prover/circuits/build`). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
 - **Testing defaults** – Pytest fan-out is pinned to four workers (API, shared modules, worker) unless `PYTEST_WORKER_COUNT` overrides; expect this concurrency when validating suites locally or in CI.
 
 ### Frontend (Next.js)
@@ -74,9 +74,9 @@
 - `.github/workflows/ci.yml` runs three jobs in parallel:
   - **backend**: setup Python 3.12 + uv, cache the uv resolver, run `./backend/run_tests.sh`.
   - **contracts**: install Foundry via `foundryup`, execute `./contracts/run_local.sh full`.
-  - **frontend**: setup Node 20, boot the Docker backend stack (Postgres/Redis/proover/api/worker), install deps, then run `npm run lint`, `npm run test`, and `npm run build` against the live API.
+  - **frontend**: setup Node 20, boot the Docker backend stack (Postgres/Redis/prover/api/worker), install deps, then run `npm run lint`, `npm run test`, and `npm run build` against the live API.
 - `.github/workflows/contracts-ci.yml` exists for legacy Forge-only runs; keep it unless instructed otherwise.
-- Repo-root `./run_tests.sh` matches CI ordering (backend → frontend → contracts → proover) to simplify pre-push validation; ensure the backend stack is reachable before invoking it so the frontend stage doesn’t fail the run.
+- Repo-root `./run_tests.sh` matches CI ordering (backend → frontend → contracts → prover) to simplify pre-push validation; ensure the backend stack is reachable before invoking it so the frontend stage doesn’t fail the run.
 
 ---
 

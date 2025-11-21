@@ -149,7 +149,7 @@ describe("ConnectWalletButton", () => {
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
 
-    expect(screen.getByText(/wallet connectors are initializing/i)).toBeInTheDocument();
+    expect(screen.getByText(/no compatible wallets detected/i)).toBeInTheDocument();
   });
 
   it("disables signing when the message input is empty", () => {

@@ -15,8 +15,9 @@ Horizen chain support docs: https://docs.goldsky.com/chains/horizen
 | `backend/api` | FastAPI service for markets, settlements, and partner endpoints. | Trusted-host & CORS controls, CSP/HSTS middleware, Redis caching, pytest suite, docker health probe. |
 | `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, structured logging, Polymarket + on-chain sync, pytest suite. |
 | `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components, zero mock fallbacks. |
-| `contracts/` | Foundry workspace (RevealMarket, MarketFactory, etc.). | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
-| `proover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
+| `contracts/zen` | Foundry workspace for the Horizen deployment. | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
+| `contracts/base` | Foundry workspace for the Base deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
+| `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
 
 Additional docs live in each directory’s README.
 
@@ -27,8 +28,8 @@ Additional docs live in each directory’s README.
 - **FastAPI surface area** – `/markets`, `/categories/{slug}`, `/markets/suggest`, `/proofs`, and `/health` are live today with CSP/HSTS/COOP hardening, schema-based request/response models, Redis-backed caching (schema-tag aware), and Prometheus metrics. The API also publishes structured request metrics into Redis so `/health/heartbeats` immediately surfaces slow requests or cache-miss spikes.
 - **Ingestion/automation worker** – The worker runs Alembic migrations on boot, streams active Polymarket markets, prefetches existing rows to minimize Postgres roundtrips, writes sanitized payloads into Postgres + Redis, and invalidates tagged caches per event/category/resolution. It exposes batch stats, publishes heartbeats, hydrates featured caches, and queues Groth16 proof jobs and AI summary jobs when enabled.
 - **Frontend** – The Next.js 15 app consumes the live API for every page render, enforces the same security headers, emits sitemap/robots automatically, and ships fully responsive marketing + docs surfaces. Linting, type-checking, and production builds run in CI and require a reachable backend stack before they start.
-- **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI.
-- **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `proover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
+- **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI. Both `contracts/zen` (Horizen) and `contracts/base` (Base LP vault + hedging) run via shared wrappers.
+- **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `prover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/run_local.sh full`, and `./run_tests.sh` are the same flows used in CI (`.github/workflows/ci.yml`). Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
 
 ---
@@ -54,7 +55,7 @@ Additional docs live in each directory’s README.
 - **Logging** – Unified formatter across services (`timestamp | LEVEL | logger | file:line | event | request_id`). Optional rotating file output for regulated deployments, structured JSON-LD for site-wide schema.
 - **Edge canonicalization** – Caddy terminates TLS, forces HTTP→HTTPS, and redirects `www.` (and any stray HTTP hostnames) to `https://revealmarket.xyz` so crawlers only ever see the canonical domain.
 - **SLA telemetry** – Every request logs latency buckets, bytes sent, and cache hit/miss data. The API publishes aggregated metrics to Redis and exposes a live dashboard at `/health/heartbeats`, so you can verify worker/API heartbeats, cache hit rates, and average latency in one place.
-- **Tests** – `./backend/run_tests.sh` (pytest, 4-way xdist by default), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests; `./run_tests.sh` performs the same sequence locally (backend → frontend → contracts → proover).
+- **Tests** – `./backend/run_tests.sh` (pytest, 4-way xdist by default), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests; `./run_tests.sh` performs the same sequence locally (backend → frontend → contracts → prover).
 
 ---
 
@@ -74,8 +75,8 @@ uv sync --project backend/worker --extra dev --no-install-project
 nvm use # respects repo-root .nvmrc, falls back to Node 20
 cd frontend && npm install && npm run dev
 
-# Contracts
-cd contracts && forge test
+# Contracts (runs both Base + Zen workspaces)
+cd contracts && ./run_tests.sh
 
 # Full docker stack (API, worker, frontend, Postgres, Redis, prover)
 ./run_local.sh
@@ -89,9 +90,9 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 
 ### Groth16 prover setup
 
-- Run `bash proover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `proover/circuits/build`. The prover container mounts those paths read-only; without them it refuses to start.
-- Both `./run_local.sh` and `./run_prod.sh` call a built-in artifact check before launching Docker. If the files are missing, `run_prod.sh` automatically executes `generate_keys.sh`; set `SKIP_PROOVER_CHECK=true` only when you have already mounted known-good artifacts.
-- The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. After the stack is up, hit `/healthz` or send a sample payload (see `proover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed.
+- Run `bash prover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `prover/circuits/build`. The prover container mounts those paths read-only; without them it refuses to start.
+- Both `./run_local.sh` and `./run_prod.sh` call a built-in artifact check before launching Docker. If the files are missing, `run_prod.sh` automatically executes `generate_keys.sh`; set `SKIP_PROVER_CHECK=true` only when you have already mounted known-good artifacts.
+- The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. After the stack is up, hit `/healthz` or send a sample payload (see `prover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed.
 
 ### Live market ingestion
 
@@ -115,4 +116,4 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 - **Liquidity Providers & DAOs** – Tap fee-sharing programs, structured webhooks, and rake analytics to model outcome-market exposure.
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via `hello@revealmarket.xyz`.
 
-Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `proover/circuits/build` are missing or invalid. Run `proover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.
+Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `prover/circuits/build` are missing or invalid. Run `prover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.

@@ -49,7 +49,7 @@ Keep scope tight—shipping these items unblocks the MVP announcement.
         • the sum of winning stakes equals the revealed pool minus rake,
         • each ticket’s payout matches the pool math,
         • rake percentage is within configured bounds.
-      - The circuit outputs a succinct proof plus public signals (market ID, outcome, total pool, rake, aggregate winners). The prover service (our “proover”) does this offline once per resolution.
+      - The circuit outputs a succinct proof plus public signals (market ID, outcome, total pool, rake, aggregate winners). The prover service (our “prover”) does this offline once per resolution.
   4. Publish + pay
       - You post the proof on-chain (or to your backend) along with the payout vector. On-chain verifier confirms it.
       - Once verified, your contract lets each user reveal their salt, prove they had a winning commitment, and claim the precomputed payout. Losing tickets never need to reveal, so they stay private forever.

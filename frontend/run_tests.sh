@@ -70,6 +70,8 @@ else
   log_warn "Frontend API ${CHECK_URL} is unreachable; running in offline mode targeting ${OFFLINE_API_BASE}"
   export RM_API_BASE_URL="${OFFLINE_API_BASE}"
   export NEXT_PUBLIC_API_BASE_URL="${OFFLINE_API_BASE}"
+  export RM_OFFLINE_API_BASE_URL="${OFFLINE_API_BASE}"
+  export RM_FORCE_OFFLINE="true"
 fi
 
 # Run lint before build to fail fast on lint errors.

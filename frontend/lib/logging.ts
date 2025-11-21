@@ -59,13 +59,8 @@ const formatLine = (level: LogLevel, message: string, meta?: Record<string, unkn
   const timestamp = formatTimestamp();
   const location = extractCaller();
   const payload: Record<string, unknown> = meta ? { ...meta } : {};
-  const rawRequestId = payload["requestId"];
-  const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : "-";
-  if ("requestId" in payload) {
-    delete payload["requestId"];
-  }
   const serialized = Object.keys(payload).length > 0 ? JSON.stringify(payload) : "{}";
-  return `${timestamp} | ${level.toUpperCase()} | ${LOGGER_NAME} | ${location} | ${message} | ${requestId} | ${serialized}`;
+  return `${timestamp} | ${level.toUpperCase()} | ${LOGGER_NAME} | ${location} | ${message} | ${serialized}`;
 };
 
 const baseLogger = {

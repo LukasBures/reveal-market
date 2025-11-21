@@ -37,13 +37,13 @@ log_step() {
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
-PROOVER_BUILD_DIR="${ROOT_DIR}/proover/circuits/build"
-PROOVER_REQUIRED_FILES=(
+PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
+PROVER_REQUIRED_FILES=(
   "settlement_js/generate_witness.js"
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
 )
-SKIP_PROOVER_CHECK="${SKIP_PROOVER_CHECK:-false}"
+SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 
 prune_docker_artifacts() {
   log_step "Pruning unused Docker data"
@@ -96,24 +96,24 @@ NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
 COMPOSE_ENV_ARGS=()
 
-ensure_proover_artifacts() {
-  if [[ "${SKIP_PROOVER_CHECK}" == "true" ]]; then
-    log_warn "Skipping Groth16 artifact validation (SKIP_PROOVER_CHECK=true)."
+ensure_prover_artifacts() {
+  if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
+    log_warn "Skipping Groth16 artifact validation (SKIP_PROVER_CHECK=true)."
     return
   fi
   local missing=()
-  for rel_path in "${PROOVER_REQUIRED_FILES[@]}"; do
-    if [[ ! -f "${PROOVER_BUILD_DIR}/${rel_path}" ]]; then
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    if [[ ! -f "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
       missing+=("${rel_path}")
     fi
   done
   if (( ${#missing[@]} > 0 )); then
     cat <<EOF
-Missing Groth16 artifacts under ${PROOVER_BUILD_DIR}.
-Run 'bash proover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
+Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
+Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
 Missing files:
 $(printf '  - %s\n' "${missing[@]}")
-Set SKIP_PROOVER_CHECK=true to bypass this check (not recommended).
+Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
 EOF
     exit 1
   fi
@@ -129,6 +129,7 @@ RUN_BUILD="true"
 RUN_PRUNE="${RUN_PRUNE:-false}"
 DETACH_MODE="false"
 UP_ARGS=()
+BUILD_SERVICES=()
 
 usage() {
   cat <<EOF
@@ -136,6 +137,7 @@ Usage: ./run_local.sh [--cache|--no-cache] [--skip-build] [compose up args...]
   --cache          Reuse existing build layers.
   --no-cache       Force a clean rebuild (default).
   --skip-build     Skip the docker compose build step entirely.
+  --build-services Comma-separated list of services to rebuild (e.g., api,worker,frontend).
   --env-file PATH  Use a specific env file (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
   --prune          Run 'docker system prune -af' before building (disabled by default).
   --detach         Start docker compose in the background (default streams logs in foreground).
@@ -151,6 +153,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-cache)
       BUILD_FLAG="--no-cache"
+      shift
+      ;;
+    --build-services)
+      if [[ $# -lt 2 ]]; then
+        log_warn "Missing value for --build-services (expected comma-separated list)"
+        exit 1
+      fi
+      IFS="," read -r -a BUILD_SERVICES <<<"$2"
+      shift 2
+      ;;
+    --build-services=*)
+      IFS="," read -r -a BUILD_SERVICES <<<"${1#*=}"
       shift
       ;;
     --skip-build)
@@ -205,7 +219,7 @@ if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts
 fi
 
-ensure_proover_artifacts
+ensure_prover_artifacts
 
 # Configure env file usage
 if docker compose version >/dev/null 2>&1; then
@@ -234,8 +248,12 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} build ${BUILD_OPTS[*]}"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${BUILD_OPTS[@]}"
+  BUILD_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${BUILD_OPTS[@]}")
+  if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
+    BUILD_CMD+=("${BUILD_SERVICES[@]}")
+  fi
+  log_info "Running: ${BUILD_CMD[*]}"
+  "${BUILD_CMD[@]}"
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi
@@ -260,6 +278,7 @@ cat <<EOF
 ------------------------------------------------------------
 Stack ready. Useful URLs while running locally:
   • API docs / health:      http://localhost:${API_PORT}/docs  | http://localhost:${API_PORT}/health
+  • Hedger admin / metrics: http://localhost:8090/admin/exposures | http://localhost:8090/metrics
   • Perf / SLA metrics:     http://localhost:${API_PORT}/health/heartbeats
   • Frontend / marketing:   http://localhost:${FRONTEND_PORT}/
   • Postgres (psql):        ${POSTGRES_URI}

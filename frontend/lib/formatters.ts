@@ -56,7 +56,6 @@ export function formatDateTime(value?: string | number | Date | null, options?: 
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: DEFAULT_TIME_ZONE,
-    timeZoneName: "short",
     ...options,
   }).format(date);
 }

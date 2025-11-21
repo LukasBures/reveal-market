@@ -8,7 +8,7 @@
 !pyproject.toml
 !uv.lock
 !run.py
-!proover/
+!prover/
 !docker/
 
 # Allow top-level metadata files as needed

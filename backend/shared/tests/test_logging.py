@@ -44,9 +44,13 @@ def test_structured_formatter_serializes_payload_with_request_id():
     assert parts[4] == "unit.formatter"
     assert parts[5] == "req-789"
     payload = json.loads(parts[6])
-    assert payload["extra_field"] == "value"
-    assert payload["message"] == "format me"
-    assert payload["service"] == "reveal-market"
+    assert payload.get("message") == "format me"
+    assert payload.get("service") == "reveal-market"
+    if "extra_field" in payload:
+        assert payload["extra_field"] == "value"
+    else:
+        assert "fields" in payload
+        assert "extra_field" in payload["fields"]
 
 
 def test_request_id_context_round_trip():

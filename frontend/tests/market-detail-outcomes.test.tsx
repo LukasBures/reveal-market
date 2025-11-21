@@ -24,4 +24,10 @@ describe("MarketDetailOutcomes", () => {
     expect(screen.getByText("No")).toBeInTheDocument();
     expect(screen.getByText("40%")).toBeInTheDocument();
   });
+
+  it("provides buy links for each outcome", () => {
+    render(<MarketDetailOutcomes market={baseDetail} />);
+    expect(screen.getByRole("link", { name: /buy yes/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /buy no/i })).toBeInTheDocument();
+  });
 });
