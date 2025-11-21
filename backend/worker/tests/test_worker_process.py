@@ -616,7 +616,7 @@ def test_maybe_generate_settlement_proof(monkeypatch):
                 circuit_hash="0xabc",
                 generated_at=datetime.now(UTC),
                 prover_version="test",
-                request_nonce=request.nonce,
+                request_id="req-1",
             )
 
     fake_prover = FakeProver()
@@ -630,7 +630,19 @@ def test_maybe_generate_settlement_proof(monkeypatch):
         outcomes=["Yes", "No"],
         outcome_prices=[0.6, 0.4],
     )
-    market_snapshot = {"event_id": "evt-proof", "market_address": None, "condition_id": "0xabc"}
+    market_snapshot = {
+        "event_id": "evt-proof",
+        "market_address": "0xabc",
+        "condition_id": "0xabc",
+        "commitments_root": "0xroot",
+        "tickets": [{"user": "0x1", "outcomeId": "0", "amount": "1", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
+        "pool_totals": ["1", "0"],
+        "total_escrow": "1",
+        "total_liability": "1",
+        "rake_bps": 0,
+        "winning_outcome_id": 0,
+        "circuit_hash": "0xabc",
+    }
     assert maybe_generate_settlement_proof(
         redis_client,
         market_snapshot=market_snapshot,

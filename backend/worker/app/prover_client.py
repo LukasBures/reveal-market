@@ -15,26 +15,28 @@ logger = logging.getLogger("reveal_market.worker.prover")
 
 @dataclass
 class SettlementProofRequest:
-    event_id: str
-    condition_id: str
-    total_pool: str
-    winning_pool: str
-    outcome_hash: str
-    market_address: str
-    nonce: str = field(default_factory=lambda: uuid4().hex)
-    circuit_version: int = 1
+    market_id: str
+    merkle_root: str
+    winning_outcome_id: int
+    pool_totals: list[str]
+    total_escrow: str
+    total_liability: str
+    rake_bps: int
+    circuit_hash: str
+    tickets: list[dict[str, Any]]
     metadata: dict[str, str] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
-            "event_id": self.event_id,
-            "condition_id": self.condition_id,
-            "total_pool": self.total_pool,
-            "winning_pool": self.winning_pool,
-            "outcome_hash": self.outcome_hash,
-            "market_address": self.market_address,
-            "nonce": self.nonce,
-            "circuit_version": self.circuit_version,
+            "marketId": self.market_id,
+            "merkleRoot": self.merkle_root,
+            "winningOutcomeId": str(self.winning_outcome_id),
+            "poolTotals": self.pool_totals,
+            "totalEscrow": self.total_escrow,
+            "totalLiability": self.total_liability,
+            "rakeBps": str(self.rake_bps),
+            "circuitHash": self.circuit_hash,
+            "tickets": self.tickets,
             "metadata": self.metadata,
         }
 
@@ -46,7 +48,7 @@ class SettlementProofResponse:
     circuit_hash: str
     generated_at: datetime
     prover_version: str | None
-    request_nonce: str
+    request_id: str
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> SettlementProofResponse:
@@ -60,7 +62,7 @@ class SettlementProofResponse:
             circuit_hash=str(payload.get("circuit_hash") or ""),
             generated_at=generated_at,
             prover_version=payload.get("prover_version"),
-            request_nonce=str(payload.get("request_nonce") or ""),
+            request_id=str(payload.get("request_id") or ""),
         )
 
     def to_json(self) -> dict[str, Any]:
@@ -70,7 +72,7 @@ class SettlementProofResponse:
             "circuit_hash": self.circuit_hash,
             "generated_at": self.generated_at.isoformat(),
             "prover_version": self.prover_version,
-            "request_nonce": self.request_nonce,
+            "request_id": self.request_id,
         }
 
 

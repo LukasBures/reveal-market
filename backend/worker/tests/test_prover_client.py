@@ -12,7 +12,7 @@ def test_prover_client_success():
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        assert payload["event_id"] == "evt-1"
+        assert payload["marketId"] == "0x123"
         return httpx.Response(
             status_code=200,
             json={
@@ -21,26 +21,29 @@ def test_prover_client_success():
                 "circuit_hash": "0x1234",
                 "generated_at": generated_at,
                 "prover_version": "test",
-                "request_nonce": payload["nonce"],
+                "request_id": "req-1",
             },
         )
 
     transport = httpx.MockTransport(handler)
     client = ProverClient("http://prover", timeout_seconds=2.0, transport=transport)
     request = SettlementProofRequest(
-        event_id="evt-1",
-        condition_id="0xabc",
-        total_pool="100",
-        winning_pool="50",
-        outcome_hash="0xbeef",
-        market_address="0x123",
+        market_id="0x123",
+        merkle_root="0xroot",
+        winning_outcome_id=0,
+        pool_totals=["70", "30"],
+        total_escrow="100",
+        total_liability="90",
+        rake_bps=100,
+        circuit_hash="0x1234",
+        tickets=[{"user": "0x1", "outcomeId": "0", "amount": "1", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
     )
     response = client.generate_settlement_proof(request)
     assert response.proof == "0xdeadbeef"
     assert response.public_signals == ["1", "2", "3"]
     assert response.circuit_hash == "0x1234"
     assert response.prover_version == "test"
-    assert response.request_nonce == request.nonce
+    assert response.request_id == "req-1"
 
 
 def test_prover_client_raises_on_error():
@@ -50,12 +53,15 @@ def test_prover_client_raises_on_error():
     transport = httpx.MockTransport(handler)
     client = ProverClient("http://prover", timeout_seconds=1.0, transport=transport)
     request = SettlementProofRequest(
-        event_id="evt-2",
-        condition_id="0xdef",
-        total_pool="10",
-        winning_pool="5",
-        outcome_hash="0xbeef",
-        market_address="0x456",
+        market_id="0x123",
+        merkle_root="0xroot",
+        winning_outcome_id=1,
+        pool_totals=["10", "0"],
+        total_escrow="10",
+        total_liability="10",
+        rake_bps=0,
+        circuit_hash="0x1234",
+        tickets=[{"user": "0x1", "outcomeId": "1", "amount": "10", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
     )
     try:
         client.generate_settlement_proof(request)

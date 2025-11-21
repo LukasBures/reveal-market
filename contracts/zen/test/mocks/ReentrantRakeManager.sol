@@ -14,7 +14,7 @@ contract ReentrantRakeManager is IRakeManager {
 
     RevealMarket public immutable MARKET;
     AttackMode public mode;
-    bytes32 public reenterOutcome;
+    uint256 public reenterOutcome;
     uint256 public reenterWinningPool;
     string public cancelReason;
 
@@ -24,9 +24,9 @@ contract ReentrantRakeManager is IRakeManager {
         MARKET = market_;
     }
 
-    function setAttackEmergency(bytes32 outcomeHash, uint256 winningPool) external {
+    function setAttackEmergency(uint256 outcomeId, uint256 winningPool) external {
         mode = AttackMode.EmergencySettle;
-        reenterOutcome = outcomeHash;
+        reenterOutcome = outcomeId;
         reenterWinningPool = winningPool;
         _entered = false;
     }
@@ -42,9 +42,9 @@ contract ReentrantRakeManager is IRakeManager {
         _entered = false;
     }
 
-    function triggerSettlement(bytes32 outcomeHash, uint256 declaredWinningPool) external {
+    function triggerSettlement(uint256 outcomeId, uint256 declaredWinningPool) external {
         _entered = false;
-        MARKET.emergencySettle(outcomeHash, declaredWinningPool);
+        MARKET.emergencySettle(outcomeId, declaredWinningPool);
     }
 
     function takeRake(address, uint256 amount, uint256) external override returns (uint256) {

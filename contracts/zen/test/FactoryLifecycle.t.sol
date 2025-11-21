@@ -17,7 +17,7 @@ contract FactoryLifecycleTest is Test {
     address private constant ORACLE = address(0xABCD);
     address private constant WINNER = address(0x1111);
     address private constant LOSER = address(0x2222);
-    bytes32 private constant OUTCOME_HASH = keccak256("HOME");
+    uint256 private constant OUTCOME_ID = 0;
     bytes32 private constant WIN_SALT = bytes32(uint256(555));
     bytes32 private constant LOSE_SALT = bytes32(uint256(777));
 
@@ -44,17 +44,15 @@ contract FactoryLifecycleTest is Test {
 
         // commit winner with coverage provided by float
         vm.deal(WINNER, 1 ether);
-        bytes32 winHash = _ticketHash(address(market), WINNER, 1 ether, WIN_SALT);
         vm.prank(WINNER);
-        market.commit{value: 1 ether}(winHash, 1 ether);
+        market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, WIN_SALT);
 
         // pause commits globally
         factory.setGlobalCommitPaused(true);
         vm.deal(LOSER, 1 ether);
-        bytes32 loseHash = _ticketHash(address(market), LOSER, 1 ether, LOSE_SALT);
         vm.prank(LOSER);
         vm.expectRevert(RevealMarket.CommitPaused.selector);
-        market.commit{value: 1 ether}(loseHash, 1 ether);
+        market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, LOSE_SALT);
         factory.setGlobalCommitPaused(false);
 
         // guardian pause claims
@@ -62,9 +60,9 @@ contract FactoryLifecycleTest is Test {
         assertTrue(market.claimsPaused());
 
         vm.warp(params.commitDeadline + 1);
-        market.lock(winHash, market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals(market);
         market.verifyAndSettle("", signals);
@@ -74,7 +72,7 @@ contract FactoryLifecycleTest is Test {
         uint256 winnerBalanceBefore = WINNER.balance;
         vm.prank(WINNER);
         bytes32[] memory proof = new bytes32[](0);
-        market.claim(0, "HOME", WIN_SALT, 0, proof);
+        market.claim(0, OUTCOME_ID, WIN_SALT, 0, proof);
         assertGt(WINNER.balance, winnerBalanceBefore);
 
         // guardian rotation
@@ -97,7 +95,7 @@ contract FactoryLifecycleTest is Test {
 
         signals[0] = uint256(market.commitmentsRoot());
         signals[1] = market.marketId();
-        signals[2] = uint256(OUTCOME_HASH);
+        signals[2] = OUTCOME_ID;
         signals[3] = totalEscrow;
         signals[4] = liability;
         signals[5] = rakeBps;
@@ -107,7 +105,4 @@ contract FactoryLifecycleTest is Test {
         signals[9] = uint256(market.circuitHash());
     }
 
-    function _ticketHash(address market, address user, uint256 amount, bytes32 salt) private pure returns (bytes32) {
-        return keccak256(abi.encodePacked(market, user, OUTCOME_HASH, amount, salt));
-    }
 }

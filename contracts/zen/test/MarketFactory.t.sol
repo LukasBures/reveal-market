@@ -69,10 +69,9 @@ contract MarketFactoryTest is Test {
         RevealMarket market = RevealMarket(payable(marketAddr));
 
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = keccak256(abi.encodePacked(USER, keccak256("TEAM"), bytes32(uint256(1))));
         vm.prank(USER);
         vm.expectRevert(MarketFactory.MarketLiabilityExceeded.selector);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(1)));
     }
 
     function testPerMarketSizeLimitEnforced() public {
@@ -85,15 +84,13 @@ contract MarketFactoryTest is Test {
         assertEq(factory.marketSizeLimit(marketAddr), params.maxMarketSize);
 
         vm.deal(USER, 2 ether);
-        bytes32 ticketHash = keccak256(abi.encodePacked(USER, keccak256("TEAM"), bytes32(uint256(5))));
         vm.prank(USER);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(5)));
 
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash2 = keccak256(abi.encodePacked(USER, keccak256("TEAM2"), bytes32(uint256(6))));
         vm.prank(USER);
         vm.expectRevert(RevealMarket.ExceedsMarketSize.selector);
-        market.commit{value: 1 ether}(ticketHash2, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(6)));
     }
 
     function testGlobalPausesPropagateToMarkets() public {
@@ -105,14 +102,13 @@ contract MarketFactoryTest is Test {
 
         factory.setGlobalCommitPaused(true);
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = keccak256(abi.encodePacked(USER, keccak256("TEAM"), bytes32(uint256(2))));
         vm.prank(USER);
         vm.expectRevert(RevealMarket.CommitPaused.selector);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(2)));
 
         factory.setGlobalCommitPaused(false);
         vm.prank(USER);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(2)));
     }
 
     function testSetRiskLimitsRevertsWhenExistingExposureTooHigh() public {
@@ -124,9 +120,8 @@ contract MarketFactoryTest is Test {
         vm.deal(address(this), 1 ether);
         market.fundMarket{value: 1 ether}(1 ether);
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = keccak256(abi.encodePacked(USER, keccak256("TEAM"), bytes32(uint256(3))));
         vm.prank(USER);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(3)));
 
         vm.expectRevert(MarketFactory.GlobalLiabilityExceeded.selector);
         factory.setRiskLimits(0, 0, 0.5 ether);

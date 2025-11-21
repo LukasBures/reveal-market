@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ROOT_DIR
 BUILD_DIR="$ROOT_DIR/build"
 PTAU_FILE="$BUILD_DIR/powersOfTau28_hez_final_12.ptau"
 PTAU_MIN_BYTES=1000000
@@ -110,6 +111,65 @@ printf "%s\n%s\n" "${CONTRIBUTOR_NAME}" "${CONTRIBUTOR_ENTROPY}" \
 echo "Exporting verification key..."
 run_snarkjs zkey export verificationkey "$BUILD_DIR/settlement_final.zkey" "$BUILD_DIR/settlement_vk.json"
 
+echo "Computing circuit hash and deployment config..."
+export ZKEY_PATH="$BUILD_DIR/settlement_final.zkey"
+export VK_PATH="$BUILD_DIR/settlement_vk.json"
+export CIRCUIT_NAME="reveal_settlement_v1"
+export CIRCUIT_VERSION="1.0.0"
+export HASH_OUT="$BUILD_DIR/settlement_hashes.json"
+if ! command -v cast >/dev/null 2>&1; then
+  echo "cast is required to compute keccak hashes; install Foundry (foundryup) and retry." >&2
+  exit 1
+fi
+pk_hex="$(xxd -p "${ZKEY_PATH}" | tr -d '\n')"
+vk_hex="$(xxd -p "${VK_PATH}" | tr -d '\n')"
+pk_hash="$(cast keccak "0x${pk_hex}")"
+vk_hash="$(cast keccak "0x${vk_hex}")"
+encoded="$(cast abi-encode 'f(string,string,bytes32,bytes32)' "${CIRCUIT_NAME}" "${CIRCUIT_VERSION}" "${pk_hash}" "${vk_hash}")"
+circuit_hash="$(cast keccak "${encoded}")"
+cat > "${HASH_OUT}" <<EOF
+{
+  "provingKeyHash": "${pk_hash}",
+  "verificationKeyHash": "${vk_hash}",
+  "circuitHash": "${circuit_hash}",
+  "circuitName": "${CIRCUIT_NAME}",
+  "circuitVersion": "${CIRCUIT_VERSION}"
+}
+EOF
+echo "Circuit hashes written to ${HASH_OUT}"
+
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["ROOT_DIR"])
+build = root / "build"
+vk_path = build / "settlement_vk.json"
+hash_path = build / "settlement_hashes.json"
+deploy_path = build / "settlement_deploy.json"
+
+with vk_path.open() as f:
+    vk = json.load(f)
+with hash_path.open() as f:
+    hashes = json.load(f)
+
+vk["circuitHash"] = hashes["circuitHash"]
+vk["expectedInputs"] = 10
+
+with deploy_path.open("w") as f:
+    json.dump(vk, f, indent=2)
+
+cache_dir = root / ".." / ".." / "contracts" / "cache"
+cache_dir.mkdir(parents=True, exist_ok=True)
+cache_path = cache_dir / "settlement-vk.json"
+cache_path.write_text(deploy_path.read_text())
+print(f"Wrote deploy config to {deploy_path} and {cache_path}")
+PY
+
 echo "Done."
 echo "  Proving key:      $BUILD_DIR/settlement_final.zkey"
 echo "  Verification key: $BUILD_DIR/settlement_vk.json"
+echo "  Deploy config:    $BUILD_DIR/settlement_deploy.json"
+# Cleanup helper source so Go unit tests ignore it.
+rm -f "$BUILD_DIR/hashcalc.go"

@@ -12,7 +12,6 @@ contract RevealMarketHandler is Test {
     RevealMarket public market;
     address public constant ORACLE = address(0xA11CE);
     address payable public constant TREASURY = payable(address(0xB0B));
-    bytes32[] private tickets;
 
     constructor() {
         RakeManager rakeManager = new RakeManager(address(this), TREASURY, 100);
@@ -35,21 +34,16 @@ contract RevealMarketHandler is Test {
 
     receive() external payable {}
 
-    function commit(bytes32 ticketHash, uint256 amount) external {
+    function commit(bytes32 salt, uint256 amount) external {
         amount = bound(amount, 0.01 ether, 1 ether);
         vm.deal(address(this), amount);
-        market.commit{value: amount}(ticketHash, amount);
-        tickets.push(ticketHash);
+        market.commit{value: amount}(0, amount, salt);
     }
 
     function lock() external {
         vm.warp(market.commitDeadline() + 1);
-        if (tickets.length == 0) return;
-        bytes32 root = tickets[0];
-        for (uint256 i = 1; i < tickets.length; ++i) {
-            root = keccak256(abi.encodePacked(root, tickets[i]));
-        }
-        market.lock(root, market.commitmentsCount());
+        if (market.commitmentsCount() == 0) return;
+        market.lock();
     }
 
     function setPauses(bool commitPaused, bool claimPaused) external {
@@ -77,9 +71,7 @@ contract RevealMarketInvariantTest is StdInvariant, Test {
         vm.prank(address(handler));
         m.setCommitPaused(true);
         vm.expectRevert(RevealMarket.CommitPaused.selector);
-        // casting literal "x" to bytes32 is safe because it is a single byte with no truncation
-        // forge-lint: disable-next-line(unsafe-typecast)
-        m.commit{value: 0.1 ether}(bytes32("x"), 0.1 ether);
+        m.commit{value: 0.1 ether}(0, 0.1 ether, bytes32("x"));
         vm.prank(address(handler));
         m.setCommitPaused(false);
     }

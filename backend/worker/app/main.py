@@ -1398,28 +1398,30 @@ def maybe_generate_settlement_proof(
             prover_enabled=settings.prover_enabled,
         )
         return False
-    normalized_condition = condition_id or market_snapshot.get("condition_id")
-    if not normalized_condition:
+    required_fields = ("market_address", "commitments_root", "tickets", "pool_totals", "total_escrow",
+                       "total_liability", "rake_bps", "winning_outcome_id", "circuit_hash")
+    missing = [field for field in required_fields if not market_snapshot.get(field)]
+    if missing:
         log_event(
             logger,
             logging.DEBUG,
-            event="worker.proof.no_condition",
-            message="skipping proof generation due to missing condition id",
+            event="worker.proof.incomplete",
+            message="skipping proof generation due to missing settlement fields",
+            missing=",".join(missing),
             event_id=market_snapshot.get("event_id"),
         )
         return False
+    normalized_market = _normalize_market_address(market_snapshot.get("market_address"))
     request = SettlementProofRequest(
-        event_id=str(market_snapshot.get("event_id") or "unknown"),
-        condition_id=str(normalized_condition).lower(),
-        total_pool=_derive_total_pool_value(market_payload),
-        winning_pool=_derive_winning_pool_value(market_payload),
-        outcome_hash=compute_outcome_hash(
-            str(market_snapshot.get("event_id") or "unknown"),
-            normalized_condition,
-            market_payload.outcomes or [],
-        ),
-        market_address=_normalize_market_address(market_snapshot.get("market_address")),
-        circuit_version=1,
+        market_id=normalized_market,
+        merkle_root=str(market_snapshot.get("commitments_root")),
+        winning_outcome_id=int(market_snapshot.get("winning_outcome_id")),
+        pool_totals=[str(x) for x in market_snapshot.get("pool_totals") or []],
+        total_escrow=str(market_snapshot.get("total_escrow")),
+        total_liability=str(market_snapshot.get("total_liability")),
+        rake_bps=int(market_snapshot.get("rake_bps")),
+        circuit_hash=str(market_snapshot.get("circuit_hash")),
+        tickets=list(market_snapshot.get("tickets") or []),
         metadata=_build_proof_metadata(market_payload),
     )
     log_event(
@@ -1427,8 +1429,8 @@ def maybe_generate_settlement_proof(
         logging.DEBUG,
         event="worker.proof.request_ready",
         message="constructed settlement proof request",
-        event_id=request.event_id,
-        condition_id=request.condition_id,
+        market_id=request.market_id,
+        merkle_root=request.merkle_root,
     )
     try:
         response = PROVER_CLIENT.generate_settlement_proof(request)

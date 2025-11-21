@@ -24,7 +24,7 @@ contract RevealMarketTest is Test {
     address private constant USER = address(0xCAFE);
     address private constant LOSER = address(0xD00D);
 
-    bytes32 private constant OUTCOME_HASH = keccak256("TEAM_A");
+    uint256 private constant OUTCOME_ID = 0;
     bytes32 private constant WIN_SALT = bytes32(uint256(1));
     uint256 private commitDeadline;
     uint256 private revealDeadline;
@@ -54,10 +54,9 @@ contract RevealMarketTest is Test {
 
     function testCommitRevertsWhenCoverageInsufficient() public {
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = _ticketHash(USER, 1 ether, WIN_SALT);
         vm.prank(USER);
         vm.expectRevert();
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, WIN_SALT);
     }
 
     function testCommitSucceedsWithFloat() public {
@@ -66,9 +65,8 @@ contract RevealMarketTest is Test {
         assertEq(market.houseFloat(), 2 ether);
 
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = _ticketHash(USER, 1 ether, WIN_SALT);
         vm.prank(USER);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(0, 1 ether, WIN_SALT);
         assertEq(market.userEscrow(), 1 ether);
         assertGt(market.maxLiability(), 0);
     }
@@ -88,9 +86,9 @@ contract RevealMarketTest is Test {
         _prepareMarketWithFloat();
 
         vm.warp(commitDeadline + 1);
-        market.lock(_ticketHash(USER, 1 ether, WIN_SALT), market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
         uint256 treasuryBefore = TREASURY.balance;
@@ -107,7 +105,7 @@ contract RevealMarketTest is Test {
         uint256 winnerBalanceBefore = USER.balance;
         vm.prank(USER);
         bytes32[] memory proof = new bytes32[](0);
-        market.claim(0, "TEAM_A", WIN_SALT, 0, proof);
+        market.claim(0, 0, WIN_SALT, 0, proof);
         assertEq(USER.balance, winnerBalanceBefore + expectedLiability);
         assertLt(market.houseFloat(), beforeFloat);
     }
@@ -115,9 +113,9 @@ contract RevealMarketTest is Test {
     function testVerifyAndSettleRevertsWhenFloatUsedExceedsBalance() public {
         _prepareMarketWithFloat();
         vm.warp(commitDeadline + 1);
-        market.lock(_ticketHash(USER, 1 ether, WIN_SALT), market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
         signals[4] = market.houseFloat() + market.userEscrow() + 1;
@@ -130,9 +128,9 @@ contract RevealMarketTest is Test {
     function testVerifyAndSettleRevertsOnRakeMismatch() public {
         _prepareMarketWithFloat();
         vm.warp(commitDeadline + 1);
-        market.lock(_ticketHash(USER, 1 ether, WIN_SALT), market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
         signals[5] = rakeManager.rakeBps() + 1;
@@ -149,16 +147,16 @@ contract RevealMarketTest is Test {
         _prepareMarketWithFloat();
 
         vm.warp(commitDeadline + 1);
-        market.lock(_ticketHash(USER, 1 ether, WIN_SALT), market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
         market.verifyAndSettle("", signals);
 
         vm.prank(USER);
         bytes32[] memory proof = new bytes32[](0);
-        market.claim(0, "TEAM_A", WIN_SALT, 0, proof);
+        market.claim(0, OUTCOME_ID, WIN_SALT, 0, proof);
         assertEq(market.paidOut(), market.totalLiability());
 
         uint256 treasuryBefore = TREASURY.balance;
@@ -172,19 +170,18 @@ contract RevealMarketTest is Test {
         vm.deal(address(this), 4 ether);
         market.fundMarket{value: 4 ether}(4 ether);
         vm.deal(USER, 2 ether);
-        bytes32 ticketHash = _ticketHash(USER, 2 ether, WIN_SALT);
         vm.prank(USER);
         vm.expectRevert(RevealMarket.ExceedsMarketSize.selector);
-        market.commit{value: 2 ether}(ticketHash, 2 ether);
+        market.commit{value: 2 ether}(OUTCOME_ID, 2 ether, WIN_SALT);
     }
 
     function testCommitmentRootMustMatchProof() public {
         _prepareMarketWithFloat();
 
         vm.warp(commitDeadline + 1);
-        market.lock(_ticketHash(USER, 1 ether, WIN_SALT), market.commitmentsCount());
+        market.lock();
         vm.prank(ORACLE);
-        market.postResult(OUTCOME_HASH);
+        market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
         signals[0] = uint256(keccak256("bad-root"));
@@ -223,9 +220,8 @@ contract RevealMarketTest is Test {
         vm.deal(address(this), 3 ether);
         market.fundMarket{value: 2 ether}(2 ether);
         vm.deal(USER, 1 ether);
-        bytes32 ticketHash = _ticketHash(USER, 1 ether, WIN_SALT);
         vm.prank(USER);
-        market.commit{value: 1 ether}(ticketHash, 1 ether);
+        market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, WIN_SALT);
     }
 
     function _buildSignals() private returns (uint256[10] memory signals) {
@@ -241,7 +237,7 @@ contract RevealMarketTest is Test {
 
         signals[0] = uint256(market.commitmentsRoot());
         signals[1] = market.marketId();
-        signals[2] = uint256(OUTCOME_HASH);
+        signals[2] = OUTCOME_ID;
         signals[3] = totalEscrow;
         signals[4] = liability;
         signals[5] = rakeBps;
@@ -251,7 +247,4 @@ contract RevealMarketTest is Test {
         signals[9] = uint256(market.circuitHash());
     }
 
-    function _ticketHash(address user, uint256 amount, bytes32 salt) private view returns (bytes32) {
-        return keccak256(abi.encodePacked(address(market), user, OUTCOME_HASH, amount, salt));
-    }
 }
