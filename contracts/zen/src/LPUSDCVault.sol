@@ -11,7 +11,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract LPUSDCVault is Ownable2Step {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable usdc;
+    IERC20 public immutable USDC;
     uint256 public totalShares;
     uint256 public totalAssets;
     uint256 public borrowed;
@@ -28,7 +28,7 @@ contract LPUSDCVault is Ownable2Step {
 
     constructor(address initialOwner, IERC20 usdc_) Ownable(initialOwner) {
         if (initialOwner == address(0) || address(usdc_) == address(0)) revert ZeroAddress();
-        usdc = usdc_;
+        USDC = usdc_;
     }
 
     /// @notice LPs deposit USDC and receive proportional vault shares.
@@ -38,7 +38,7 @@ contract LPUSDCVault is Ownable2Step {
         balanceOf[msg.sender] += shares;
         totalShares += shares;
         totalAssets += assets;
-        usdc.safeTransferFrom(msg.sender, address(this), assets);
+        USDC.safeTransferFrom(msg.sender, address(this), assets);
         emit Deposit(msg.sender, assets, shares);
     }
 
@@ -50,7 +50,7 @@ contract LPUSDCVault is Ownable2Step {
         balanceOf[msg.sender] -= shares;
         totalShares -= shares;
         totalAssets -= assets;
-        usdc.safeTransfer(msg.sender, assets);
+        USDC.safeTransfer(msg.sender, assets);
         emit Withdraw(msg.sender, assets, shares);
     }
 
@@ -59,7 +59,7 @@ contract LPUSDCVault is Ownable2Step {
         if (amount == 0 || to == address(0)) revert InvalidAmount();
         if (amount > _availableLiquidity()) revert InsufficientLiquidity();
         borrowed += amount;
-        usdc.safeTransfer(to, amount);
+        USDC.safeTransfer(to, amount);
         emit Borrow(to, amount, utilization());
         return amount;
     }
@@ -67,7 +67,7 @@ contract LPUSDCVault is Ownable2Step {
     /// @notice Repay borrowed USDC back into the vault.
     function repay(uint256 amount) external returns (uint256 applied) {
         if (amount == 0) revert InvalidAmount();
-        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        USDC.safeTransferFrom(msg.sender, address(this), amount);
         applied = amount > borrowed ? borrowed : amount;
         borrowed -= applied;
         if (amount > applied) {
@@ -84,7 +84,7 @@ contract LPUSDCVault is Ownable2Step {
     }
 
     function _availableLiquidity() internal view returns (uint256) {
-        uint256 onHand = usdc.balanceOf(address(this));
+        uint256 onHand = USDC.balanceOf(address(this));
         if (borrowed > onHand) return 0;
         return onHand - borrowed;
     }

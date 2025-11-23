@@ -5,6 +5,7 @@
 !backend/
 !frontend/
 !hedger/
+!price-streamer/
 !shared/
 !pyproject.toml
 !uv.lock
