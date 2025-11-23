@@ -86,6 +86,58 @@ class Resolution(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class Commitment(Base):
+    __tablename__ = "commitments"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    market_id = Column(Integer, nullable=False, index=True)
+    user_address = Column(String(64), nullable=False)
+    outcome_id = Column(Integer, nullable=False)
+    amount_wei = Column(BigInteger, nullable=False)
+    salt = Column(String(66), nullable=True)
+    ticket_hash = Column(String(66), nullable=False)
+    leaf = Column(String(66), nullable=False)
+    leaf_index = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitmentMerklePath(Base):
+    __tablename__ = "commitment_merkle_paths"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    commitment_id = Column(BigInteger, nullable=False, index=True)
+    level = Column(Integer, nullable=False)
+    sibling_hash = Column(String(66), nullable=False)
+
+
+class SettlementProofStatus(str, Enum):
+    NONE = "none"
+    REQUESTED = "requested"
+    GENERATED = "generated"
+    FAILED = "failed"
+
+
+class Settlement(Base):
+    __tablename__ = "settlements"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    market_id = Column(Integer, nullable=False, unique=True, index=True)
+    merkle_root = Column(String(66), nullable=True)
+    commitments_count = Column(Integer, nullable=True)
+    pool_total_yes = Column(BigInteger, nullable=True)
+    pool_total_no = Column(BigInteger, nullable=True)
+    total_escrow = Column(BigInteger, nullable=True)
+    total_liability = Column(BigInteger, nullable=True)
+    rake_bps = Column(Integer, nullable=True)
+    winning_outcome_id = Column(Integer, nullable=True)
+    circuit_hash = Column(String(66), nullable=True)
+    proof_status = Column(String(32), nullable=False, default=SettlementProofStatus.NONE.value)
+    proof_request_id = Column(String(128), nullable=True)
+    proof_hash = Column(String(66), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class SchemaVersion(Base):
     __tablename__ = "schema_versions"
 

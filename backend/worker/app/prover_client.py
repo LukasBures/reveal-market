@@ -94,11 +94,14 @@ class ProverClient:
         self.timeout_seconds = timeout_seconds
         self._transport = transport
 
-    def generate_settlement_proof(self, request: SettlementProofRequest) -> SettlementProofResponse:
+    def generate_settlement_proof(self, request: SettlementProofRequest | dict[str, Any]) -> SettlementProofResponse:
         """Submit a proof job and synchronously retrieve the receipt."""
 
         url = f"{self.base_url}/api/v1/proofs/settlement"
-        payload = request.to_payload()
+        if isinstance(request, SettlementProofRequest):
+            payload = request.to_payload()
+        else:
+            payload = request
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
                 response = client.post(url, json=payload)
