@@ -19,6 +19,12 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging("reveal_market.hedger", settings.log_level)
     logger = logging.getLogger("reveal_market.hedger")
+    sanitized_config = {
+        k: v
+        for k, v in settings.model_dump().items()
+        if not any(secret in k for secret in ["key", "private", "secret", "password"])
+    }
+    log_event(logger, logging.INFO, event="service.config", message="hedger configuration", config=sanitized_config)
 
     app = FastAPI(title="Reveal Hedger", version="0.1.0")
     app.add_middleware(

@@ -48,13 +48,19 @@ except ImportError:  # pragma: no cover - redis is an optional dependency during
 setup_logging("reveal_market.api")
 
 settings = get_settings()
+_sanitized_config = {
+    k: v
+    for k, v in settings.model_dump().items()
+    if not any(secret in k for secret in ["key", "private", "secret", "password"])
+}
+logger = logging.getLogger("reveal_market.api")
+logger.info("service configuration", extra={"event": "service.config", "config": _sanitized_config})
 
 
 def _current_settings() -> Settings:
     return settings
 
 
-logger = logging.getLogger("reveal_market.api")
 instrumentator = Instrumentator()
 cache_client: Redis | None = None
 _cache_lock = Lock()

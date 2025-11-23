@@ -42,19 +42,12 @@ export function MarketDetailMetadata({ market }: Props) {
   const items: MetadataItem[] = [
     { label: "UMA status", value: market.umaStatus ?? "pending" },
     { label: "Market address", value: market.marketAddress, mono: true },
-    { label: "Event ID", value: market.eventId },
   ];
   if (market.factory) {
     items.push({ label: "Factory address", value: market.factory, mono: true });
   }
   if (sourceSlug) {
     items.push({ label: "Source slug", value: sourceSlug, mono: true });
-  }
-  if (clobPairId) {
-    items.push({ label: "CLOB pair ID", value: clobPairId, mono: true });
-  }
-  if (formattedTokens) {
-    items.push({ label: "Order book tokens", value: formattedTokens, mono: true });
   }
   if (feeLabel) {
     items.push({ label: "Fee (bps)", value: feeLabel });

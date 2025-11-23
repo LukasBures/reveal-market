@@ -46,6 +46,12 @@ def create_app() -> FastAPI:
     state = StreamState(settings)
     streamer = PriceStreamer(state, settings)
     heartbeat_stop = start_heartbeat(logger, "price_streamer", interval_seconds=60)
+    sanitized_config = {
+        k: v
+        for k, v in settings.model_dump().items()
+        if not any(secret in k for secret in ["key", "private", "secret", "password"])
+    }
+    logger.info("service configuration", extra={"event": "service.config", "config": sanitized_config})
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -35,8 +35,9 @@ const displayFont = localFont({
 const SITE_URL = absoluteUrl("/");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const API_ORIGIN = (() => {
+  const candidate = process.env.NEXT_PUBLIC_API_BASE_URL ?? serverEnv.apiBaseUrl;
   try {
-    return new URL(serverEnv.apiBaseUrl).origin;
+    return new URL(candidate).origin;
   } catch {
     return null;
   }

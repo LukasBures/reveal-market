@@ -103,6 +103,12 @@ setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
+_sanitized_config = {
+    k: v
+    for k, v in settings.model_dump().items()
+    if not any(secret in k for secret in ["key", "private", "secret", "password"])
+}
+logger.info("service configuration", extra={"event": "service.config", "config": _sanitized_config})
 PROVER_CLIENT: ProverClient | None = None
 
 

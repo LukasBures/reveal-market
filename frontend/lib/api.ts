@@ -373,8 +373,6 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
         null,
       slug: payload.slug ?? payload.extra_data?.gamma?.slug,
       factory: payload.factory ?? undefined,
-      conditionId: payload.condition_id ?? undefined,
-      questionId: payload.question_id ?? undefined,
       umaStatus: payload.uma_resolution_status ?? undefined,
       marketAddress: payload.market_address ?? undefined,
       rakeBps: payload.rake_bps ?? undefined,
