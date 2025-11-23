@@ -268,6 +268,8 @@ contract RevealMarket is ReentrancyGuard {
         emit MaxLiabilityUpdated(newLiability);
 
         bytes32 ticketHash = _hashCommit(msg.sender, outcomeId, amount, salt);
+        // Keccak is the canonical hash for circuit + off-chain builder compatibility.
+        // forge-lint: disable-next-line(asm-keccak256)
         bytes32 leaf = keccak256(abi.encodePacked(ticketHash));
         _commitments.push(leaf);
         userTickets[msg.sender].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false}));
@@ -393,6 +395,8 @@ contract RevealMarket is ReentrancyGuard {
         if (reconstructed != ticket.commitHash) revert TicketLoses();
         if (!commitmentExists[reconstructed]) revert CommitmentNotFound();
         if (winningCommitmentsRoot == bytes32(0)) revert InvalidProofLayout();
+        // Keccak kept for deterministic leaf reconstruction matching circuit/off-chain tree.
+        // forge-lint: disable-next-line(asm-keccak256)
         bytes32 leaf = keccak256(abi.encodePacked(reconstructed));
         if (commitmentsCount == 1) {
             if (merkleProof.length != 0 || leaf != winningCommitmentsRoot) revert InvalidMerkleProof();

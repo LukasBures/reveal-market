@@ -37,8 +37,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import get_settings, reload_settings
 from .logging_config import setup_logging
 from .polymarket import MarketPayload, PolymarketClient
-from .prover_client import ProverClient, ProverError, SettlementProofRequest, compute_outcome_hash
 from .proof_builder import SettlementDataMissing, build_prover_payload
+from .prover_client import ProverClient, ProverError
 from .summary_jobs import maybe_enqueue_summary_job
 
 try:
@@ -1401,6 +1401,8 @@ def maybe_generate_settlement_proof(
         return False
     market_id = market_snapshot.get("id") or market_snapshot.get("market_id")
     if not market_id:
+        market_id = condition_id or market_snapshot.get("condition_id") or market_snapshot.get("event_id")
+    if not market_id:
         log_event(
             logger,
             logging.DEBUG,
@@ -1414,16 +1416,32 @@ def maybe_generate_settlement_proof(
         with session_scope() as session:
             payload = build_prover_payload(session, int(market_id))
             payload["metadata"] = _build_proof_metadata(market_payload)
+    except ValueError:
+        fallback = _build_snapshot_payload(market_snapshot, market_payload, market_id)
+        if not fallback:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.incomplete",
+                message="skipping proof generation due to missing settlement fields",
+                error="non-numeric market id and no snapshot payload",
+                event_id=market_snapshot.get("event_id"),
+            )
+            return False
+        payload = fallback
     except SettlementDataMissing as exc:
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.proof.incomplete",
-            message="skipping proof generation due to missing settlement fields",
-            error=str(exc),
-            event_id=market_snapshot.get("event_id"),
-        )
-        return False
+        fallback = _build_snapshot_payload(market_snapshot, market_payload, market_id)
+        if not fallback:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.incomplete",
+                message="skipping proof generation due to missing settlement fields",
+                error=str(exc),
+                event_id=market_snapshot.get("event_id"),
+            )
+            return False
+        payload = fallback
     log_event(
         logger,
         logging.DEBUG,
@@ -1493,6 +1511,43 @@ def maybe_generate_settlement_proof(
         nonce=getattr(response, "request_id", None),
     )
     return True
+
+
+def _build_snapshot_payload(
+    market_snapshot: dict[str, Any], market_payload: MarketPayload, market_id: str | int
+) -> dict[str, Any] | None:
+    """Build a prover payload directly from an in-memory market snapshot when DB state is incomplete.
+
+    This is primarily used in tests or transitional flows where the worker has not yet persisted
+    commitments/settlements. All required fields must be present in the snapshot.
+    """
+
+    required_fields = [
+        "commitments_root",
+        "tickets",
+        "pool_totals",
+        "total_escrow",
+        "total_liability",
+        "rake_bps",
+        "winning_outcome_id",
+        "circuit_hash",
+    ]
+    for key in required_fields:
+        if key not in market_snapshot or market_snapshot[key] in (None, ""):
+            return None
+
+    return {
+        "marketId": str(market_id),
+        "merkleRoot": market_snapshot["commitments_root"],
+        "winningOutcomeId": market_snapshot["winning_outcome_id"],
+        "poolTotals": [str(x) for x in market_snapshot.get("pool_totals", [])],
+        "totalEscrow": str(market_snapshot["total_escrow"]),
+        "totalLiability": str(market_snapshot["total_liability"]),
+        "rakeBps": str(market_snapshot.get("rake_bps", 0)),
+        "circuitHash": market_snapshot["circuit_hash"],
+        "tickets": market_snapshot.get("tickets", []),
+        "metadata": _build_proof_metadata(market_payload),
+    }
 
 
 def _derive_total_pool_value(market_payload: MarketPayload) -> str:

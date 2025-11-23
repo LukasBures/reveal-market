@@ -90,11 +90,11 @@ When running `npm run build`, `frontend/run_tests.sh`, or `./run_tests.sh`, ensu
 
 The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no longer runs `npm install` or `npm run dev` on container start. Re-run `./run_local.sh` after frontend changes or use `cd frontend && npm run dev` for hot reload.
 
-### Groth16 prover setup
+### Groth16 prover setup / current circuit status
 
-- Run `bash prover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `prover/circuits/build`. The prover container mounts those paths read-only; without them it refuses to start.
+- Run `bash prover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `prover/circuits/build`. The script now computes proving/verifying key hashes, derives the 10-signal circuit hash, and writes deploy config to `contracts/cache/settlement-vk.json` / `prover/circuits/build/settlement_deploy.json`. The prover container mounts those paths read-only; without them it refuses to start.
 - Both `./run_local.sh` and `./run_prod.sh` call a built-in artifact check before launching Docker. If the files are missing, `run_prod.sh` automatically executes `generate_keys.sh`; set `SKIP_PROVER_CHECK=true` only when you have already mounted known-good artifacts.
-- The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. After the stack is up, hit `/healthz` or send a sample payload (see `prover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed.
+- The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. After the stack is up, hit `/healthz` or send a sample payload (see `prover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed. Public signals are fixed at 10: `[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, commitmentsCount, circuitHash]`.
 
 ### Live market ingestion
 
@@ -102,6 +102,7 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 - Tune Gamma rate limiting via `RM_POLYMARKET_RATE_LIMIT_REQUESTS` / `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` when running multiple workers so you stay under Polymarket’s quotas.
 - The worker automatically retries failed Polymarket syncs with exponential backoff (configure `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, and `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` if you need longer windows during outages).
 - Keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker auto-applies schema updates (e.g., the `markets.tags` column) before syncing.
+- Commitments/settlements schema and Merkle/prover payload builders now exist in the worker; wire your on-chain ingestion to persist commitments (ticket hash/leaf/amount/outcome) and settlement aggregates (root, pools, liability, rake, winning outcome, circuit hash) so proof generation can run end-to-end.
 - After changing env, restart the worker (`./run_local.sh worker` or `docker compose restart worker`) so it repulls the Gamma feed, writes fresh rows to Postgres, and refreshes Redis caches the frontend reads.
 - `/markets` search and the `/markets/suggest` endpoint are backed by a Postgres full-text index (`markets_search_vector_idx`). Run `alembic upgrade head` (or restart the worker/API containers) whenever new migrations land so the index stays current. Client-side search suggestions now flow through a Next.js API route that reuses this backend endpoint, so missing indexes immediately show up in the UI.
 - The stack never seeds mock data—every response flows from Polymarket via the worker. Keep the worker running (Docker restarts it automatically) so it continues syncing markets into Postgres/Redis.

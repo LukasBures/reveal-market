@@ -635,7 +635,18 @@ def test_maybe_generate_settlement_proof(monkeypatch):
         "market_address": "0xabc",
         "condition_id": "0xabc",
         "commitments_root": "0xroot",
-        "tickets": [{"user": "0x1", "outcomeId": "0", "amount": "1", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
+        "tickets": [
+            {
+                "user": "0x1",
+                "outcomeId": "0",
+                "amount": "1",
+                "salt": "0x1",
+                "ticketHash": "0x2",
+                "leaf": "0x2",
+                "merklePath": [],
+                "merkleIndex": 0,
+            }
+        ],
         "pool_totals": ["1", "0"],
         "total_escrow": "1",
         "total_liability": "1",

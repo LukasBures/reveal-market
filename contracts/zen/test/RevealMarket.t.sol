@@ -224,7 +224,7 @@ contract RevealMarketTest is Test {
         market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, WIN_SALT);
     }
 
-    function _buildSignals() private returns (uint256[10] memory signals) {
+    function _buildSignals() private view returns (uint256[10] memory signals) {
         uint256 totalEscrow = market.userEscrow();
         uint256 rakeBps = rakeManager.rakeBps();
         uint256 rakeAmount = (totalEscrow * rakeBps) / 10_000;

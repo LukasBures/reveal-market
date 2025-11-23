@@ -34,3 +34,8 @@ packages = ["app"]
 [build-system]
 requires = ["hatchling>=1.24.0"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "sqlalchemy (>=2.0.44,<3.0.0)"
+]

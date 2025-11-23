@@ -36,7 +36,18 @@ def test_prover_client_success():
         total_liability="90",
         rake_bps=100,
         circuit_hash="0x1234",
-        tickets=[{"user": "0x1", "outcomeId": "0", "amount": "1", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
+        tickets=[
+            {
+                "user": "0x1",
+                "outcomeId": "0",
+                "amount": "1",
+                "salt": "0x1",
+                "ticketHash": "0x2",
+                "leaf": "0x2",
+                "merklePath": [],
+                "merkleIndex": 0,
+            }
+        ],
     )
     response = client.generate_settlement_proof(request)
     assert response.proof == "0xdeadbeef"
@@ -61,7 +72,18 @@ def test_prover_client_raises_on_error():
         total_liability="10",
         rake_bps=0,
         circuit_hash="0x1234",
-        tickets=[{"user": "0x1", "outcomeId": "1", "amount": "10", "salt": "0x1", "ticketHash": "0x2", "leaf": "0x2", "merklePath": [], "merkleIndex": 0}],
+        tickets=[
+            {
+                "user": "0x1",
+                "outcomeId": "1",
+                "amount": "10",
+                "salt": "0x1",
+                "ticketHash": "0x2",
+                "leaf": "0x2",
+                "merklePath": [],
+                "merkleIndex": 0,
+            }
+        ],
     )
     try:
         client.generate_settlement_proof(request)

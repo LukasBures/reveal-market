@@ -3,7 +3,7 @@
 This doc lists the minimum cross-team work that must land before we can call the stack “MVP ready.” Anything not referenced here can slip to the next milestone.
 
 ## Snapshot priorities (Nov 2025)
-- **Backend** – Provenance + settlement data must be stored locally so `/markets` always returns auditable narratives and payout history.
+- **Backend** – Provenance + settlement data must be stored locally so `/markets` always returns auditable narratives and payout history. (Commitment/settlement schema added; Merkle/payload builder wired; ingestion/backfill still needed.)
 - **Contracts** – Groth16 proofs need production keys, rotation tooling, and replay persistence so on-chain receipts are defensible.
 - **Frontend** – Investors must see real data everywhere (charts, search, proofs) and be able to export diligence artifacts without leaving the site.
 - **Proover** – Operators need artifact validation and Prometheus-grade telemetry so zk receipts remain trustworthy in production.
@@ -12,12 +12,12 @@ See the service-specific TODO files for deeper acceptance criteria.
 
 ### Backend MVP gaps
 1. **AI summary ledger** – Persist every AI summary (model, prompt hash, context pointers, timestamps) and expose the history via `/markets/{event}` so diligence teams can audit narrative changes.
-2. **Persistent resolution ledger** – Store resolution payloads (block #, tx hash, payout vector, oracle source) inside Postgres + Redis, and return them from `/markets` + `/proofs` without re-querying external APIs.
-3. **On-chain mirroring & automation** – Stream MarketFactory events (create/rake/guardian updates) into Postgres and, when configured, queue settlement transactions once on-chain payouts finalize so the backend never drifts from contracts.
+2. **Persistent resolution ledger** – Store resolution payloads (block #, tx hash, payout vector, oracle source) inside Postgres + Redis, and return them from `/markets` + `/proofs` without re-querying external APIs. (Commitments/settlements tables exist; Merkle/payload builder implemented; must ingest real on-chain commits/resolutions and backfill Merkle paths/pool totals/liabilities/rake/winning outcomes/circuit hash.)
+3. **On-chain mirroring & automation** – Stream MarketFactory events (create/rake/guardian updates) into Postgres and, when configured, queue settlement transactions once on-chain payouts finalize so the backend never drifts from contracts. (Proof generation path now expects persisted settlement state; hook ingestion + prover triggering.)
 
 ### Contracts MVP gaps
-1. **Production Groth16 rollout** – Finalize audited proving/verifying keys, emit hashes on-chain, and ship rotation scripts/runbooks so every proof can be traced back to a known circuit version.
-2. **Proof replay persistence** – Emit/store `proofNonce` + settlement receipts (backend + events) so auditors can prove no proof was replayed or tampered with.
+1. **Production Groth16 rollout** – Finalize audited proving/verifying keys, emit hashes on-chain, and ship rotation scripts/runbooks so every proof can be traced back to a known circuit version. (10-signal circuit regenerated; `contracts/cache/settlement-vk.json` updated with circuitHash; deploy scripts ready—need live deploy + artifacts/addresses.)
+2. **Proof replay persistence** – Emit/store `proofNonce` + settlement receipts (backend + events) so auditors can prove no proof was replayed or tampered with. (Backend settlements table has proof status/hash/request id fields; ingestion path to persist hashes still pending.)
 3. **Guardian/ownership operations** – Document and test the `Ownable2Step` + guardian transfer process (including manifest ingestion) so we can rotate keys safely before onboarding partner capital.
 
 ### Frontend MVP gaps
@@ -26,7 +26,7 @@ See the service-specific TODO files for deeper acceptance criteria.
 3. **Proof & diligence surfacing** – Add filters (status, verifier, market) + CSV export on `/proofs`, and include a visible trust CTA so investors can self-serve receipts.
 
 ### Proover MVP gaps
-1. **Artifact validation command** – Provide a CLI/env check that verifies `settlement_final.zkey` and `settlement_js` before the prover boots outside Docker so operators don’t accidentally run with stale artifacts.
+1. **Artifact validation command** – Provide a CLI/env check that verifies `settlement_final.zkey` and `settlement_js` before the prover boots outside Docker so operators don’t accidentally run with stale artifacts. (Keygen regenerates circuitHash/pk/vk hashes; need CLI/health integration.)
 2. **Prometheus metrics** – Expose latency/concurrency counters via `/metrics` (histograms + gauges) so ops can alert on proof slowdowns and stalled queues.
 
 Keep scope tight—shipping these items unblocks the MVP announcement.

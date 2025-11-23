@@ -17,6 +17,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Core market tables
     op.create_table(
         "markets",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
@@ -95,6 +96,58 @@ def upgrade() -> None:
     )
     op.create_index("ix_resolutions_block_number", "resolutions", ["block_number"])
 
+    # Commitments and settlement data for zk-proof generation
+    op.create_table(
+        "commitments",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=False),
+        sa.Column("user_address", sa.String(length=64), nullable=False),
+        sa.Column("outcome_id", sa.Integer(), nullable=False),
+        sa.Column("amount_wei", sa.BigInteger(), nullable=False),
+        sa.Column("salt", sa.String(length=66), nullable=True),
+        sa.Column("ticket_hash", sa.String(length=66), nullable=False),
+        sa.Column("leaf", sa.String(length=66), nullable=False),
+        sa.Column("leaf_index", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_commitments_market_id", "commitments", ["market_id"])
+    op.create_index("ix_commitments_market_user", "commitments", ["market_id", "user_address"])
+
+    op.create_table(
+        "commitment_merkle_paths",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("commitment_id", sa.BigInteger(), nullable=False),
+        sa.Column("level", sa.Integer(), nullable=False),
+        sa.Column("sibling_hash", sa.String(length=66), nullable=False),
+    )
+    op.create_index(
+        "ix_commitment_merkle_paths_commitment_level",
+        "commitment_merkle_paths",
+        ["commitment_id", "level"],
+    )
+
+    op.create_table(
+        "settlements",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=False, unique=True),
+        sa.Column("merkle_root", sa.String(length=66), nullable=True),
+        sa.Column("commitments_count", sa.Integer(), nullable=True),
+        sa.Column("pool_total_yes", sa.BigInteger(), nullable=True),
+        sa.Column("pool_total_no", sa.BigInteger(), nullable=True),
+        sa.Column("total_escrow", sa.BigInteger(), nullable=True),
+        sa.Column("total_liability", sa.BigInteger(), nullable=True),
+        sa.Column("rake_bps", sa.Integer(), nullable=True),
+        sa.Column("winning_outcome_id", sa.Integer(), nullable=True),
+        sa.Column("circuit_hash", sa.String(length=66), nullable=True),
+        sa.Column("proof_status", sa.String(length=32), nullable=False, server_default="none"),
+        sa.Column("proof_request_id", sa.String(length=128), nullable=True),
+        sa.Column("proof_hash", sa.String(length=66), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_settlements_market_id", "settlements", ["market_id"])
+    op.create_index("ix_settlements_proof_status", "settlements", ["proof_status"])
+
     op.create_table(
         "schema_versions",
         sa.Column("key", sa.String(length=64), primary_key=True, nullable=False),
@@ -104,6 +157,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_settlements_proof_status", table_name="settlements")
+    op.drop_index("ix_settlements_market_id", table_name="settlements")
+    op.drop_table("settlements")
+    op.drop_index("ix_commitment_merkle_paths_commitment_level", table_name="commitment_merkle_paths")
+    op.drop_table("commitment_merkle_paths")
+    op.drop_index("ix_commitments_market_user", table_name="commitments")
+    op.drop_index("ix_commitments_market_id", table_name="commitments")
+    op.drop_table("commitments")
     op.drop_table("schema_versions")
     op.drop_index("ix_resolutions_block_number", table_name="resolutions")
     op.drop_table("resolutions")

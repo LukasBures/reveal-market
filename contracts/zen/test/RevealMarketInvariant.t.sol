@@ -71,7 +71,8 @@ contract RevealMarketInvariantTest is StdInvariant, Test {
         vm.prank(address(handler));
         m.setCommitPaused(true);
         vm.expectRevert(RevealMarket.CommitPaused.selector);
-        m.commit{value: 0.1 ether}(0, 0.1 ether, bytes32("x"));
+        bytes32 salt = keccak256("x"); // deterministic 32-byte salt without truncation
+        m.commit{value: 0.1 ether}(0, 0.1 ether, salt);
         vm.prank(address(handler));
         m.setCommitPaused(false);
     }

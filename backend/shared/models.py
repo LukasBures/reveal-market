@@ -89,7 +89,7 @@ class Resolution(Base):
 class Commitment(Base):
     __tablename__ = "commitments"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     market_id = Column(Integer, nullable=False, index=True)
     user_address = Column(String(64), nullable=False)
     outcome_id = Column(Integer, nullable=False)
@@ -104,7 +104,7 @@ class Commitment(Base):
 class CommitmentMerklePath(Base):
     __tablename__ = "commitment_merkle_paths"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     commitment_id = Column(BigInteger, nullable=False, index=True)
     level = Column(Integer, nullable=False)
     sibling_hash = Column(String(66), nullable=False)
@@ -120,7 +120,7 @@ class SettlementProofStatus(str, Enum):
 class Settlement(Base):
     __tablename__ = "settlements"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     market_id = Column(Integer, nullable=False, unique=True, index=True)
     merkle_root = Column(String(66), nullable=True)
     commitments_count = Column(Integer, nullable=True)

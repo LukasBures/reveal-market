@@ -13,6 +13,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, and Prometheus counters (`worker.*`). |
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
+| Commitments & Merkle | Persist commitments/settlements (ticket hash, leaf, root, pools, liability, rake, outcome, circuit hash), rebuild Keccak Merkle roots/paths from stored leaves, and keep prover payloads in sync with the on-chain root/commit count. |
 | Optional on-chain writes | When `RM_AUTO_CREATE_ONCHAIN_MARKETS=true`, call `MarketFactory.createMarket` with retry/backoff. |
 | AI enrichment | Queue summary jobs whenever a market lacks a narrative and process them via `app.summary_worker`. |
 | Proof receipts | When enabled, call the `prover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |

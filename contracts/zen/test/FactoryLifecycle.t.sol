@@ -82,7 +82,7 @@ contract FactoryLifecycleTest is Test {
         assertTrue(market.claimsPaused());
     }
 
-    function _buildSignals(RevealMarket market) internal returns (uint256[10] memory signals) {
+    function _buildSignals(RevealMarket market) internal view returns (uint256[10] memory signals) {
         uint256 totalEscrow = market.userEscrow();
         uint256 rakeBps = rakeManager.rakeBps();
         uint256 rakeAmount = (totalEscrow * rakeBps) / 10_000;
