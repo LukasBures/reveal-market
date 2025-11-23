@@ -41,6 +41,7 @@ class StreamState:
         self.fx_last_error: str | None = None
         self._fx_prev_price: Decimal | None = None
         self._fx_prev_price_ts: datetime | None = None
+        self._fx_rejection_count: int = 0
         self._fx_lock = asyncio.Lock()
         self.subscriptions = SubscriptionManager(max_items=self.settings.max_subscriptions)
         self.last_seen: dict[str, datetime] = {}
@@ -171,6 +172,22 @@ class StreamState:
         if price <= 0:
             self.fx_last_error = "price_non_positive"
             return None
+        if price < Decimal(str(self.settings.fx_min_price)) or price > Decimal(str(self.settings.fx_max_price)):
+            self.fx_last_error = "price_out_of_bounds"
+            self._fx_rejection_count += 1
+            if self._fx_rejection_count >= self.settings.fx_max_consecutive_rejections:
+                self.fx_ws_connected = False
+            logger.warning(
+                "Rejecting FX out-of-bounds",
+                extra={
+                    "event": "fx.reject.bounds",
+                    "price": str(price),
+                    "min": self.settings.fx_min_price,
+                    "max": self.settings.fx_max_price,
+                    "rejections": self._fx_rejection_count,
+                },
+            )
+            return None
         now = datetime.now(UTC)
         if not allow_jump and self._fx_prev_price and self._fx_prev_price_ts:
             delta_seconds = (now - self._fx_prev_price_ts).total_seconds()
@@ -178,17 +195,22 @@ class StreamState:
                 change_pct = abs(price - self._fx_prev_price) / self._fx_prev_price * Decimal("100")
                 if change_pct > Decimal(str(self.settings.fx_max_jump_percent)):
                     self.fx_last_error = f"jump_{change_pct:.2f}pct"
+                    self._fx_rejection_count += 1
+                    if self._fx_rejection_count >= self.settings.fx_max_consecutive_rejections:
+                        self.fx_ws_connected = False
                     logger.warning(
                         "Rejecting FX jump",
                         extra={
                             "event": "fx.jump.rejected",
                             "change_pct": float(change_pct),
                             "window_seconds": delta_seconds,
+                            "rejections": self._fx_rejection_count,
                         },
                     )
                     return None
         quote = FxQuote(zen_usd=price, fetched_at=now, stale=False, source=source)
         self._update_fx(quote)
+        self._fx_rejection_count = 0
         return quote
 
 

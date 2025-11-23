@@ -11,7 +11,7 @@ from app.streamer import PriceStreamer
 
 @pytest.mark.asyncio
 async def test_rtds_fx_updates_quote():
-    settings = Settings(rtds_enabled=True)
+    settings = Settings(rtds_enabled=True, fx_min_price=0.1, fx_max_price=10)
     state = StreamState(settings)
     streamer = PriceStreamer(state, settings)
     # Seed a stale quote

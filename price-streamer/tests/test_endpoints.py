@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from datetime import UTC, datetime, timedelta
+
+from app.config import Settings
 from app.main import create_app
-from app.state import StreamState
+from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
 
 
@@ -13,6 +16,20 @@ def test_app(monkeypatch):
     # Use in-memory state with no Redis connection.
     state = StreamState()
     monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    # Avoid starting real streamer/network loops in tests.
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
         yield client, state
@@ -24,6 +41,65 @@ def test_health_endpoint_reports_fx(test_app):
     assert resp.status_code == 200
     payload = resp.json()
     assert "fx_zen_usd" in payload
+    assert "status" in payload
+
+
+def test_health_status_stale(monkeypatch):
+    settings = Settings(market_stale_seconds=60)
+    state = StreamState(settings)
+    state.fx_quote = FxQuote(
+        zen_usd=1, fetched_at=datetime.now(UTC) - timedelta(seconds=120), stale=True, source="test"
+    )
+    state.fx_last_update = state.fx_quote.fetched_at
+    state.fx_ws_connected = False
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/health")
+        assert resp.json()["status"] == "stale"
+
+
+def test_health_status_degraded(monkeypatch):
+    settings = Settings(market_stale_seconds=10)
+    state = StreamState(settings)
+    state.fx_quote = FxQuote(zen_usd=1, fetched_at=datetime.now(UTC), stale=False, source="test")
+    state.fx_last_update = state.fx_quote.fetched_at
+    state.fx_ws_connected = True
+    state.last_seen["m1"] = datetime.now(UTC) - timedelta(seconds=120)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/health")
+        assert resp.json()["status"] == "degraded"
 
 
 def test_stream_endpoint_connects(test_app):

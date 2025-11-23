@@ -121,6 +121,12 @@ class PriceStreamer:
         if not market_id or not prices or not isinstance(prices, (list, tuple)):
             return
         fx = await self.state.get_fx()
+        if fx.stale:
+            logger.warning(
+                "Skipping publish due to stale FX",
+                extra={"event": "publish.skipped.fx_stale", "market_id": market_id, "fx_source": fx.source},
+            )
+            return
         ts = datetime.now(UTC).isoformat()
         for idx, price in enumerate(prices):
             try:

@@ -71,15 +71,21 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         fx = await state.get_fx()
+        stale_markets = state.stale_markets(settings.market_stale_seconds)
+        status = "ok"
+        if fx.stale or not state.fx_ws_connected:
+            status = "stale"
+        elif stale_markets:
+            status = "degraded"
         return {
-            "status": "ok",
+            "status": status,
             "fx_zen_usd": str(fx.zen_usd),
             "fx_stale": fx.stale,
             "fx_source": fx.source,
             "fx_ws_connected": state.fx_ws_connected,
             "fx_last_error": state.fx_last_error,
             "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
-            "stale_markets": state.stale_markets(),
+            "stale_markets": stale_markets,
             "last_seen": {k: v.isoformat() for k, v in state.last_seen.items()},
         }
 
