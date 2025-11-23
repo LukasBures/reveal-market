@@ -156,6 +156,17 @@ class HedgerService:
                 error=str(exc),
             )
             return {"status": "rejected", "reason": "fx_unavailable", "error": str(exc)}
+        if commit.stake_zen > self.settings.risk_max_commit_zen:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.stake_limit",
+                message="rejecting commit because stake exceeds max per-commit limit",
+                market_id=commit.market_id,
+                stake_zen=str(commit.stake_zen),
+                stake_limit=str(self.settings.risk_max_commit_zen),
+            )
+            return {"status": "rejected", "reason": "stake_limit"}
         try:
             pricing = self.bet_processor.price_bet(commit.stake_zen, quote.zen_usd)
         except ValueError as exc:

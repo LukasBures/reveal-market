@@ -9,6 +9,7 @@ type Props = {
 
 export function MarketDetailChart({ marketId }: Props) {
   const { history, error } = usePriceStream(marketId, 0);
+  const hasStaleFx = history.some((p) => p.fx_stale);
 
   const pathData = useMemo(() => {
     if (history.length < 2) return "";
@@ -37,7 +38,9 @@ export function MarketDetailChart({ marketId }: Props) {
     <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">
       <div className="flex items-center justify-between text-sm text-slate-400">
         <span>Price history</span>
-        <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Live</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+          {hasStaleFx ? "FX stale" : "Live"}
+        </span>
       </div>
       <div className="mt-4 h-60 rounded-2xl bg-slate-950/80">
         {history.length >= 2 ? (

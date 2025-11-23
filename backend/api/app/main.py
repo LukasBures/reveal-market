@@ -873,6 +873,11 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
     """Return a pricing quote for a ZEN stake, gating on FX availability."""
 
     zen_usd = payload.zen_usd
+    if payload.stake_zen > settings.max_stake_zen:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stake exceeds max of {settings.max_stake_zen} ZEN",
+        )
     if zen_usd is None:
         try:
             fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)

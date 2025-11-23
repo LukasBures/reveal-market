@@ -47,7 +47,11 @@ export async function fetchPricingQuote(stakeZen: number, zenUsd: number): Promi
   return (await res.json()) as PricingQuote;
 }
 
-export async function fetchPriceHistory(marketId: string, outcome: number, limit = 200): Promise<Array<{ timestamp: string; price: string; display_price: string }>> {
+export async function fetchPriceHistory(
+  marketId: string,
+  outcome: number,
+  limit = 200,
+): Promise<Array<{ timestamp: string; price: string; display_price: string; fx_stale?: boolean }>> {
   const res = await fetch(
     getStreamerEndpoint(`/history?market_id=${encodeURIComponent(marketId)}&outcome=${outcome}&limit=${limit}`, true),
     {

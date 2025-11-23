@@ -7,6 +7,8 @@ type Props = {
   defaultStakeZen?: number;
 };
 
+const MAX_STAKE_ZEN = 100;
+
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
   return value.toFixed(decimals);
@@ -45,6 +47,11 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
   useEffect(() => {
     if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
       setQuote(null);
+      return;
+    }
+    if (debouncedStake > MAX_STAKE_ZEN) {
+      setQuote(null);
+      setError(`Max stake per bet is ${MAX_STAKE_ZEN} ZEN`);
       return;
     }
     let cancelled = false;
@@ -91,11 +98,22 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
           <input
             type="number"
             min={0}
+            max={MAX_STAKE_ZEN}
             step="0.01"
             value={stakeZen}
-            onChange={(e) => setStakeZen(Number(e.target.value))}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (Number.isNaN(next)) {
+                setStakeZen(0);
+                return;
+              }
+              setStakeZen(Math.min(Math.max(next, 0), MAX_STAKE_ZEN));
+            }}
             className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
           />
+          <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Max per bet: {MAX_STAKE_ZEN} ZEN
+          </span>
         </label>
         <div className="grid flex-1 grid-cols-2 gap-3 text-xs md:grid-cols-3">
           <Metric label="Refund (ZEN)" value={formatNumber(quote?.refund_zen ?? NaN, 4)} />

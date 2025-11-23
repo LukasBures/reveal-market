@@ -5,6 +5,7 @@ type PricePoint = {
   timestamp: string;
   price: number;
   display_price: number;
+  fx_stale?: boolean;
 };
 
 export function usePriceStream(marketId: string, outcome = 0) {
@@ -23,6 +24,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
               timestamp: entry.timestamp,
               price: Number(entry.price),
               display_price: Number(entry.display_price),
+              fx_stale: entry.fx_stale,
             }))
             .filter((p) => Number.isFinite(p.price)),
         );
@@ -46,6 +48,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
           timestamp: payload.timestamp,
           price: Number(payload.price),
           display_price: Number(payload.display_price),
+          fx_stale: payload.fx_stale,
         };
         if (!Number.isFinite(point.price)) return;
         setHistory((prev) => [...prev.slice(-199), point]);
@@ -68,6 +71,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
       history.map((point) => ({
         x: new Date(point.timestamp).getTime(),
         y: point.display_price || point.price,
+        fx_stale: point.fx_stale,
       })),
     [history],
   );

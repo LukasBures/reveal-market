@@ -153,15 +153,17 @@ export function MainNav() {
         </>
       ) : null}
       <div className="border-t border-white/5 bg-black/60 px-4 py-2 text-xs text-white/80">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-end gap-3">
+          <div className="flex items-center gap-3">
+            {fxStale && <span className="text-amber-300 text-[11px] uppercase tracking-[0.2em]">FX stale</span>}
+            {fxError && <span className="text-rose-300 text-[11px] uppercase tracking-[0.2em]">FX unavailable</span>}
+            {!fxStale && !fxError && (
+              <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>
+            )}
+          </div>
           <span className="rounded-full bg-white/5 px-3 py-1 font-semibold tracking-wide">
             {fxLabel ? fxLabel : "ZEN/USD loading…"}
           </span>
-          <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.2em]">
-            {fxStale && <span className="text-amber-300">FX stale — betting paused until fresh</span>}
-            {fxError && <span className="text-rose-300">FX unavailable ({fxError})</span>}
-            {!fxStale && !fxError && <span className="text-emerald-300">Live pricing</span>}
-          </div>
         </div>
       </div>
     </header>
