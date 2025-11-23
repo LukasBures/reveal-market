@@ -28,14 +28,6 @@ calc_pytest_workers() {
   echo 4
 }
 
-has_xdist() {
-  local python_bin="$1"
-  "${python_bin}" - <<'PY'
-import importlib.util
-print(bool(importlib.util.find_spec("xdist")))
-PY
-}
-
 run_py_tests() {
   local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
   local -a pytest_args=()
@@ -48,6 +40,12 @@ run_py_tests() {
     exit 1
   fi
 
+  # Ensure dev deps (including xdist) are present.
+  if ! "${python_bin}" -c "import pytest, pytest_asyncio, importlib.util; importlib.util.find_spec('xdist')" >/dev/null 2>&1; then
+    log_step "Installing dev dependencies (including xdist)"
+    "${python_bin}" -m pip install --no-cache-dir -e .[dev]
+  fi
+
   # Lint first if ruff is available.
   if [[ -x "${ruff_bin}" ]]; then
     log_step "ruff check (hedger)"
@@ -55,10 +53,15 @@ run_py_tests() {
   fi
 
   if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
-    if [[ "$(has_xdist "${python_bin}")" == "True" ]]; then
+    XDIST_AVAILABLE=$("${python_bin}" - <<'PY'
+import importlib.util
+print("yes" if importlib.util.find_spec("xdist") or importlib.util.find_spec("pytest_xdist") else "no")
+PY
+)
+    if [[ "$XDIST_AVAILABLE" == "yes" ]]; then
       pytest_args+=("-n" "${workers}")
     else
-      log_step "pytest-xdist not installed; running single-worker"
+      log_step "pytest-xdist not installed; running single-worker (set PYTEST_WORKER_COUNT=1 or install xdist)"
     fi
   fi
 

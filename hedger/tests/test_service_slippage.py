@@ -20,7 +20,12 @@ class StubPolymarketClient:
 
 @pytest.mark.asyncio
 async def test_execute_hedge_rejects_high_slippage(monkeypatch):
-    settings = Settings()
+    settings = Settings(
+        vault_rpc_url="http://localhost:8545",
+        vault_private_key="0x" + "11" * 32,
+        vault_sender_address="0x" + "01" * 20,
+        lp_vault_address="0x" + "02" * 20,
+    )
     service = HedgerService(settings)
     service.lock_manager = None
     service.polymarket_client = StubPolymarketClient(slippage_bps=settings.max_slippage_bps + 50)  # type: ignore[assignment]
