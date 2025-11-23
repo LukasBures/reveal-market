@@ -84,6 +84,25 @@ class ResolvedMarketRecord(Base):
     resolved_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
+class TreasurySnapshotRecord(Base):
+    __tablename__ = "hedger_treasury_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market_id = Column(String, nullable=False, index=True)
+    outcome = Column(String, nullable=False)
+    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    refund_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    rake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    payout_profit_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    borrowed_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    lp_share_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    repay_amount_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    platform_usdc_revenue = Column(Numeric(precision=32, scale=8), nullable=False)
+    zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
+    usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+
+
 class HedgerRepository:
     """Lightweight Postgres repository used for audit logs and crash recovery."""
 
@@ -172,6 +191,71 @@ class HedgerRepository:
                 proof_payload=proof_payload,
                 prover_latency_seconds=prover_latency_seconds,
                 submitted_tx=submitted_tx,
+            )
+            session.add(row)
+            session.commit()
+
+    async def record_treasury_snapshot(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        stake_zen: Decimal,
+        refund_zen: Decimal,
+        rake_zen: Decimal,
+        payout_profit_usdc: Decimal,
+        borrowed_usdc: Decimal,
+        lp_share_usdc: Decimal,
+        repay_amount_usdc: Decimal,
+        platform_usdc_revenue: Decimal,
+        zen_balance: Decimal,
+        usdc_balance: Decimal,
+    ) -> None:
+        await asyncio.to_thread(
+            self._record_treasury_snapshot_sync,
+            market_id,
+            outcome,
+            stake_zen,
+            refund_zen,
+            rake_zen,
+            payout_profit_usdc,
+            borrowed_usdc,
+            lp_share_usdc,
+            repay_amount_usdc,
+            platform_usdc_revenue,
+            zen_balance,
+            usdc_balance,
+        )
+
+    def _record_treasury_snapshot_sync(
+        self,
+        market_id: str,
+        outcome: str,
+        stake_zen: Decimal,
+        refund_zen: Decimal,
+        rake_zen: Decimal,
+        payout_profit_usdc: Decimal,
+        borrowed_usdc: Decimal,
+        lp_share_usdc: Decimal,
+        repay_amount_usdc: Decimal,
+        platform_usdc_revenue: Decimal,
+        zen_balance: Decimal,
+        usdc_balance: Decimal,
+    ) -> None:
+        with self.SessionLocal() as session:
+            row = TreasurySnapshotRecord(
+                market_id=market_id,
+                outcome=outcome,
+                stake_zen=stake_zen,
+                refund_zen=refund_zen,
+                rake_zen=rake_zen,
+                payout_profit_usdc=payout_profit_usdc,
+                borrowed_usdc=borrowed_usdc,
+                lp_share_usdc=lp_share_usdc,
+                repay_amount_usdc=repay_amount_usdc,
+                platform_usdc_revenue=platform_usdc_revenue,
+                zen_balance=zen_balance,
+                usdc_balance=usdc_balance,
             )
             session.add(row)
             session.commit()
@@ -276,3 +360,35 @@ class HedgerRepository:
                 ).group_by(HedgeActionRecord.market_id)
             ).all()
         return {market_id: total or Decimal("0") for market_id, total in rows}
+
+    def hedge_breakdown(self, market_id: str) -> dict[str, Decimal]:
+        """Return borrow vs unwind totals for a market."""
+
+        with self.SessionLocal() as session:
+            rows = session.execute(
+                select(
+                    HedgeActionRecord.is_unwind,
+                    func.sum(HedgeActionRecord.size_usd),
+                ).where(HedgeActionRecord.market_id == market_id).group_by(HedgeActionRecord.is_unwind)
+            ).all()
+        borrow = Decimal("0")
+        unwind = Decimal("0")
+        for is_unwind, total in rows:
+            if is_unwind:
+                unwind += total or Decimal("0")
+            else:
+                borrow += total or Decimal("0")
+        return {"borrowed": borrow, "unwound": unwind}
+
+    def hedge_payloads(self, market_id: str) -> list[dict]:
+        with self.SessionLocal() as session:
+            rows = (
+                session.query(HedgeActionRecord.response_payload)
+                .filter(HedgeActionRecord.market_id == market_id, HedgeActionRecord.response_payload.isnot(None))
+                .all()
+            )
+        payloads: list[dict] = []
+        for (payload,) in rows:
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads

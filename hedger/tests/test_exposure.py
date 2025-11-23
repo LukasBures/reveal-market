@@ -16,7 +16,7 @@ class StubFx:
     async def get_quote(self) -> FxQuote:
         return self.quote
 
-    def usd_from_zen(self, zen_amount: Decimal, quote: FxQuote | None = None) -> Decimal:
+    def usd_from_zen(self, zen_amount: Decimal, quote: FxQuote | None = None, apply_haircut: bool = True) -> Decimal:
         quote = quote or self.quote
         # Apply a 5% haircut on top of the provided price.
         return (zen_amount * quote.zen_usd * Decimal("0.95")).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)

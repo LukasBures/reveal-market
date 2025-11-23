@@ -281,6 +281,35 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  price_streamer:
+    build:
+      context: .
+      dockerfile: docker/price-streamer/Dockerfile
+    container_name: reveal-market-price-streamer
+    restart: unless-stopped
+    environment:
+      STREAMER_REDIS_URL: redis://redis:6379/0
+      STREAMER_POLYMARKET_WS_URL: wss://clob.polymarket.com/ws
+      STREAMER_POLYMARKET_REST_URL: https://gamma-api.polymarket.com/markets
+      STREAMER_FX_FEED_URL: ${RM_FX_FEED_URL:-https://gamma-api.polymarket.com/prices/zen-usd}
+      STREAMER_FX_FALLBACK_PRICE: ${RM_FX_FALLBACK_PRICE:-1.0}
+      STREAMER_WORSEN_PERCENT: ${RM_WORSEN_PERCENT:-0.03}
+      STREAMER_HAIRCUT_PERCENT: ${RM_HAIRCUT_PERCENT:-0.12}
+      STREAMER_RAKE_PERCENT: ${RM_RAKE_PERCENT:-0.02}
+      STREAMER_API_HOST: 0.0.0.0
+      STREAMER_API_PORT: 8100
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8100/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   # Named volumes keep state between docker compose up/down cycles.
   postgres_data:

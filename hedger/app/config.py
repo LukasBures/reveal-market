@@ -53,6 +53,35 @@ class Settings(BaseSettings):
     risk_coverage_ratio_target: float = Field(default=0.98)
     risk_lp_utilization_limit: float = Field(default=0.85)
     float_min_zen: Decimal = Field(default=Decimal("5000"))
+    rake_percent: Decimal = Field(
+        default=Decimal("0.02"),
+        ge=Decimal("0"),
+        lt=Decimal("0.25"),
+        validation_alias=AliasChoices("HEDGER_RAKE_PERCENT", "RM_RAKE_PERCENT"),
+    )
+    haircut_percent: Decimal = Field(
+        default=Decimal("0.12"),
+        ge=Decimal("0"),
+        lt=Decimal("0.25"),
+        validation_alias=AliasChoices("HEDGER_HAIRCUT_PERCENT", "RM_HAIRCUT_PERCENT"),
+    )
+    worsen_percent: Decimal = Field(
+        default=Decimal("0.03"),
+        ge=Decimal("0"),
+        lt=Decimal("0.25"),
+        validation_alias=AliasChoices("HEDGER_WORSEN_PERCENT", "RM_WORSEN_PERCENT"),
+    )
+    lp_share_percent: Decimal = Field(
+        default=Decimal("0.18"),
+        ge=Decimal("0"),
+        lt=Decimal("0.5"),
+        validation_alias=AliasChoices("HEDGER_LP_SHARE_PERCENT", "RM_LP_SHARE_PERCENT"),
+    )
+    vault_rpc_url: str | None = Field(default=None)
+    vault_private_key: str | None = Field(default=None)
+    vault_sender_address: str | None = Field(default=None)
+    vault_chain_id: int = Field(default=137, ge=1)
+    vault_gas_price_gwei: int | None = Field(default=None, ge=0)
 
     settlement_poll_seconds: int = Field(default=20)
     heartbeat_interval_seconds: int = Field(default=60)
@@ -64,6 +93,10 @@ class Settings(BaseSettings):
     prover_timeout_seconds: int = Field(default=30)
     bridge_endpoint: str = Field(default="https://bridge.revealmarket.xyz/submit")
     lp_vault_address: str = Field(default="0x0000000000000000000000000000000000000000")
+
+    @property
+    def total_monetisation(self) -> Decimal:
+        return self.haircut_percent + self.worsen_percent + self.rake_percent
 
 
 def get_settings() -> Settings:

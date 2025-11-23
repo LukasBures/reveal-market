@@ -8,9 +8,11 @@ from decimal import Decimal
 
 from redis.asyncio import Redis
 
+from .bet_processor_zen import BetProcessorZen
 from .config import Settings
 from .exposure import ExposureLedger
 from .fx import FxOracle
+from .hedger_usdc import HedgerUSDC
 from .local_logging import log_event
 from .locks import RedisLockManager
 from .metrics import (
@@ -19,12 +21,14 @@ from .metrics import (
     record_pnl,
     update_float_and_utilization,
 )
+from .pricing_engine import PricingEngine
 from .polymarket import PolymarketClient
 from .risk import RiskEngine, RiskLimits
 from .settlement import SettlementCoordinator
 from .storage import HedgerRepository
+from .treasury_manager import TreasuryManager
 from .types import CommitEvent, HedgeInstruction, MarketExposureSnapshot, OutcomeSide
-from .vault import BaseLpVaultClient
+from .vault import BaseLpVaultClient, OnChainLpVaultClient, VaultTxConfig
 
 logger = logging.getLogger("reveal_market.hedger.service")
 
@@ -51,13 +55,31 @@ class HedgerService:
             max_age_seconds=settings.fx_max_age_seconds,
             fallback_zen_usd=settings.fx_fallback_price,
         )
+        self.pricing_engine = PricingEngine(
+            haircut_percent=settings.haircut_percent,
+            worsen_percent=settings.worsen_percent,
+            rake_percent=settings.rake_percent,
+        )
+        self.treasury = TreasuryManager(lp_share_percent=settings.lp_share_percent)
+        self.bet_processor = BetProcessorZen(self.pricing_engine, self.treasury)
         self.polymarket_client = PolymarketClient(
             base_url=settings.polymarket_api_base,
             timeout_seconds=settings.polymarket_timeout_seconds,
             retry_attempts=settings.polymarket_retry_attempts,
             retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
         )
-        self.vault_client = BaseLpVaultClient(settings.lp_vault_address)
+        if settings.vault_rpc_url and settings.vault_private_key and settings.vault_sender_address:
+            tx_cfg = VaultTxConfig(
+                rpc_url=settings.vault_rpc_url,
+                chain_id=settings.vault_chain_id,
+                private_key=settings.vault_private_key,
+                sender=settings.vault_sender_address,
+                gas_price_gwei=settings.vault_gas_price_gwei,
+            )
+            self.vault_client = OnChainLpVaultClient(settings.lp_vault_address, tx_cfg)
+        else:
+            raise ValueError("Vault RPC/key/sender are required for vault client")
+        self.hedger_usdc = HedgerUSDC(self.vault_client, max_utilization=limits.lp_utilization_limit)
         self.exposure_ledger = ExposureLedger(
             fx_oracle=self.fx_oracle,
             limits=limits,
@@ -113,15 +135,60 @@ class HedgerService:
             )
             return {"status": "duplicate", "idempotency_key": idemp_key}
 
+        if self.fx_oracle.stale():
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.fx_stale",
+                message="rejecting commit because FX oracle is stale",
+                market_id=commit.market_id,
+            )
+            return {"status": "rejected", "reason": "fx_unavailable"}
+
+        try:
+            quote = await self.fx_oracle.get_quote()
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.fx_error",
+                message="rejecting commit because FX oracle errored",
+                market_id=commit.market_id,
+                error=str(exc),
+            )
+            return {"status": "rejected", "reason": "fx_unavailable", "error": str(exc)}
+        try:
+            pricing = self.bet_processor.price_bet(commit.stake_zen, quote.zen_usd)
+        except ValueError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.invalid",
+                message="pricing engine rejected commit",
+                market_id=commit.market_id,
+                error=str(exc),
+            )
+            return {"status": "rejected", "reason": str(exc)}
+
+        lp_ok, projected_util = await self.hedger_usdc.can_hedge(pricing.hedge_usdc)
+        if not lp_ok:
+            return {
+                "status": "rejected",
+                "reason": "lp_unavailable",
+                "projected_utilization": projected_util,
+                "pricing": pricing.model_dump(mode="json"),
+            }
+
         lock_ctx = self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else asyncio.nullcontext()
         async with lock_ctx:
             snapshot, instruction, breaches = await self.exposure_ledger.record_commit(
-                commit, idempotency_key=idemp_key
+                commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc
             )
         response: dict = {
             "snapshot": snapshot,
             "hedge_instruction": instruction,
             "breaches": breaches,
+            "pricing": pricing.model_dump(mode="json"),
         }
         if instruction:
             hedge_result = await self._execute_hedge(instruction)
@@ -152,16 +219,19 @@ class HedgerService:
                 return {"status": "rejected", "reason": "slippage_limit", "quote": quote}
 
             if instruction.is_unwind:
-                repay = await self.vault_client.repay_from_hedge(instruction.size_usd)
-                borrow_receipt = {"repay": repay}
+                borrow_receipt = await self.hedger_usdc.repay(instruction.size_usd)
             else:
-                borrow_receipt = await self.vault_client.borrow_for_hedge(instruction.size_usd)
+                borrow_receipt = await self.hedger_usdc.borrow(instruction.size_usd)
+                if borrow_receipt.get("status") == "rejected":
+                    return borrow_receipt
 
             await self.exposure_ledger.register_fill(
                 instruction.market_id, instruction.size_usd, is_unwind=instruction.is_unwind
             )
             await self.repository.record_hedge_instruction(instruction, response_payload=quote)
-            utilization = await self.vault_client.current_utilization()
+            utilization = borrow_receipt.get("utilization") if isinstance(borrow_receipt, dict) else None
+            if utilization is None:
+                utilization = await self.vault_client.current_utilization()
             update_float_and_utilization(float_zen=None, lp_utilization=utilization)
             realized, unrealized = await self.vault_client.get_pnl()
             record_pnl(realized_usd=realized, unrealized_usd=unrealized)
@@ -220,6 +290,7 @@ class HedgerService:
             prover_latency_seconds=None,
             submitted_tx=None,
         )
+        economics = await self._build_and_persist_economics(market_id, outcome_value)
         self.repository.mark_market_resolved(market_id, outcome_value)
         await self.exposure_ledger.finalize_market(market_id)
         log_event(
@@ -230,7 +301,7 @@ class HedgerService:
             market_id=market_id,
             outcome=outcome_value,
         )
-        return {"status": "resolved", "payload": payload, "proof": response}
+        return {"status": "resolved", "payload": payload, "proof": response, "economics": economics}
 
     async def health(self) -> dict:
         latest_commit_at = self.repository.latest_commit_timestamp()
@@ -288,6 +359,74 @@ class HedgerService:
     async def _noop_async_lock():
         yield
 
+    async def _project_settlement(self, market_id: str, outcome_value: str, persist: bool = False) -> dict | None:
+        commits = self.repository.get_commits_for_market(market_id)
+        if not commits:
+            return None
+
+        winning_stake = sum([c.stake_zen for c in commits if c.direction == outcome_value], start=Decimal("0"))
+        total_stake = sum([c.stake_zen for c in commits], start=Decimal("0"))
+        hedge_totals = self.repository.hedge_breakdown(market_id)
+        borrow_usdc = hedge_totals.get("borrowed", Decimal("0"))
+        unwind_usdc = hedge_totals.get("unwound", Decimal("0"))
+        net_borrow_usdc = max(Decimal("0"), borrow_usdc - unwind_usdc)
+        hedge_payloads = self.repository.hedge_payloads(market_id)
+        expected_payout = self._extract_expected_payout(hedge_payloads, net_borrow_usdc)
+        stake_for_calc = winning_stake if winning_stake > 0 else total_stake
+        if stake_for_calc <= 0:
+            return None
+        try:
+            quote = await self.fx_oracle.get_quote()
+        except Exception:
+            return None
+        realized, unrealized = await self.vault_client.get_pnl()
+        expected_usdc_payout_if_win = expected_payout + Decimal(str(max(unrealized, 0.0)))
+        pricing = self.pricing_engine.quote_bet(stake_for_calc, quote.zen_usd)
+        breakdown = self.bet_processor.settlement_breakdown(
+            pricing,
+            hedge_cost_usdc=net_borrow_usdc,
+            expected_usdc_payout_if_win=expected_usdc_payout_if_win,
+            user_won=winning_stake > 0,
+            hedge_realized_pnl_usdc=Decimal(str(realized)),
+        )
+        treasury_snapshot = self.treasury.apply_settlement(breakdown)
+        if persist:
+            await self.repository.record_treasury_snapshot(
+                market_id=market_id,
+                outcome=outcome_value,
+                stake_zen=breakdown.stake_zen,
+                refund_zen=breakdown.refund_zen,
+                rake_zen=breakdown.rake_zen,
+                payout_profit_usdc=breakdown.payout_profit_usdc,
+                borrowed_usdc=breakdown.borrowed_usdc,
+                lp_share_usdc=breakdown.lp_share_usdc,
+                repay_amount_usdc=breakdown.repay_amount_usdc,
+                platform_usdc_revenue=breakdown.total_platform_usdc_revenue,
+                zen_balance=treasury_snapshot.zen_balance,
+                usdc_balance=treasury_snapshot.usdc_balance,
+            )
+        return {
+            "pricing": pricing.model_dump(mode="json"),
+            "breakdown": breakdown.model_dump(mode="json"),
+            "treasury": treasury_snapshot.model_dump(mode="json"),
+            "hedge_totals": {
+                "borrowed_usdc": str(borrow_usdc),
+                "unwound_usdc": str(unwind_usdc),
+            },
+        }
+
+    @staticmethod
+    def _extract_expected_payout(payloads: list[dict], fallback: Decimal) -> Decimal:
+        for payload in payloads:
+            value = payload.get("expected_usdc_payout") or payload.get("expected_payout_usdc")
+            if value is None:
+                continue
+            try:
+                return Decimal(str(value))
+            except Exception:
+                continue
+        return fallback
+
     def _build_prover_payload(self, market_id: str, outcome: str) -> dict:
         commits = self.repository.get_commits_for_market(market_id)
         commit_payloads = [
@@ -310,3 +449,7 @@ class HedgerService:
             "total_no_zen": f"{total_no:.8f}",
             "commits": commit_payloads,
         }
+
+    async def _build_and_persist_economics(self, market_id: str, outcome_value: str) -> dict | None:
+        economics = await self._project_settlement(market_id, outcome_value, persist=True)
+        return economics

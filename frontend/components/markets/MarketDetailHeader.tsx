@@ -39,7 +39,10 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
                 {market.status ?? "Active"}
               </span>
               <span className="rounded-full border border-white/15 px-2.5 py-1 text-white/70">
-                ZEN settlement rails
+                ZEN in / USDC profit
+              </span>
+              <span className="rounded-full border border-sky-400/50 px-2.5 py-1 text-sky-200">
+                Live prices streaming
               </span>
             </div>
             <h1 className="text-2xl font-semibold leading-snug text-white md:text-3xl">{market.title}</h1>

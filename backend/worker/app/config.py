@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     wallet_private_key: SecretStr | None = Field(default=None)
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
+    rake_percent: float = Field(default=0.02, ge=0, lt=0.25)
+    haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
+    worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
+    lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     auto_create_onchain_markets: bool = Field(default=False)
     default_commit_lead_seconds: int = Field(default=86400, ge=60)
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
@@ -147,6 +151,10 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return _split_csv(value)
         return value
+
+    @property
+    def total_monetisation_percent(self) -> float:
+        return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
 
 
 @lru_cache(maxsize=1)

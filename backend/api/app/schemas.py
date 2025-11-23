@@ -150,3 +150,45 @@ class ResolutionSummary(BaseModel):
     block_timestamp: datetime | None = Field(default=None, alias="blockTimestamp")
 
     model_config = ConfigDict(populate_by_name=True, validate_by_name=True)
+
+
+class PricingQuoteRequest(BaseModel):
+    stake_zen: float = Field(..., gt=0)
+    zen_usd: float | None = Field(default=None, gt=0)
+
+
+class PricingQuoteResponse(BaseModel):
+    stake_zen: float
+    zen_usd: float
+    displayed_odds_multiplier: float
+    rake_zen: float
+    refund_zen: float
+    hedge_usdc: float
+    haircut_percent: float
+    worsen_percent: float
+    rake_percent: float
+    total_monetisation: float
+
+
+class FxQuoteResponse(BaseModel):
+    zen_usd: float
+    stale: bool = False
+
+
+class TreasurySnapshot(BaseModel):
+    id: int
+    market_id: str
+    outcome: str
+    stake_zen: float
+    refund_zen: float
+    rake_zen: float
+    payout_profit_usdc: float
+    borrowed_usdc: float
+    lp_share_usdc: float
+    repay_amount_usdc: float
+    platform_usdc_revenue: float
+    zen_balance: float
+    usdc_balance: float
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

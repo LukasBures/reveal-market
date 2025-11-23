@@ -7,6 +7,8 @@ import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
+import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
+import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -237,7 +239,9 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
                 <p className="mt-3">{contextCopy}</p>
               </section>
+              <MarketDetailChart marketId={canonicalEventId} />
               <MarketDetailOutcomes market={market} />
+              <StakeQuoteCard />
               <MarketDetailMetadataPanel market={market} />
             </div>
             <MarketDetailSidebarPanel market={market} />

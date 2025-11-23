@@ -478,3 +478,217 @@ ____
      DeployHorizenTestnet.s.sol that writes deployments/horizen-testnet.json.
   3. Build the minimal testnet UI (connect wallet on Horizen, commit form with salt/ticketHash, show locked merkleRoot, settlement/proof status + explorer link, basic “My
      tickets” view) and hook the backend to call prover then settleMarket on-chain.
+
+
+____
+
+
+Anonymous Prediction Market – Full Economic & Payment Logic Specification (MVP)
+=========================================================================================
+
+1. Overview
+-----------
+This document describes the complete economic, payout, hedging, and liquidity-provider (LP)
+architecture for the anonymous prediction‑market MVP. It is written in clear paragraphs and
+structured instructions so that an AI coding assistant (e.g., Codex) can directly implement the
+system. The platform supports a dual‑asset flow: users place bets in ZEN, receive stake refunds
+in ZEN minus rake, and receive winnings (profit) in USDC. The LP pool on Polygon is
+USDC‑only and funds the hedger. Only the platform owner may borrow from the LP pool.
+All parameters such as haircut, worsen spread, and rake must be fully configurable.
+
+2. Platform Parameters (Configurable)
+-------------------------------------
+The platform must expose configuration values that can be adjusted without changing code.
+These values must be stored in a configuration module or contract:
+
+- haircut_percent (recommended default: 10–12.5%)
+- worsen_percent (recommended default: 3%)
+- rake_percent (recommended default: 1.5–2%)
+- lp_share_percent (recommended default: 15–20%)
+
+The platform must compute total_monetisation dynamically as:
+total_monetisation = haircut_percent + worsen_percent + rake_percent
+
+These parameters must be used consistently across betting logic, hedger logic, pricing
+engine, settlement, LP revenue share calculations, and risk management.
+
+3. Asset Flow Model
+--------------------
+The system uses two assets:
+
+- ZEN for user-facing operations (bettor stakes and rake collection)
+- USDC for hedging, payouts of profit, internal treasury, and LP pool operations
+
+ZEN and USDC must be kept strictly separate in accounting, payout logic, and treasury
+management. Users interact exclusively with ZEN for placing bets and receiving stake refunds.
+Profit payouts must be executed in USDC. All hedging operations and LP payouts are USDC‑denominated.
+
+4. User Bet Lifecycle
+----------------------
+When a user submits a bet, the system receives:
+
+- user_id
+- market_id
+- outcome selection
+- stake_zen
+
+The pricing engine must:
+
+1. Display worsened odds to the user using worsen_percent.
+2. Apply rake_percent only on payout/refund, not on displayed odds.
+3. Apply haircut_percent internally to calculate the hedging exposure in USDC.
+
+Codex must convert the ZEN stake into a USDC hedging amount using:
+
+hedge_usdc = (stake_zen * zen_price_usdc) * (1 - haircut_percent)
+
+This USDC amount must be borrowed from the LP pool.
+
+5. Hedging Logic
+-----------------
+The hedger is the only component allowed to borrow USDC from the LP pool. When a bet is
+placed:
+
+1. Convert the ZEN stake to USDC-equivalent exposure.
+2. Apply haircut to determine reduced hedge volume.
+3. Borrow this USDC amount from the LP pool.
+4. Execute a hedge position on an external market such as Polymarket.
+
+The hedger must track:
+
+- hedge_position_id
+- hedge_cost_usdc
+- expected_usdc_payout_if_win
+- expected_usdc_liability_if_loss
+
+Upon resolution, the hedger must close or settle each hedge and return borrowed USDC plus
+LP revenue share.
+
+6. Settlement Logic
+--------------------
+When the market resolves:
+
+If the user LOSES:
+- stake_zen becomes platform ZEN revenue.
+- hedger settles external position.
+- any hedger PnL in USDC contributes to platform and LP revenues.
+
+If the user WINS:
+A) Refund stake in ZEN minus rake:
+   refund_zen = stake_zen * (1 - rake_percent)
+   rake_zen = stake_zen * rake_percent (platform revenue)
+
+B) Pay profit in USDC:
+   profit_usdc = expected_usdc_payout_if_win - hedge_cost_usdc
+   payout_profit_usdc = max(0, profit_usdc)
+
+C) Repay LP pool:
+   lp_share_usdc = total_platform_usdc_revenue * lp_share_percent
+   repay_amount_usdc = borrowed_usdc + lp_share_usdc
+
+7. LP Pool (Polygon, USDC‑only)
+-------------------------------
+The LP pool holds only USDC. Liquidity providers may deposit or withdraw USDC at any time.
+LPs receive a proportional revenue share, not a fixed APY. This prevents insolvency, avoids
+ponzi dynamics, and ties payouts to real platform activity.
+
+LPs receive:
+lp_share_usdc = platform_total_usdc_revenue * lp_share_percent
+
+LP yield (APY) is:
+lp_apy = (lp_share_usdc * 12) / lp_total_pool_usdc
+
+Small pool = high APY
+Large pool = stabilized APY
+
+This dynamic model is crucial for sustainability.
+
+8. Pricing Engine
+------------------
+The pricing engine must:
+
+- Apply haircut to internal hedge exposure.
+- Apply worsen spread to displayed odds.
+- Calculate potential payouts.
+- Ensure no external market is ever given superior odds (bot protection).
+
+Haircut makes hedging safer and gives the platform internal margin.
+Worsen ensures user-facing odds are slightly disadvantageous, monetising privacy.
+Rake ensures stable, predictable platform revenue.
+
+9. Treasury Accounting
+-----------------------
+Treasury must maintain two independent ledgers:
+
+1. ZEN ledger:
+   - Receives rake_zen
+   - Receives losing-stake ZEN
+   - Never used for hedging
+
+2. USDC ledger:
+   - Receives hedger profits
+   - Receives haircut + worsen monetisation
+   - Pays LP share
+   - Pays user USDC winnings
+   - Stores long-term treasury
+
+These two ledgers must never be mixed.
+
+10. User-Facing Rules (must be shown in UI)
+--------------------------------------------
+The platform must clearly display:
+
+“You bet in ZEN. If you win, you receive:
+ • Your stake back in ZEN minus the platform rake.
+ • Your winnings in stable USDC, so your profit is protected from volatility.”
+
+This must be visible in the confirmation modal and payout summaries.
+
+11. Failure Handling
+---------------------
+Codex must implement fail-safes:
+
+- If LP pool lacks USDC, disable new bets.
+- If hedge execution fails, reject new bets and pause market.
+- If payout_usdc < 0 due to slippage, set payout_usdc = 0.
+- If oracle for ZEN/USDC price fails, disable betting temporarily.
+- All configurable parameters must have safety limits (e.g., haircut < 25%).
+
+12. Modules Codex Must Implement
+---------------------------------
+The system must consist of:
+
+- pricing_engine.py
+- bet_processor_zen.py
+- hedger_usdc.py
+- settlement.py
+- treasury_manager.py
+- LPUSDCVault.sol (smart contract)
+- config.py (for configurable parameters)
+
+Each module must be deterministic, side-effect aware, and isolated in responsibilities.
+
+13. Summary
+------------
+This architecture provides:
+- A ZEN-facing anonymous betting system.
+- USDC‑based hedging and profits.
+- Configurable monetisation parameters.
+- Safe LP mechanics with variable yield.
+- Clean economic separation between ZEN (user side) and USDC (backend side).
+
+
+____
+
+• Here’s a pragmatic setup that balances bandwidth, consistency, and latency:
+
+  - Centralize feeds in the backend: Run a small price streamer service/worker that connects to Polymarket’s WebSocket (with REST fallback) and normalizes ticks. Apply your worsen/haircut/LP logic server-side so the math is consistent and auditable. Don’t do price math in the browser.
+  - Publish lightweight deltas: Cache the latest price per market in Redis and fan out via a backend WebSocket/SSE endpoint that clients subscribe to per-market. Send minimal payloads (market_id, outcome, mid/last, ts) and compress; avoid streaming every market to every user. On the frontend, use the live stream to
+    update odds/charts; fall back to cached REST (/markets) for initial load and occasional refresh.
+  - Limit bandwidth: Only stream markets the user is viewing or has open positions in; throttle updates (e.g., 250–500ms debounce) and aggregate to candles server-side. With per-market subscriptions and small deltas, 20 TB/month is plenty.
+  - FX (ZEN/USD) sourcing: Keep FX in the backend (your hedger’s FX oracle). Cache the latest quote with staleness checks and expose it via a tiny endpoint or include it in the pricing quote response. If you want extra integrity, sign the price server-side and have the frontend verify the signature; never rely on
+    client-sourced FX for hedging math.
+  - Charts: Build candles/time-series in the backend from the Polymarket stream (or periodic REST snapshots) and serve pre-aggregated series to the frontend; update with live ticks pushed over the same WebSocket/SSE.
+  - Failure modes: If the Polymarket stream drops or FX is stale, serve the last known value with a “stale” flag and temporarily disable new bet pricing; resume live once fresh data arrives.
+
+  Net: stream from Polymarket to your backend, apply all economics there, broadcast lean per-market updates to clients, and serve FX from your own oracle cache.

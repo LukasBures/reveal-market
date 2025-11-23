@@ -6,6 +6,8 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+import httpx
+from decimal import Decimal
 from threading import Event, Lock, Thread
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
@@ -32,8 +34,10 @@ from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
+from app.pricing import PricingEngine, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
+from app import models
 
 try:
     from redis import Redis
@@ -857,6 +861,67 @@ def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
         worker=worker_status,
         api=api_status,
     )
+
+
+@app.post("/pricing/quote", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
+def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteResponse:
+    """Return a pricing quote for a ZEN stake, gating on FX availability."""
+
+    zen_usd = payload.zen_usd
+    if zen_usd is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
+    engine = PricingEngine(settings)
+    try:
+        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_event(
+        logger,
+        logging.INFO,
+        event="pricing.quote",
+        message="pricing quote generated",
+        stake_zen=payload.stake_zen,
+        zen_usd=payload.zen_usd,
+        total_monetisation=str(quote.total_monetisation),
+    )
+    return quote
+
+
+@app.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])
+async def pricing_fx() -> schemas.FxQuoteResponse:
+    try:
+        return await fetch_fx_quote(settings)
+    except httpx.HTTPError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="pricing.fx.error",
+            message="failed to fetch FX feed",
+            error=str(exc),
+        )
+        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
+
+
+@app.get("/treasury/snapshots", response_model=list[schemas.TreasurySnapshot], tags=["treasury"])
+def treasury_snapshots(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    market_id: Annotated[str | None, Query()] = None,
+    session: Session = Depends(get_session),
+) -> list[schemas.TreasurySnapshot]:
+    query = session.query(models.HedgerTreasurySnapshot).order_by(models.HedgerTreasurySnapshot.created_at.desc())
+    if market_id:
+        query = query.filter(models.HedgerTreasurySnapshot.market_id == market_id)
+    rows = query.limit(limit).all()
+    return rows
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.ERROR,
+            event="pricing.fx.unexpected",
+            message="unexpected FX fetch error",
+            error=str(exc),
+        )
+        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
 
 
 @app.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     wallet_private_key: SecretStr | None = Field(default=None)
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
+    rake_percent: float = Field(default=0.02, ge=0, lt=0.25)
+    haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
+    worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
+    lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     cache_ttl_seconds: int = Field(default=30, ge=1)
     cacheable_market_limit: int = Field(default=20, ge=1, le=250)
     market_record_cache_ttl_seconds: int = Field(default=120, ge=30)
@@ -58,6 +62,9 @@ class Settings(BaseSettings):
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
+    fx_feed_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
+    fx_timeout_seconds: float = Field(default=5.0, gt=0)
+    fx_fallback_price: float = Field(default=1.0, gt=0)
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)
@@ -120,6 +127,12 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return _split_csv(value)
         return value
+
+    @property
+    def total_monetisation_percent(self) -> float:
+        """Return the combined monetisation percentage (haircut + worsen + rake)."""
+
+        return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
 
 
 @lru_cache(maxsize=1)

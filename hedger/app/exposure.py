@@ -127,10 +127,14 @@ class ExposureLedger:
             self._float_balance_zen = balance_zen
 
     async def record_commit(
-        self, commit: CommitEvent, *, idempotency_key: str | None = None
+        self,
+        commit: CommitEvent,
+        *,
+        idempotency_key: str | None = None,
+        stake_usd: Decimal | None = None,
     ) -> tuple[MarketExposureSnapshot, HedgeInstruction | None, list[RiskBreach]]:
-        quote = await self.fx_oracle.get_quote()
-        stake_usd = self.fx_oracle.usd_from_zen(commit.stake_zen, quote)
+        quote = await self.fx_oracle.get_quote() if stake_usd is None else None
+        stake_usd = stake_usd if stake_usd is not None else self.fx_oracle.usd_from_zen(commit.stake_zen, quote)
 
         async with self._lock:
             market = self._markets.get(commit.market_id) or MarketExposure(commit.market_id)

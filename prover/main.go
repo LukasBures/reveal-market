@@ -126,6 +126,12 @@ func main() {
 		"backend":     prover.Backend(),
 		"version":     cfg.Version,
 		"circuit":     server.circuitHash,
+		"fees": map[string]float64{
+			"rake_percent":       cfg.RakePercent,
+			"haircut_percent":    cfg.HaircutPercent,
+			"worsen_percent":     cfg.WorsenPercent,
+			"total_monetisation": cfg.TotalMonetisation,
+		},
 	})
 
 	if err := http.ListenAndServe(cfg.ListenAddr, server.routes()); err != nil {
@@ -189,6 +195,12 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"last_proof_at":   formatMillis(lastProof),
 		"max_concurrency": a.cfg.MaxConcurrency,
 		"ready":           a.prover.Ready(),
+		"fees": map[string]float64{
+			"rake_percent":       a.cfg.RakePercent,
+			"haircut_percent":    a.cfg.HaircutPercent,
+			"worsen_percent":     a.cfg.WorsenPercent,
+			"total_monetisation": a.cfg.TotalMonetisation,
+		},
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -421,6 +433,19 @@ func intEnv(key string, fallback int) int {
 		return fallback
 	}
 	if n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	value := getenv(key, "")
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	if err != nil || n < 0 {
+		logLine("warn", "prover.invalid_env", map[string]any{"key": key, "value": value, "fallback": fallback})
 		return fallback
 	}
 	return n

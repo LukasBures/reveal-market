@@ -1,9 +1,12 @@
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
+import dynamic from "next/dynamic";
 
 type Props = {
   market: MarketDetail;
 };
+
+const OutcomeQuote = dynamic(() => import("./OutcomeQuote").then((mod) => mod.OutcomeQuote), { ssr: false });
 
 const formatZen = (value: number | undefined): string => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -36,6 +39,7 @@ export function MarketDetailOutcomes({ market }: Props) {
           Prices shown in ZEN
         </span>
       </div>
+      <OutcomeQuote stakeZen={10} />
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm text-slate-200">
           <thead>
@@ -77,6 +81,16 @@ export function MarketDetailOutcomes({ market }: Props) {
             })}
           </tbody>
         </table>
+      </div>
+      <div className="mt-5 rounded-3xl border border-amber-200/30 bg-amber-500/5 p-4 text-sm text-slate-200 sm:p-5">
+        <p className="text-base font-semibold text-white">How payouts work</p>
+        <p className="mt-2 text-slate-200">
+          You deposit ZEN. If you win, you get two tokens:
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-100">
+          <li>Your stake back in ZEN minus the platform rake% (rake is charged on the ZEN stake only).</li>
+          <li>Your winnings in stable USDC (the profit shown here), keeping gains stable.</li>
+        </ul>
       </div>
     </section>
   );

@@ -65,11 +65,12 @@ class FxOracle:
             self._quote = quote
             return quote
 
-    def usd_from_zen(self, zen_amount: Decimal, quote: FxQuote | None = None) -> Decimal:
+    def usd_from_zen(self, zen_amount: Decimal, quote: FxQuote | None = None, apply_haircut: bool = True) -> Decimal:
         quote = quote or self._quote
         if not quote:
             raise ValueError("FX quote is not available; call get_quote() first")
-        haircut = (Decimal(10_000 - self.haircut_bps) / Decimal(10_000)).quantize(Decimal("0.0001"))
+        haircut = Decimal(10_000 - self.haircut_bps) / Decimal(10_000) if apply_haircut else Decimal(1)
+        haircut = haircut.quantize(Decimal("0.0001"))
         return (zen_amount * quote.zen_usd * haircut).quantize(Decimal("0.00000001"))
 
     def _is_stale(self, quote: FxQuote) -> bool:

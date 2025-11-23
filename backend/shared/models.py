@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -144,3 +144,22 @@ class SchemaVersion(Base):
     key = Column(String(64), primary_key=True, nullable=False)
     revision = Column(String(64), nullable=False)
     applied_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class HedgerTreasurySnapshot(Base):
+    __tablename__ = "hedger_treasury_snapshots"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    market_id = Column(String, nullable=False, index=True)
+    outcome = Column(String, nullable=False)
+    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    refund_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    rake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    payout_profit_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    borrowed_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    lp_share_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    repay_amount_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
+    platform_usdc_revenue = Column(Numeric(precision=32, scale=8), nullable=False)
+    zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
+    usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,0 +1,30 @@
+[project]
+name = "reveal-market-price-streamer"
+version = "0.1.0"
+description = "Polymarket price streamer with SSE fanout and FX integration."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.111,<0.112",
+    "uvicorn>=0.30,<0.31",
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+    "redis>=5.0,<6.0",
+    "httpx>=0.27,<0.28",
+    "websockets>=12.0,<13.0",
+    "python-json-logger>=2.0,<3.0",
+    "prometheus-client>=0.20,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9.0",
+    "pytest-asyncio>=0.23,<0.24",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"

@@ -104,3 +104,39 @@ class RiskReport(BaseModel):
 class FxQuote:
     zen_usd: Decimal
     fetched_at: datetime
+
+
+class PricingQuote(BaseModel):
+    """User-facing economics for a ZEN bet."""
+
+    stake_zen: Decimal
+    zen_usd: Decimal
+    displayed_odds_multiplier: Decimal
+    rake_zen: Decimal
+    refund_zen: Decimal
+    hedge_usdc: Decimal
+    haircut_percent: Decimal
+    worsen_percent: Decimal
+    rake_percent: Decimal
+    total_monetisation: Decimal
+
+
+class SettlementBreakdown(BaseModel):
+    """Settlement outputs for a single bet."""
+
+    stake_zen: Decimal
+    refund_zen: Decimal
+    rake_zen: Decimal
+    payout_profit_usdc: Decimal
+    borrowed_usdc: Decimal
+    lp_share_usdc: Decimal
+    repay_amount_usdc: Decimal
+    total_platform_usdc_revenue: Decimal
+    user_outcome: str
+
+
+class TreasurySnapshot(BaseModel):
+    """Current balances for the split treasuries."""
+
+    zen_balance: Decimal
+    usdc_balance: Decimal
