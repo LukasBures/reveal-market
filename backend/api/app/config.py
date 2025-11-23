@@ -62,9 +62,12 @@ class Settings(BaseSettings):
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
-    fx_feed_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
+    fx_feed_url: AnyHttpUrl = Field(
+        default="https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd"
+    )
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
+    max_stake_zen: float = Field(default=100.0, gt=0, description="Per-quote max stake in ZEN")
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)

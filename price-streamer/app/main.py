@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import StreamingResponse
@@ -88,6 +89,31 @@ def create_app() -> FastAPI:
             "stale_markets": stale_markets,
             "last_seen": {k: v.isoformat() for k, v in state.last_seen.items()},
         }
+
+    async def _fx_payload() -> dict:
+        quote = await state.get_fx()
+        now = datetime.now(UTC)
+        age_seconds = (now - (quote.fetched_at or now)).total_seconds()
+        return {
+            "pair": "ZEN/USDC",
+            "zen_usd": float(quote.zen_usd),
+            "source": quote.source,
+            "received_at": quote.fetched_at.isoformat(),
+            "stale": quote.stale,
+            "age_seconds": age_seconds,
+        }
+
+    @app.get("/fx/zen-usdc")
+    async def fx_quote_usdc() -> dict:
+        return await _fx_payload()
+
+    @app.get("/fx/zen-usd")
+    async def fx_quote_usd() -> dict:
+        return await _fx_payload()
+
+    @app.get("/fx/zen-usdt")
+    async def fx_quote_usdt() -> dict:
+        return await _fx_payload()
 
     @app.get("/metrics")
     async def metrics() -> Response:

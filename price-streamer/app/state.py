@@ -62,7 +62,7 @@ class StreamState:
         async with self._fx_lock:
             try:
                 async with httpx.AsyncClient(timeout=self.settings.fx_timeout_seconds) as client:
-                    res = await client.get(self.settings.fx_feed_url)
+                    res = await client.get(str(self.settings.fx_feed_url))
                     res.raise_for_status()
                     data = res.json()
                     price = (
@@ -161,8 +161,9 @@ class StreamState:
         self.fx_quote = quote
         self.fx_last_update = quote.fetched_at
         self.fx_last_source = quote.source
-        self._fx_prev_price = quote.zen_usd
-        self._fx_prev_price_ts = quote.fetched_at
+        if quote.source != "fallback":
+            self._fx_prev_price = quote.zen_usd
+            self._fx_prev_price_ts = quote.fetched_at
         self.fx_last_error = None
         if quote.source == "binance_ws":
             self.fx_ws_connected = True
@@ -172,6 +173,8 @@ class StreamState:
         if price <= 0:
             self.fx_last_error = "price_non_positive"
             return None
+        if self.fx_last_source == "fallback":
+            allow_jump = True
         if price < Decimal(str(self.settings.fx_min_price)) or price > Decimal(str(self.settings.fx_max_price)):
             self.fx_last_error = "price_out_of_bounds"
             self._fx_rejection_count += 1

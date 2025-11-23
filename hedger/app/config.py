@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     polymarket_retry_attempts: int = Field(default=3)
     polymarket_retry_backoff_seconds: float = Field(default=0.5)
 
-    fx_feed_url: str = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
+    fx_feed_url: str = Field(default="https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd")
     fx_timeout_seconds: int = Field(default=5)
     fx_max_age_seconds: int = Field(default=120)
     fx_haircut_bps: int = Field(default=500, description="FX haircut in basis points (500 = 5%)")
@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     risk_coverage_ratio_target: float = Field(default=0.98)
     risk_lp_utilization_limit: float = Field(default=0.85)
     float_min_zen: Decimal = Field(default=Decimal("5000"))
+    risk_max_commit_zen: Decimal = Field(
+        default=Decimal("1000"),
+        ge=Decimal("0"),
+        description="Per-commit stake limit in ZEN",
+    )
     rake_percent: Decimal = Field(
         default=Decimal("0.02"),
         ge=Decimal("0"),

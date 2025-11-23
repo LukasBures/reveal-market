@@ -103,6 +103,36 @@ def test_health_status_degraded(monkeypatch):
         assert resp.json()["status"] == "degraded"
 
 
+def test_fx_endpoint(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(zen_usd=2, fetched_at=now, stale=False, source="binance_ws")
+    state.fx_last_update = now
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/fx/zen-usd")
+        payload = resp.json()
+        assert payload["pair"] == "ZEN/USDC"
+        assert payload["zen_usd"] == 2.0
+
+
 def test_stream_endpoint_connects(test_app):
     client, state = test_app
 
