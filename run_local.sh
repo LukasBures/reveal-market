@@ -253,6 +253,12 @@ log_step "Validating docker compose files"
 log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} config"
 "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
 if [[ "${RUN_BUILD}" == "true" ]]; then
+  # If the user requested specific services to run and did not pass --build-services,
+  # limit the build to those services to avoid rebuilding the entire stack.
+  if [[ ${#BUILD_SERVICES[@]} -eq 0 && ${#UP_ARGS[@]} -gt 0 ]]; then
+    BUILD_SERVICES=("${UP_ARGS[@]}")
+  fi
+
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
   log_step "Building images (${BUILD_DESC}, pull latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
   BUILD_OPTS=(--parallel --pull)

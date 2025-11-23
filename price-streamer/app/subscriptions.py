@@ -23,7 +23,7 @@ class SubscriptionManager:
         self.assets.discard(str(asset_id))
 
     def build_clob_subscribe(self) -> str:
-        return json.dumps({"assets_ids": sorted(self.assets), "type": "market"})
+        return json.dumps({"assets_ids": sorted(self.assets), "type": "MARKET"})
 
     def build_rtds_subscribe(self) -> str:
         subs = [

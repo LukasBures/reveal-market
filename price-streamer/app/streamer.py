@@ -41,6 +41,10 @@ class PriceStreamer:
 
     async def _ws_loop(self) -> None:
         while not self._stop.is_set():
+            # Avoid hammering the WS with empty subscriptions.
+            if not self.state.subscriptions.assets:
+                await asyncio.sleep(self.settings.ws_reconnect_seconds)
+                continue
             async for ws in iter_ws(self.settings.clob_ws_url):
                 if self._stop.is_set():
                     break

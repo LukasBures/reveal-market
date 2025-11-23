@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .config import get_settings
+from .logging_utils import setup_logging, start_heartbeat
 from .state import StreamState
 from .streamer import PriceStreamer
 
@@ -40,10 +41,11 @@ async def _sse_events(pubsub, heartbeat_seconds: int, max_events: int | None = N
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    setup_logging("reveal_market.price_streamer", settings.log_level)
 
     state = StreamState(settings)
     streamer = PriceStreamer(state, settings)
+    heartbeat_stop = start_heartbeat(logger, "price_streamer", interval_seconds=60)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -53,6 +55,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            heartbeat_stop.set()
             with suppress(Exception):
                 await streamer.stop()
                 await state.shutdown()
