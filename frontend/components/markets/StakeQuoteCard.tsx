@@ -18,6 +18,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fxStale, setFxStale] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +26,10 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
       try {
         const payload = await fetchFxQuote();
         if (!cancelled) setFx(payload);
+        if (!cancelled) setFxStale(payload.stale);
+        if (!cancelled && payload.stale) {
+          setError("Pricing temporarily unavailable (stale FX)");
+        }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
@@ -38,7 +43,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
   const debouncedStake = useDebounce(stakeZen, 200);
 
   useEffect(() => {
-    if (!fx || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
+    if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
       setQuote(null);
       return;
     }
@@ -105,6 +110,11 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
       {error && (
         <p className="mt-2 text-xs text-rose-300">
           {error}. FX feed or pricing may be temporarily unavailable.
+        </p>
+      )}
+      {fxStale && (
+        <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-amber-300">
+          Pricing paused due to stale FX. Please retry in a moment.
         </p>
       )}
     </div>

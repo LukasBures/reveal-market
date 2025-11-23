@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-
-import pytest
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from app.config import Settings
 from app.main import create_app
 from app.state import FxQuote, StreamState
@@ -16,6 +15,7 @@ def test_app(monkeypatch):
     # Use in-memory state with no Redis connection.
     state = StreamState()
     monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+
     # Avoid starting real streamer/network loops in tests.
     class DummyStreamer:
         def __init__(self, *_args, **_kwargs): ...
@@ -54,6 +54,7 @@ def test_health_status_stale(monkeypatch):
     state.fx_ws_connected = False
     monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
     class DummyStreamer:
         def __init__(self, *_args, **_kwargs): ...
 

@@ -12,6 +12,7 @@ export function OutcomeQuote({ stakeZen }: Props) {
   const [profitUsd, setProfitUsd] = useState<string>("—");
   const [fxLabel, setFxLabel] = useState<string>("FX: loading…");
   const [error, setError] = useState<string | null>(null);
+  const [fxStale, setFxStale] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,6 +21,11 @@ export function OutcomeQuote({ stakeZen }: Props) {
         const fx = await fetchFxQuote();
         if (cancelled) return;
         setFxLabel(`FX: 1 ZEN = ${fx.zen_usd.toFixed(4)} USD${fx.stale ? " (stale)" : ""}`);
+        setFxStale(fx.stale);
+        if (fx.stale) {
+          setError("Pricing temporarily unavailable (stale FX)");
+          return;
+        }
         const quote = await fetchPricingQuote(stakeZen, fx.zen_usd);
         if (cancelled) return;
         setRefundZen(quote.refund_zen.toFixed(4));
@@ -52,6 +58,11 @@ export function OutcomeQuote({ stakeZen }: Props) {
       <span className="rounded-full bg-sky-500/15 px-2 py-1 text-sky-200">
         Est. profit on {stakeZen} ZEN: {profitUsd} USDC
       </span>
+      {fxStale && (
+        <span className="rounded-full bg-amber-500/15 px-2 py-1 text-amber-200">
+          Pricing paused due to stale FX
+        </span>
+      )}
     </div>
   );
 }

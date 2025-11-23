@@ -64,8 +64,15 @@ async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
         response = await client.get(settings.fx_feed_url)
         response.raise_for_status()
         data = response.json()
-        raw = data.get("price") or data.get("zen_usd") or data.get("zenUSD")
+        stale = bool(data.get("fx_stale") or data.get("stale"))
+        raw = (
+            data.get("price")
+            or data.get("zen_usd")
+            or data.get("zenUSD")
+            or data.get("fx_zen_usd")
+            or data.get("fx", {}).get("zen_usd")
+        )
         if raw is None:
             raise ValueError("FX feed response missing zen_usd/price")
         zen_usd = float(raw)
-    return FxQuoteResponse(zen_usd=zen_usd, stale=False)
+    return FxQuoteResponse(zen_usd=zen_usd, stale=stale)

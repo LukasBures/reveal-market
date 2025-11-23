@@ -874,6 +874,24 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
 
     zen_usd = payload.zen_usd
     if zen_usd is None:
+        try:
+            fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
+            fx.raise_for_status()
+            data = fx.json()
+            if data.get("fx_stale") or data.get("stale"):
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price stale")
+            zen_usd = float(
+                data.get("price")
+                or data.get("zen_usd")
+                or data.get("zenUSD")
+                or data.get("fx_zen_usd")
+                or data.get("fx", {}).get("zen_usd")
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
+    if zen_usd is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
     engine = PricingEngine(settings)
     try:

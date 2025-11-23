@@ -50,6 +50,7 @@ class FxOracle:
         self._lock = asyncio.Lock()
         self._retry_attempts = retry_attempts
         self._fallback_zen_usd = fallback_zen_usd
+        self._stale_override = False
 
     async def get_quote(self) -> FxQuote:
         async with self._lock:
@@ -63,6 +64,7 @@ class FxOracle:
         async with self._lock:
             quote = await self._fetch_quote()
             self._quote = quote
+            self._stale_override = False
             return quote
 
     def usd_from_zen(self, zen_amount: Decimal, quote: FxQuote | None = None, apply_haircut: bool = True) -> Decimal:
@@ -74,7 +76,7 @@ class FxOracle:
         return (zen_amount * quote.zen_usd * haircut).quantize(Decimal("0.00000001"))
 
     def _is_stale(self, quote: FxQuote) -> bool:
-        return datetime.now(UTC) - quote.fetched_at > timedelta(seconds=self.max_age_seconds)
+        return self._stale_override or datetime.now(UTC) - quote.fetched_at > timedelta(seconds=self.max_age_seconds)
 
     async def _fetch_quote(self) -> FxQuote:
         fallback_quote = FxQuote(zen_usd=self._fallback_zen_usd, fetched_at=datetime.now(UTC))
@@ -88,7 +90,15 @@ class FxOracle:
                     response = await self.client.get(self.feed_url, timeout=self.timeout_seconds)
                     response.raise_for_status()
                     data = response.json()
-                    price = data.get("price") or data.get("zen_usd") or data.get("zenUSD")
+                    if data.get("fx_stale") or data.get("stale"):
+                        raise ValueError("FX feed marked stale")
+                    price = (
+                        data.get("price")
+                        or data.get("zen_usd")
+                        or data.get("zenUSD")
+                        or data.get("fx_zen_usd")
+                        or data.get("fx", {}).get("zen_usd")
+                    )
                     if price is None:
                         raise ValueError("FX feed response missing zen_usd/price")
                     zen_usd = Decimal(str(price))
@@ -101,6 +111,7 @@ class FxOracle:
                             "feed_url": self.feed_url,
                         },
                     )
+                    self._stale_override = False
                     return quote
         except RetryError as exc:
             logger.warning(
@@ -112,6 +123,7 @@ class FxOracle:
                     "error": str(exc),
                 },
             )
+            self._stale_override = True
             return fallback_quote
         except (InvalidOperation, httpx.HTTPError, ValueError) as exc:
             logger.warning(
@@ -123,6 +135,7 @@ class FxOracle:
                     "error": str(exc),
                 },
             )
+            self._stale_override = True
             return fallback_quote
 
     def stale(self) -> bool:

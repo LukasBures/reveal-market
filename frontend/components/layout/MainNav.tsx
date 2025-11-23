@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
+import { fetchFxQuote } from "@/lib/pricing-client";
 
 const navLinks = [
   { href: "/about", label: "About" },
@@ -25,6 +26,9 @@ const externalHomeHref = /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [fxLabel, setFxLabel] = useState<string | null>(null);
+  const [fxStale, setFxStale] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -38,6 +42,28 @@ export function MainNav() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadFx = async () => {
+      try {
+        const data = await fetchFxQuote();
+        if (cancelled) return;
+        setFxLabel(`ZEN/USD ${Number(data.zen_usd).toFixed(4)}`);
+        setFxStale(Boolean(data.stale));
+        setFxError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setFxError((err as Error).message);
+      }
+    };
+    loadFx();
+    const id = setInterval(loadFx, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl">
@@ -126,6 +152,18 @@ export function MainNav() {
           <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
         </>
       ) : null}
+      <div className="border-t border-white/5 bg-black/60 px-4 py-2 text-xs text-white/80">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+          <span className="rounded-full bg-white/5 px-3 py-1 font-semibold tracking-wide">
+            {fxLabel ? fxLabel : "ZEN/USD loading…"}
+          </span>
+          <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.2em]">
+            {fxStale && <span className="text-amber-300">FX stale — betting paused until fresh</span>}
+            {fxError && <span className="text-rose-300">FX unavailable ({fxError})</span>}
+            {!fxStale && !fxError && <span className="text-emerald-300">Live pricing</span>}
+          </div>
+        </div>
+      </div>
     </header>
   );
 }

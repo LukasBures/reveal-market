@@ -99,7 +99,13 @@ async def test_get_fx_marks_stale(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cache_tick_signs_payload():
-    state = StreamState(Settings(cache_prefix="ps:test", pubsub_prefix="ps:stream", signing_secret="abc"))
+    state = StreamState(
+        Settings(
+            cache_prefix="ps:test",
+            pubsub_prefix="ps:stream",
+            signing_secret="dummy_signing_key",  # noqa: S106 - test-only secret
+        )
+    )
     dummy = DummyRedis()
     state.redis = dummy  # type: ignore[assignment]
     await state.cache_tick("m1", "0", {"price": "0.5"})
