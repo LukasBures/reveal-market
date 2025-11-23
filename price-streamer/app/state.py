@@ -33,6 +33,7 @@ class StreamState:
         self.settings = settings or get_settings()
         self.redis: Redis | None = None
         self.fx_quote: FxQuote | None = None
+        self.fx_last_update: datetime | None = None
         self._fx_lock = asyncio.Lock()
         self.subscriptions = SubscriptionManager(max_items=self.settings.max_subscriptions)
         self.last_seen: dict[str, datetime] = {}
@@ -72,11 +73,18 @@ class StreamState:
                     stale=True,
                 )
                 self.fx_quote = fallback
+                self.fx_last_update = fallback.fetched_at
                 return fallback
 
     async def get_fx(self) -> FxQuote:
         if not self.fx_quote:
             return await self.refresh_fx()
+        # Mark stale if older than threshold.
+        if (
+            self.fx_last_update
+            and (datetime.now(UTC) - self.fx_last_update).total_seconds() > self.settings.fx_stale_after_seconds
+        ):
+            self.fx_quote = FxQuote(zen_usd=self.fx_quote.zen_usd, fetched_at=self.fx_last_update, stale=True)
         return self.fx_quote
 
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:

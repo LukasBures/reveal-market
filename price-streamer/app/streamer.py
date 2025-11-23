@@ -31,6 +31,7 @@ class PriceStreamer:
             asyncio.create_task(self._fx_refresh_loop(), name="fx-refresh"),
             asyncio.create_task(self._flush_loop(), name="flush-loop"),
             asyncio.create_task(self._rtds_loop(), name="rtds-loop"),
+            asyncio.create_task(self._fx_ws_loop(), name="fx-ws-loop"),
         ]
 
     async def stop(self) -> None:
@@ -199,3 +200,46 @@ class PriceStreamer:
             return
         quote = FxQuote(zen_usd=price, fetched_at=datetime.now(UTC), stale=False)
         self.state.fx_quote = quote
+        self.state.fx_last_update = quote.fetched_at
+
+    async def _fx_ws_loop(self) -> None:
+        if not self.settings.fx_ws_url:
+            return
+        while not self._stop.is_set():
+            try:
+                async for ws in iter_ws(self.settings.fx_ws_url):
+                    if self._stop.is_set():
+                        break
+                    async for raw in ws:
+                        if self._stop.is_set():
+                            break
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        await self._handle_fx_ws(data)
+            except Exception as exc:  # pragma: no cover - reconnect path
+                logger.warning("FX ws loop error", extra={"event": "fx.ws.error", "error": str(exc)})
+            await asyncio.sleep(self.settings.ws_reconnect_seconds)
+
+    async def _handle_fx_ws(self, data: dict) -> None:
+        # Binance ticker shape: b=best bid, a=best ask, c=last price
+        bid = data.get("b")
+        ask = data.get("a")
+        last = data.get("c")
+        price_val: Decimal | None = None
+        if bid and ask:
+            try:
+                price_val = (Decimal(str(bid)) + Decimal(str(ask))) / Decimal(2)
+            except Exception:
+                price_val = None
+        if price_val is None and last:
+            try:
+                price_val = Decimal(str(last))
+            except Exception:
+                price_val = None
+        if price_val is None:
+            return
+        quote = FxQuote(zen_usd=price_val, fetched_at=datetime.now(UTC), stale=False)
+        self.state.fx_quote = quote
+        self.state.fx_last_update = quote.fetched_at

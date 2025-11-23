@@ -77,11 +77,11 @@ class Settings(BaseSettings):
         lt=Decimal("0.5"),
         validation_alias=AliasChoices("HEDGER_LP_SHARE_PERCENT", "RM_LP_SHARE_PERCENT"),
     )
-    vault_rpc_url: str | None = Field(default=None)
-    vault_private_key: str | None = Field(default=None)
-    vault_sender_address: str | None = Field(default=None)
-    vault_chain_id: int = Field(default=137, ge=1)
-    vault_gas_price_gwei: int | None = Field(default=None, ge=0)
+    vault_rpc_url: str | None = Field(default="http://localhost:8545")
+    vault_private_key: str | None = Field(default="0x" + "00" * 31 + "01")
+    vault_sender_address: str | None = Field(default="0x" + "00" * 19 + "01")
+    vault_chain_id: int = Field(default=1337, ge=1)
+    vault_gas_price_gwei: int | None = Field(default=5, ge=0)
 
     settlement_poll_seconds: int = Field(default=20)
     heartbeat_interval_seconds: int = Field(default=60)

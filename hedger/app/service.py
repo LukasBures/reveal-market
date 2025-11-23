@@ -68,17 +68,16 @@ class HedgerService:
             retry_attempts=settings.polymarket_retry_attempts,
             retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
         )
-        if settings.vault_rpc_url and settings.vault_private_key and settings.vault_sender_address:
-            tx_cfg = VaultTxConfig(
-                rpc_url=settings.vault_rpc_url,
-                chain_id=settings.vault_chain_id,
-                private_key=settings.vault_private_key,
-                sender=settings.vault_sender_address,
-                gas_price_gwei=settings.vault_gas_price_gwei,
-            )
-            self.vault_client = OnChainLpVaultClient(settings.lp_vault_address, tx_cfg)
-        else:
+        if not (settings.vault_rpc_url and settings.vault_private_key and settings.vault_sender_address):
             raise ValueError("Vault RPC/key/sender are required for vault client")
+        tx_cfg = VaultTxConfig(
+            rpc_url=settings.vault_rpc_url,
+            chain_id=settings.vault_chain_id,
+            private_key=settings.vault_private_key,
+            sender=settings.vault_sender_address,
+            gas_price_gwei=settings.vault_gas_price_gwei,
+        )
+        self.vault_client = OnChainLpVaultClient(settings.lp_vault_address, tx_cfg)
         self.hedger_usdc = HedgerUSDC(self.vault_client, max_utilization=limits.lp_utilization_limit)
         self.exposure_ledger = ExposureLedger(
             fx_oracle=self.fx_oracle,

@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
             "status": "ok",
             "fx_zen_usd": str(fx.zen_usd),
             "fx_stale": fx.stale,
+            "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
             "stale_markets": state.stale_markets(),
             "last_seen": {k: v.isoformat() for k, v in state.last_seen.items()},
         }

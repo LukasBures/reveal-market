@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     rtds_topic_crypto: str = Field(default="crypto_prices")
     rtds_topic_chainlink: str = Field(default="crypto_prices_chainlink")
     fx_feed_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
+    fx_ws_url: str | None = Field(
+        default="wss://stream.binance.com:9443/ws/zenusdt@ticker",
+        description="Primary FX websocket (ZEN/USDT ticker).",
+    )
+    fx_stale_after_seconds: int = Field(default=20, ge=5)
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
