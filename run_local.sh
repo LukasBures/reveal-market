@@ -95,6 +95,7 @@ PARALLEL_BUILDS="$(calc_parallel_builds "${CPU_COUNT}")"
 NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
 COMPOSE_ENV_ARGS=()
+WAIT_FLAG=()
 
 ensure_prover_artifacts() {
   if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
@@ -222,10 +223,9 @@ fi
 ensure_prover_artifacts
 
 # Configure env file usage
+SUPPORTS_ENV_FILE=false
 if docker compose version >/dev/null 2>&1; then
   SUPPORTS_ENV_FILE=true
-else
-  SUPPORTS_ENV_FILE=false
 fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -236,6 +236,17 @@ else
   elif [[ "${ENV_FILE}" != "${DEFAULT_ENV_FILE}" ]]; then
     log_warn "compose CLI (${COMPOSE_CMD[*]}) does not support --env-file; rename env file to .env or switch to docker compose."
   fi
+fi
+
+supports_wait_flag() {
+  if "${COMPOSE_CMD[@]}" up --help 2>&1 | grep -q -- "--wait"; then
+    return 0
+  fi
+  return 1
+}
+
+if supports_wait_flag; then
+  WAIT_FLAG+=("--wait")
 fi
 
 log_step "Validating docker compose files"
@@ -263,6 +274,9 @@ UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" up "--remove-orphans")
 if [[ "${DETACH_MODE}" == "true" ]]; then
   UP_CMD+=("--detach")
 fi
+if [[ ${#WAIT_FLAG[@]} -gt 0 ]]; then
+  UP_CMD+=("${WAIT_FLAG[@]}")
+fi
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
@@ -271,6 +285,7 @@ log_info "Running: ${UP_CMD[*]}"
 
 API_PORT="${API_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+STREAMER_PORT="${STREAMER_PORT:-8100}"
 POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:5432/reveal_market}"
 REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
 
@@ -281,10 +296,25 @@ Stack ready. Useful URLs while running locally:
   • Hedger admin / metrics: http://localhost:8090/admin/exposures | http://localhost:8090/metrics
   • Perf / SLA metrics:     http://localhost:${API_PORT}/health/heartbeats
   • Frontend / marketing:   http://localhost:${FRONTEND_PORT}/
+  • Price streamer:         http://localhost:${STREAMER_PORT}/health | http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
   • Postgres (psql):        ${POSTGRES_URI}
   • Redis (CLI):            ${REDIS_CMD}
 ------------------------------------------------------------
 EOF
+
+# Emit a quick health snapshot when supported (Compose v2+).
+if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
+  log_step "Service status"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for svc in data:
+    print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
+PY
+fi
 
 if [[ "${DETACH_MODE}" == "false" ]]; then
   cat <<'EOF'
