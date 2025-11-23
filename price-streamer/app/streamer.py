@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
-import json
 
 from .config import Settings
 from .state import StreamState, iter_ws
@@ -30,6 +30,7 @@ class PriceStreamer:
             asyncio.create_task(self._rest_poll_loop(), name="rest-poll"),
             asyncio.create_task(self._fx_refresh_loop(), name="fx-refresh"),
             asyncio.create_task(self._flush_loop(), name="flush-loop"),
+            asyncio.create_task(self._rtds_loop(), name="rtds-loop"),
         ]
 
     async def stop(self) -> None:
@@ -39,14 +40,24 @@ class PriceStreamer:
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _ws_loop(self) -> None:
-        async for raw in iter_ws(self.settings.clob_ws_url):
+        # Always send subscription payload based on tracked assets.
+        self.state.subscriptions.add_assets([])  # ensure initialized
+        async for ws in iter_ws(self.settings.clob_ws_url):
             if self._stop.is_set():
                 break
             try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            await self._handle_tick(data, source="ws")
+                await ws.send(self.state.subscriptions.build_clob_subscribe())
+                async for raw in ws:
+                    if self._stop.is_set():
+                        break
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    await self._handle_tick(data, source="ws")
+            except Exception as exc:  # pragma: no cover - reconnect path
+                logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
+                await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     async def _rest_poll_loop(self) -> None:
         while not self._stop.is_set():

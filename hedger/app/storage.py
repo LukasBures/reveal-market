@@ -369,7 +369,9 @@ class HedgerRepository:
                 select(
                     HedgeActionRecord.is_unwind,
                     func.sum(HedgeActionRecord.size_usd),
-                ).where(HedgeActionRecord.market_id == market_id).group_by(HedgeActionRecord.is_unwind)
+                )
+                .where(HedgeActionRecord.market_id == market_id)
+                .group_by(HedgeActionRecord.is_unwind)
             ).all()
         borrow = Decimal("0")
         unwind = Decimal("0")

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Tuple
 
-
-def build_merkle_root_and_paths(leaves: List[bytes]) -> Tuple[bytes, List[List[bytes]]]:
+def build_merkle_root_and_paths(leaves: list[bytes]) -> tuple[bytes, list[list[bytes]]]:
     """Build a keccak-based binary Merkle tree and return root and per-leaf sibling paths.
 
     Leaves are duplicated when odd to maintain full binary levels. Returns (root, paths) where
@@ -14,7 +12,7 @@ def build_merkle_root_and_paths(leaves: List[bytes]) -> Tuple[bytes, List[List[b
         return b"", []
 
     # Initialize paths for each leaf
-    paths: List[List[bytes]] = [[] for _ in leaves]
+    paths: list[list[bytes]] = [[] for _ in leaves]
     level = leaves[:]
     indices = list(range(len(leaves)))
 
@@ -25,8 +23,8 @@ def build_merkle_root_and_paths(leaves: List[bytes]) -> Tuple[bytes, List[List[b
             level.append(level[-1])
             indices.append(indices[-1])
 
-        next_level: List[bytes] = []
-        next_indices: List[int] = []
+        next_level: list[bytes] = []
+        next_indices: list[int] = []
         for i in range(0, len(level), 2):
             left = level[i]
             right = level[i + 1]

@@ -17,10 +17,14 @@ export type FxQuote = {
 };
 
 const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
-const streamerBase = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL || "").replace(/\/$/, "");
+const streamerBasePublic = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL || "").replace(/\/$/, "");
+const streamerBaseInternal = (process.env.STREAMER_INTERNAL_URL || "").replace(/\/$/, "");
 
 const getEndpoint = (path: string) => `${apiBase || "http://localhost:8000"}${path}`;
-const getStreamerEndpoint = (path: string) => `${streamerBase || "http://localhost:8100"}${path}`;
+const getStreamerEndpoint = (path: string, preferInternal = false) => {
+  if (preferInternal && streamerBaseInternal) return `${streamerBaseInternal}${path}`;
+  return `${streamerBasePublic || "http://localhost:8100"}${path}`;
+};
 
 export async function fetchFxQuote(): Promise<FxQuote> {
   const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
@@ -44,9 +48,12 @@ export async function fetchPricingQuote(stakeZen: number, zenUsd: number): Promi
 }
 
 export async function fetchPriceHistory(marketId: string, outcome: number, limit = 200): Promise<Array<{ timestamp: string; price: string; display_price: string }>> {
-  const res = await fetch(getStreamerEndpoint(`/history?market_id=${encodeURIComponent(marketId)}&outcome=${outcome}&limit=${limit}`), {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    getStreamerEndpoint(`/history?market_id=${encodeURIComponent(marketId)}&outcome=${outcome}&limit=${limit}`, true),
+    {
+      cache: "no-store",
+    },
+  );
   if (!res.ok) {
     throw new Error(`History fetch failed: ${res.status}`);
   }

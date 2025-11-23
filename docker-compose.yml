@@ -291,6 +291,7 @@ services:
       STREAMER_REDIS_URL: redis://redis:6379/0
       STREAMER_POLYMARKET_WS_URL: wss://clob.polymarket.com/ws
       STREAMER_POLYMARKET_REST_URL: https://gamma-api.polymarket.com/markets
+      STREAMER_INTERNAL_URL: http://price_streamer:8100
       STREAMER_FX_FEED_URL: ${RM_FX_FEED_URL:-https://gamma-api.polymarket.com/prices/zen-usd}
       STREAMER_FX_FALLBACK_PRICE: ${RM_FX_FALLBACK_PRICE:-1.0}
       STREAMER_WORSEN_PERCENT: ${RM_WORSEN_PERCENT:-0.03}

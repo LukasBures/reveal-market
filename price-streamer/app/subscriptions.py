@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 @dataclass
@@ -27,8 +27,7 @@ class SubscriptionManager:
 
     def build_rtds_subscribe(self) -> str:
         subs = [
-            {"topic": topic, "type": type_, "filters": filters or ""}
-            for topic, type_, filters in sorted(self.topics)
+            {"topic": topic, "type": type_, "filters": filters or ""} for topic, type_, filters in sorted(self.topics)
         ]
         return json.dumps({"action": "subscribe", "subscriptions": subs})
 

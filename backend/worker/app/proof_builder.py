@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
+from eth_utils import to_checksum_address
+from shared.models import Commitment, Settlement
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from eth_utils import to_checksum_address
 
-from shared.models import Commitment, CommitmentMerklePath, Settlement
 from .merkle import build_merkle_root_and_paths
 
 logger = logging.getLogger("reveal_market.worker.proof_builder")
@@ -25,10 +25,8 @@ def _hex_bytes(value: str | bytes) -> str:
     raise TypeError("unsupported type for hex conversion")
 
 
-def build_prover_payload(session: Session, market_id: int) -> Dict[str, Any]:
-    settlement = session.execute(
-        select(Settlement).where(Settlement.market_id == market_id)
-    ).scalar_one_or_none()
+def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
+    settlement = session.execute(select(Settlement).where(Settlement.market_id == market_id)).scalar_one_or_none()
     if not settlement:
         raise SettlementDataMissing("settlement row not found")
     required_fields = [
@@ -43,8 +41,10 @@ def build_prover_payload(session: Session, market_id: int) -> Dict[str, Any]:
     if any(v in (None, 0, "") for v in required_fields):
         raise SettlementDataMissing("settlement missing required fields")
 
-    commitments: List[Commitment] = (
-        session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id)).scalars().all()
+    commitments: list[Commitment] = (
+        session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id))
+        .scalars()
+        .all()
     )
     if not commitments:
         raise SettlementDataMissing("no commitments for market")
@@ -55,7 +55,7 @@ def build_prover_payload(session: Session, market_id: int) -> Dict[str, Any]:
     if computed_root != expected_root:
         raise SettlementDataMissing("computed merkle root does not match stored root")
 
-    tickets: List[Dict[str, Any]] = []
+    tickets: list[dict[str, Any]] = []
     for idx, commitment in enumerate(commitments):
         if settlement.commitments_count and idx >= settlement.commitments_count:
             break

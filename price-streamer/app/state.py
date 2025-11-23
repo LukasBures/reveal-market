@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+import hashlib
+import hmac
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-import hmac
-import hashlib
-import json
 
 import httpx
 from redis.asyncio import Redis
@@ -39,6 +38,7 @@ class StreamState:
         self.last_seen: dict[str, datetime] = {}
         self.last_published: dict[str, datetime] = {}
         self.tick_sizes: dict[str, Decimal] = {}
+        self._rtds_connected = False
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
@@ -62,7 +62,9 @@ class StreamState:
                     self.fx_quote = quote
                     return quote
             except Exception as exc:  # pragma: no cover - network fallback
-                logger.warning("FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)})
+                logger.warning(
+                    "FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)}
+                )
                 fallback = FxQuote(
                     zen_usd=Decimal(str(self.settings.fx_fallback_price)),
                     fetched_at=datetime.now(UTC),
@@ -127,13 +129,12 @@ class StreamState:
 
 
 async def iter_ws(ws_url: str):
-    """Yield incoming messages from a websocket, reconnecting on drop."""
+    """Yield websocket connections, reconnecting on drop."""
 
     while True:
         try:
             async with connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
-                async for raw in ws:
-                    yield raw
+                yield ws
         except Exception as exc:  # pragma: no cover - reconnection path
-            logger.warning("polymarket ws dropped; reconnecting", extra={"event": "polymarket.ws.reconnect", "error": str(exc)})
+            logger.warning("ws dropped; reconnecting", extra={"event": "ws.reconnect", "error": str(exc)})
             await asyncio.sleep(get_settings().ws_reconnect_seconds)

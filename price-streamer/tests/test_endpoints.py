@@ -28,6 +28,7 @@ def test_health_endpoint_reports_fx(test_app):
 
 def test_stream_endpoint_connects(test_app):
     client, state = test_app
+
     # Set up a dummy redis pubsub to avoid actual Redis.
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):

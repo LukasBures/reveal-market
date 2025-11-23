@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+import httpx
+
 from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
-import httpx
 
 MAX_PERCENT = Decimal("0.25")
 
@@ -49,8 +50,8 @@ class PricingEngine:
     def _validate_percent(self, value: float, label: str) -> Decimal:
         try:
             pct = Decimal(str(value))
-        except InvalidOperation:
-            raise ValueError(f"{label} must be a decimal")
+        except InvalidOperation as exc:
+            raise ValueError(f"{label} must be a decimal") from exc
         if pct < 0 or pct >= MAX_PERCENT:
             raise ValueError(f"{label} must be between 0 and {MAX_PERCENT} (exclusive)")
         return pct

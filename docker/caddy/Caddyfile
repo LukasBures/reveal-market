@@ -137,6 +137,40 @@ revealmarket.xyz {
 
 
 # ======================================================================
+#  STREAMER SUBDOMAIN — stream.revealmarket.xyz
+# ======================================================================
+stream.revealmarket.xyz {
+  encode zstd gzip
+
+  tls {
+    protocols tls1.2 tls1.3
+    issuer acme {
+      email infra@revealmarket.xyz
+    }
+  }
+
+  log {
+    level WARN
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+
+  reverse_proxy price_streamer:8100 {
+    header_up X-Forwarded-Proto {scheme}
+    header_up X-Forwarded-Host {host}
+    header_up X-Real-IP {remote_host}
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      keepalive_idle_conns 64
+    }
+  }
+}
+
+
+# ======================================================================
 #  WWW REDIRECT — www.revealmarket.xyz → revealmarket.xyz
 # ======================================================================
 www.revealmarket.xyz {

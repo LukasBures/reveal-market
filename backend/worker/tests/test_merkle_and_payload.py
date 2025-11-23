@@ -1,10 +1,9 @@
 import pytest
+from shared.models import Base, Commitment, Settlement
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
 from worker.app.merkle import build_merkle_root_and_paths
 from worker.app.proof_builder import SettlementDataMissing, build_prover_payload
-from shared.models import Base, Commitment, Settlement
 
 
 @pytest.fixture()

@@ -28,9 +28,7 @@ class PricingEngine:
         displayed_multiplier = Decimal("1") - self.worsen_percent
         rake_zen = (stake_zen * self.rake_percent).quantize(Decimal("0.00000001"))
         refund_zen = (stake_zen - rake_zen).quantize(Decimal("0.00000001"))
-        hedge_usdc = (stake_zen * zen_usd * (Decimal("1") - self.haircut_percent)).quantize(
-            Decimal("0.00000001")
-        )
+        hedge_usdc = (stake_zen * zen_usd * (Decimal("1") - self.haircut_percent)).quantize(Decimal("0.00000001"))
         hedge_usdc = max(hedge_usdc, Decimal("0"))
 
         return PricingQuote(
@@ -49,8 +47,8 @@ class PricingEngine:
     def _validate_percent(self, value: Decimal, label: str) -> Decimal:
         try:
             percent = Decimal(value)
-        except InvalidOperation:
-            raise ValueError(f"{label} must be a decimal percentage")
+        except InvalidOperation as exc:
+            raise ValueError(f"{label} must be a decimal percentage") from exc
         if percent < 0 or percent >= MAX_PERCENT:
             raise ValueError(f"{label} must be between 0 and {MAX_PERCENT} (exclusive)")
         return percent

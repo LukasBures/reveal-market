@@ -913,15 +913,6 @@ def treasury_snapshots(
         query = query.filter(models.HedgerTreasurySnapshot.market_id == market_id)
     rows = query.limit(limit).all()
     return rows
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.ERROR,
-            event="pricing.fx.unexpected",
-            message="unexpected FX fetch error",
-            error=str(exc),
-        )
-        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
 
 
 @app.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])

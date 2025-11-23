@@ -10,11 +10,16 @@ class Settings(BaseSettings):
     environment: str = Field(default="prod", validation_alias=AliasChoices("MODE", "ENVIRONMENT"))
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
 
-    redis_url: str = Field(default="redis://redis:6379/0", validation_alias=AliasChoices("STREAMER_REDIS_URL", "RM_REDIS_URL"))
+    redis_url: str = Field(
+        default="redis://redis:6379/0", validation_alias=AliasChoices("STREAMER_REDIS_URL", "RM_REDIS_URL")
+    )
     clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/market")
     clob_rest_markets_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/markets")
     rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com")
-    rtds_crypto_symbols: str | None = Field(default=None, description="Comma-separated symbols for crypto_prices (e.g., zenusdt,ethusdt)")
+    rtds_crypto_symbols: str | None = Field(
+        default=None, description="Comma-separated symbols for crypto_prices (e.g., zenusdt,ethusdt)"
+    )
+    rtds_enabled: bool = Field(default=True)
     fx_feed_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
@@ -30,7 +35,7 @@ class Settings(BaseSettings):
     pubsub_prefix: str = Field(default="price_streamer:stream")
     history_prefix: str = Field(default="price_streamer:history")
     history_limit: int = Field(default=500, ge=10)
-    api_host: str = Field(default="0.0.0.0")
+    api_host: str = Field(default="0.0.0.0")  # noqa: S104 - intentional service binding inside docker
     api_port: int = Field(default=8100)
     signing_secret: str | None = Field(default=None, description="Optional HMAC secret to sign payloads")
 

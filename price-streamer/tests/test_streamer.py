@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from decimal import Decimal
 
 import pytest
@@ -18,8 +17,9 @@ class StubState(StreamState):
         self.cached.append((market_id, outcome, payload))
 
     async def get_fx(self):
-        from app.state import FxQuote
         from datetime import UTC, datetime
+
+        from app.state import FxQuote
 
         return FxQuote(zen_usd=Decimal("1.0"), fetched_at=datetime.now(UTC), stale=False)
 

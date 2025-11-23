@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress, asynccontextmanager
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import StreamingResponse

@@ -21,14 +21,14 @@ from .metrics import (
     record_pnl,
     update_float_and_utilization,
 )
-from .pricing_engine import PricingEngine
 from .polymarket import PolymarketClient
+from .pricing_engine import PricingEngine
 from .risk import RiskEngine, RiskLimits
 from .settlement import SettlementCoordinator
 from .storage import HedgerRepository
 from .treasury_manager import TreasuryManager
 from .types import CommitEvent, HedgeInstruction, MarketExposureSnapshot, OutcomeSide
-from .vault import BaseLpVaultClient, OnChainLpVaultClient, VaultTxConfig
+from .vault import OnChainLpVaultClient, VaultTxConfig
 
 logger = logging.getLogger("reveal_market.hedger.service")
 
