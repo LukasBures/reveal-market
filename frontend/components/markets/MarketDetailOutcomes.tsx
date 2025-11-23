@@ -1,12 +1,10 @@
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
-import dynamic from "next/dynamic";
+import { OutcomeQuote } from "./OutcomeQuote";
 
 type Props = {
   market: MarketDetail;
 };
-
-const OutcomeQuote = dynamic(() => import("./OutcomeQuote").then((mod) => mod.OutcomeQuote), { ssr: false });
 
 const formatZen = (value: number | undefined): string => {
   if (typeof value !== "number" || Number.isNaN(value)) {

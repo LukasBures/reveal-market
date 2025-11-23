@@ -9,6 +9,7 @@ export type ServerEnv = {
 function resolveApiBase(): string {
   const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
   const offlineFallback = process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000";
+  const forceOffline = process.env.RM_FORCE_OFFLINE === "true";
   const explicitBase = process.env.RM_API_BASE_URL ?? null;
   const selectedBase =
     (preferDockerApi && explicitBase ? explicitBase : null) ??
@@ -19,7 +20,7 @@ function resolveApiBase(): string {
   if (selectedBase) {
     return assertValidUrl(selectedBase, "API base URL");
   }
-  if (process.env.NODE_ENV !== "production") {
+  if (forceOffline || process.env.NODE_ENV !== "production") {
     logger.info("serverEnv:offline_fallback", { fallback: offlineFallback });
     return assertValidUrl(offlineFallback, "offline API base URL");
   }
