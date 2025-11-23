@@ -101,8 +101,8 @@ contract FactoryLifecycleTest is Test {
         signals[5] = rakeBps;
         signals[6] = totalEscrow;
         signals[7] = 0;
-        signals[8] = market.commitmentsCount();
-        signals[9] = uint256(market.circuitHash());
+        signals[8] = uint256(market.circuitHash());
+        signals[9] = 0; // padding
     }
 
 }

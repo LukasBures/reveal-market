@@ -122,7 +122,7 @@ contract Groth16VerifierTest is Test {
         signals[5] = uint256(keccak256("outcome")) % FIELD;
         signals[6] = 1;
         signals[7] = 42;
-        signals[8] = 0;
+        signals[8] = uint256(keccak256("circuit"));
         signals[9] = 0;
     }
 

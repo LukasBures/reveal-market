@@ -164,7 +164,11 @@ cache_dir = root / ".." / ".." / "contracts" / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 cache_path = cache_dir / "settlement-vk.json"
 cache_path.write_text(deploy_path.read_text())
-print(f"Wrote deploy config to {deploy_path} and {cache_path}")
+zen_cache_dir = root / ".." / ".." / "contracts" / "zen" / "cache"
+zen_cache_dir.mkdir(parents=True, exist_ok=True)
+zen_cache_path = zen_cache_dir / "settlement-vk.json"
+zen_cache_path.write_text(deploy_path.read_text())
+print(f"Wrote deploy config to {deploy_path}, {cache_path}, and {zen_cache_path}")
 PY
 
 echo "Done."

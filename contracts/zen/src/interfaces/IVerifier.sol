@@ -7,6 +7,8 @@ interface IVerifier {
     function circuitHash() external view returns (bytes32);
 
     /// @notice Verifies a proof against public signals.
+    /// @dev Public signals are ordered as:
+    /// [merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)].
     /// @return success True when proof verification passes.
     function verifyProof(bytes calldata proof, uint256[10] calldata pubSignals) external returns (bool success);
 }

@@ -16,4 +16,4 @@ cat <<'JSON' > "$PROOF_FILE"
 }
 JSON
 
-echo '["9","10"]' > "$PUBLIC_FILE"
+echo '["1","2","1","10","9","50","10","0","1","0"]' > "$PUBLIC_FILE"

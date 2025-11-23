@@ -55,8 +55,8 @@ contract RevealMarket is ReentrancyGuard {
         uint256 rakeBps;
         uint256 poolTotalYes;
         uint256 poolTotalNo;
-        uint256 commitmentsCount;
         bytes32 circuitHash;
+        uint256 padding;
     }
 
     event Initialized(
@@ -320,9 +320,9 @@ contract RevealMarket is ReentrancyGuard {
 
         SettlementSignals memory signals = _decodeSignals(pubSignals);
         if (signals.commitmentsRoot != commitmentsRoot) revert InvalidProofLayout();
-        if (signals.commitmentsCount != commitmentsCount) revert InvalidProofLayout();
         if (signals.marketId != marketId) revert InvalidMarketAddress();
         if (signals.circuitHash != circuitHash) revert CircuitHashMismatch();
+        if (signals.padding != 0) revert InvalidProofLayout();
 
         if (signals.winningOutcomeId != winningOutcomeId) revert ProofOutcomeMismatch();
 
@@ -655,8 +655,8 @@ contract RevealMarket is ReentrancyGuard {
         signals.rakeBps = pubSignals[5];
         signals.poolTotalYes = pubSignals[6];
         signals.poolTotalNo = pubSignals[7];
-        signals.commitmentsCount = pubSignals[8];
-        signals.circuitHash = bytes32(pubSignals[9]);
+        signals.circuitHash = bytes32(pubSignals[8]);
+        signals.padding = pubSignals[9];
     }
 
     function _getTicket(address user, uint256 ticketId) private view returns (Ticket storage) {

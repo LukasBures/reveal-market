@@ -12,8 +12,8 @@ include "circomlib/circuits/bitify.circom";
 // 5: rakeBps
 // 6: poolTotalYes
 // 7: poolTotalNo
-// 8: commitmentsCount
-// 9: circuitHash
+// 8: circuitHash
+// 9: padding (must be zero; kept to enforce 10-signal length)
 template SettlementCircuit() {
     signal input merkleRoot;
     signal input marketId;
@@ -23,8 +23,8 @@ template SettlementCircuit() {
     signal input rakeBps;
     signal input poolTotalYes;
     signal input poolTotalNo;
-    signal input commitmentsCount;
     signal input circuitHash;
+    signal input padding;
 
     signal output pubMerkleRoot;
     signal output pubMarketId;
@@ -34,8 +34,8 @@ template SettlementCircuit() {
     signal output pubRakeBps;
     signal output pubPoolTotalYes;
     signal output pubPoolTotalNo;
-    signal output pubCommitmentsCount;
     signal output pubCircuitHash;
+    signal output pubPadding;
 
     // Basic sanity constraints
     component rakeCheck = LessThan(32);
@@ -58,10 +58,8 @@ template SettlementCircuit() {
     liabilityCheck.in[1] <== totalEscrow + 1;
     liabilityCheck.out === 1;
 
-    component commitmentsNonZero = LessThan(32);
-    commitmentsNonZero.in[0] <== 0;
-    commitmentsNonZero.in[1] <== commitmentsCount;
-    commitmentsNonZero.out === 1;
+    // Keep the 10th public signal slot fixed at zero so the verifier enforces length without extra semantics.
+    padding === 0;
 
     pubMerkleRoot <== merkleRoot;
     pubMarketId <== marketId;
@@ -71,8 +69,8 @@ template SettlementCircuit() {
     pubRakeBps <== rakeBps;
     pubPoolTotalYes <== poolTotalYes;
     pubPoolTotalNo <== poolTotalNo;
-    pubCommitmentsCount <== commitmentsCount;
     pubCircuitHash <== circuitHash;
+    pubPadding <== padding;
 }
 
 component main = SettlementCircuit();

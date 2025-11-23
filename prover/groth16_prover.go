@@ -257,6 +257,9 @@ func readPublicSignals(path string) ([]string, error) {
 	if err := decoder.Decode(&raw); err != nil {
 		return nil, newInternalError(fmt.Errorf("invalid public signals payload: %w", err))
 	}
+	if len(raw) != 10 {
+		return nil, newInternalError(fmt.Errorf("unexpected public signal count: got %d, expected 10", len(raw)))
+	}
 	signals := make([]string, 0, len(raw))
 	for _, item := range raw {
 		signals = append(signals, item.String())
@@ -486,9 +489,8 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 	if sumPools.Cmp(totalEscrow) != 0 {
 		return nil, newValidationError("pool_totals must sum to total_escrow")
 	}
-	commitmentsCount := big.NewInt(int64(len(req.Tickets)))
-	if commitmentsCount.Sign() == 0 {
-		return nil, newValidationError("commitments_count must be > 0")
+	if len(req.Tickets) == 0 {
+		return nil, newValidationError("tickets must be > 0")
 	}
 	circuitHash, err := parseHexField(req.CircuitHash, "circuit_hash")
 	if err != nil {
@@ -504,8 +506,8 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 		"rakeBps":          fieldElement(rakeBps).String(),
 		"poolTotalYes":     fieldElement(poolYes).String(),
 		"poolTotalNo":      fieldElement(poolNo).String(),
-		"commitmentsCount": fieldElement(commitmentsCount).String(),
-		"circuitHashInput": fieldElement(circuitHash).String(),
+		"circuitHash":      fieldElement(circuitHash).String(),
+		"padding":          "0",
 	}
 	return inputs, nil
 }

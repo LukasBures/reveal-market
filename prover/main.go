@@ -262,6 +262,9 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		})
 		return settlementProofResponse{}, err
 	}
+	if len(result.PublicSignals) != 10 {
+		return settlementProofResponse{}, newInternalError(fmt.Errorf("unexpected public signal count: got %d, expected 10", len(result.PublicSignals)))
+	}
 	now := time.Now().UTC()
 	a.lastProofAt.Store(now)
 

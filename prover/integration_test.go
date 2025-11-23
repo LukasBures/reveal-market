@@ -65,13 +65,22 @@ func TestGroth16ProverIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
 	}
-	if result.Proof == "" || len(result.PublicSignals) == 0 {
-		t.Fatalf("expected proof and public signals to be populated")
+	if result.Proof == "" {
+		t.Fatalf("expected proof to be populated")
+	}
+	expectedSignals := []string{"1", "2", "1", "10", "9", "50", "10", "0", "1", "0"}
+	if len(result.PublicSignals) != len(expectedSignals) {
+		t.Fatalf("expected %d public signals, got %d", len(expectedSignals), len(result.PublicSignals))
+	}
+	for i, value := range expectedSignals {
+		if result.PublicSignals[i] != value {
+			t.Fatalf("public signal %d mismatch: got %s want %s", i, result.PublicSignals[i], value)
+		}
 	}
 	if result.ProofCalldata == nil || len(result.ProofCalldata) != 2 {
 		t.Fatalf("expected calldata to contain proof + public signals")
 	}
-	if len(result.ProofCalldata[1]) == 0 {
-		t.Fatalf("expected public signals in calldata")
+	if len(result.ProofCalldata[1]) != len(expectedSignals) {
+		t.Fatalf("expected %d public signals in calldata, got %d", len(expectedSignals), len(result.ProofCalldata[1]))
 	}
 }

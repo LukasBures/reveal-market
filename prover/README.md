@@ -101,6 +101,9 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 }
 ```
 
+Public signals emitted by the circuit are fixed at ten slots in this order:
+`[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding(0)]`.
+
 **Response body** (`settlementProofResponse`):
 
 ```jsonc

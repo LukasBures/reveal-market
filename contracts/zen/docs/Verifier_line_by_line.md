@@ -14,20 +14,20 @@ The Groth16 verifier now deployed with Reveal Market is configurable, replay-saf
 StoredVerifyingKey private _vk;
 Pairing.G1Point[] private _ic;
 bytes32 public circuitHash;
-uint256 public immutable expectedInputs;
+uint256 public immutable EXPECTED_INPUTS;
 ```
 
 * `_vk` holds `α`, `β`, `γ`, `δ`.
 * `_ic` stores the commitment vector used to derive `vk_x`.
 * `circuitHash` is a 32-byte fingerprint for the circuit / verifying key.
-* `expectedInputs` is immutable (currently `6`) and keeps the Solidity contract in lockstep with the circuit.
+* `EXPECTED_INPUTS` is immutable (currently `10`) and keeps the Solidity contract in lockstep with the circuit.
 
 ## Constructor & Key Rotation
 
 ```solidity
 constructor(..., uint256 expectedInputs_) Ownable(msg.sender) {
-    require(expectedInputs_ <= 6);
-    expectedInputs = expectedInputs_;
+    require(expectedInputs_ <= 16);
+    EXPECTED_INPUTS = expectedInputs_;
     _setVerifyingKey(...);
 }
 
@@ -36,16 +36,16 @@ function setVerifyingKey(...) external onlyOwner {
 }
 ```
 
-* Rejects deployments with zero inputs or more than six public signals.
-* `_setVerifyingKey` validates IC length (`expectedInputs + 1`), range-checks coordinates, replaces the stored points, updates `circuitHash`, and emits `VerifyingKeyUpdated`.
+* Rejects deployments with zero inputs or more than sixteen public signals.
+* `_setVerifyingKey` validates IC length (`EXPECTED_INPUTS + 1`), range-checks coordinates, replaces the stored points, updates `circuitHash`, and emits `VerifyingKeyUpdated`.
 
 ## Proof Verification
 
 ```solidity
-function verifyProof(bytes calldata proofData, uint256[6] calldata pubSignals) external view returns (bool)
+function verifyProof(bytes calldata proofData, uint256[10] calldata pubSignals) external view returns (bool)
 ```
 
-1. Ensures a verifying key is configured and that the caller supplied exactly `expectedInputs` public signals.
+1. Ensures a verifying key is configured and that the caller supplied exactly `EXPECTED_INPUTS` public signals (10-signal settlement layout with `circuitHash` at index 8 and a zero padding slot at 9).
 2. Decodes `proofData` into the `(A, B, C)` triple (256 bytes total).
 3. Validates all G1/G2 coordinates are either the point at infinity or within the BN254 field.
 4. Computes `vk_x = IC[0] + Σ (pubSignals[i] * IC[i+1])`.

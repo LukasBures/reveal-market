@@ -93,8 +93,8 @@ func TestBuildWitnessInput(t *testing.T) {
 		"rakeBps":          "50",
 		"poolTotalYes":     "7",
 		"poolTotalNo":      "3",
-		"commitmentsCount": "1",
-		"circuitHashInput": "48879",
+		"circuitHash":      "48879",
+		"padding":          "0",
 	}
 	for key, want := range expected {
 		if got := inputs[key]; got != want {
@@ -136,7 +136,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
-			PublicSignals: []string{"1", "2"},
+			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
 			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
 			Warnings:      []string{"warn"},
 		},

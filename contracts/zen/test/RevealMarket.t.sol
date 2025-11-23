@@ -243,8 +243,8 @@ contract RevealMarketTest is Test {
         signals[5] = rakeBps;
         signals[6] = totalEscrow; // assume YES pool for tests
         signals[7] = 0; // NO pool
-        signals[8] = market.commitmentsCount();
-        signals[9] = uint256(market.circuitHash());
+        signals[8] = uint256(market.circuitHash());
+        signals[9] = 0; // padding
     }
 
 }

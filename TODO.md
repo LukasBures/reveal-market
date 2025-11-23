@@ -187,11 +187,10 @@ We want a deterministic, auditable definition of circuitHash and public signals.
   6. rakeBps              (uint256)
   7. poolTotal_0          (uint256)
   8. poolTotal_1          (uint256)
-  9. ... poolTotal_(K-1)  (uint256, K outcomes, K fixed per circuit)
-  10. circuitHash         (bytes32 mapped into field)
+  9. circuitHash          (bytes32 mapped into field)
+  10. padding             (uint256, fixed to 0 to enforce array length)
 
-  For MVP, we assume K = 2 outcomes (YES/NO).
-  That gives 10 public signals total.
+  For MVP, we assume K = 2 outcomes (YES/NO) and keep the padding slot to pin the verifier to 10 signals.
 
 - Max public inputs / signals:
   - We will compile circuits with a fixed K and field size, but in the Solidity verifier we enforce:
@@ -395,3 +394,87 @@ Given the above confirmed inputs, the concrete next development steps are:
    - Beta test evidence and links to explorer, logs, and screenshots.
 
 This specification is now complete enough to implement the testnet milestone without guesswork and to satisfy the Project grant requirements for “privacy architecture plus ZK implementation”, a functioning testnet app, technical documentation, demo video, and beta testing proof.
+
+
+
+____
+ Regenerate the circuit/vk/zkey to the finalized 10-signal layout (no commitmentsCount), compute circuitHash from key hashes, and update verifier JSON + contract bindings/
+     tests accordingly.
+
+• Here’s the concrete sequence to move everything to the finalized 10-signal, no-commitmentsCount layout and bind circuitHash to the key hashes:
+
+  1. Update the circuit to the new signals
+
+  - Edit prover/circuits/settlement.circom so the public signals (in order) are: merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolTotalYes,
+    poolTotalNo, circuitHash (and a final padding slot if you want to keep array length 10). Remove the commitmentsCount input/output and its non-zero constraint. Keep winner/
+    rake/pool/liability guards.
+  - Regenerate the build artifacts with your existing script: from prover/, run npm install (if needed) then ./circuits/generate_keys.sh (or your chosen snarkjs pipeline) to
+    produce fresh settlement_final.zkey, settlement.wasm, settlement_js, and public.json.
+
+  2. Compute the hashes and circuitHash
+
+  - Proving key hash: keccak256 of the raw settlement_final.zkey bytes.
+  - Verification key hash: keccak256 of the raw verifier JSON (after you export it).
+  - circuitHash = keccak256(abi.encodePacked("reveal_settlement_v1", "1.0.0", PROVING_KEY_HASH, VERIFICATION_KEY_HASH)).
+  - You can script it, e.g.:
+
+    python - <<'PY'
+    import hashlib, json, eth_hash.auto as keccak, pathlib
+    pk = pathlib.Path("prover/circuits/build/settlement_final.zkey").read_bytes()
+    vk_json = pathlib.Path("prover/circuits/build/verification_key.json").read_bytes()
+    pk_hash = keccak.keccak_256(pk).hexdigest()
+    vk_hash = keccak.keccak_256(vk_json).hexdigest()
+    preimage = b"reveal_settlement_v1" + b"1.0.0" + bytes.fromhex(pk_hash) + bytes.fromhex(vk_hash)
+    circuit_hash = keccak.keccak_256(preimage).hexdigest()
+    print("proving_key_hash=0x"+pk_hash)
+    print("verification_key_hash=0x"+vk_hash)
+    print("circuit_hash=0x"+circuit_hash)
+    PY
+    (Adjust paths if your build directory differs.)
+
+  3. Export the new verifier JSON
+
+  - Use snarkjs (or noir) to export the verifier points for the new 10-signal layout:
+
+    snarkjs zkey export verificationkey prover/circuits/build/settlement_final.zkey prover/circuits/build/verification_key.json
+    snarkjs zkey export solidityverifier prover/circuits/build/settlement_final.zkey > /tmp/Verifier.sol
+  - Copy the IC/alpha/beta/gamma/delta values into contracts/zen/cache/settlement-vk.json with expectedInputs: 10 and circuitHash set to the computed value above. (Keep the
+    schema: alpha1, beta2, gamma2, delta2, ic, circuitHash, expectedInputs.)
+
+  4. Update Solidity bindings
+
+  - contracts/zen/src/RevealMarket.sol: drop commitmentsCount from SettlementSignals, _decodeSignals, and proof checks. Remap indices to the new order and keep uint256[10] so the
+    verifier still enforces length 10. Remove the InvalidProofLayout checks that referenced commitmentsCount from public signals; keep the local commitmentsCount storage checks.
+  - contracts/zen/src/interfaces/IVerifier.sol: keep verifyProof(bytes,uint256[10]) but document the new ordering.
+  - contracts/zen/src/Verifier.sol: set EXPECTED_INPUTS to 10 (it already takes it from the vk JSON), and update any tests expecting the old 6-input config.
+  - Update contract tests that asserted on the old signal ordering or commitmentsCount.
+
+  5. Update the prover backend
+
+  - prover/groth16_prover.go: adjust buildWitnessInput/validateRequest to emit only the new 9 (or 10 with padding) public inputs in the spec order; drop commitmentsCount. Ensure
+    readPublicSignals expects length 10.
+  - prover/circuits/settlement.circom public outputs must match the contract indexing; regenerate public.json and keep the order consistent.
+  - prover/main.go/settlementProofRequest: keep the same request schema, but when building the witness/publicSignals, map to the new ordering and ensure the returned
+    public_signals array length is 10.
+  - Update prover tests that assert on publicSignals length/order.
+
+  6. Wire the new verifier key into deployments
+
+  - Replace contracts/zen/cache/settlement-vk.json with the regenerated values.
+  - Re-run forge test in contracts/zen to ensure the new layout is accepted.
+  - Use the new vk JSON when running contracts/zen/script/Deploy.s.sol (set SETTLEMENT_VK_PATH to your regenerated file) so the verifier on-chain has the correct IC length and
+    circuitHash.
+
+  7. Document the hashes
+
+  - Record proving key hash, verification key hash, and the resulting circuitHash in contracts/zen/docs/settlement-circuit.md (and any ops docs) so the binding is auditable.
+
+  That’s the full path: change circuit -> regenerate pk/vk/zkey -> compute hashes -> refresh vk JSON/circuitHash -> update Solidity/prover code to the new ordering -> rerun
+  tests.
+
+
+
+  2. Add Horizen testnet presets (RPC/WS/explorer, chain id 2651420, REVEAL_OWNER/GUARDIAN/TREASURY envs), wire wagmi/WalletConnect to that chain, and ship a
+     DeployHorizenTestnet.s.sol that writes deployments/horizen-testnet.json.
+  3. Build the minimal testnet UI (connect wallet on Horizen, commit form with salt/ticketHash, show locked merkleRoot, settlement/proof status + explorer link, basic “My
+     tickets” view) and hook the backend to call prover then settleMarket on-chain.

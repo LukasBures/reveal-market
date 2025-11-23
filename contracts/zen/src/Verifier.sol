@@ -12,7 +12,7 @@ import {Pairing} from "./utils/Pairing.sol";
  *
  * This contract wraps the auto-generated pairing logic from snarkjs/Noir with operational features expected in production:
  *   - Verifying keys are stored on-chain and can be rotated by the owner, enabling circuit upgrades without redeploying RevealMarket.
- *   - The verifier enforces a fixed number of public inputs (6) and rejects malformed data before hitting the expensive pairing precompile.
+ *   - The verifier enforces a fixed number of public inputs (10 for the settlement circuit) and rejects malformed data before hitting the expensive pairing precompile.
  *   - Instead of reverting on invalid proofs, `verifyProof` simply returns false so the caller (RevealMarket) can raise a domain-specific error.
  *
  * Storage layout:
