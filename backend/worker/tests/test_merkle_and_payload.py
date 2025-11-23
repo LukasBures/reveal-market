@@ -3,15 +3,15 @@ from shared.models import Base, Commitment, Settlement
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from worker.app.merkle import build_merkle_root_and_paths
-from worker.app.proof_builder import SettlementDataMissing, build_prover_payload
+from worker.app.proof_builder import SettlementDataMissingError, build_prover_payload
 
 
 @pytest.fixture()
 def session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    sess = SessionLocal()
+    session_local = sessionmaker(bind=engine)
+    sess = session_local()
     try:
         yield sess
     finally:
@@ -58,7 +58,7 @@ def test_build_prover_payload(session):
 
     # Settlement row
     # Compute canonical root for these leaves.
-    root, _ = build_merkle_root_and_paths([bytes.fromhex(l.removeprefix("0x")) for l in leaves])
+    root, _ = build_merkle_root_and_paths([bytes.fromhex(leaf.removeprefix("0x")) for leaf in leaves])
     s = Settlement(
         id=1,
         market_id=1,
@@ -85,5 +85,5 @@ def test_build_prover_payload(session):
 def test_build_prover_payload_missing_data(session):
     session.add(Settlement(id=1, market_id=1))
     session.commit()
-    with pytest.raises(SettlementDataMissing):
+    with pytest.raises(SettlementDataMissingError):
         build_prover_payload(session, 1)

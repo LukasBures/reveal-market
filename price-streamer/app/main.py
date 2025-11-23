@@ -79,7 +79,19 @@ def create_app() -> FastAPI:
         market_id: str = Query(..., description="Market ID to stream"),
         heartbeat: int = Query(15, ge=1),
         max_events: int | None = Query(default=None, ge=1, description="Optional cap on events (for testing)"),
+        assets_ids: str | None = Query(
+            default=None, description="Comma-separated asset IDs to subscribe to (CLOB market stream)"
+        ),
+        symbols: str | None = Query(default=None, description="Comma-separated crypto symbols to subscribe (RTDS)"),
     ):
+        # Allow on-demand subscription scoping.
+        if assets_ids:
+            state.subscriptions.add_assets([asset.strip() for asset in assets_ids.split(",") if asset.strip()])
+        if symbols:
+            for sym in symbols.split(","):
+                trimmed = sym.strip()
+                if trimmed:
+                    state.rtds_symbols.add(trimmed)
         pubsub = await state.subscribe(market_id)
         return StreamingResponse(
             _sse_events(pubsub, heartbeat_seconds=heartbeat, max_events=max_events),

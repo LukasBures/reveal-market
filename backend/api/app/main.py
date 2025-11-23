@@ -6,13 +6,13 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-import httpx
 from decimal import Decimal
 from threading import Event, Lock, Thread
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
 from uuid import uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +27,7 @@ from shared.onchain import OnChainConfigurationError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app import crud, schemas
+from app import crud, models, schemas
 from app.config import Settings, get_settings
 from app.database import get_session, run_migrations, session_scope
 from app.health import build_health_response
@@ -37,7 +37,6 @@ from app.onchain import fetch_factory_markets
 from app.pricing import PricingEngine, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
-from app import models
 
 try:
     from redis import Redis

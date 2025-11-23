@@ -423,8 +423,14 @@ class HedgerService:
                 continue
             try:
                 return Decimal(str(value))
-            except Exception:
-                continue
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="hedger.payout.extract_failed",
+                    message="failed to parse expected payout",
+                    error=str(exc),
+                )
         return fallback
 
     def _build_prover_payload(self, market_id: str, outcome: str) -> dict:

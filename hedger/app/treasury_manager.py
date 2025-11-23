@@ -47,8 +47,8 @@ class TreasuryManager:
     def _validate_percent(self, value: Decimal) -> Decimal:
         try:
             pct = Decimal(value)
-        except InvalidOperation:
-            raise ValueError("lp_share_percent must be a decimal")
+        except InvalidOperation as exc:
+            raise ValueError("lp_share_percent must be a decimal") from exc
         if pct < 0 or pct >= Decimal("0.5"):
             raise ValueError("lp_share_percent must be between 0 and 0.5 (exclusive)")
         return pct

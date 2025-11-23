@@ -20,6 +20,9 @@ class Settings(BaseSettings):
         default=None, description="Comma-separated symbols for crypto_prices (e.g., zenusdt,ethusdt)"
     )
     rtds_enabled: bool = Field(default=True)
+    rtds_ping_seconds: int = Field(default=10, ge=3)
+    rtds_topic_crypto: str = Field(default="crypto_prices")
+    rtds_topic_chainlink: str = Field(default="crypto_prices_chainlink")
     fx_feed_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/prices/zen-usd")
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)

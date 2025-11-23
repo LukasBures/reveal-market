@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import get_settings, reload_settings
 from .logging_config import setup_logging
 from .polymarket import MarketPayload, PolymarketClient
-from .proof_builder import SettlementDataMissing, build_prover_payload
+from .proof_builder import SettlementDataMissingError, build_prover_payload
 from .prover_client import ProverClient, ProverError
 from .summary_jobs import maybe_enqueue_summary_job
 
@@ -1429,7 +1429,7 @@ def maybe_generate_settlement_proof(
             )
             return False
         payload = fallback
-    except SettlementDataMissing as exc:
+    except SettlementDataMissingError as exc:
         fallback = _build_snapshot_payload(market_snapshot, market_payload, market_id)
         if not fallback:
             log_event(

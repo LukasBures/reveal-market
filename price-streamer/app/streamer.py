@@ -9,7 +9,7 @@ from decimal import Decimal
 import httpx
 
 from .config import Settings
-from .state import StreamState, iter_ws
+from .state import FxQuote, StreamState, iter_ws
 
 logger = logging.getLogger("reveal_market.price_streamer.streamer")
 
@@ -40,24 +40,23 @@ class PriceStreamer:
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _ws_loop(self) -> None:
-        # Always send subscription payload based on tracked assets.
-        self.state.subscriptions.add_assets([])  # ensure initialized
-        async for ws in iter_ws(self.settings.clob_ws_url):
-            if self._stop.is_set():
-                break
-            try:
-                await ws.send(self.state.subscriptions.build_clob_subscribe())
-                async for raw in ws:
-                    if self._stop.is_set():
-                        break
-                    try:
-                        data = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    await self._handle_tick(data, source="ws")
-            except Exception as exc:  # pragma: no cover - reconnect path
-                logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
-                await asyncio.sleep(self.settings.ws_reconnect_seconds)
+        while not self._stop.is_set():
+            async for ws in iter_ws(self.settings.clob_ws_url):
+                if self._stop.is_set():
+                    break
+                try:
+                    await ws.send(self.state.subscriptions.build_clob_subscribe())
+                    async for raw in ws:
+                        if self._stop.is_set():
+                            break
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        await self._handle_tick(data, source="ws")
+                except Exception as exc:  # pragma: no cover - reconnect path
+                    logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
+                    await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     async def _rest_poll_loop(self) -> None:
         while not self._stop.is_set():
@@ -108,7 +107,10 @@ class PriceStreamer:
         for idx, price in enumerate(prices):
             try:
                 base_price = Decimal(str(price))
-            except Exception:
+            except Exception as exc:
+                logger.debug("price parse failed", extra={"event": "price.parse.failed", "error": str(exc)})
+                base_price = None
+            if base_price is None:
                 continue
             worsened = (base_price * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))).quantize(
                 Decimal("0.0001")
@@ -135,3 +137,61 @@ class PriceStreamer:
         if existing and existing.get("price") == payload.get("price"):
             return
         self._publish_cache[key] = payload
+
+    async def _rtds_loop(self) -> None:
+        if not self.settings.rtds_enabled:
+            return
+        # Prime symbol filters
+        if self.settings.rtds_crypto_symbols:
+            for sym in self.settings.rtds_crypto_symbols.split(","):
+                trimmed = sym.strip()
+                if trimmed:
+                    self.state.rtds_symbols.add(trimmed)
+        while not self._stop.is_set():
+            try:
+                async for ws in iter_ws(self.settings.rtds_ws_url):
+                    if self._stop.is_set():
+                        break
+                    await self._send_rtds_subscribe(ws)
+                    async for raw in ws:
+                        if self._stop.is_set():
+                            break
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        await self._handle_rtds(data)
+                        await asyncio.sleep(0)
+            except Exception as exc:  # pragma: no cover - reconnect path
+                logger.warning("RTDS loop error", extra={"event": "rtds.error", "error": str(exc)})
+            await asyncio.sleep(self.settings.ws_reconnect_seconds)
+
+    async def _send_rtds_subscribe(self, ws) -> None:
+        subs: list[dict] = []
+        if self.state.rtds_symbols:
+            subs.append(
+                {
+                    "topic": self.settings.rtds_topic_crypto,
+                    "type": "update",
+                    "filters": ",".join(sorted(self.state.rtds_symbols)),
+                }
+            )
+        if subs:
+            payload = json.dumps({"action": "subscribe", "subscriptions": subs})
+            await ws.send(payload)
+
+    async def _handle_rtds(self, data: dict) -> None:
+        topic = data.get("topic")
+        payload = data.get("payload") or {}
+        if topic != self.settings.rtds_topic_crypto:
+            return
+        symbol = payload.get("symbol")
+        value = payload.get("value")
+        if not symbol or value is None:
+            return
+        try:
+            price = Decimal(str(value))
+        except Exception:
+            return
+        quote = FxQuote(zen_usd=price, fetched_at=datetime.now(UTC), stale=False)
+        self.state.fx_quote = quote

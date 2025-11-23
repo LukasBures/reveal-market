@@ -39,6 +39,7 @@ class StreamState:
         self.last_published: dict[str, datetime] = {}
         self.tick_sizes: dict[str, Decimal] = {}
         self._rtds_connected = False
+        self.rtds_symbols: set[str] = set()
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
@@ -111,8 +112,10 @@ class StreamState:
             try:
                 parsed = json.loads(item)
                 records.append(parsed)
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.debug(
+                    "skipping malformed history entry", extra={"event": "history.parse.failed", "error": str(exc)}
+                )
         return list(reversed(records))
 
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:

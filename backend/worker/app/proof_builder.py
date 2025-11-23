@@ -13,7 +13,7 @@ from .merkle import build_merkle_root_and_paths
 logger = logging.getLogger("reveal_market.worker.proof_builder")
 
 
-class SettlementDataMissing(RuntimeError):
+class SettlementDataMissingError(RuntimeError):
     pass
 
 
@@ -28,7 +28,7 @@ def _hex_bytes(value: str | bytes) -> str:
 def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     settlement = session.execute(select(Settlement).where(Settlement.market_id == market_id)).scalar_one_or_none()
     if not settlement:
-        raise SettlementDataMissing("settlement row not found")
+        raise SettlementDataMissingError("settlement row not found")
     required_fields = [
         settlement.merkle_root,
         settlement.commitments_count,
@@ -39,7 +39,7 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
         settlement.circuit_hash,
     ]
     if any(v in (None, 0, "") for v in required_fields):
-        raise SettlementDataMissing("settlement missing required fields")
+        raise SettlementDataMissingError("settlement missing required fields")
 
     commitments: list[Commitment] = (
         session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id))
@@ -47,13 +47,13 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
         .all()
     )
     if not commitments:
-        raise SettlementDataMissing("no commitments for market")
+        raise SettlementDataMissingError("no commitments for market")
 
     leaves = [bytes.fromhex(commitment.leaf.removeprefix("0x")) for commitment in commitments]
     computed_root, paths = build_merkle_root_and_paths(leaves)
     expected_root = bytes.fromhex(settlement.merkle_root.removeprefix("0x"))
     if computed_root != expected_root:
-        raise SettlementDataMissing("computed merkle root does not match stored root")
+        raise SettlementDataMissingError("computed merkle root does not match stored root")
 
     tickets: list[dict[str, Any]] = []
     for idx, commitment in enumerate(commitments):
