@@ -25,12 +25,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'price-streamer/uv.lock') }}
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
+          uv sync --project price-streamer --extra dev --no-install-project --frozen
       - name: Pre-commit checks
         run: uv run pre-commit run --all-files
 
@@ -52,13 +53,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'price-streamer/uv.lock') }}
 
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
+          uv sync --project price-streamer --extra dev --no-install-project --frozen
 
       - name: Run backend tests
         env:
@@ -100,7 +102,39 @@ jobs:
         run: uv run --project hedger -- ruff check app tests
 
       - name: Hedger tests
-        run: uv run --project hedger -- python -m pytest -q
+        env:
+          PYTEST_WORKER_COUNT: 4
+        run: ./hedger/run_tests.sh
+
+
+  price-streamer:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('price-streamer/uv.lock') }}
+
+      - name: Sync price-streamer dependencies
+        run: |
+          uv sync --project price-streamer --extra dev --no-install-project --frozen
+
+      - name: Run price-streamer tests
+        env:
+          PYTEST_WORKER_COUNT: 4
+        run: ./price-streamer/run_tests.sh
 
 
   contracts-polygon:
@@ -227,6 +261,7 @@ jobs:
     needs:
       - backend
       - hedger
+      - price-streamer
       - contracts-polygon
       - contracts-zen
       - frontend

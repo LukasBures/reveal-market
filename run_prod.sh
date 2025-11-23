@@ -238,4 +238,18 @@ log_step "Service status"
 log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} ps"
 "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps
 
+# Emit a concise health summary when supported (Docker Compose v2+).
+if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
+  log_step "Health summary"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+for svc in data:
+    name = svc.get("Name")
+    state = svc.get("State")
+    health = svc.get("Health")
+    print(f"{name:30s} state={state} health={health}")
+PY
+fi
+
 log_step "Deployment complete"
