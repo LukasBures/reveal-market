@@ -9,7 +9,7 @@ from decimal import Decimal
 import httpx
 
 from .config import Settings
-from .state import FxQuote, StreamState, iter_ws
+from .state import StreamState, iter_ws
 
 logger = logging.getLogger("reveal_market.price_streamer.streamer")
 
@@ -73,8 +73,21 @@ class PriceStreamer:
 
     async def _fx_refresh_loop(self) -> None:
         while not self._stop.is_set():
-            await self.state.refresh_fx()
-            await asyncio.sleep(max(30, self.settings.rest_poll_seconds))
+            now = datetime.now(UTC)
+            ws_stale = False
+            if self.state.fx_ws_last_update:
+                ws_stale = (now - self.state.fx_ws_last_update).total_seconds() > self.settings.fx_ws_stale_ttl_seconds
+            else:
+                ws_stale = True
+            if ws_stale:
+                self.state.fx_ws_connected = False
+            if self.settings.fx_rest_enabled and (
+                ws_stale
+                or not self.state.fx_last_update
+                or (now - self.state.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds
+            ):
+                await self.state.refresh_fx(label="coingecko_rest")
+            await asyncio.sleep(self.settings.fx_rest_interval_seconds)
 
     async def _flush_loop(self) -> None:
         interval = max(0.05, self.settings.publish_throttle_ms / 1000)
@@ -198,9 +211,7 @@ class PriceStreamer:
             price = Decimal(str(value))
         except Exception:
             return
-        quote = FxQuote(zen_usd=price, fetched_at=datetime.now(UTC), stale=False)
-        self.state.fx_quote = quote
-        self.state.fx_last_update = quote.fetched_at
+        self.state._register_fx(price, source="rtds_crypto", allow_jump=True)
 
     async def _fx_ws_loop(self) -> None:
         if not self.settings.fx_ws_url:
@@ -219,11 +230,16 @@ class PriceStreamer:
                             continue
                         await self._handle_fx_ws(data)
             except Exception as exc:  # pragma: no cover - reconnect path
+                self.state.fx_ws_connected = False
+                self.state.fx_last_error = str(exc)
                 logger.warning("FX ws loop error", extra={"event": "fx.ws.error", "error": str(exc)})
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     async def _handle_fx_ws(self, data: dict) -> None:
         # Binance ticker shape: b=best bid, a=best ask, c=last price
+        symbol = str(data.get("s") or "").upper()
+        if symbol and symbol != "ZENUSDT":
+            return
         bid = data.get("b")
         ask = data.get("a")
         last = data.get("c")
@@ -240,6 +256,8 @@ class PriceStreamer:
                 price_val = None
         if price_val is None:
             return
-        quote = FxQuote(zen_usd=price_val, fetched_at=datetime.now(UTC), stale=False)
-        self.state.fx_quote = quote
-        self.state.fx_last_update = quote.fetched_at
+        quote = self.state._register_fx(price_val, source="binance_ws")
+        if not quote:
+            return
+        self.state.fx_last_error = None
+        self.state.fx_ws_connected = True

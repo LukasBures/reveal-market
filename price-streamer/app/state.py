@@ -24,6 +24,7 @@ class FxQuote:
     zen_usd: Decimal
     fetched_at: datetime
     stale: bool
+    source: str = "unknown"
 
 
 class StreamState:
@@ -34,6 +35,12 @@ class StreamState:
         self.redis: Redis | None = None
         self.fx_quote: FxQuote | None = None
         self.fx_last_update: datetime | None = None
+        self.fx_ws_last_update: datetime | None = None
+        self.fx_last_source: str | None = None
+        self.fx_ws_connected: bool = False
+        self.fx_last_error: str | None = None
+        self._fx_prev_price: Decimal | None = None
+        self._fx_prev_price_ts: datetime | None = None
         self._fx_lock = asyncio.Lock()
         self.subscriptions = SubscriptionManager(max_items=self.settings.max_subscriptions)
         self.last_seen: dict[str, datetime] = {}
@@ -50,19 +57,25 @@ class StreamState:
         if self.redis:
             await self.redis.aclose()
 
-    async def refresh_fx(self) -> FxQuote:
+    async def refresh_fx(self, *, label: str = "coingecko_rest") -> FxQuote:
         async with self._fx_lock:
             try:
                 async with httpx.AsyncClient(timeout=self.settings.fx_timeout_seconds) as client:
                     res = await client.get(self.settings.fx_feed_url)
                     res.raise_for_status()
                     data = res.json()
-                    price = data.get("price") or data.get("zen_usd") or data.get("zenUSD")
+                    price = (
+                        data.get("price")
+                        or data.get("zen_usd")
+                        or data.get("zenUSD")
+                        or data.get("horizen", {}).get("usd")
+                    )
                     if price is None:
                         raise ValueError("FX feed missing zen_usd/price")
-                    quote = FxQuote(zen_usd=Decimal(str(price)), fetched_at=datetime.now(UTC), stale=False)
-                    self.fx_quote = quote
-                    return quote
+                    quote = self._register_fx(Decimal(str(price)), source=label, allow_jump=True)
+                    if quote:
+                        return quote
+                    raise ValueError("FX quote rejected by sanity checks")
             except Exception as exc:  # pragma: no cover - network fallback
                 logger.warning(
                     "FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)}
@@ -71,9 +84,9 @@ class StreamState:
                     zen_usd=Decimal(str(self.settings.fx_fallback_price)),
                     fetched_at=datetime.now(UTC),
                     stale=True,
+                    source="fallback",
                 )
-                self.fx_quote = fallback
-                self.fx_last_update = fallback.fetched_at
+                self._update_fx(fallback)
                 return fallback
 
     async def get_fx(self) -> FxQuote:
@@ -82,9 +95,14 @@ class StreamState:
         # Mark stale if older than threshold.
         if (
             self.fx_last_update
-            and (datetime.now(UTC) - self.fx_last_update).total_seconds() > self.settings.fx_stale_after_seconds
+            and (datetime.now(UTC) - self.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds
         ):
-            self.fx_quote = FxQuote(zen_usd=self.fx_quote.zen_usd, fetched_at=self.fx_last_update, stale=True)
+            self.fx_quote = FxQuote(
+                zen_usd=self.fx_quote.zen_usd,
+                fetched_at=self.fx_last_update,
+                stale=True,
+                source=self.fx_last_source or "unknown",
+            )
         return self.fx_quote
 
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
@@ -137,6 +155,41 @@ class StreamState:
         message = "|".join(f"{k}:{payload[k]}" for k in sorted(payload.keys()))
         digest = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
         return digest
+
+    def _update_fx(self, quote: FxQuote) -> None:
+        self.fx_quote = quote
+        self.fx_last_update = quote.fetched_at
+        self.fx_last_source = quote.source
+        self._fx_prev_price = quote.zen_usd
+        self._fx_prev_price_ts = quote.fetched_at
+        self.fx_last_error = None
+        if quote.source == "binance_ws":
+            self.fx_ws_connected = True
+            self.fx_ws_last_update = quote.fetched_at
+
+    def _register_fx(self, price: Decimal, *, source: str, allow_jump: bool = False) -> FxQuote | None:
+        if price <= 0:
+            self.fx_last_error = "price_non_positive"
+            return None
+        now = datetime.now(UTC)
+        if not allow_jump and self._fx_prev_price and self._fx_prev_price_ts:
+            delta_seconds = (now - self._fx_prev_price_ts).total_seconds()
+            if delta_seconds < self.settings.fx_jump_window_seconds:
+                change_pct = abs(price - self._fx_prev_price) / self._fx_prev_price * Decimal("100")
+                if change_pct > Decimal(str(self.settings.fx_max_jump_percent)):
+                    self.fx_last_error = f"jump_{change_pct:.2f}pct"
+                    logger.warning(
+                        "Rejecting FX jump",
+                        extra={
+                            "event": "fx.jump.rejected",
+                            "change_pct": float(change_pct),
+                            "window_seconds": delta_seconds,
+                        },
+                    )
+                    return None
+        quote = FxQuote(zen_usd=price, fetched_at=now, stale=False, source=source)
+        self._update_fx(quote)
+        return quote
 
 
 async def iter_ws(ws_url: str):

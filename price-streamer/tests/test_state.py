@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -33,9 +34,9 @@ async def test_fx_refresh_fallback(monkeypatch):
     state = StreamState(Settings(fx_feed_url="http://invalid", fx_timeout_seconds=0.1))
 
     async def fake_refresh():
-        return FxQuote(
-            zen_usd=Decimal("1.23"), fetched_at=state.fx_quote.fetched_at if state.fx_quote else None, stale=False
-        )
+        quote = FxQuote(zen_usd=Decimal("1.23"), fetched_at=datetime.now(UTC), stale=False, source="test")
+        state._update_fx(quote)
+        return quote
 
     monkeypatch.setattr(state, "refresh_fx", fake_refresh)
     quote = await state.get_fx()
