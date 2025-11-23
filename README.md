@@ -19,6 +19,7 @@ Horizen chain support docs: https://docs.goldsky.com/chains/horizen
 | `contracts/polygon` | Foundry workspace for the Polygon deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
 | `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
 | `hedger/` | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
+| `price-streamer/` | Polymarket price ingest + SSE fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
 
 Additional docs live in each directory’s README.
 
@@ -79,6 +80,10 @@ cd contracts && ./run_tests.sh
 # Hedger (FastAPI + exposure/hedging engine)
 uv sync --project hedger --extra dev --no-install-project
 cd hedger && ./run_tests.sh
+
+# Price Streamer (WS/SSE service)
+uv sync --project price-streamer --extra dev --no-install-project
+cd price-streamer && ./run_tests.sh
 
 # Full docker stack (API, worker, frontend, Postgres, Redis, prover)
 ./run_local.sh
