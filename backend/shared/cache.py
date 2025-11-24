@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Sequence
+from threading import Lock
 from typing import Any
 
 from redis import Redis
@@ -14,6 +15,43 @@ logger = logging.getLogger("reveal_market.cache")
 
 _TAG_PREFIX = "cache:tag:"
 _SCHEMA_UNKNOWN_TAG = "schema:unknown"
+
+
+class CacheStats:
+    def __init__(self):
+        self._lock = Lock()
+        self.hits = 0
+        self.misses = 0
+        self.errors = 0
+
+    def record_hit(self) -> None:
+        with self._lock:
+            self.hits += 1
+
+    def record_miss(self) -> None:
+        with self._lock:
+            self.misses += 1
+
+    def record_error(self) -> None:
+        with self._lock:
+            self.errors += 1
+
+    def snapshot(self) -> dict[str, float]:
+        with self._lock:
+            return {
+                "hits": float(self.hits),
+                "misses": float(self.misses),
+                "errors": float(self.errors),
+            }
+
+
+_stats = CacheStats()
+
+
+def get_stats_client() -> CacheStats:
+    """Return the cache stats accumulator."""
+
+    return _stats
 
 
 def get_client(url: str) -> Redis | None:
@@ -29,13 +67,16 @@ def get_client(url: str) -> Redis | None:
             message="failed to connect to redis",
             error=str(exc),
         )
+        get_stats_client().record_error()
         return None
 
 
 def get_json(client: Redis | None, key: str) -> Any:
     """Fetch and JSON-decode the given key from Redis."""
 
+    stats = get_stats_client()
     if client is None:
+        stats.record_miss()
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -56,8 +97,10 @@ def get_json(client: Redis | None, key: str) -> Any:
             key=key,
             error=str(exc),
         )
+        stats.record_error()
         return None
     if payload is None:
+        stats.record_miss()
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -78,6 +121,7 @@ def get_json(client: Redis | None, key: str) -> Any:
                 key=key,
                 size=len(payload),
             )
+        stats.record_hit()
         return data
     except json.JSONDecodeError:
         log_event(
@@ -87,6 +131,7 @@ def get_json(client: Redis | None, key: str) -> Any:
             message="redis payload was not valid JSON",
             key=key,
         )
+        stats.record_error()
         return None
 
 
@@ -120,6 +165,7 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
                 size=len(payload),
             )
     except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
+        get_stats_client().record_error()
         log_event(
             logger,
             logging.WARNING,
@@ -154,6 +200,7 @@ def delete(client: Redis | None, key: str) -> None:
             key=key,
             error=str(exc),
         )
+        get_stats_client().record_error()
 
 
 def delete_prefix(client: Redis | None, prefix: str) -> None:
@@ -174,6 +221,7 @@ def delete_prefix(client: Redis | None, prefix: str) -> None:
             prefix=prefix,
             error=str(exc),
         )
+        get_stats_client().record_error()
 
 
 def iter_scan(client: Redis, pattern: str) -> Iterable[str]:
@@ -265,6 +313,7 @@ def invalidate_tag(client: Redis | None, tag: str) -> int:
             tag=tag,
             error=str(exc),
         )
+        get_stats_client().record_error()
         return 0
 
 

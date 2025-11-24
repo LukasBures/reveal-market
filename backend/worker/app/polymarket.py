@@ -175,6 +175,8 @@ class PolymarketClient:
         rate_limit_requests: int | None = None,
         rate_limit_window_seconds: float | None = None,
         empty_page_tolerance: int = 0,
+        rate_limit_counter: Any | None = None,
+        empty_page_counter: Any | None = None,
     ) -> None:
         raw_base = str(base_url)
         self.base_url = raw_base.rstrip("/")
@@ -188,6 +190,8 @@ class PolymarketClient:
         )
         self._retryer = None
         self._retry_counter = retry_counter
+        self._rate_limit_counter = rate_limit_counter
+        self._empty_page_counter = empty_page_counter
         self._rate_limiter = _RateLimiter(rate_limit_requests, rate_limit_window_seconds)
         self._empty_page_tolerance = max(0, empty_page_tolerance)
 
@@ -240,11 +244,8 @@ class PolymarketClient:
                         "polymarket page contained no records",
                         extra={"offset": offset, "empty_pages": empty_pages},
                     )
-                    if (
-                        total_records is not None
-                        and offset < total_records
-                        and empty_pages <= self._empty_page_tolerance
-                    ):
+                    self._record_empty_page()
+                    if (total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance):
                         offset += page_size
                         continue
                     if empty_pages <= self._empty_page_tolerance:
@@ -275,6 +276,7 @@ class PolymarketClient:
         self._rate_limiter.acquire()
         response = client.get(url, params=params)
         if response.status_code == 429:
+            self._record_rate_limit()
             logger.warning(
                 "polymarket rate limit encountered",
                 extra={"params": params, "status_code": response.status_code},
@@ -338,6 +340,24 @@ class PolymarketClient:
             counter.labels(outcome=outcome).inc()
         except Exception:  # pragma: no cover - metrics failures should not break ingestion
             logger.debug("failed to record polymarket retry metric", extra={"metric_outcome": outcome})
+
+    def _record_rate_limit(self) -> None:
+        counter = getattr(self, "_rate_limit_counter", None)
+        if counter is None:
+            return
+        try:
+            counter.labels(outcome="rate_limited").inc()
+        except Exception:  # pragma: no cover
+            logger.debug("failed to record polymarket rate limit metric")
+
+    def _record_empty_page(self) -> None:
+        counter = getattr(self, "_empty_page_counter", None)
+        if counter is None:
+            return
+        try:
+            counter.labels(outcome="empty").inc()
+        except Exception:  # pragma: no cover
+            logger.debug("failed to record polymarket empty page metric")
 
 
 class _RateLimiter:

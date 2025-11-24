@@ -82,7 +82,12 @@ contract Verifier is IVerifier, Ownable2Step {
     }
 
     /// @inheritdoc IVerifier
-    function verifyProof(bytes calldata proofData, uint256[10] calldata pubSignals) external view override returns (bool) {
+    function verifyProof(bytes calldata proofData, uint256[10] calldata pubSignals)
+        external
+        view
+        override
+        returns (bool)
+    {
         if (_ic.length == 0) revert VerifyingKeyNotSet();
         if (pubSignals.length != EXPECTED_INPUTS) {
             revert ProofInputLengthMismatch(EXPECTED_INPUTS, pubSignals.length);
@@ -175,9 +180,7 @@ contract Verifier is IVerifier, Ownable2Step {
     }
 
     function _validateG2Point(Pairing.G2Point memory point) private pure {
-        if (
-            point.X[0] == 0 && point.X[1] == 0 && point.Y[0] == 0 && point.Y[1] == 0
-        ) {
+        if (point.X[0] == 0 && point.X[1] == 0 && point.Y[0] == 0 && point.Y[1] == 0) {
             return;
         }
         _validateFieldElement(point.X[0]);
@@ -188,17 +191,9 @@ contract Verifier is IVerifier, Ownable2Step {
 
     function _pairingCheck(Proof memory proof, Pairing.G1Point memory vkx) external view returns (bool) {
         if (msg.sender != address(this)) revert PairingHelperUnauthorized();
-        return
-            Pairing.pairingProd4(
-                Pairing.negate(proof.A),
-                proof.B,
-                _vk.alfa1,
-                _vk.beta2,
-                vkx,
-                _vk.gamma2,
-                proof.C,
-                _vk.delta2
-            );
+        return Pairing.pairingProd4(
+            Pairing.negate(proof.A), proof.B, _vk.alfa1, _vk.beta2, vkx, _vk.gamma2, proof.C, _vk.delta2
+        );
     }
 
     function _validateFieldElement(uint256 value) private pure {

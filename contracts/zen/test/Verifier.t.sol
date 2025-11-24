@@ -65,7 +65,7 @@ contract Groth16VerifierTest is Test {
     }
 
     function testSetVerifyingKeyEmitsEvent() public {
-        (, , , , uint256[2][] memory ic) = _demoVerifyingKey();
+        (,,,, uint256[2][] memory ic) = _demoVerifyingKey();
         vm.expectEmit(true, false, false, true);
         bytes32 updatedHash = keccak256(bytes("updated"));
         emit Verifier.VerifyingKeyUpdated(updatedHash, 10);
@@ -73,7 +73,7 @@ contract Groth16VerifierTest is Test {
     }
 
     function testSetVerifyingKeyRevertsOnFieldOverflow() public {
-        (, , , , uint256[2][] memory ic) = _demoVerifyingKey();
+        (,,,, uint256[2][] memory ic) = _demoVerifyingKey();
         uint256[2] memory badAlpha = [FIELD, uint256(1)];
         vm.expectRevert(abi.encodeWithSelector(Verifier.FieldOverflow.selector, FIELD));
         bytes32 badHash = keccak256(bytes("bad"));

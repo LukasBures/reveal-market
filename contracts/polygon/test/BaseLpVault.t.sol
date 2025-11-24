@@ -235,8 +235,7 @@ contract BaseLpVaultTest is Test {
         vm.startPrank(hedger);
         usdc.approve(address(vault), type(uint256).max);
 
-        uint256 expectedUtilBps =
-            Math.mulDiv(40 * ONE_USDC, vault.BPS_DENOMINATOR(), vault.totalAssets());
+        uint256 expectedUtilBps = Math.mulDiv(40 * ONE_USDC, vault.BPS_DENOMINATOR(), vault.totalAssets());
         vm.expectEmit();
         emit BaseLpVault.BorrowForHedge(hedger, lp1, 40 * ONE_USDC, 40 * ONE_USDC, expectedUtilBps);
         vault.borrowForHedge(40 * ONE_USDC, lp1);
@@ -246,8 +245,7 @@ contract BaseLpVaultTest is Test {
         usdc.approve(address(vault), type(uint256).max);
 
         vm.startPrank(hedger);
-        uint256 expectedUtilAfterRepay =
-            Math.mulDiv(30 * ONE_USDC, vault.BPS_DENOMINATOR(), vault.totalAssets());
+        uint256 expectedUtilAfterRepay = Math.mulDiv(30 * ONE_USDC, vault.BPS_DENOMINATOR(), vault.totalAssets());
         vm.expectEmit();
         emit BaseLpVault.RepayFromHedge(hedger, lp1, 10 * ONE_USDC, 30 * ONE_USDC, expectedUtilAfterRepay);
         vault.repayFromHedge(10 * ONE_USDC, lp1);

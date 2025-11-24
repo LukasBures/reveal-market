@@ -214,7 +214,9 @@ contract RevealMarket is ReentrancyGuard {
         if (cfg.rakeManager == address(0)) revert InvalidRakeManager();
         if (cfg.treasury == address(0)) revert InvalidTreasury();
         if (cfg.guardian == address(0)) revert InvalidGuardian();
-        if (cfg.payoutMultiplier == 0 || cfg.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) revert InvalidPayoutMultiplier();
+        if (cfg.payoutMultiplier == 0 || cfg.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) {
+            revert InvalidPayoutMultiplier();
+        }
         if (cfg.commitDeadline <= block.timestamp) revert InvalidTimestamp();
         if (cfg.revealDeadline <= cfg.commitDeadline) revert InvalidTimestamp();
         if (cfg.rakeBpsOverride > IRakeManager(cfg.rakeManager).maxRakeBps()) revert InvalidRakeBps();
@@ -247,7 +249,12 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Allows users to commit a ticket hash with ZEN during the commit phase.
-    function commit(uint256 outcomeId, uint256 amount, bytes32 salt) external payable nonReentrant onlyPhase(Phase.Commit) {
+    function commit(uint256 outcomeId, uint256 amount, bytes32 salt)
+        external
+        payable
+        nonReentrant
+        onlyPhase(Phase.Commit)
+    {
         if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
         if (amount == 0) revert InvalidAmount();
         if (_factoryCommitPaused()) revert CommitPaused();
@@ -370,13 +377,7 @@ contract RevealMarket is ReentrancyGuard {
     }
 
     /// @notice Claims winnings by revealing the committed outcome.
-    function claim(
-        uint256 ticketId,
-        uint256 outcomeId,
-        bytes32 salt,
-        uint256 leafIndex,
-        bytes32[] calldata merkleProof
-    )
+    function claim(uint256 ticketId, uint256 outcomeId, bytes32 salt, uint256 leafIndex, bytes32[] calldata merkleProof)
         external
         nonReentrant
         onlyPhase(Phase.Settled)
@@ -594,7 +595,9 @@ contract RevealMarket is ReentrancyGuard {
         emit MaxLiabilityUpdated(maxLiability);
         emit EmergencySettled(bytes32(outcomeId), declaredWinningPool, msg.sender);
         emit MarketSettled(outcomeId);
-        emit MarketResolved(bytes32(outcomeId), declaredWinningPool, totalLiability, _collateralBalance(), rakePaid, settledAt);
+        emit MarketResolved(
+            bytes32(outcomeId), declaredWinningPool, totalLiability, _collateralBalance(), rakePaid, settledAt
+        );
     }
 
     function updateOracle(address newOracle) external {

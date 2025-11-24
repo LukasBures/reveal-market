@@ -16,7 +16,8 @@ contract RevealMarketHandler is Test {
     constructor() {
         RakeManager rakeManager = new RakeManager(address(this), TREASURY, 100);
         MockVerifier verifier = new MockVerifier();
-        MarketFactory factory = new MarketFactory(address(new RevealMarket()), address(rakeManager), TREASURY, address(verifier));
+        MarketFactory factory =
+            new MarketFactory(address(new RevealMarket()), address(rakeManager), TREASURY, address(verifier));
 
         MarketFactory.CreateMarketParams memory params;
         params.eventId = "INV";

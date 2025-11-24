@@ -56,12 +56,7 @@ contract HedgeStrategyExecutorTest is Test {
 
         vm.expectEmit(true, true, false, true);
         emit HedgeStrategyExecutor.HedgeOrderExecuted(
-            orderHash,
-            order.receiver,
-            order.amount,
-            order.minOut,
-            order.maxSlippageBps,
-            order.deadline
+            orderHash, order.receiver, order.amount, order.minOut, order.maxSlippageBps, order.deadline
         );
 
         executor.executeBorrow(order, sig);

@@ -17,6 +17,7 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
   const lastUpdateRef = useRef<number>(0);
   const backoffRef = useRef<number>(1000);
   const wsRef = useRef<WebSocket | null>(null);
+  const lastStatusRef = useRef<FxState["status"]>("connecting");
 
   useEffect(() => {
     let cancelled = false;
@@ -41,10 +42,14 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
             lastUpdateRef.current = Date.now();
             setFx(nextFx);
             setStatus(nextFx.stale ? "stale" : "live");
+            if (nextFx.stale && lastStatusRef.current !== "stale") {
+              console.warn("FX stream stale", payload); // basic monitoring hook
+            }
             setError(null);
           } catch (err) {
             setError((err as Error).message);
             setStatus("error");
+            console.error("FX stream error", err);
           }
         };
         ws.onerror = () => {
@@ -55,12 +60,14 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
           if (cancelled) return;
           setStatus("error");
           const delay = Math.min(backoffRef.current, 10_000);
+          console.warn("FX socket closed, reconnecting", { delay });
           backoffRef.current = delay * 2;
           setTimeout(connect, delay);
         };
       } catch (err) {
         setError((err as Error).message);
         setStatus("error");
+        console.error("FX stream init failed", err);
       }
     };
 
@@ -73,10 +80,14 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
         lastUpdateRef.current = Date.now();
         setFx(data);
         setStatus(data.stale ? "stale" : "live");
+        if (data.stale) {
+          console.warn("FX HTTP fallback stale", data);
+        }
         setError(null);
       } catch (err) {
         setError((err as Error).message);
         setStatus("error");
+        console.error("FX HTTP fallback failed", err);
       }
     }, 5_000);
 
@@ -90,5 +101,6 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
     };
   }, [path]);
 
+  lastStatusRef.current = status;
   return { fx, error, status };
 }

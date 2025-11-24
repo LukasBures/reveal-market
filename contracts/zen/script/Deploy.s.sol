@@ -89,15 +89,7 @@ contract Deploy is ScriptBase {
         console.log("Circuit hash:", uint256(circuitHash));
         console.log("Expected signals:", expectedInputs);
 
-        _writeArtifacts(
-            rakeManager,
-            implementation,
-            factory,
-            verifierAddress,
-            oracle,
-            circuitHash,
-            expectedInputs
-        );
+        _writeArtifacts(rakeManager, implementation, factory, verifierAddress, oracle, circuitHash, expectedInputs);
 
         // Example (optional):
         // uint256 commitDeadline = block.timestamp + 3 days;
@@ -115,6 +107,7 @@ contract Deploy is ScriptBase {
         // });
         // factory.createMarket(params);
     }
+
     function _loadVerifyingKey(string memory path) private view returns (VerifyingKeyConfig memory config) {
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string memory json = HEVM.readFile(path);

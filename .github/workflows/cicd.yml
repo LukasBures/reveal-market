@@ -136,6 +136,25 @@ jobs:
           PYTEST_WORKER_COUNT: 4
         run: ./price-streamer/run_tests.sh
 
+  prover:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Prover tests (fail if artifacts missing)
+        working-directory: prover
+        run: |
+          chmod +x check_artifacts.sh
+          ./run_tests.sh
+      - name: Prover health smoke
+        working-directory: prover
+        run: |
+          go test -run TestHTTPHandlersHealthAndProof -v
+
 
   contracts-polygon:
     needs: precommit

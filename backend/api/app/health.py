@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 
 import httpx
 from redis.exceptions import RedisError
+from shared.cache import CacheStats, get_stats_client
+from shared.logging import log_event
 from shared.polymarket import build_polymarket_markets_url
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -26,6 +28,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     settings = get_settings()
     components: ComponentMap = {}
     component_states: list[str] = []
+    cache_stats: CacheStats | None = None
 
     checks: list[tuple[str, schemas.HealthComponent]] = [
         _check_database(session),
@@ -40,12 +43,20 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
 
     overall_status = _derive_overall_status(component_states)
 
+    try:
+        stats_client = get_stats_client()
+        cache_stats = stats_client.snapshot() if stats_client else None
+    except Exception as exc:  # pragma: no cover - defensive log
+        log_event(health_logger, logging.WARNING, event="health.cache.stats.error", message=str(exc))
+        cache_stats = None
+
     return schemas.HealthResponse(
         status=overall_status,
         service=settings.app_name,
         version=settings.version,
         timestamp=datetime.now(tz=UTC),
         components=components,
+        cache_stats=cache_stats,
     )
 
 

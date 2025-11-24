@@ -20,6 +20,7 @@ class HealthResponse(BaseModel):
     version: str
     timestamp: datetime
     components: dict[str, HealthComponent]
+    cache_stats: dict[str, float] | None = None
 
 
 class HeartbeatMetrics(BaseModel):

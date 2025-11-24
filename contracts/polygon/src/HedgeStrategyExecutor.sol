@@ -74,13 +74,10 @@ contract HedgeStrategyExecutor is EIP712, Ownable, Pausable, ReentrancyGuard {
     /// @param owner_ Admin for risk params and pausing.
     /// @param maxOrderAmount_ Per-order borrow cap in asset units.
     /// @param maxSlippageBps_ Per-order slippage cap (bps).
-    constructor(
-        BaseLpVault vault_,
-        address signer_,
-        address owner_,
-        uint256 maxOrderAmount_,
-        uint16 maxSlippageBps_
-    ) EIP712("HedgeStrategyExecutor", "1") Ownable(owner_) {
+    constructor(BaseLpVault vault_, address signer_, address owner_, uint256 maxOrderAmount_, uint16 maxSlippageBps_)
+        EIP712("HedgeStrategyExecutor", "1")
+        Ownable(owner_)
+    {
         if (address(vault_) == address(0)) {
             revert InvalidReceiver();
         }
@@ -134,12 +131,7 @@ contract HedgeStrategyExecutor is EIP712, Ownable, Pausable, ReentrancyGuard {
         VAULT.borrowForHedge(order.amount, order.receiver);
 
         emit HedgeOrderExecuted(
-            orderHash,
-            order.receiver,
-            order.amount,
-            order.minOut,
-            order.maxSlippageBps,
-            order.deadline
+            orderHash, order.receiver, order.amount, order.minOut, order.maxSlippageBps, order.deadline
         );
     }
 

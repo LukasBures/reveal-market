@@ -104,5 +104,4 @@ contract FactoryLifecycleTest is Test {
         signals[8] = uint256(market.circuitHash());
         signals[9] = 0; // padding
     }
-
 }

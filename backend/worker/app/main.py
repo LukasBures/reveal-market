@@ -99,6 +99,18 @@ POLYMARKET_RETRY_COUNTER = _safe_counter(
     ["outcome"],
 )
 
+POLYMARKET_RATE_LIMIT_COUNTER = _safe_counter(
+    "worker_polymarket_rate_limit_total",
+    "Rate limit encounters when fetching Polymarket markets",
+    ["outcome"],
+)
+
+POLYMARKET_EMPTY_PAGE_COUNTER = _safe_counter(
+    "worker_polymarket_empty_pages_total",
+    "Empty page responses during Polymarket pagination",
+    ["outcome"],
+)
+
 setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
@@ -359,6 +371,8 @@ def _build_polymarket_client() -> PolymarketClient:
         rate_limit_requests=settings.polymarket_rate_limit_requests,
         rate_limit_window_seconds=settings.polymarket_rate_limit_window_seconds,
         empty_page_tolerance=settings.polymarket_empty_page_tolerance,
+        rate_limit_counter=POLYMARKET_RATE_LIMIT_COUNTER,
+        empty_page_counter=POLYMARKET_EMPTY_PAGE_COUNTER,
     )
 
 

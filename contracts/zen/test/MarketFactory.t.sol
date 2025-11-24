@@ -129,6 +129,20 @@ contract MarketFactoryTest is Test {
         factory.setRiskLimits(0, 0, 0.5 ether);
     }
 
+    function testCreateMarketRejectsZeroOracle() public {
+        MarketFactory.CreateMarketParams memory params = _defaultParams();
+        params.oracle = address(0);
+        vm.expectRevert(MarketFactory.ZeroAddress.selector);
+        factory.createMarket(params);
+    }
+
+    function testCreateMarketRejectsExcessiveRakeOverride() public {
+        MarketFactory.CreateMarketParams memory params = _defaultParams();
+        params.rakeBpsOverride = rakeManager.MAX_RAKE_BPS() + 1;
+        vm.expectRevert(MarketFactory.InvalidRakeBps.selector);
+        factory.createMarket(params);
+    }
+
     function testOwnershipTransferTwoStep() public {
         factory.transferOwnership(NEW_OWNER);
         assertEq(factory.pendingOwner(), NEW_OWNER);

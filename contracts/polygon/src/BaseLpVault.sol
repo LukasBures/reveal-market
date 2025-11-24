@@ -33,9 +33,15 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     uint256 public maxBorrowPerCall;
 
     event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares);
-    event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares);
-    event BorrowForHedge(address indexed hedger, address indexed to, uint256 amount, uint256 utilizedAfter, uint256 utilizationBps);
-    event RepayFromHedge(address indexed hedger, address indexed from, uint256 amount, uint256 utilizedAfter, uint256 utilizationBps);
+    event Withdraw(
+        address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares
+    );
+    event BorrowForHedge(
+        address indexed hedger, address indexed to, uint256 amount, uint256 utilizedAfter, uint256 utilizationBps
+    );
+    event RepayFromHedge(
+        address indexed hedger, address indexed from, uint256 amount, uint256 utilizedAfter, uint256 utilizationBps
+    );
     event HedgerUpdated(address indexed previousHedger, address indexed newHedger);
     event MaxUtilizationBpsUpdated(uint16 previousMaxUtilizationBps, uint16 newMaxUtilizationBps);
     event MaxBorrowPerCallUpdated(uint256 previousMaxBorrowPerCall, uint256 newMaxBorrowPerCall);
@@ -130,12 +136,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Deposit USDC and receive vault shares.
-    function deposit(uint256 assets, address receiver)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function deposit(uint256 assets, address receiver) external nonReentrant whenNotPaused returns (uint256 shares) {
         if (assets == 0) {
             revert InvalidAmount();
         }
@@ -233,12 +234,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Hedger-only borrow of idle assets for external hedging. Enforces per-call and bps caps.
-    function borrowForHedge(uint256 amount, address to)
-        external
-        nonReentrant
-        whenNotPaused
-        onlyHedger
-    {
+    function borrowForHedge(uint256 amount, address to) external nonReentrant whenNotPaused onlyHedger {
         if (amount == 0) {
             revert InvalidAmount();
         }
@@ -259,9 +255,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         }
 
         uint256 totalBefore = balanceBefore + utilizedAssets;
-        uint256 utilizationBps = totalBefore == 0
-            ? 0
-            : Math.mulDiv(newUtilized, BPS_DENOMINATOR, totalBefore);
+        uint256 utilizationBps = totalBefore == 0 ? 0 : Math.mulDiv(newUtilized, BPS_DENOMINATOR, totalBefore);
         _enforceUtilizationCap(utilizationBps);
 
         utilizedAssets = newUtilized;
@@ -271,12 +265,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Hedger-only repay of utilized assets back to the vault. Requires exact amount (no fee-on-transfer).
-    function repayFromHedge(uint256 amount, address from)
-        external
-        nonReentrant
-        whenNotPaused
-        onlyHedger
-    {
+    function repayFromHedge(uint256 amount, address from) external nonReentrant whenNotPaused onlyHedger {
         if (amount == 0) {
             revert InvalidAmount();
         }
@@ -292,9 +281,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         }
         uint256 totalBefore = balanceBefore + utilizedAssets;
         uint256 newUtilized = utilizedAssets - amount;
-        uint256 utilizationBps = totalBefore == 0
-            ? 0
-            : Math.mulDiv(newUtilized, BPS_DENOMINATOR, totalBefore);
+        uint256 utilizationBps = totalBefore == 0 ? 0 : Math.mulDiv(newUtilized, BPS_DENOMINATOR, totalBefore);
         utilizedAssets = newUtilized;
 
         emit RepayFromHedge(msg.sender, from, amount, newUtilized, utilizationBps);
