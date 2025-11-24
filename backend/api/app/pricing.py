@@ -61,7 +61,7 @@ async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
     """Fetch the latest ZEN/USD price from the configured feed."""
 
     async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
-        response = await client.get(settings.fx_feed_url)
+        response = await client.get(str(settings.fx_feed_url))
         response.raise_for_status()
         data = response.json()
         stale = bool(data.get("fx_stale") or data.get("stale"))

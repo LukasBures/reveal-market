@@ -1003,6 +1003,15 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             error=str(exc),
         )
         return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
+    except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
+        log_event(
+            logger,
+            logging.WARNING,
+            event="pricing.fx.error",
+            message="unexpected FX parsing error",
+            error=str(exc),
+        )
+        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
 
 
 @app.get("/treasury/snapshots", response_model=list[schemas.TreasurySnapshot], tags=["treasury"])

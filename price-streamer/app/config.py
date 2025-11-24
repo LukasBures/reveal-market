@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     fx_rest_enabled: bool = Field(default=True)
     fx_rest_interval_seconds: int = Field(default=10, ge=5)
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
-    fx_fallback_price: float = Field(default=3.0, gt=0)
+    fx_fallback_price: float = Field(default=0.0, ge=0)
     market_stale_seconds: int = Field(default=60, ge=10)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)

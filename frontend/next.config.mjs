@@ -1,6 +1,8 @@
 import path from "node:path";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(/\/$/, "");
+const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "http://localhost:8100").replace(/\/$/, "");
+const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const GA_ORIGINS = [
@@ -50,7 +52,7 @@ const WALLET_PROVIDER_WS = [
   "wss://metamask-sdk.api.cx.metamask.io",
 ];
 
-const connectSrc = ["'self'", API_BASE, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
+const connectSrc = ["'self'", API_BASE, STREAMER_BASE, STREAMER_WS, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
 if (IS_PRODUCTION) {
   scriptSrc.push(...GA_ORIGINS);
   connectSrc.push(...GA_ORIGINS);

@@ -49,7 +49,9 @@ export function MainNav() {
       try {
         const data = await fetchFxQuote();
         if (cancelled) return;
-        setFxLabel(`ZEN/USD ${Number(data.zen_usd).toFixed(4)}`);
+        const value = Number(data.zen_usd);
+        const display = Number.isFinite(value) && value > 0 ? value.toFixed(2) : "0.00";
+        setFxLabel(`ZEN/USD ${display}`);
         setFxStale(Boolean(data.stale));
         setFxError(null);
       } catch (err) {

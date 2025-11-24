@@ -33,7 +33,8 @@
 # ======================================================================
 :80 {
   encode zstd gzip
-  redir https://revealmarket.xyz{uri} 308
+  # Redirect all HTTP hosts to their HTTPS equivalent (preserves subdomains like stream.revealmarket.xyz)
+  redir https://{host}{uri} 308
 }
 
 
