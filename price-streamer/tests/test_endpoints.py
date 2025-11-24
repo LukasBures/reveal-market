@@ -133,6 +133,36 @@ def test_fx_endpoint(monkeypatch):
         assert payload["zen_usd"] == 2.0
 
 
+def test_subscriptions_endpoint(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    state.subscriptions.add_assets(["a1", "a2"])
+    state.rtds_symbols.add("zenusdt")
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 2
+        assert "zenusdt" in data["symbols"]
+
+
 def test_stream_endpoint_connects(test_app):
     client, state = test_app
 

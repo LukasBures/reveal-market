@@ -155,6 +155,8 @@ class ResolutionSummary(BaseModel):
 class PricingQuoteRequest(BaseModel):
     stake_zen: float = Field(..., gt=0)
     zen_usd: float | None = Field(default=None, gt=0)
+    market_id: str | None = Field(default=None, description="Market ID for cap tracking")
+    user_id: str | None = Field(default=None, description="User identifier for per-market caps")
 
 
 class PricingQuoteResponse(BaseModel):
@@ -168,6 +170,11 @@ class PricingQuoteResponse(BaseModel):
     worsen_percent: float
     rake_percent: float
     total_monetisation: float
+    max_stake_zen: float | None = None
+    max_user_stake_per_market_zen: float | None = None
+    max_market_stake_zen: float | None = None
+    remaining_user_stake_zen: float | None = None
+    remaining_market_stake_zen: float | None = None
 
 
 class FxQuoteResponse(BaseModel):

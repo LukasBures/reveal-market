@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
 import { useEffect, useMemo, useState } from "react";
-import { fetchFxQuote, fetchPricingQuote, type FxQuote, type PricingQuote } from "@/lib/pricing-client";
+import { fetchFxQuote, fetchPricingQuoteWithMeta, type FxQuote, type PricingQuote } from "@/lib/pricing-client";
 import { OutcomeQuote } from "./OutcomeQuote";
 
 type Props = {
@@ -65,7 +65,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     let cancelled = false;
     setLoading(true);
-    fetchPricingQuote(stakeZen, fx.zen_usd)
+    fetchPricingQuoteWithMeta(stakeZen, fx.zen_usd, { marketId: market.eventId })
       .then((payload) => {
         if (cancelled) return;
         setQuote(payload);
@@ -80,7 +80,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [fx, stakeZen]);
+  }, [fx, stakeZen, market.eventId]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;
@@ -107,7 +107,7 @@ export function MarketDetailOutcomes({ market }: Props) {
           Prices shown in ZEN
         </span>
       </div>
-      <OutcomeQuote stakeZen={10} />
+      <OutcomeQuote stakeZen={10} marketId={market.eventId} />
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm text-slate-200">
           <thead>

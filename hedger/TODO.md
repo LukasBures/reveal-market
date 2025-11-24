@@ -12,6 +12,7 @@ Short list of items to reach a functional hedger MVP.
 - Track LP utilization + ZEN float from on-chain sources and enforce risk actions (throttle, pause, bridge top-ups).
 - Add bridge integration to move USDC→ZEN when float low and USDC→vault/bridge when PnL positive.
 - Expand risk metrics: slippage, fill quality, hedge latency, implied odds variance.
+- Enforce off-chain bet caps: per-bet (100 ZEN), per-user-per-market, and per-market caps mirrored from API; reject hedges before placement when caps are exceeded. Document future on-chain maxTicketStake/maxUserStakePerMarket.
 
 ## Settlement
 - Build prover payload assembly from stored commits + oracle outcome; handle disputed/late oracles.

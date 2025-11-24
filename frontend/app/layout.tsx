@@ -34,10 +34,19 @@ const displayFont = localFont({
 
 const SITE_URL = absoluteUrl("/");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const isBrowserResolvableHost = (hostname: string) => {
+  const normalized = hostname.toLowerCase();
+  if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(normalized)) {
+    return true;
+  }
+  // Treat dotted domains or IPv6 literals as routable; skip bare Docker hostnames like "api".
+  return normalized.includes(".") || normalized.includes(":");
+};
 const API_ORIGIN = (() => {
   const candidate = process.env.NEXT_PUBLIC_API_BASE_URL ?? serverEnv.apiBaseUrl;
   try {
-    return new URL(candidate).origin;
+    const url = new URL(candidate);
+    return isBrowserResolvableHost(url.hostname) ? url.origin : null;
   } catch {
     return null;
   }

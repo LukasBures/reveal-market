@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
     max_stake_zen: float = Field(default=100.0, gt=0, description="Per-quote max stake in ZEN")
+    max_user_stake_per_market_zen: float = Field(
+        default=100.0, gt=0, description="Per-user cumulative stake per market in ZEN"
+    )
+    max_market_stake_zen: float = Field(default=1000.0, gt=0, description="Total stake cap per market in ZEN")
+    bet_cap_ttl_seconds: int = Field(default=86400, ge=60, description="TTL for bet cap counters in Redis")
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)

@@ -15,3 +15,8 @@ These are the only backend tasks blocking the MVP launch. Defer everything else 
 - Add an optional settlement automation loop that queues on-chain settlement transactions (or alerts ops) once payouts finalize, with duplicate suppression + retry logging.
 
 Ship these three items and the backend will meet MVP expectations for provenance, settlement integrity, and ops readiness.
+
+## 4. Bet caps (off-chain + future on-chain)
+- Enforce per-bet cap (100 ZEN), per-user-per-market cap, and per-market ZEN cap at the API layer; surface limits in responses.
+- Mirror caps in hedger risk checks so oversized commits never hedge.
+- Add a TODO for on-chain enforcement (maxTicketStake, maxUserStakePerMarket) to close the loop in a later contract upgrade.

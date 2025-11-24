@@ -152,6 +152,15 @@ def create_app() -> FastAPI:
         records = await state.get_history(market_id, str(outcome), limit)
         return {"market_id": market_id, "outcome": outcome, "count": len(records), "data": records}
 
+    @app.get("/subscriptions")
+    async def subscriptions():
+        return {
+            "assets": sorted(state.subscriptions.assets),
+            "symbols": sorted(state.rtds_symbols),
+            "count": len(state.subscriptions.assets),
+            "max": settings.max_subscriptions,
+        }
+
     return app
 
 

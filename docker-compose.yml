@@ -167,7 +167,7 @@ services:
       HEDGER_DATABASE_URL: postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market
       HEDGER_REDIS_URL: redis://redis:6379/0
       HEDGER_POLYMARKET_API_BASE: https://gamma-api.polymarket.com
-      HEDGER_FX_FEED_URL: ${HEDGER_FX_FEED_URL:-https://gamma-api.polymarket.com/prices/zen-usd}
+      HEDGER_FX_FEED_URL: ${HEDGER_FX_FEED_URL:-http://api:8000/pricing/fx}
       HEDGER_FX_HAIRCUT_BPS: ${HEDGER_FX_HAIRCUT_BPS:-500}
       HEDGER_VAULT_RPC_URL: ${HEDGER_VAULT_RPC_URL:-http://localhost:8545}
       HEDGER_VAULT_PRIVATE_KEY: ${HEDGER_VAULT_PRIVATE_KEY:-0x0000000000000000000000000000000000000000000000000000000000000001}
@@ -301,7 +301,7 @@ services:
       STREAMER_POLYMARKET_WS_URL: wss://clob.polymarket.com/ws
       STREAMER_POLYMARKET_REST_URL: https://gamma-api.polymarket.com/markets
       STREAMER_INTERNAL_URL: http://price_streamer:8100
-      STREAMER_FX_FEED_URL: ${RM_FX_FEED_URL:-https://gamma-api.polymarket.com/prices/zen-usd}
+      STREAMER_FX_FEED_URL: ${RM_FX_FEED_URL:-http://api:8000/pricing/fx}
       STREAMER_FX_FALLBACK_PRICE: ${RM_FX_FALLBACK_PRICE:-1.0}
       STREAMER_FX_WS_URL: ${STREAMER_FX_WS_URL:-wss://stream.binance.com:9443/ws/zenusdt@ticker}
       STREAMER_FX_STALE_AFTER_SECONDS: ${STREAMER_FX_STALE_AFTER_SECONDS:-10}

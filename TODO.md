@@ -7,23 +7,26 @@ This doc lists the minimum cross-team work that must land before we can call the
 - **Contracts** – Groth16 proofs need production keys, rotation tooling, and replay persistence so on-chain receipts are defensible.
 - **Frontend** – Investors must see real data everywhere (charts, search, proofs) and be able to export diligence artifacts without leaving the site.
 - **Proover** – Operators need artifact validation and Prometheus-grade telemetry so zk receipts remain trustworthy in production.
+- **Limits & gating** – Enforce per-bet and per-user caps off-chain (UI + API/hedger) and document on-chain equivalents for future hardening.
 
 See the service-specific TODO files for deeper acceptance criteria.
 
 ### Backend MVP gaps
-1. **AI summary ledger** – Persist every AI summary (model, prompt hash, context pointers, timestamps) and expose the history via `/markets/{event}` so diligence teams can audit narrative changes.
-2. **Persistent resolution ledger** – Store resolution payloads (block #, tx hash, payout vector, oracle source) inside Postgres + Redis, and return them from `/markets` + `/proofs` without re-querying external APIs. (Commitments/settlements tables exist; Merkle/payload builder implemented; must ingest real on-chain commits/resolutions and backfill Merkle paths/pool totals/liabilities/rake/winning outcomes/circuit hash.)
-3. **On-chain mirroring & automation** – Stream MarketFactory events (create/rake/guardian updates) into Postgres and, when configured, queue settlement transactions once on-chain payouts finalize so the backend never drifts from contracts. (Proof generation path now expects persisted settlement state; hook ingestion + prover triggering.)
+1. **Persistent resolution ledger** – Store resolution payloads (block #, tx hash, payout vector, oracle source) inside Postgres + Redis, and return them from `/markets` + `/proofs` without re-querying external APIs. (Commitments/settlements tables exist; Merkle/payload builder implemented; must ingest real on-chain commits/resolutions and backfill Merkle paths/pool totals/liabilities/rake/winning outcomes/circuit hash.)
+2. **On-chain mirroring & automation** – Stream MarketFactory events (create/rake/guardian updates) into Postgres and, when configured, queue settlement transactions once on-chain payouts finalize so the backend never drifts from contracts. (Proof generation path now expects persisted settlement state; hook ingestion + prover triggering.)
+3. **Bet caps enforcement** – Off-chain enforce per-bet cap (100 ZEN), per-user-per-market cap, and per-market ZEN cap; document on-chain cap requirements (maxTicketStake, maxUserStakePerMarket) for a future circuit/contract upgrade.
 
 ### Contracts MVP gaps
 1. **Production Groth16 rollout** – Finalize audited proving/verifying keys, emit hashes on-chain, and ship rotation scripts/runbooks so every proof can be traced back to a known circuit version. (10-signal circuit regenerated; `contracts/cache/settlement-vk.json` updated with circuitHash; deploy scripts ready—need live deploy + artifacts/addresses.)
 2. **Proof replay persistence** – Emit/store `proofNonce` + settlement receipts (backend + events) so auditors can prove no proof was replayed or tampered with. (Backend settlements table has proof status/hash/request id fields; ingestion path to persist hashes still pending.)
 3. **Guardian/ownership operations** – Document and test the `Ownable2Step` + guardian transfer process (including manifest ingestion) so we can rotate keys safely before onboarding partner capital.
+4. **Stake caps (future on-chain)** – Add maxTicketStake and maxUserStakePerMarket to RevealMarket/Factory so on-chain rejects oversize commits; mirror off-chain caps until then.
 
 ### Frontend MVP gaps
 1. **Live market telemetry** – Replace the placeholder `MarketDetailChart` with real price/liquidity history sourced from the backend/worker so detail pages show actual performance.
 2. **Full search experience** – Ship a `/markets/search` surface (pagination, keyboard shortcuts, category pills) that calls the backend search endpoint instead of filtering placeholder cards.
 3. **Proof & diligence surfacing** – Add filters (status, verifier, market) + CSV export on `/proofs`, and include a visible trust CTA so investors can self-serve receipts.
+4. **Bet limit UX** – Persistently surface per-bet and per-user caps in stake inputs and disable actions when limits are exceeded or FX/market data is stale.
 
 ### Proover MVP gaps
 1. **Artifact validation command** – Provide a CLI/env check that verifies `settlement_final.zkey` and `settlement_js` before the prover boots outside Docker so operators don’t accidentally run with stale artifacts. (Keygen regenerates circuitHash/pk/vk hashes; need CLI/health integration.)

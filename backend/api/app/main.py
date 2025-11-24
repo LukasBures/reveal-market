@@ -31,6 +31,7 @@ from app import crud, models, schemas
 from app.config import Settings, get_settings
 from app.database import get_session, run_migrations, session_scope
 from app.health import build_health_response
+from app.cache import get_redis_client
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
@@ -896,6 +897,42 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
             raise
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
+
+    # Enforce optional per-user and per-market caps using Redis counters.
+    redis_client = get_redis_client()
+    user_total = None
+    market_total = None
+    user_remaining = None
+    market_remaining = None
+
+    if payload.market_id:
+        market_key = f"betcaps:market:{payload.market_id}:total"
+        try:
+            market_total = float(redis_client.get(market_key) or 0)
+        except Exception as exc:  # pragma: no cover - defensive logging only
+            log_event(logger, logging.WARNING, event="betcaps.read.error", message="Failed to read market cap", error=str(exc))
+            market_total = 0
+        if market_total + payload.stake_zen > settings.max_market_stake_zen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Market stake cap exceeded ({settings.max_market_stake_zen} ZEN)",
+            )
+        market_remaining = settings.max_market_stake_zen - (market_total + payload.stake_zen)
+
+        if payload.user_id:
+            user_key = f"betcaps:market:{payload.market_id}:user:{payload.user_id}"
+            try:
+                user_total = float(redis_client.get(user_key) or 0)
+            except Exception as exc:  # pragma: no cover
+                log_event(logger, logging.WARNING, event="betcaps.read.error", message="Failed to read user cap", error=str(exc))
+                user_total = 0
+            if user_total + payload.stake_zen > settings.max_user_stake_per_market_zen:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"User stake cap exceeded ({settings.max_user_stake_per_market_zen} ZEN)",
+                )
+            user_remaining = settings.max_user_stake_per_market_zen - (user_total + payload.stake_zen)
+
     if zen_usd is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
     engine = PricingEngine(settings)
@@ -903,6 +940,30 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    quote = quote.model_copy(
+        update={
+            "max_stake_zen": settings.max_stake_zen,
+            "max_user_stake_per_market_zen": settings.max_user_stake_per_market_zen if payload.market_id else None,
+            "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
+            "remaining_user_stake_zen": user_remaining,
+            "remaining_market_stake_zen": market_remaining,
+        }
+    )
+
+    # Update cap counters after successful quote.
+    if payload.market_id:
+        pipeline = redis_client.pipeline()
+        market_key = f"betcaps:market:{payload.market_id}:total"
+        pipeline.set(market_key, (market_total or 0) + payload.stake_zen, ex=settings.bet_cap_ttl_seconds)
+        if payload.user_id:
+            user_key = f"betcaps:market:{payload.market_id}:user:{payload.user_id}"
+            pipeline.set(user_key, (user_total or 0) + payload.stake_zen, ex=settings.bet_cap_ttl_seconds)
+        try:
+            pipeline.execute()
+        except Exception as exc:  # pragma: no cover
+            log_event(logger, logging.WARNING, event="betcaps.write.error", message="Failed to persist bet caps", error=str(exc))
+
     log_event(
         logger,
         logging.INFO,

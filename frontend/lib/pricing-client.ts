@@ -9,6 +9,11 @@ export type PricingQuote = {
   worsen_percent: number;
   rake_percent: number;
   total_monetisation: number;
+  max_stake_zen?: number | null;
+  max_user_stake_per_market_zen?: number | null;
+  max_market_stake_zen?: number | null;
+  remaining_user_stake_zen?: number | null;
+  remaining_market_stake_zen?: number | null;
 };
 
 export type FxQuote = {
@@ -35,10 +40,23 @@ export async function fetchFxQuote(): Promise<FxQuote> {
 }
 
 export async function fetchPricingQuote(stakeZen: number, zenUsd: number): Promise<PricingQuote> {
+  return fetchPricingQuoteWithMeta(stakeZen, zenUsd, {});
+}
+
+export async function fetchPricingQuoteWithMeta(
+  stakeZen: number,
+  zenUsd: number,
+  opts: { marketId?: string; userId?: string } = {},
+): Promise<PricingQuote> {
   const res = await fetch(getEndpoint("/pricing/quote"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ stake_zen: stakeZen, zen_usd: zenUsd }),
+    body: JSON.stringify({
+      stake_zen: stakeZen,
+      zen_usd: zenUsd,
+      market_id: opts.marketId,
+      user_id: opts.userId,
+    }),
   });
   if (!res.ok) {
     const detail = await res.text();

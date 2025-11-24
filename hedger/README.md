@@ -10,6 +10,7 @@ The Hedger keeps RevealMarket economically neutral while preserving privacy. It 
 - Concurrency + idempotency: Redis locks + idempotency for commit ingestion and hedge execution, plus DB duplicate checks; stream offsets stored for replay safety.
 - Metrics: exposures, net exposure, coverage ratio, LP utilization, float balance, PnL placeholders, event lag, hedge executions, and settlement/prover latency histograms.
 - Settlement orchestration: builds prover payloads from stored commits + outcome, persists receipts, marks markets resolved, and clears exposure (on-chain submission is stubbed).
+- Pricing guardrails: hedges refuse stale FX and enforce per-commit stake caps; defaults mirror UI (100 ZEN per bet) and haircuts/worsen/rake are applied server-side.
 
 ## Running locally
 The Docker image is wired into `docker-compose.yml` as `hedger`. To start it alongside the rest of the stack:

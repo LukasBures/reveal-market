@@ -36,6 +36,7 @@ Tech stack callouts:
 - **Tailwind (utility-first)** layered with custom glassmorphism helpers defined in `app/globals.css`.
 - **Vitest + Testing Library** for behavioral tests.
 - **ESLint + Typescript** enforced via `npm run lint`.
+- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `price-streamer` (via SSE and `/pricing/fx`), surfaces a header ticker, and enforces a 100 ZEN per-bet UI cap that mirrors backend limits.
 
 ---
 

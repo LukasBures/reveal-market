@@ -73,6 +73,8 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_CORS_ALLOW_*` | Origins/methods/headers/credentials for CORS. |
 | `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
+| `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 100 ZEN max; quotes above this return 400). |
+| `RM_FX_FEED_URL` / `RM_FX_TIMEOUT_SECONDS` | FX source for pricing (defaults to Binance-derived feed via price-streamer). Quotes reject when FX is stale/unavailable. |
 
 ### How the pipeline stays fresh
 

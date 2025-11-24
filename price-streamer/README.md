@@ -4,7 +4,8 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
 
 ## Features
 - Polymarket CLOB websocket ingestion with per-market subscriptions.
-- Optional RTDS crypto stream for ZEN/USD FX; REST fallback with staleness flags.
+- Binance ZEN/USDT websocket as primary FX (stale after 5s), with Coingecko REST fallback every 10s and jump-rejection/bounds (default 3–300 USD).
+- Optional RTDS crypto stream for additional FX; REST fallback with staleness flags.
 - SSE fanout (`/stream`) and per-outcome history (`/history`), cached in Redis.
 - Worsen/haircut/rake applied server-side; payload signing optional.
 
@@ -15,6 +16,7 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
   - `STREAMER_REDIS_URL`
   - `STREAMER_POLYMARKET_WS_URL` / `STREAMER_POLYMARKET_REST_URL`
   - `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
+  - `STREAMER_FX_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
   - `STREAMER_API_HOST`, `STREAMER_API_PORT`
   - Optional: `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_CRYPTO_SYMBOLS`, `STREAMER_SIGNING_SECRET`
 

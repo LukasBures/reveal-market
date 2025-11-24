@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchFxQuote, fetchPricingQuote } from "@/lib/pricing-client";
+import { fetchFxQuote, fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
 
 type Props = {
   stakeZen: number;
+  marketId: string;
 };
 
-export function OutcomeQuote({ stakeZen }: Props) {
+export function OutcomeQuote({ stakeZen, marketId }: Props) {
   const [refundZen, setRefundZen] = useState<string>("—");
   const [profitUsd, setProfitUsd] = useState<string>("—");
   const [fxLabel, setFxLabel] = useState<string>("FX: loading…");
@@ -26,7 +27,7 @@ export function OutcomeQuote({ stakeZen }: Props) {
           setError("Pricing temporarily unavailable (stale FX)");
           return;
         }
-        const quote = await fetchPricingQuote(stakeZen, fx.zen_usd);
+        const quote = await fetchPricingQuoteWithMeta(stakeZen, fx.zen_usd, { marketId });
         if (cancelled) return;
         setRefundZen(quote.refund_zen.toFixed(4));
         const profit = quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
@@ -44,7 +45,7 @@ export function OutcomeQuote({ stakeZen }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [stakeZen]);
+  }, [stakeZen, marketId]);
 
   if (error) {
     return <p className="text-xs text-rose-300">Pricing unavailable: {error}</p>;
