@@ -22,5 +22,7 @@ async def test_rtds_fx_updates_quote():
     }
     await streamer._handle_rtds(payload)
     assert state.fx_quote is not None
-    assert state.fx_quote.zen_usd == Decimal("1.23")
+    adjusted = Decimal("1.23") * (Decimal("1") - Decimal(str(settings.worsen_percent)))
+    assert state.fx_quote.zen_usd == adjusted
+    assert state.fx_quote.raw_zen_usd == Decimal("1.23")
     assert state.fx_quote.stale is False

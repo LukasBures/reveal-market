@@ -146,6 +146,7 @@ class PriceStreamer:
                 "display_price": str(worsened),
                 "timestamp": ts,
                 "fx_zen_usd": str(fx.zen_usd),
+                "fx_raw_zen_usd": str(fx.raw_zen_usd or fx.zen_usd),
                 "fx_stale": fx.stale,
                 "source": source,
             }

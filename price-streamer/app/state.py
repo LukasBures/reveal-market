@@ -25,6 +25,7 @@ class FxQuote:
     zen_usd: Decimal
     fetched_at: datetime
     stale: bool
+    raw_zen_usd: Decimal | None = None
     source: str = "unknown"
 
 
@@ -94,8 +95,10 @@ class StreamState:
                 logger.warning(
                     "FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)}
                 )
+                fallback_price = Decimal(str(self.settings.fx_fallback_price))
                 fallback = FxQuote(
-                    zen_usd=Decimal(str(self.settings.fx_fallback_price)),
+                    zen_usd=self._apply_fx_worsen(fallback_price),
+                    raw_zen_usd=fallback_price,
                     fetched_at=datetime.now(UTC),
                     stale=True,
                     source="fallback",
@@ -113,6 +116,7 @@ class StreamState:
         ):
             self.fx_quote = FxQuote(
                 zen_usd=self.fx_quote.zen_usd,
+                raw_zen_usd=self.fx_quote.raw_zen_usd or self.fx_quote.zen_usd,
                 fetched_at=self.fx_last_update,
                 stale=True,
                 source=self.fx_last_source or "unknown",
@@ -175,12 +179,17 @@ class StreamState:
         self.fx_last_update = quote.fetched_at
         self.fx_last_source = quote.source
         if quote.source != "fallback":
-            self._fx_prev_price = quote.zen_usd
+            self._fx_prev_price = quote.raw_zen_usd or quote.zen_usd
             self._fx_prev_price_ts = quote.fetched_at
         self.fx_last_error = None
         if quote.source == "binance_ws":
             self.fx_ws_connected = True
             self.fx_ws_last_update = quote.fetched_at
+
+    def _apply_fx_worsen(self, price: Decimal) -> Decimal:
+        """Apply worsen% to the raw FX price before exposing downstream."""
+        worsened = price * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
+        return worsened.quantize(Decimal("0.00000001"))
 
     def _register_fx(self, price: Decimal, *, source: str, allow_jump: bool = False) -> FxQuote | None:
         if price <= 0:
@@ -224,7 +233,8 @@ class StreamState:
                         },
                     )
                     return None
-        quote = FxQuote(zen_usd=price, fetched_at=now, stale=False, source=source)
+        adjusted_price = self._apply_fx_worsen(price)
+        quote = FxQuote(zen_usd=adjusted_price, raw_zen_usd=price, fetched_at=now, stale=False, source=source)
         self._update_fx(quote)
         self._fx_rejection_count = 0
         return quote

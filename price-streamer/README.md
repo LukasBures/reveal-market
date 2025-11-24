@@ -32,6 +32,11 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 - `GET /healthz` – service + feed status (stale flags, FX age).
 - `GET /history?market_id=...&outcome=0&limit=100` – recent ticks.
 - `GET /stream?market_id=...&assets_ids=a1,a2&symbols=zenusdt` – SSE stream; subscribes to provided asset IDs and optional RTDS symbols.
+- `GET /fx/zen-usd` (and `zen-usdc`, `zen-usdt`) – latest FX snapshot (worsen% applied; raw price also returned).
+- `WS /stream/ws?market_id=...` – websocket stream for market ticks (mirrors SSE); auto-subscribes to `market_id` when `assets_ids` is omitted.
+- `WS /fx/zen-usd` (aliases: `/fx/zen-usdc`, `/fx/zen-usdt`) – websocket stream of ZEN/USD quotes (pushes on change, worsen% applied; raw price included).
+
+> For TLS/WSS, front the service with Caddy/Nginx (see docker/caddy/Caddyfile for the `stream.revealmarket.xyz` setup). Locally use `ws://localhost:8100/...`; in prod use `wss://stream.revealmarket.xyz/...`.
 
 ## Tests
 ```bash

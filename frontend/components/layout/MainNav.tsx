@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
-import { fetchFxQuote } from "@/lib/pricing-client";
+import { createFxWebSocket, fetchFxQuote } from "@/lib/pricing-client";
 
 const navLinks = [
   { href: "/about", label: "About" },
@@ -29,6 +29,7 @@ export function MainNav() {
   const [fxLabel, setFxLabel] = useState<string | null>(null);
   const [fxStale, setFxStale] = useState(false);
   const [fxError, setFxError] = useState<string | null>(null);
+  const fxLastUpdateRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -45,26 +46,61 @@ export function MainNav() {
 
   useEffect(() => {
     let cancelled = false;
-    const loadFx = async () => {
+    let ws: WebSocket | null = null;
+    const applyFx = (data: { zen_usd?: number; stale?: boolean }) => {
+      const value = Number(data.zen_usd);
+      const stale = Boolean(data.stale);
+      const display = Number.isFinite(value) && value > 0 ? value.toFixed(2) : "0.00";
+      setFxLabel(`ZEN/USD ${display}${stale ? " (stale)" : ""}`);
+      setFxStale(stale);
+      setFxError(null);
+      fxLastUpdateRef.current = Date.now();
+    };
+
+    const connectWs = () => {
+      ws = createFxWebSocket();
+      ws.onmessage = (event) => {
+        if (cancelled) return;
+        try {
+          const payload = JSON.parse(event.data);
+          applyFx(payload);
+        } catch (err) {
+          setFxError((err as Error).message);
+        }
+      };
+      ws.onerror = () => {
+        if (cancelled) return;
+        setFxError("FX socket error");
+      };
+      ws.onclose = () => {
+        if (cancelled) return;
+        setTimeout(connectWs, 1500);
+      };
+    };
+
+    const fetchFallback = async () => {
       try {
         const data = await fetchFxQuote();
-        if (cancelled) return;
-        const value = Number(data.zen_usd);
-        const stale = Boolean(data.stale);
-        const display = Number.isFinite(value) && value > 0 ? value.toFixed(2) : "0.00";
-        setFxLabel(`ZEN/USD ${display}${stale ? " (stale)" : ""}`);
-        setFxStale(stale);
-        setFxError(null);
+        applyFx(data);
       } catch (err) {
-        if (cancelled) return;
-        setFxError((err as Error).message);
+        if (!cancelled) setFxError((err as Error).message);
       }
     };
-    loadFx();
-    const id = setInterval(loadFx, 5000);
+
+    connectWs();
+    fetchFallback();
+    // Fallback poll in case the socket stalls.
+    const pollId = setInterval(() => {
+      const age = Date.now() - fxLastUpdateRef.current;
+      if (age > 10_000) fetchFallback();
+    }, 5_000);
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearInterval(pollId);
+      if (ws && ws.readyState !== WebSocket.CLOSED) {
+        ws.close();
+      }
     };
   }, []);
 

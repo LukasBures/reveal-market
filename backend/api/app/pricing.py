@@ -57,6 +57,40 @@ class PricingEngine:
         return pct
 
 
+def _coerce_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_fx_price(payload: dict) -> float | None:
+    """Extract a USD price from common FX payload shapes."""
+    if not isinstance(payload, dict):
+        return None
+
+    # Direct keys from common feeds.
+    for key in ("price", "zen_usd", "zenUSD", "fx_zen_usd"):
+        price = _coerce_float(payload.get(key))
+        if price is not None:
+            return price
+
+    fx_block = payload.get("fx")
+    if isinstance(fx_block, dict):
+        price = _coerce_float(fx_block.get("zen_usd"))
+        if price is not None:
+            return price
+
+    # Nested maps such as Coingecko: {"horizen": {"usd": 7.5}}
+    for value in payload.values():
+        if isinstance(value, dict):
+            for nested_key in ("usd", "price", "zen_usd", "zenUSD"):
+                price = _coerce_float(value.get(nested_key))
+                if price is not None:
+                    return price
+    return None
+
+
 async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
     """Fetch the latest ZEN/USD price from the configured feed."""
 
@@ -65,13 +99,7 @@ async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
         response.raise_for_status()
         data = response.json()
         stale = bool(data.get("fx_stale") or data.get("stale"))
-        raw = (
-            data.get("price")
-            or data.get("zen_usd")
-            or data.get("zenUSD")
-            or data.get("fx_zen_usd")
-            or data.get("fx", {}).get("zen_usd")
-        )
+        raw = _extract_fx_price(data)
         if raw is None:
             raise ValueError("FX feed response missing zen_usd/price")
         zen_usd = float(raw)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from app.config import Settings
@@ -107,7 +108,10 @@ def test_fx_endpoint(monkeypatch):
     settings = Settings()
     state = StreamState(settings)
     now = datetime.now(UTC)
-    state.fx_quote = FxQuote(zen_usd=2, fetched_at=now, stale=False, source="binance_ws")
+    expected = Decimal("2") * (Decimal("1") - Decimal(str(settings.worsen_percent)))
+    state.fx_quote = FxQuote(
+        zen_usd=expected, raw_zen_usd=Decimal("2"), fetched_at=now, stale=False, source="binance_ws"
+    )
     state.fx_last_update = now
     monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
@@ -130,7 +134,9 @@ def test_fx_endpoint(monkeypatch):
         resp = client.get("/fx/zen-usd")
         payload = resp.json()
         assert payload["pair"] == "ZEN/USDC"
-        assert payload["zen_usd"] == 2.0
+        expected = float(2 * (1 - settings.worsen_percent))
+        assert payload["zen_usd"] == expected
+        assert payload["raw_zen_usd"] == 2.0
 
 
 def test_subscriptions_endpoint(monkeypatch):
@@ -183,3 +189,45 @@ def test_stream_endpoint_connects(test_app):
         assert resp.status_code == 200
         for _ in resp.iter_lines():
             break
+    # Should auto-add the market to websocket subscriptions even without explicit assets_ids.
+    assert "m1" in state.subscriptions.assets
+
+
+def test_stream_websocket_sends_messages(test_app):
+    client, state = test_app
+
+    class DummyPubSub:
+        def __init__(self):
+            import asyncio
+
+            self.queue = asyncio.Queue()
+
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            import asyncio
+
+            try:
+                return await asyncio.wait_for(self.queue.get(), timeout=timeout)
+            except TimeoutError:
+                return None
+
+        async def close(self):
+            return
+
+        def feed(self, data: str):
+            self.queue.put_nowait({"data": data})
+
+    pubsub = DummyPubSub()
+
+    async def fake_subscribe(market_id: str):
+        return pubsub
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+
+    with client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1") as ws:
+        # Seed a tick for the websocket loop to forward.
+        pubsub.feed('{"market_id":"m1","price":"0.42"}')
+        incoming = ws.receive_text()
+        if "ping" in incoming:
+            incoming = ws.receive_text()
+        assert '"price":"0.42"' in incoming
+    assert "m1" in state.subscriptions.assets

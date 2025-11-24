@@ -31,6 +31,14 @@ const getStreamerEndpoint = (path: string, preferInternal = false) => {
   return `${streamerBasePublic || "http://localhost:8100"}${path}`;
 };
 
+const toWebSocketScheme = (url: string) => {
+  if (url.startsWith("ws://") || url.startsWith("wss://")) return url;
+  return url.replace(/^http/, "ws");
+};
+
+const getStreamerWsEndpoint = (path: string, preferInternal = false) =>
+  toWebSocketScheme(getStreamerEndpoint(path, preferInternal));
+
 export async function fetchFxQuote(): Promise<FxQuote> {
   const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
   if (!res.ok) {
@@ -86,4 +94,9 @@ export async function fetchPriceHistory(
 export function createPriceStream(marketId: string): EventSource {
   const url = `${getStreamerEndpoint("/stream")}?market_id=${encodeURIComponent(marketId)}`;
   return new EventSource(url);
+}
+
+export function createFxWebSocket(path = "/fx/zen-usd"): WebSocket {
+  const url = getStreamerWsEndpoint(path, true);
+  return new WebSocket(url);
 }

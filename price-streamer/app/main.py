@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, Query, Response
+from fastapi import FastAPI, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -88,6 +88,7 @@ def create_app() -> FastAPI:
         return {
             "status": status,
             "fx_zen_usd": str(fx.zen_usd),
+            "fx_raw_zen_usd": str(fx.raw_zen_usd or fx.zen_usd),
             "fx_stale": fx.stale,
             "fx_source": fx.source,
             "fx_ws_connected": state.fx_ws_connected,
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
         return {
             "pair": "ZEN/USDC",
             "zen_usd": float(quote.zen_usd),
+            "raw_zen_usd": float(quote.raw_zen_usd or quote.zen_usd),
             "source": quote.source,
             "received_at": quote.fetched_at.isoformat(),
             "stale": quote.stale,
@@ -130,6 +132,46 @@ def create_app() -> FastAPI:
     async def fx_quote_usdt() -> dict:
         return await _fx_payload()
 
+    async def _fx_ws_stream(ws: WebSocket):
+        await ws.accept()
+        last_sent: datetime | None = None
+        try:
+            while True:
+                fx = await state.get_fx()
+                updated_at = state.fx_last_update or fx.fetched_at
+                if last_sent is None or (updated_at and updated_at != last_sent):
+                    await ws.send_json(
+                        {
+                            "pair": "ZEN/USDC",
+                            "zen_usd": float(fx.zen_usd),
+                            "raw_zen_usd": float(fx.raw_zen_usd or fx.zen_usd),
+                            "source": fx.source,
+                            "received_at": fx.fetched_at.isoformat(),
+                            "stale": fx.stale,
+                        }
+                    )
+                    last_sent = updated_at
+                await asyncio.sleep(1)
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:  # pragma: no cover - runtime guard
+            logger.warning("FX websocket error", extra={"event": "fx.ws.stream.error", "error": str(exc)})
+        finally:
+            with suppress(Exception):
+                await ws.close()
+
+    @app.websocket("/fx/zen-usd")
+    async def fx_websocket_usd(ws: WebSocket):
+        await _fx_ws_stream(ws)
+
+    @app.websocket("/fx/zen-usdc")
+    async def fx_websocket_usdc(ws: WebSocket):
+        await _fx_ws_stream(ws)
+
+    @app.websocket("/fx/zen-usdt")
+    async def fx_websocket_usdt(ws: WebSocket):
+        await _fx_ws_stream(ws)
+
     @app.get("/metrics")
     async def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -145,8 +187,14 @@ def create_app() -> FastAPI:
         symbols: str | None = Query(default=None, description="Comma-separated crypto symbols to subscribe (RTDS)"),
     ):
         # Allow on-demand subscription scoping.
+        assets: list[str] = []
         if assets_ids:
-            state.subscriptions.add_assets([asset.strip() for asset in assets_ids.split(",") if asset.strip()])
+            assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
+        # Default to the requested market_id so websocket streams stay hydrated even without explicit assets_ids.
+        if not assets and market_id:
+            assets = [market_id]
+        if assets:
+            state.subscriptions.add_assets(assets)
         if symbols:
             for sym in symbols.split(","):
                 trimmed = sym.strip()
@@ -157,6 +205,48 @@ def create_app() -> FastAPI:
             _sse_events(pubsub, heartbeat_seconds=heartbeat, max_events=max_events),
             media_type="text/event-stream",
         )
+
+    @app.websocket("/stream/ws")
+    async def stream_ws(
+        websocket: WebSocket,
+        market_id: str,
+        heartbeat: int = 15,
+        assets_ids: str | None = None,
+        symbols: str | None = None,
+    ):
+        assets: list[str] = []
+        if assets_ids:
+            assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
+        if not assets and market_id:
+            assets = [market_id]
+        if assets:
+            state.subscriptions.add_assets(assets)
+        if symbols:
+            for sym in symbols.split(","):
+                trimmed = sym.strip()
+                if trimmed:
+                    state.rtds_symbols.add(trimmed)
+        pubsub = await state.subscribe(market_id)
+        await websocket.accept()
+        try:
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat)
+                if message and message.get("data"):
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    await websocket.send_text(str(data))
+                else:
+                    await websocket.send_json({"event": "ping", "ts": datetime.now(UTC).isoformat()})
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:  # pragma: no cover - runtime guard
+            logger.warning("market websocket error", extra={"event": "stream.ws.error", "error": str(exc)})
+        finally:
+            with suppress(Exception):
+                await pubsub.close()
+            with suppress(Exception):
+                await websocket.close()
 
     @app.get("/history")
     async def history(
