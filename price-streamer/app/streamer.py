@@ -55,10 +55,16 @@ class PriceStreamer:
                         if self._stop.is_set():
                             break
                         try:
-                            data = json.loads(raw)
+                            payload = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
-                        await self._handle_tick(data, source="ws")
+                        # Polymarket may send batch payloads as a list; handle both shapes.
+                        if isinstance(payload, list):
+                            for item in payload:
+                                if isinstance(item, dict):
+                                    await self._handle_tick(item, source="ws")
+                        elif isinstance(payload, dict):
+                            await self._handle_tick(payload, source="ws")
                 except Exception as exc:  # pragma: no cover - reconnect path
                     logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
                     await asyncio.sleep(self.settings.ws_reconnect_seconds)

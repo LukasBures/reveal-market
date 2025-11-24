@@ -105,7 +105,7 @@ export async function fetchPriceHistory(
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-export function createPriceStream(marketId: string): EventSource {
+export function createMarketStream(marketId: string): EventSource {
   const url = `${getStreamerEndpoint("/stream")}?market_id=${encodeURIComponent(marketId)}`;
   return new EventSource(url);
 }

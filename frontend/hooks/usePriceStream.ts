@@ -1,24 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPriceStream, fetchPriceHistory } from "@/lib/pricing-client";
-
-type PricePoint = {
-  timestamp: string;
-  price: number;
-  display_price: number;
-  fx_stale?: boolean;
-};
+import { fetchPriceHistory } from "@/lib/pricing-client";
+import { seedHistory, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
 export function usePriceStream(marketId: string, outcome = 0) {
-  const [history, setHistory] = useState<PricePoint[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const streamState = usePriceStreamStore(marketId);
 
   useEffect(() => {
+    setHistoryLoaded(false);
     let cancelled = false;
-    const load = async () => {
+    (async () => {
       try {
         const data = await fetchPriceHistory(marketId, outcome, 200);
         if (cancelled) return;
-        setHistory(
+        seedHistory(
+          marketId,
+          outcome,
           data
             .map((entry) => ({
               timestamp: entry.timestamp,
@@ -28,53 +26,27 @@ export function usePriceStream(marketId: string, outcome = 0) {
             }))
             .filter((p) => Number.isFinite(p.price)),
         );
+        setHistoryLoaded(true);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
-    };
-    load();
+    })();
     return () => {
       cancelled = true;
     };
   }, [marketId, outcome]);
 
-  useEffect(() => {
-    const es = createPriceStream(marketId);
-    const handler = (event: MessageEvent) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (Number(payload.outcome) !== outcome) return;
-        const point: PricePoint = {
-          timestamp: payload.timestamp,
-          price: Number(payload.price),
-          display_price: Number(payload.display_price),
-          fx_stale: payload.fx_stale,
-        };
-        if (!Number.isFinite(point.price)) return;
-        setHistory((prev) => [...prev.slice(-199), point]);
-      } catch (err) {
-        setError((err as Error).message);
-      }
-    };
-    es.onmessage = handler;
-    es.onerror = () => {
-      setError("Price stream disconnected");
-      es.close();
-    };
-    return () => {
-      es.close();
-    };
-  }, [marketId, outcome]);
-
   const chartPoints = useMemo(
     () =>
-      history.map((point) => ({
+      (streamState.histories[outcome] ?? []).map((point) => ({
         x: new Date(point.timestamp).getTime(),
         y: point.display_price || point.price,
         fx_stale: point.fx_stale,
       })),
-    [history],
+    [streamState.histories, outcome],
   );
 
-  return { history: chartPoints, error };
+  const combinedError = error || streamState.error;
+
+  return { history: chartPoints, error: combinedError, connected: streamState.connected, historyLoaded };
 }

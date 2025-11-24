@@ -291,7 +291,7 @@ services:
     restart: unless-stopped
     environment:
       STREAMER_REDIS_URL: redis://redis:6379/0
-      STREAMER_CLOB_WS_URL: wss://clob.polymarket.com/ws
+      STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws/market}
       STREAMER_CLOB_REST_MARKETS_URL: https://gamma-api.polymarket.com/markets
       STREAMER_INTERNAL_URL: http://price-streamer:8100
       STREAMER_FX_FEED_URL: ${STREAMER_FX_FEED_URL:-https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT}

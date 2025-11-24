@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(
         default="redis://redis:6379/0", validation_alias=AliasChoices("STREAMER_REDIS_URL", "RM_REDIS_URL")
     )
-    clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/market")
+    clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/ws/market")
     clob_rest_markets_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/markets")
     rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com")
     rtds_crypto_symbols: str | None = Field(
@@ -104,6 +104,27 @@ class Settings(BaseSettings):
             )
         )
         return normalized
+
+    @field_validator("clob_ws_url", mode="before")
+    @classmethod
+    def _normalize_clob_ws(cls, value: str):
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.scheme.lower() != "wss":
+            raise ValueError("STREAMER_CLOB_WS_URL must use wss://")
+        path = (parsed.path or "").lower()
+        # Require a concrete channel (e.g., /ws/market or /ws/user)
+        if not path.startswith("/ws/") or path.rstrip("/").count("/") < 2:
+            raise ValueError("STREAMER_CLOB_WS_URL must include /ws/<channel>")
+        return urlunparse(
+            (
+                "wss",
+                parsed.netloc,
+                path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
 
 
 def get_settings() -> Settings:
