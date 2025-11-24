@@ -13,4 +13,7 @@ Only two things block us from trusting the prover in MVP environments:
 3. **Ops hygiene**
    - Ensure prover debug endpoints stay reachable behind whatever CORS/ingress rules are applied in staging/prod; document expected origins in ops runbooks.
 
+4. **Quote-aware proofs (if needed)**
+   - If settlement proofs ever include priced quote fields, document required public inputs and ensure the pricing signer/chain bindings stay outside the proving payload; otherwise keep proofs independent to avoid coupling to quote flow.
+
 Deliver these and the prover is MVP-ready.

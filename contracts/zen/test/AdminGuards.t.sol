@@ -17,13 +17,16 @@ contract AdminGuardsTest is Test {
 
     address payable private constant TREASURY = payable(address(0xBEEF));
     address private constant ORACLE = address(0xA11CE);
+    address private constant PRICING_SIGNER = address(0x1234);
     address private guardian = address(0xCAFE);
 
     function setUp() public {
         implementation = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
         verifier = new MockVerifier();
-        factory = new MarketFactory(address(implementation), address(rakeManager), TREASURY, address(verifier));
+        factory = new MarketFactory(
+            address(implementation), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER
+        );
         factory.setGuardian(guardian);
     }
 

@@ -2,6 +2,11 @@
 
 These are the only backend tasks blocking the MVP launch. Defer everything else until these land.
 
+## 0. Signed pricing + quote storage
+- Keep the API signing ABI-packed quotes that match `RevealMarket.commitWithQuote` (`QUOTE_V1`, chainid, market, wallet, outcome, stake_wei, fx_scaled, expiry, quoteId) and reject requests missing those fields.
+- Add durable quote persistence (status, expiry, consumed_at) instead of best-effort Redis so we can audit/replay-protect even if Redis evicts.
+- Expose a health/smoke check for pricing signer envs (`RM_PRICING_CHAIN_ID`, signer key/address) and fail fast when misconfigured.
+
 ## 1. AI summary provenance
 - Persist every AI-generated summary (model, prompt hash, retrieval context, requested/checked timestamps) in Postgres.
 - Expose the summary history via `/markets/{event}` and include the latest metadata in `/markets` responses so auditors can trace narrative evolution.

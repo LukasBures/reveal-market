@@ -75,6 +75,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
 | `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 100 ZEN max; quotes above this return 400). |
 | `RM_FX_FEED_URL` / `RM_FX_TIMEOUT_SECONDS` | FX source for pricing (defaults to Binance-derived feed via price-streamer). Quotes reject when FX is stale/unavailable. |
+| `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. API signs the ABI-packed digest used by `RevealMarket.commitWithQuote`, bound to chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId. |
 
 ### How the pipeline stays fresh
 
@@ -93,6 +94,12 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_POLYGON_RPC_URL`, `RM_POLYGON_CTF_ADDRESS`, `RM_POLYMARKET_CLOB_HOST` | Optional overrides for Polygon + CLOB integrations. |
 
 Use `.env` or `SETTINGS_FILE` to load a dedicated config file (see `app.config.get_settings()`).
+
+### Pricing & signed quotes
+
+- `/pricing/quote` now requires `wallet_address`, `market_address`, and `outcome_id` and ignores any client-supplied FX. It signs an ABI-packed digest matching `RevealMarket.commitWithQuote` (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
+- `/pricing/submit` verifies the same digest, enforces expiry, and optionally checks FX drift vs the live feed. Quotes are cached in Redis for replay/audit with a short TTL.
+- Set `RM_PRICING_CHAIN_ID` to the chain where markets live; keep the signer key private and expose `PRICING_SIGNER_ADDRESS` to contracts/deployment scripts.
 
 ---
 

@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import BookParams
 
 from .config import Settings
 from .state import FatalWebsocketError, StreamState, iter_ws
@@ -23,6 +25,14 @@ class PriceStreamer:
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
         self._publish_cache: dict[str, dict] = {}
+        self.clob_client: ClobClient | None = None
+        if getattr(self.settings, "clob_host", None):
+            try:
+                self.clob_client = ClobClient(str(self.settings.clob_host))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to initialise CLOB client", extra={"event": "clob.init.failed", "error": str(exc)}
+                )
 
     async def start(self) -> None:
         self._tasks = [
@@ -115,6 +125,34 @@ class PriceStreamer:
             for market in markets:
                 await self._normalize_and_publish(market, source="rest")
 
+    async def _fetch_midpoints(self, token_ids: list[str]) -> list[Decimal] | None:
+        if not self.clob_client:
+            return None
+        params = [BookParams(token_id=str(token_id)) for token_id in token_ids if str(token_id)]
+        if not params:
+            return None
+        try:
+            midpoints = await asyncio.to_thread(self.clob_client.get_midpoints, params)
+        except Exception as exc:  # pragma: no cover - network path
+            logger.debug("CLOB midpoint fetch failed", extra={"event": "clob.midpoints.failed", "error": str(exc)})
+            return None
+        parsed: list[Decimal] = []
+        if isinstance(midpoints, list):
+            for entry in midpoints:
+                if isinstance(entry, dict):
+                    value = entry.get("midpoint") or entry.get("price") or entry.get("mid")
+                else:
+                    value = entry
+                try:
+                    parsed.append(Decimal(str(value)))
+                except Exception as exc:
+                    logger.debug(
+                        "Skipping midpoint parse failure",
+                        extra={"event": "clob.midpoints.parse_failed", "error": str(exc)},
+                    )
+                    continue
+        return parsed or None
+
     async def _handle_tick(self, data: dict, source: str) -> None:
         market = data.get("market") or data.get("marketId") or data.get("id")
         if not market:
@@ -122,8 +160,21 @@ class PriceStreamer:
         await self._normalize_and_publish(data, source=source)
 
     async def _normalize_and_publish(self, raw: dict, source: str) -> None:
-        market_id = raw.get("id") or raw.get("marketId") or raw.get("market")
-        prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
+        market_id = (
+            raw.get("id")
+            or raw.get("marketId")
+            or raw.get("market")
+            or raw.get("conditionId")
+            or raw.get("condition_id")
+        )
+        raw_prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
+        token_ids = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
+        coerced_token_ids = [str(token) for token in token_ids or [] if str(token).strip()]
+        prices = raw_prices
+        if coerced_token_ids:
+            midpoints = await self._fetch_midpoints(coerced_token_ids)
+            if midpoints and len(midpoints) == len(coerced_token_ids):
+                prices = midpoints
         if not market_id or not prices or not isinstance(prices, (list, tuple)):
             return
         fx = await self.state.get_fx()

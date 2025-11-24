@@ -696,14 +696,3 @@ ____
   - Failure modes: If the Polymarket stream drops or FX is stale, serve the last known value with a “stale” flag and temporarily disable new bet pricing; resume live once fresh data arrives.
 
   Net: stream from Polymarket to your backend, apply all economics there, broadcast lean per-market updates to clients, and serve FX from your own oracle cache.
-
-
-  - On-chain verification: Contracts still ignore the backend signature. You need to add signature verification (quote_id, stake, fx_used, odds, expiry, nonce) in the contract before accepting any bet. Without this, a user could alter calldata.
-  - Submission flow: Add a submit endpoint or transaction builder that:
-      - Requires quote_id, signature, and recomputes the quote server-side.
-      - Rejects if expired, mismatched stake/market/user, or signature invalid.
-      - Enforces slippage bounds if desired.
-  - Quote storage/replay protection: Store issued quotes (nonce/quote_id, expiry, status) to prevent replay and to audit.
-  - Env/secrets: Set RM_PRICING_SIGNER_PRIVATE_KEY in prod/dev; it’s currently empty.
-  - Frontend TX flow: Pass the signed quote to the transaction (and display expiry). Currently only the quote request is updated.
-  - Optional zk tie-in: If proofs depend on the quoted price, include the signed fields in the proof input; otherwise, keep proofs independent.

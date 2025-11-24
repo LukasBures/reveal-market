@@ -9,6 +9,7 @@
 - Add invariant/fuzz tests ensuring `escrow + float + paidOut >= totalLiability` across all flows (commit/settle/claim/refund). Current invariants cover a subset.
 - Consider per-claimer payout caps to avoid extreme multipliers if MAX_PAYOUT_MULTIPLIER is raised in future.
 - Add configurable on-chain stake caps (maxTicketStake, maxUserStakePerMarket) to mirror off-chain bet limits; wire into Factory/RevealMarket and tests.
+- Add fuzz/unit coverage for `commitWithQuote` (digest alignment, expiry, expectedUser, usedQuoteIds) and signer upgrade paths; document `PRICING_SIGNER_ADDRESS` in deploy scripts and README.
 
 ## Deployment / Ops
 - Update deployment docs/runbooks to match native-only collateral, 12 public signals, and max payout multiplier rules.

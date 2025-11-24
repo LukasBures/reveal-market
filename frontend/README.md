@@ -37,6 +37,7 @@ Tech stack callouts:
 - **Vitest + Testing Library** for behavioral tests.
 - **ESLint + Typescript** enforced via `npm run lint`.
 - **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `price-streamer` (via SSE and `/pricing/fx`), surfaces a header ticker, and enforces a 100 ZEN per-bet UI cap that mirrors backend limits.
+- **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
 
 ---
 
@@ -48,6 +49,8 @@ Set these in the repo-root `.env` (copied from `.env.example`). The frontend rea
 | -------- | ------- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (e.g., `http://localhost:8000` when running Docker locally). |
+| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public price-streamer base (e.g., `https://stream.revealmarket.xyz` for WSS). Defaults to `http://localhost:8100` if omitted. |
+| `STREAMER_INTERNAL_URL` | In-cluster/base URL the server components should use to reach price-streamer. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
 | `RM_API_BASE_URL` | Internal base URL for server-side fetches. Defaults to `http://api:8000` inside Docker networks. |
 | `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at an internal API host (e.g., `http://api:8000`) so the backend stays private. |
@@ -94,8 +97,13 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 - `fetchMarketStatsBreakdown()` / `fetchHealthSnapshot()` – Used for KPI cards, doc callouts, and investor narratives.
 - `fetchProofReceipts(limit, { offset })` – Backed by the `/proofs` API and used by `/proofs`’ infinite scroll client to keep the page lightweight.
 - `fetchMarketSuggestions(query, limit)` – Powers `/app/api/markets/suggest` so the global search dropdown hits a cached Next.js route instead of calling the backend twice per keystroke.
+- `fetchPricingQuoteWithMeta(stakeZen, { walletAddress, marketAddress, outcomeId, marketId })` – Requests signed quotes compatible with `RevealMarket.commitWithQuote`; missing fields are rejected.
 
 Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast while still respecting backend invalidation tags that the worker publishes.
+
+### Trading flow (FX + quotes)
+- FX hook prefers WS/WSS (`/fx/zen-usdc`) with periodic HTTP fallback; after a few fallbacks it re-attempts WS automatically.
+- Quote requests include wallet, market address, and outcome id; the backend signs the on-chain digest. Client components surface expiry and call `commitWithQuote` with the signed payload via wagmi/viem. Ensure the connected chain matches the quote’s `chain_id`.
 
 ### Lazy loading & pagination
 

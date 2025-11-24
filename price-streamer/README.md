@@ -6,8 +6,9 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
 - Polymarket CLOB websocket ingestion with per-market subscriptions.
 - Binance ZEN/USDT websocket as primary FX (stale after 5s), with Coingecko REST fallback every 10s and jump-rejection/bounds (default 3–300 USD).
 - Optional RTDS crypto stream for additional FX; REST fallback with staleness flags.
-- SSE fanout (`/stream`) and per-outcome history (`/history`), cached in Redis.
+- SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis.
 - Worsen/haircut/rake applied server-side; payload signing optional.
+- Connection pooling: one WS per path is shared across subscribers, with periodic HTTP fallback to refresh stale data and auto-reconnect back to WS.
 
 ## Requirements
 - Python 3.12
@@ -37,6 +38,10 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 - `WS /fx/zen-usd` (aliases: `/fx/zen-usdc`, `/fx/zen-usdt`) – websocket stream of ZEN/USD quotes (pushes on change, worsen% applied; raw price included).
 
 > For TLS/WSS, front the service with Caddy/Nginx (see docker/caddy/Caddyfile for the `stream.revealmarket.xyz` setup). Locally use `ws://localhost:8100/...`; in prod use `wss://stream.revealmarket.xyz/...`.
+
+### Client expectations
+- Prefer WS/WSS first (`/fx/zen-usdc`), let the client fall back to HTTP if WS is stale, and auto-attempt WS again after a few HTTP fallbacks.
+- Dev: `ws://localhost:8100/fx/zen-usdc`. Prod: `wss://stream.revealmarket.xyz/fx/zen-usdc`.
 
 ## Tests
 ```bash

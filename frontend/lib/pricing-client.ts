@@ -1,6 +1,8 @@
 export type PricingQuote = {
   stake_zen: number;
+  stake_wei: string | number;
   zen_usd: number;
+  zen_usd_scaled: string | number;
   displayed_odds_multiplier: number;
   rake_zen: number;
   refund_zen: number;
@@ -9,6 +11,7 @@ export type PricingQuote = {
   worsen_percent: number;
   rake_percent: number;
   total_monetisation: number;
+  chain_id: number;
   max_stake_zen?: number | null;
   max_user_stake_per_market_zen?: number | null;
   max_market_stake_zen?: number | null;
@@ -16,8 +19,14 @@ export type PricingQuote = {
   remaining_market_stake_zen?: number | null;
   quote_id: string;
   expires_at: string;
+  expiry_ts: number;
   signature: string;
   signer: string;
+  market_id?: string | null;
+  user_id?: string | null;
+  wallet_address?: string | null;
+  outcome_id?: number | null;
+  market_address?: string | null;
 };
 
 export type FxQuote = {
@@ -65,14 +74,20 @@ export async function fetchFxQuote(): Promise<FxQuote> {
   return (await res.json()) as FxQuote;
 }
 
-export async function fetchPricingQuote(stakeZen: number): Promise<PricingQuote> {
-  return fetchPricingQuoteWithMeta(stakeZen, {});
+export async function fetchPricingQuote(
+  stakeZen: number,
+  opts: { walletAddress: string; marketAddress: string; outcomeId: number; marketId?: string; userId?: string },
+): Promise<PricingQuote> {
+  return fetchPricingQuoteWithMeta(stakeZen, opts);
 }
 
 export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
-  opts: { marketId?: string; userId?: string } = {},
+  opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
 ): Promise<PricingQuote> {
+  if (!opts.walletAddress || !opts.marketAddress || opts.outcomeId === undefined || opts.outcomeId === null) {
+    throw new Error("walletAddress, marketAddress, and outcomeId are required for signed quotes");
+  }
   const res = await fetch(getEndpoint("/pricing/quote"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,6 +95,9 @@ export async function fetchPricingQuoteWithMeta(
       stake_zen: stakeZen,
       market_id: opts.marketId,
       user_id: opts.userId,
+      wallet_address: opts.walletAddress,
+      outcome_id: opts.outcomeId,
+      market_address: opts.marketAddress,
     }),
   });
   if (!res.ok) {

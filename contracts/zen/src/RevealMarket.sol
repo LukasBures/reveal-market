@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 
 import {IMarketFactoryRisk} from "./interfaces/IMarketFactoryRisk.sol";
@@ -31,6 +33,16 @@ contract RevealMarket is ReentrancyGuard {
         bool claimed;
     }
 
+    struct SignedQuote {
+        bytes32 quoteId;
+        uint256 stakeZen;
+        uint256 zenUsd;
+        uint256 expiry;
+        uint256 outcomeId;
+        address expectedUser;
+        bytes signature;
+    }
+
     struct InitConfig {
         string eventId;
         uint256 commitDeadline;
@@ -44,6 +56,7 @@ contract RevealMarket is ReentrancyGuard {
         uint256 payoutMultiplier;
         PayoutCurve payoutCurve;
         uint256 maxMarketSize;
+        address pricingSigner;
     }
 
     struct SettlementSignals {
@@ -116,6 +129,7 @@ contract RevealMarket is ReentrancyGuard {
     error OutcomeAlreadySet();
     error InvalidPayment();
     error InvalidGuardian();
+    error InvalidPricingSigner();
     error InvalidOutcome();
     error CommitPaused();
     error ClaimPaused();
@@ -134,6 +148,8 @@ contract RevealMarket is ReentrancyGuard {
     error InvalidProofLayout();
     error InvalidMerkleProof();
     error CommitmentNotFound();
+    error InvalidQuote();
+    error QuoteAlreadyUsed();
 
     uint256 public constant WAD = 1e18;
     uint256 public constant MAX_PAYOUT_MULTIPLIER = 5e18; // 5x cap for odds to avoid extreme exposure.
@@ -176,6 +192,7 @@ contract RevealMarket is ReentrancyGuard {
     uint256 public commitmentsCount;
     uint256 public rakeBpsOverride;
     uint256 public floatReservedAtSettlement;
+    address public pricingSigner;
 
     PayoutCurve public payoutCurve;
     uint256 public payoutMultiplier;
@@ -185,6 +202,7 @@ contract RevealMarket is ReentrancyGuard {
     mapping(bytes32 => bool) public commitmentExists;
     mapping(address => Ticket[]) public userTickets;
     bytes32[] private _commitments;
+    mapping(bytes32 => bool) public usedQuoteIds;
 
     modifier onlyPhase(Phase expected) {
         _onlyPhase(expected);
@@ -214,6 +232,7 @@ contract RevealMarket is ReentrancyGuard {
         if (cfg.rakeManager == address(0)) revert InvalidRakeManager();
         if (cfg.treasury == address(0)) revert InvalidTreasury();
         if (cfg.guardian == address(0)) revert InvalidGuardian();
+        if (cfg.pricingSigner == address(0)) revert InvalidPricingSigner();
         if (cfg.payoutMultiplier == 0 || cfg.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) {
             revert InvalidPayoutMultiplier();
         }
@@ -236,6 +255,7 @@ contract RevealMarket is ReentrancyGuard {
         maxMarketSize = cfg.maxMarketSize;
         circuitHash = IVerifier(cfg.verifier).circuitHash();
         marketId = uint256(uint160(address(this)));
+        pricingSigner = cfg.pricingSigner;
 
         phase = Phase.Commit;
         _initialized = true;
@@ -255,11 +275,27 @@ contract RevealMarket is ReentrancyGuard {
         nonReentrant
         onlyPhase(Phase.Commit)
     {
+        if (msg.value != amount) revert InvalidPayment();
+        _commitInternal(msg.sender, outcomeId, amount, salt);
+    }
+
+    /// @notice Allows users to commit with a backend-signed quote to prevent client tampering.
+    function commitWithQuote(uint256 outcomeId, uint256 amount, bytes32 salt, SignedQuote calldata quote)
+        external
+        payable
+        nonReentrant
+        onlyPhase(Phase.Commit)
+    {
+        if (msg.value != amount) revert InvalidPayment();
+        _validateQuote(quote, msg.sender, amount, outcomeId);
+        _commitInternal(msg.sender, outcomeId, amount, salt);
+    }
+
+    function _commitInternal(address user, uint256 outcomeId, uint256 amount, bytes32 salt) internal {
         if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
         if (amount == 0) revert InvalidAmount();
         if (_factoryCommitPaused()) revert CommitPaused();
         if (commitsPaused) revert CommitPaused();
-        if (msg.value != amount) revert InvalidPayment();
         if (outcomeId > 1) revert InvalidOutcome();
 
         uint256 potentialPayout = _estimatePayout(amount);
@@ -274,16 +310,44 @@ contract RevealMarket is ReentrancyGuard {
         commitmentsCount += 1;
         emit MaxLiabilityUpdated(newLiability);
 
-        bytes32 ticketHash = _hashCommit(msg.sender, outcomeId, amount, salt);
+        bytes32 ticketHash = _hashCommit(user, outcomeId, amount, salt);
         // Keccak is the canonical hash for circuit + off-chain builder compatibility.
         // forge-lint: disable-next-line(asm-keccak256)
         bytes32 leaf = keccak256(abi.encodePacked(ticketHash));
         _commitments.push(leaf);
-        userTickets[msg.sender].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false}));
+        userTickets[user].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false}));
         commitmentExists[ticketHash] = true;
 
-        emit Commit(msg.sender, ticketHash, amount, block.timestamp);
-        emit Committed(msg.sender, ticketHash, amount);
+        emit Commit(user, ticketHash, amount, block.timestamp);
+        emit Committed(user, ticketHash, amount);
+    }
+
+    function _validateQuote(SignedQuote calldata quote, address sender, uint256 amount, uint256 outcomeId) internal {
+        if (quote.expiry <= block.timestamp) revert InvalidTimestamp();
+        if (quote.stakeZen != amount) revert InvalidAmount();
+        if (quote.outcomeId != outcomeId) revert InvalidOutcome();
+        if (quote.expectedUser == address(0) || quote.expectedUser != sender) revert NotAuthorized();
+        if (quote.zenUsd == 0) revert InvalidQuote();
+        if (usedQuoteIds[quote.quoteId]) revert QuoteAlreadyUsed();
+
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "QUOTE_V1",
+                block.chainid,
+                address(this),
+                quote.expectedUser,
+                quote.outcomeId,
+                quote.stakeZen,
+                quote.zenUsd,
+                quote.expiry,
+                quote.quoteId
+            )
+        );
+        bytes32 wrapped = MessageHashUtils.toEthSignedMessageHash(digest);
+        address recovered = ECDSA.recover(wrapped, quote.signature);
+        if (recovered != pricingSigner) revert NotAuthorized();
+
+        usedQuoteIds[quote.quoteId] = true;
     }
 
     /// @notice Adds house float liquidity for enhanced payouts.

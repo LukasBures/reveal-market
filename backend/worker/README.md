@@ -26,6 +26,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 - Resolution sync stays lean: unused change flags were removed while keeping the persisted payload + cache content identical, so heartbeats and invalidations still reflect real state changes without extra bookkeeping.
 - Redis remains optional for background work; when it is unavailable the worker keeps writing to Postgres and simply skips cache writes/invalidations instead of failing the sync loop.
+- Pricing quotes and signatures are handled by the API/contract path (`commitWithQuote`); the worker does not touch quote issuance or verification—keep API + price-streamer healthy for trading flows.
 
 ---
 

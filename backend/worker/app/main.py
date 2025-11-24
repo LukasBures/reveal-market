@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 import httpx
+from py_clob_client.client import ClobClient
 from redis import Redis
 from shared import cache as shared_cache
 from shared import models as shared_models
@@ -36,7 +37,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings, reload_settings
 from .logging_config import setup_logging
-from .polymarket import MarketPayload, PolymarketClient
+from .polymarket import MarketPayload, PolymarketClient, merge_clob_markets
 from .proof_builder import SettlementDataMissingError, build_prover_payload
 from .prover_client import ProverClient, ProverError
 from .summary_jobs import maybe_enqueue_summary_job
@@ -376,6 +377,23 @@ def _build_polymarket_client() -> PolymarketClient:
     )
 
 
+def _build_clob_client() -> ClobClient | None:
+    host = settings.clob_host
+    if not host:
+        return None
+    try:
+        return ClobClient(str(host))
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.clob.error",
+            message="failed to initialise clob client",
+            error=str(exc),
+        )
+        return None
+
+
 def _build_prover_client() -> ProverClient | None:
     if settings.prover_enabled and settings.prover_base_url:
         return ProverClient(
@@ -386,13 +404,15 @@ def _build_prover_client() -> ProverClient | None:
 
 
 polymarket_client = _build_polymarket_client()
+clob_client = _build_clob_client()
 PROVER_CLIENT = _build_prover_client()
 
 
 def _reload_worker_settings(signum=None, frame=None) -> None:  # pragma: no cover - signal handler
-    global settings, polymarket_client, conditional_tokens_client, goldsky_client, PROVER_CLIENT
+    global settings, polymarket_client, clob_client, conditional_tokens_client, goldsky_client, PROVER_CLIENT
     settings = reload_settings()
     polymarket_client = _build_polymarket_client()
+    clob_client = _build_clob_client()
     goldsky_client = _build_goldsky_client()
     conditional_tokens_client = _build_conditional_tokens_client()
     PROVER_CLIENT = _build_prover_client()
@@ -588,6 +608,22 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             error=str(exc),
         )
         raise
+    if clob_client is not None:
+        try:
+            merge_clob_markets(
+                markets,
+                clob_client,
+                max_pages=settings.polymarket_max_pages,
+                logger=logger,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.clob.enrichment_failed",
+                message="failed to enrich markets with clob data",
+                error=str(exc),
+            )
     latency_ms = (time.perf_counter() - start) * 1000
     if markets:
         POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()

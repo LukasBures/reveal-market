@@ -3,29 +3,44 @@
 import { useEffect, useState } from "react";
 import { fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
+import { useAccount } from "wagmi";
 
 type Props = {
   stakeZen: number;
   marketId: string;
+  marketAddress?: string | null;
+  outcomeId?: number;
 };
 
-export function OutcomeQuote({ stakeZen, marketId }: Props) {
+export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 }: Props) {
   const [refundZen, setRefundZen] = useState<string>("—");
   const [profitUsd, setProfitUsd] = useState<string>("—");
   const [error, setError] = useState<string | null>(null);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const fxLabel = fx ? `FX: 1 ZEN = $${fx.zen_usd.toFixed(4)} USDC${fxStale ? " (stale)" : ""}` : "FX: loading…";
+  const { address } = useAccount();
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
+        if (!address || !marketAddress) {
+          setError("Connect wallet to request a quote");
+          return;
+        }
+        if (outcomeId === undefined || outcomeId === null) return;
         if (!fx || fxStale) {
           setError("Pricing temporarily unavailable (stale FX)");
           return;
         }
-        const quote = await fetchPricingQuoteWithMeta(stakeZen, { marketId });
+        // Quotes must be bound to wallet + market + outcome to match on-chain verification.
+        const quote = await fetchPricingQuoteWithMeta(stakeZen, {
+          marketId,
+          walletAddress: address,
+          outcomeId,
+          marketAddress,
+        });
         if (cancelled) return;
         setRefundZen(quote.refund_zen.toFixed(4));
         const profit = quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
@@ -43,15 +58,20 @@ export function OutcomeQuote({ stakeZen, marketId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [stakeZen, marketId, fx, fxStale]);
+  }, [stakeZen, marketId, fx, fxStale, address, marketAddress, outcomeId]);
 
   useEffect(() => {
     // Auto-refresh on quote expiry
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = async () => {
       try {
-        if (!fx || fxStale || !stakeZen) return;
-        const quote = await fetchPricingQuoteWithMeta(stakeZen, { marketId });
+        if (!fx || fxStale || !stakeZen || !address || !marketAddress) return;
+        const quote = await fetchPricingQuoteWithMeta(stakeZen, {
+          marketId,
+          walletAddress: address,
+          outcomeId,
+          marketAddress,
+        });
         const expires = new Date(quote.expires_at).getTime();
         const delay = Math.max(expires - Date.now() - 1_000, 0);
         timer = setTimeout(schedule, delay);
@@ -63,7 +83,7 @@ export function OutcomeQuote({ stakeZen, marketId }: Props) {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [fx, fxStale, stakeZen, marketId]);
+  }, [fx, fxStale, stakeZen, marketId, address, marketAddress, outcomeId]);
 
   if (error) {
     return <p className="text-xs text-rose-300">Pricing unavailable: {error}</p>;

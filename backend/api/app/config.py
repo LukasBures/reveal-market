@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     )
     max_market_stake_zen: float = Field(default=1000.0, gt=0, description="Total stake cap per market in ZEN")
     bet_cap_ttl_seconds: int = Field(default=86400, ge=60, description="TTL for bet cap counters in Redis")
+    quote_store_ttl_seconds: int = Field(default=900, ge=60, description="TTL for issued quotes (replay guard)")
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)
@@ -113,6 +114,7 @@ class Settings(BaseSettings):
     worker_heartbeat_stale_seconds: int = Field(default=180, ge=30)
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
+    pricing_chain_id: int | None = Field(default=None, ge=1, description="Chain id used for quote signatures")
     pricing_quote_ttl_seconds: int = Field(default=120, ge=30, le=600)
 
     @field_validator("max_page_size")

@@ -9,3 +9,4 @@
 - [ ] Enforce configurable CORS defaults (STREAMER_CORS_ALLOW_*) in code/tests and add a healthcheck to warn when frontend origins are missing.
 - [ ] Wire on-demand subscription control API and document max_subscriptions behavior for ops; surface current FX/market staleness in a dashboard.
 - [ ] Note future on-chain caps: mirror off-chain bet caps (maxTicketStake/maxUserStakePerMarket) once contracts expose them.
+- [ ] Ensure WS-first FX flow with shared connections keeps retrying WS after HTTP fallbacks; add tests/logs for backoff + single-connection pooling.

@@ -80,3 +80,82 @@ async def test_normalize_payload_contains_fx():
     await streamer._normalize_and_publish(data, source="rest")
     _, _, payload = state.cached[0]
     assert "fx_zen_usd" in payload and "fx_stale" in payload
+
+
+@pytest.mark.asyncio
+async def test_normalize_prefers_clob_midpoints(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+
+    async def fake_midpoints(token_ids):
+        return [Decimal("0.7"), Decimal("0.3")]
+
+    monkeypatch.setattr(streamer, "_fetch_midpoints", fake_midpoints)
+    data = {"id": "m2", "outcomePrices": [0.1, 0.2], "clobTokenIds": ["t1", "t2"]}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.cached
+    _, _, payload = state.cached[0]
+    assert payload["price"] == "0.7"
+
+
+@pytest.mark.asyncio
+async def test_normalize_uses_raw_prices_when_midpoints_missing(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+
+    async def none_midpoints(token_ids):
+        return None
+
+    monkeypatch.setattr(streamer, "_fetch_midpoints", none_midpoints)
+    data = {"id": "m3", "outcomePrices": [0.9, 0.1], "clobTokenIds": ["x", "y"]}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.cached
+    _, _, payload = state.cached[0]
+    assert payload["price"] == "0.9"
+
+
+@pytest.mark.asyncio
+async def test_fetch_midpoints_parses_dict_payload(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+
+    class StubClob:
+        def get_midpoints(self, params):
+            return [{"midpoint": "0.25"}, {"midpoint": 0.75}]
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    streamer.clob_client = StubClob()
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+
+    mids = await streamer._fetch_midpoints(["a", "b"])
+    assert mids == [Decimal("0.25"), Decimal("0.75")]
+
+
+@pytest.mark.asyncio
+async def test_fetch_midpoints_returns_none_when_no_params(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    streamer.clob_client = object()  # ensure client exists
+    mids = await streamer._fetch_midpoints([])
+    assert mids is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_midpoints_handles_client_failure(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+
+    class StubClob:
+        def get_midpoints(self, params):
+            raise RuntimeError("boom")
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    streamer.clob_client = StubClob()
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+
+    mids = await streamer._fetch_midpoints(["a"])
+    assert mids is None

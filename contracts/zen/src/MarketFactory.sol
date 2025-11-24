@@ -50,6 +50,7 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
     address public treasury;
     address public verifier;
     address public guardian;
+    address public pricingSigner;
     bool public override globalCommitPaused;
     bool public override globalClaimPaused;
 
@@ -80,12 +81,12 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
         _;
     }
 
-    constructor(address implementation_, address rakeManager_, address treasury_, address verifier_)
+    constructor(address implementation_, address rakeManager_, address treasury_, address verifier_, address pricingSigner_)
         Ownable(msg.sender)
     {
         if (
-            implementation_ == address(0) || rakeManager_ == address(0) || treasury_ == address(0)
-                || verifier_ == address(0)
+            implementation_ == address(0) || rakeManager_ == address(0) || treasury_ == address(0) || verifier_ == address(0)
+                || pricingSigner_ == address(0)
         ) revert ZeroAddress();
 
         implementation = implementation_;
@@ -93,6 +94,7 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
         treasury = treasury_;
         verifier = verifier_;
         guardian = msg.sender;
+        pricingSigner = pricingSigner_;
         emit GuardianUpdated(msg.sender);
     }
 
@@ -117,6 +119,11 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
     function setVerifier(address verifier_) external onlyOwner {
         if (verifier_ == address(0)) revert ZeroAddress();
         verifier = verifier_;
+    }
+
+    function setPricingSigner(address pricingSigner_) external onlyOwner {
+        if (pricingSigner_ == address(0)) revert ZeroAddress();
+        pricingSigner = pricingSigner_;
     }
 
     function setGuardian(address newGuardian) external onlyOwner {
@@ -192,7 +199,8 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
             rakeBpsOverride: params.rakeBpsOverride,
             payoutMultiplier: params.payoutMultiplier,
             payoutCurve: params.payoutCurve,
-            maxMarketSize: marketSize
+            maxMarketSize: marketSize,
+            pricingSigner: pricingSigner
         });
         RevealMarket(payable(market)).initialize(cfg);
 

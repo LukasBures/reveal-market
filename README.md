@@ -20,6 +20,7 @@ Horizen chain support docs: https://docs.goldsky.com/chains/horizen
 | `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
 | `hedger/` | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
 | `price-streamer/` | Polymarket price ingest + SSE fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
+| `backend/api` + `frontend` + `contracts/zen` | Signed pricing + on-chain enforcement. | API signs ABI-packed quotes (`QUOTE_V1`, chainid, market, wallet, outcome, stake_wei, fx_scaled, expiry, quoteId), frontend requests quotes with those fields and submits `commitWithQuote`, contracts enforce signatures/replay/expiry with `pricingSigner`. |
 
 Additional docs live in each directory’s README.
 
@@ -35,6 +36,7 @@ Additional docs live in each directory’s README.
 - **Hedger** – FastAPI admin surface with Prometheus metrics; tracks exposures (YES/NO), FX haircuts, risk limits, and emits buy/sell/unwind hedge instructions with slippage gates. Uses Redis locks/idempotency + DB offsets for replay safety, hydrates state from Postgres on restart, and builds prover payloads from stored commits/outcomes before marking markets resolved. Metrics include exposures, coverage, LP utilization, float, PnL placeholders, event lag, hedge executions, and settlement/prover latency.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/run_local.sh full`, and `./run_tests.sh` are the same flows used in CI (`.github/workflows/ci.yml`). Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
 - **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Coingecko fallback; `/fx/zen-usd` exposes the latest quote + staleness. API/hedger reject stale FX and cap per-quote stakes (100 ZEN surfaced in the UI) with haircut/worsen/rake applied server-side. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
+- **Signed quotes enforced on-chain** – Quotes now bind chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId to a `pricingSigner`. The API signs this ABI-packed digest, the frontend requests quotes with those fields and submits `commitWithQuote`, and `RevealMarket` rejects mismatched/expired/replayed quotes.
 - **Bet caps (off-chain)** – UI stake inputs clamp to 100 ZEN; API enforces `RM_MAX_STAKE_ZEN`, and hedger mirrors per-commit caps. Per-user/per-market caps are planned on-chain (see service TODOs) and will be mirrored off-chain first.
 
 ---

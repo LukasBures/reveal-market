@@ -13,6 +13,8 @@ from functools import partial
 from typing import Any
 
 import httpx
+from py_clob_client.client import ClobClient
+from py_clob_client.constants import END_CURSOR
 from pydantic import BaseModel, Field, ValidationError
 from shared.categories import canonical_category_from_raw
 from shared.polymarket import build_polymarket_markets_url
@@ -672,6 +674,157 @@ def _extract_clob_ids(raw_ids: Any) -> list[str] | None:
             if candidate:
                 values.append(candidate)
     return values or None
+
+
+def _extract_clob_token_ids(raw: dict[str, Any]) -> list[str] | None:
+    tokens = raw.get("tokens")
+    if not isinstance(tokens, list):
+        return None
+    token_ids: list[str] = []
+    for token in tokens:
+        if not isinstance(token, dict):
+            continue
+        token_id = token.get("token_id") or token.get("tokenId")
+        if token_id:
+            token_ids.append(str(token_id))
+    return token_ids or None
+
+
+def _extract_clob_prices(raw: dict[str, Any]) -> list[float] | None:
+    tokens = raw.get("tokens")
+    if not isinstance(tokens, list):
+        return None
+    prices: list[float] = []
+    for token in tokens:
+        if not isinstance(token, dict):
+            continue
+        price = _coerce_float(token.get("price"))
+        if price is not None:
+            prices.append(price)
+    return prices or None
+
+
+def _extract_clob_outcomes(raw: dict[str, Any]) -> list[str] | None:
+    tokens = raw.get("tokens")
+    if not isinstance(tokens, list):
+        return None
+    outcomes: list[str] = []
+    for token in tokens:
+        if not isinstance(token, dict):
+            continue
+        outcome = _clean_string(token.get("outcome"))
+        if outcome:
+            outcomes.append(outcome)
+    return outcomes or None
+
+
+def _index_markets_by_identifier(markets: list[MarketPayload]) -> tuple[dict[str, MarketPayload], ...]:
+    by_condition: dict[str, MarketPayload] = {}
+    by_slug: dict[str, MarketPayload] = {}
+    by_event: dict[str, MarketPayload] = {}
+    for market in markets:
+        if market.condition_id:
+            by_condition[str(market.condition_id).lower()] = market
+        if market.slug:
+            by_slug[str(market.slug).lower()] = market
+        if market.event_id:
+            by_event[str(market.event_id).lower()] = market
+    return by_condition, by_slug, by_event
+
+
+def _match_clob_market(raw: dict[str, Any], indexes: tuple[dict[str, MarketPayload], ...]) -> MarketPayload | None:
+    by_condition, by_slug, by_event = indexes
+    condition_id = _clean_string(raw.get("condition_id") or raw.get("conditionId"))
+    if condition_id:
+        candidate = by_condition.get(condition_id.lower())
+        if candidate:
+            return candidate
+    slug = _clean_string(raw.get("market_slug") or raw.get("marketSlug") or raw.get("slug"))
+    if slug:
+        candidate = by_slug.get(slug.lower())
+        if candidate:
+            return candidate
+    raw_id = _clean_string(raw.get("id"))
+    if raw_id:
+        return by_event.get(raw_id.lower())
+    return None
+
+
+def _apply_clob_overlay(target: MarketPayload, raw: dict[str, Any]) -> None:
+    token_ids = _extract_clob_token_ids(raw) or _extract_clob_ids(raw.get("clobTokenIds") or raw.get("clob_token_ids"))
+    if token_ids:
+        target.clob_token_ids = token_ids
+    prices = _extract_clob_prices(raw)
+    if prices and not target.outcome_prices:
+        target.outcome_prices = prices
+    outcomes = _extract_clob_outcomes(raw)
+    if outcomes and not target.outcomes:
+        target.outcomes = outcomes
+    min_size = _coerce_float(raw.get("minimum_order_size"))
+    if min_size is not None:
+        target.order_min_size = min_size
+    tick_size = _coerce_float(raw.get("minimum_tick_size"))
+    if tick_size is not None:
+        target.price_tick_size = tick_size
+    order_book_enabled = raw.get("enable_order_book")
+    if isinstance(order_book_enabled, bool):
+        target.enable_order_book = order_book_enabled
+    closes_at = _extract_timestamp_candidate(raw.get("end_date_iso") or raw.get("endDate") or raw.get("end_date"))
+    if closes_at and target.closes_at is None:
+        target.closes_at = closes_at
+    extra = raw if isinstance(raw, dict) else {"clob": raw}
+    existing_extra = target.extra_data if isinstance(target.extra_data, dict) else {}
+    merged_extra = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+    merged_extra["clob"] = extra
+    target.extra_data = merged_extra
+
+
+def merge_clob_markets(
+    markets: list[MarketPayload],
+    clob_client: ClobClient,
+    *,
+    max_pages: int | None = None,
+    logger: logging.Logger | None = None,
+) -> None:
+    """Enrich existing market payloads with data from the CLOB API."""
+    if not markets:
+        return
+    try:
+        clob_markets = fetch_clob_markets(clob_client, max_pages=max_pages)
+    except Exception as exc:  # pragma: no cover - defensive fetch guard
+        if logger:
+            logger.warning(
+                "Failed to fetch clob markets",
+                extra={"event": "clob.fetch.failed", "error": str(exc)},
+            )
+        return
+    if not clob_markets:
+        return
+    indexes = _index_markets_by_identifier(markets)
+    for raw in clob_markets:
+        if not isinstance(raw, dict):
+            continue
+        target = _match_clob_market(raw, indexes)
+        if target is None:
+            continue
+        _apply_clob_overlay(target, raw)
+
+
+def fetch_clob_markets(clob_client: ClobClient, *, max_pages: int | None = None) -> list[dict[str, Any]]:
+    """Page through the CLOB simplified markets endpoint."""
+    results: list[dict[str, Any]] = []
+    cursor = "MA=="
+    pages = 0
+    while True:
+        payload = clob_client.get_simplified_markets(next_cursor=cursor)
+        markets = payload.get("data") if isinstance(payload, dict) else payload
+        if isinstance(markets, list):
+            results.extend([m for m in markets if isinstance(m, dict)])
+        cursor = payload.get("next_cursor") if isinstance(payload, dict) else None
+        pages += 1
+        if cursor is None or cursor == END_CURSOR or (max_pages and pages >= max_pages):
+            break
+    return results
 
 
 def _collect_images(raw: dict[str, Any]) -> list[str] | None:

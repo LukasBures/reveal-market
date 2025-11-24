@@ -7,6 +7,9 @@ import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-clie
 import { OutcomeQuote } from "./OutcomeQuote";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { useFxStream } from "@/hooks/useFxStream";
+import { useAccount, useChainId } from "wagmi";
+import type { Address } from "viem";
+import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 
 type Props = {
   market: MarketDetail;
@@ -29,14 +32,27 @@ export function MarketDetailOutcomes({ market }: Props) {
   const [stakeZen, setStakeZen] = useState(10);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [txLoading, setTxLoading] = useState(false);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
+  const { address } = useAccount();
+  const chainId = useChainId();
+  const { commitWithQuote, isPending: txPending, error: wagmiError } = useCommitWithQuote(
+    (market.marketAddress ?? "") as Address,
+  );
 
   useEffect(() => {
     if (!fx || fxStale || stakeZen <= 0) {
       if (fxStale) setError("Pricing paused (FX stale)");
       setQuote(null);
+      return;
+    }
+    if (!address || !market.marketAddress) {
+      setQuote(null);
+      setError("Connect wallet to request a quote");
       return;
     }
     if (stakeZen > MAX_STAKE_ZEN) {
@@ -46,7 +62,12 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     let cancelled = false;
     setLoading(true);
-    fetchPricingQuoteWithMeta(stakeZen, { marketId: market.eventId })
+    fetchPricingQuoteWithMeta(stakeZen, {
+      marketId: market.eventId,
+      walletAddress: address,
+      outcomeId: selectedOutcome,
+      marketAddress: market.marketAddress ?? undefined,
+    })
       .then((payload) => {
         if (cancelled) return;
         setQuote(payload);
@@ -61,7 +82,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [fx, fxStale, stakeZen, market.eventId]);
+  }, [fx, fxStale, stakeZen, market.eventId, address, market.marketAddress, selectedOutcome]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;
@@ -76,6 +97,52 @@ export function MarketDetailOutcomes({ market }: Props) {
     const seconds = Math.ceil(remainingMs / 1000);
     return `Quote expires in ${seconds}s`;
   }, [quote]);
+
+  async function handleCommit() {
+    setTxError(null);
+    setTxHash(null);
+    if (!address) {
+      setTxError("Connect wallet before committing.");
+      return;
+    }
+    if (!market.marketAddress) {
+      setTxError("Market contract address missing.");
+      return;
+    }
+    if (!quote) {
+      setTxError("Request a quote first.");
+      return;
+    }
+    if (stakeZen !== quote.stake_zen) {
+      setTxError("Stake changed. Refresh the quote.");
+      return;
+    }
+    // Quote must still be live and chain-aligned before submitting the tx.
+    const expiresTs = new Date(quote.expires_at).getTime();
+    if (expiresTs <= Date.now()) {
+      setTxError("Quote expired. Request a new one.");
+      return;
+    }
+    if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
+      setTxError(`Switch to chain ${quote.chain_id} to commit.`);
+      return;
+    }
+    try {
+      setTxLoading(true);
+      const params = buildSignedQuoteParams({
+        quote,
+        outcomeId: selectedOutcome,
+        walletAddress: address as Address,
+        amountWei: BigInt(quote.stake_wei),
+      });
+      const tx = await commitWithQuote(params);
+      setTxHash(typeof tx === "string" ? tx : (tx as any)?.hash ?? null);
+    } catch (err) {
+      setTxError((err as Error).message);
+    } finally {
+      setTxLoading(false);
+    }
+  }
 
   if (outcomes.length === 0) {
     return (
@@ -92,11 +159,11 @@ export function MarketDetailOutcomes({ market }: Props) {
           Live pricing paused{fxStale ? " (FX stale)" : ""}{streamError ? ` (${streamError})` : ""}. Actions are
           temporarily disabled.
         </div>
-        {quote && (
-          <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-400">
-            Quote ID: {quote.quote_id} · {expiresLabel}
-          </p>
-        )}
+      )}
+      {quote && (
+        <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+          Quote ID: {quote.quote_id} · {expiresLabel}
+        </p>
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
@@ -108,7 +175,12 @@ export function MarketDetailOutcomes({ market }: Props) {
           Prices shown in ZEN
         </span>
       </div>
-      <OutcomeQuote stakeZen={10} marketId={market.eventId} />
+      <OutcomeQuote
+        stakeZen={10}
+        marketId={market.eventId}
+        marketAddress={market.marketAddress}
+        outcomeId={selectedOutcome}
+      />
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm text-slate-200">
           <thead>
@@ -215,10 +287,39 @@ export function MarketDetailOutcomes({ market }: Props) {
             </div>
           </div>
         </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-slate-400">
+            {expiresLabel ? `Quote ID ${quote?.quote_id ?? ""} · ${expiresLabel}` : "Request a quote to trade"}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCommit}
+              disabled={txLoading || txPending || !quote || fxStale}
+              className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
+                txLoading || txPending || !quote || fxStale
+                  ? "bg-white/20 text-white/60 cursor-not-allowed"
+                  : "bg-emerald-500 text-white hover:bg-emerald-400"
+              }`}
+            >
+              {txLoading || txPending ? "Submitting…" : "Commit with quote"}
+            </button>
+            {txHash && (
+              <span className="text-[11px] text-emerald-200">
+                Submitted tx: {txHash.slice(0, 10)}…{txHash.slice(-6)}
+              </span>
+            )}
+          </div>
+        </div>
         {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}
         {error && (
           <p className="mt-2 text-xs text-rose-300">
             {error}. Pricing uses live Polymarket odds + Binance FX; if stale, please retry.
+          </p>
+        )}
+        {(txError || wagmiError) && (
+          <p className="mt-1 text-xs text-rose-300">
+            {txError ?? wagmiError?.message ?? "Transaction failed"}. Ensure chain and quote are valid.
           </p>
         )}
       </div>

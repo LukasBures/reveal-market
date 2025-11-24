@@ -23,6 +23,7 @@ contract RevealMarketTest is Test {
     address private constant ORACLE = address(0xA11CE);
     address private constant USER = address(0xCAFE);
     address private constant LOSER = address(0xD00D);
+    address private constant PRICING_SIGNER = address(0x1234);
 
     uint256 private constant OUTCOME_ID = 0;
     bytes32 private constant WIN_SALT = bytes32(uint256(1));
@@ -37,7 +38,7 @@ contract RevealMarketTest is Test {
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;
 
-        factory = new MarketFactory(address(market), address(rakeManager), TREASURY, address(verifier));
+        factory = new MarketFactory(address(market), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER);
 
         MarketFactory.CreateMarketParams memory params;
         params.eventId = "EVT-1";
@@ -204,7 +205,8 @@ contract RevealMarketTest is Test {
             rakeBpsOverride: 0,
             payoutMultiplier: 6e18,
             payoutCurve: RevealMarket.PayoutCurve.FixedOdds,
-            maxMarketSize: 5 ether
+            maxMarketSize: 5 ether,
+            pricingSigner: PRICING_SIGNER
         });
         bad.initialize(cfg);
     }

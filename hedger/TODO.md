@@ -20,6 +20,7 @@ Short list of items to reach a functional hedger MVP.
 - Persist settlement receipts + rake distribution accounting for float models.
 - Validate prover payload against schema, add retries/backoff, and wire request_id tracing for prover + settlement submissions.
 - Add disputed/late outcome handling that pauses unwinds and surfaces risk alerts.
+- Consume API-issued signed quotes (stake/fx/outcome-bound) and ensure hedger-side validation matches contract digest before hedging; reject if caps/staleness/expiry violated.
 
 ## Ops & API
 - Harden admin API with authn/z; add endpoints for positions, PnL, risk limits, float levels, and event lags.

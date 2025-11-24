@@ -18,6 +18,7 @@ contract MarketFactoryTest is Test {
     address private constant ORACLE = address(0xA11CE);
     address private constant USER = address(0xCAFE);
     address private constant NEW_OWNER = address(0xB0B);
+    address private constant PRICING_SIGNER = address(0x1234);
 
     uint256 private commitDeadline;
     uint256 private revealDeadline;
@@ -26,7 +27,8 @@ contract MarketFactoryTest is Test {
         implementation = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
         verifier = new MockVerifier();
-        factory = new MarketFactory(address(implementation), address(rakeManager), TREASURY, address(verifier));
+        factory =
+            new MarketFactory(address(implementation), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER);
 
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;

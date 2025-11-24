@@ -77,7 +77,7 @@ contract Deploy is ScriptBase {
         }
 
         MarketFactory factory =
-            new MarketFactory(address(implementation), address(rakeManager), treasury, verifierAddress);
+            new MarketFactory(address(implementation), address(rakeManager), treasury, verifierAddress, pricingSigner);
 
         HEVM.stopBroadcast();
 
@@ -90,7 +90,9 @@ contract Deploy is ScriptBase {
         console.log("Circuit hash:", uint256(circuitHash));
         console.log("Expected signals:", expectedInputs);
 
-        _writeArtifacts(rakeManager, implementation, factory, verifierAddress, oracle, circuitHash, expectedInputs);
+        _writeArtifacts(
+            rakeManager, implementation, factory, verifierAddress, oracle, pricingSigner, circuitHash, expectedInputs
+        );
         // Log signer used for pricing quotes (off-chain signature verification)
         console.log("Pricing signer:", pricingSigner);
 

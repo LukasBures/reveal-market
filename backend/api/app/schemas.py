@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -157,11 +158,16 @@ class PricingQuoteRequest(BaseModel):
     stake_zen: float = Field(..., gt=0)
     market_id: str | None = Field(default=None, description="Market ID for cap tracking")
     user_id: str | None = Field(default=None, description="User identifier for per-market caps")
+    wallet_address: str | None = Field(default=None, description="User wallet to bind quote to")
+    outcome_id: int | None = Field(default=None, ge=0, description="Outcome id to bind quote to")
+    market_address: str | None = Field(default=None, description="Market contract address")
 
 
 class PricingQuoteResponse(BaseModel):
     stake_zen: float
+    stake_wei: int = 0
     zen_usd: float
+    zen_usd_scaled: int = 0
     displayed_odds_multiplier: float
     rake_zen: float
     refund_zen: float
@@ -170,6 +176,7 @@ class PricingQuoteResponse(BaseModel):
     worsen_percent: float
     rake_percent: float
     total_monetisation: float
+    chain_id: int = 0
     max_stake_zen: float | None = None
     max_user_stake_per_market_zen: float | None = None
     max_market_stake_zen: float | None = None
@@ -177,10 +184,14 @@ class PricingQuoteResponse(BaseModel):
     remaining_market_stake_zen: float | None = None
     quote_id: str
     expires_at: datetime
+    expiry_ts: int = 0
     signature: str
     signer: str
     market_id: str | None = None
     user_id: str | None = None
+    wallet_address: str | None = None
+    outcome_id: int | None = None
+    market_address: str | None = None
 
 
 class FxQuoteResponse(BaseModel):
@@ -197,6 +208,76 @@ class PricingSubmitResponse(BaseModel):
     quote: PricingQuoteResponse
     current_fx: float
     valid: bool = True
+
+
+class OrderBookLevel(BaseModel):
+    price: Decimal
+    size: Decimal
+
+
+class ClobOrderBookResponse(BaseModel):
+    market: str | None = None
+    asset_id: str | None = None
+    bids: list[OrderBookLevel] = Field(default_factory=list)
+    asks: list[OrderBookLevel] = Field(default_factory=list)
+    timestamp: datetime | None = None
+    min_order_size: Decimal | None = None
+    tick_size: Decimal | None = None
+    hash: str | None = None
+
+    @classmethod
+    def from_summary(cls, summary: Any) -> ClobOrderBookResponse:
+        raw = summary.__dict__ if hasattr(summary, "__dict__") else summary
+        bids = cls._parse_levels(raw.get("bids") if isinstance(raw, dict) else None)
+        asks = cls._parse_levels(raw.get("asks") if isinstance(raw, dict) else None)
+        timestamp = raw.get("timestamp") if isinstance(raw, dict) else None
+        parsed_ts = cls._parse_timestamp(timestamp)
+        return cls(
+            market=raw.get("market") if isinstance(raw, dict) else None,
+            asset_id=raw.get("asset_id") or raw.get("assetId") if isinstance(raw, dict) else None,
+            bids=bids,
+            asks=asks,
+            timestamp=parsed_ts,
+            min_order_size=cls._coerce_decimal(raw.get("min_order_size") if isinstance(raw, dict) else None),
+            tick_size=cls._coerce_decimal(raw.get("tick_size") if isinstance(raw, dict) else None),
+            hash=raw.get("hash") if isinstance(raw, dict) else None,
+        )
+
+    @staticmethod
+    def _parse_levels(levels: Any) -> list[OrderBookLevel]:
+        if not isinstance(levels, list):
+            return []
+        parsed: list[OrderBookLevel] = []
+        for level in levels:
+            if hasattr(level, "__dict__"):
+                level = level.__dict__  # type: ignore[assignment]
+            if isinstance(level, dict):
+                price = ClobOrderBookResponse._coerce_decimal(level.get("price"))
+                size = ClobOrderBookResponse._coerce_decimal(level.get("size"))
+                if price is not None and size is not None:
+                    parsed.append(OrderBookLevel(price=price, size=size))
+        return parsed
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _coerce_decimal(value: Any) -> Decimal | None:
+        if value is None:
+            return None
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return None
 
 
 class TreasurySnapshot(BaseModel):

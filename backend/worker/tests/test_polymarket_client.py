@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import httpx
-from app.polymarket import PolymarketClient
+from app.polymarket import MarketPayload, PolymarketClient, fetch_clob_markets, merge_clob_markets
 
 
 def test_polymarket_client_handles_pagination():
@@ -289,3 +290,150 @@ def test_polymarket_client_handles_empty_pages_with_meta_total():
     markets = client.fetch_markets(page_size=1, max_pages=5)
 
     assert [m.event_id for m in markets] == ["evt-1", "evt-2"]
+
+
+def test_merge_clob_markets_enriches_payload():
+    markets = [
+        MarketPayload(
+            event_id="evt-merge",
+            title="Merge me?",
+            oracle="polymarket",
+            condition_id="0xabc",
+            outcomes=["Yes", "No"],
+        )
+    ]
+
+    clob_market = {
+        "condition_id": "0xabc",
+        "tokens": [
+            {"token_id": "tok1", "outcome": "Yes", "price": 0.55},
+            {"token_id": "tok2", "outcome": "No", "price": 0.45},
+        ],
+        "minimum_order_size": 5,
+        "minimum_tick_size": 0.001,
+        "enable_order_book": True,
+    }
+
+    class StubClobClient:
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            return {"data": [clob_market], "next_cursor": "LTE="}
+
+    merge_clob_markets(markets, StubClobClient())
+    merged = markets[0]
+    assert merged.clob_token_ids == ["tok1", "tok2"]
+    assert merged.order_min_size == 5
+    assert merged.price_tick_size == 0.001
+    assert merged.enable_order_book is True
+    assert merged.extra_data and "clob" in merged.extra_data
+
+
+def test_merge_clob_matches_by_slug():
+    markets = [
+        MarketPayload(
+            event_id="evt-slug",
+            title="Market with slug",
+            oracle="polymarket",
+            slug="market-slug",
+        )
+    ]
+    clob_market = {
+        "market_slug": "market-slug",
+        "tokens": [
+            {"token_id": "tok-a", "outcome": "Yes", "price": 0.4},
+            {"token_id": "tok-b", "outcome": "No", "price": 0.6},
+        ],
+        "minimum_order_size": 10,
+    }
+
+    class StubClobClient:
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            return {"data": [clob_market], "next_cursor": "LTE="}
+
+    merge_clob_markets(markets, StubClobClient())
+    merged = markets[0]
+    assert merged.clob_token_ids == ["tok-a", "tok-b"]
+    assert merged.order_min_size == 10
+    assert merged.outcomes == ["Yes", "No"]
+    assert merged.outcome_prices == [0.4, 0.6]
+
+
+def test_merge_clob_preserves_existing_prices():
+    market = MarketPayload(
+        event_id="evt-existing",
+        title="Existing",
+        oracle="polymarket",
+        condition_id="0xdef",
+        outcomes=["Yes", "No"],
+        outcome_prices=[0.1, 0.2],
+    )
+    clob_market = {
+        "condition_id": "0xdef",
+        "tokens": [
+            {"token_id": "tok1", "outcome": "Yes", "price": 0.55},
+            {"token_id": "tok2", "outcome": "No", "price": 0.45},
+        ],
+    }
+
+    class StubClobClient:
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            return {"data": [clob_market], "next_cursor": "LTE="}
+
+    merge_clob_markets([market], StubClobClient())
+    assert market.clob_token_ids == ["tok1", "tok2"]
+    # Outcome prices are not overridden when already present.
+    assert market.outcome_prices == [0.1, 0.2]
+
+
+def test_merge_clob_skips_unmatched_markets(caplog):
+    caplog.set_level("WARNING")
+    markets = [
+        MarketPayload(
+            event_id="evt-keep",
+            title="Keep",
+            oracle="polymarket",
+        )
+    ]
+
+    class StubClobClient:
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            return {"data": [{"condition_id": "other"}], "next_cursor": "LTE="}
+
+    merge_clob_markets(markets, StubClobClient(), logger=logging.getLogger("merge"))
+    # No crash, no enrichment
+    assert markets[0].clob_token_ids is None
+    assert markets[0].outcome_prices is None
+
+
+def test_fetch_clob_markets_handles_empty_data():
+    class StubClobClient:
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            return {"data": None, "next_cursor": "LTE="}
+
+    results = fetch_clob_markets(StubClobClient())
+    assert results == []
+
+
+def test_fetch_clob_markets_respects_max_pages_and_cursor():
+    calls: list[str] = []
+
+    class StubClobClient:
+        def __init__(self):
+            self.payloads = [
+                {"data": [{"id": "a"}], "next_cursor": "MQ=="},
+                {"data": [{"id": "b"}], "next_cursor": "LTE="},
+            ]
+
+        def get_simplified_markets(self, next_cursor: str = "MA=="):
+            calls.append(next_cursor)
+            index = 0 if next_cursor == "MA==" else 1
+            return self.payloads[index]
+
+    client = StubClobClient()
+    # Stops after first page when capped
+    first_page_only = fetch_clob_markets(client, max_pages=1)
+    assert first_page_only == [{"id": "a"}]
+    # Full pagination reaches END_CURSOR
+    calls.clear()
+    all_pages = fetch_clob_markets(client, max_pages=None)
+    assert all_pages == [{"id": "a"}, {"id": "b"}]
+    assert calls == ["MA==", "MQ=="]

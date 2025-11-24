@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchPricingQuote, type PricingQuote } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
+import { useAccount } from "wagmi";
 
 type Props = {
   defaultStakeZen?: number;
+  marketAddress?: string | null;
+  marketId?: string;
+  outcomeId?: number;
 };
 
 const MAX_STAKE_ZEN = 100;
@@ -15,19 +19,30 @@ const formatNumber = (value: number, decimals = 4) => {
   return value.toFixed(decimals);
 };
 
-export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
+export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, outcomeId = 0 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
+  const { address } = useAccount();
 
   const debouncedStake = useDebounce(stakeZen, 200);
 
   useEffect(() => {
     let cancelled = false;
     const requestQuote = async () => {
+      if (!address) {
+        setQuote(null);
+        setError("Connect wallet to request a quote");
+        return;
+      }
+      if (!marketAddress) {
+        setQuote(null);
+        setError("Missing market address for quote");
+        return;
+      }
       if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
         setQuote(null);
         if (fx?.stale) setError("Pricing paused (FX stale)");
@@ -40,7 +55,12 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
       }
       setLoading(true);
       try {
-        const payload = await fetchPricingQuote(debouncedStake);
+        const payload = await fetchPricingQuoteWithMeta(debouncedStake, {
+          marketId,
+          walletAddress: address,
+          marketAddress,
+          outcomeId,
+        });
         if (!cancelled) {
           setQuote(payload);
           setError(null);
@@ -55,7 +75,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [debouncedStake, fx]);
+  }, [debouncedStake, fx, address, marketAddress, marketId, outcomeId]);
 
   useEffect(() => {
     if (!quote) return;

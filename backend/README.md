@@ -46,6 +46,7 @@ These milestones ladder up to the same thesis: reliable data fuels confident liq
 
 - [`backend/api/README.md`](./api/README.md) – FastAPI runtime, security headers, health check details, and env vars.
 - [`backend/worker/README.md`](./worker/README.md) – Polymarket ingest, cache invalidation, on-chain automation, and worker config.
+- Signed-quote flow: the API signs ABI-packed pricing quotes (bound to chain id, market, wallet, outcome, stake wei, FX 1e8, expiry, quoteId) and the `RevealMarket.commitWithQuote` entrypoint enforces them on-chain. Set `RM_PRICING_CHAIN_ID` + `RM_PRICING_SIGNER_PRIVATE_KEY` and expose `PRICING_SIGNER_ADDRESS` in deployments.
 
 ## Partner Takeaways
 

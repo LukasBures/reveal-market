@@ -111,6 +111,7 @@ function startConnection(path: string) {
       const ws = createFxWebSocket(path);
       conn.ws = ws;
       ws.onopen = () => {
+        // Keep a single shared WS per path; reset backoff on success.
         setState(conn, { wsConnected: true, status: conn.state.status === "error" ? "connecting" : conn.state.status });
         conn.backoff = 1_000;
       };
@@ -140,8 +141,8 @@ function startConnection(path: string) {
       };
       ws.onclose = () => {
         if (conn.cancelled) return;
-        setState(conn, { wsConnected: false, status: "error" });
         const delay = Math.min(conn.backoff, 10_000);
+        setState(conn, { wsConnected: false, status: "error" });
         console.warn("FX socket closed, reconnecting", { delay });
         conn.backoff = delay * 2;
         setTimeout(connect, delay);

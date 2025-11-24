@@ -6,7 +6,7 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from threading import Event, Lock, Thread
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
@@ -20,6 +20,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
+from py_clob_client.client import ClobClient
+from redis import Redis
+from redis.exceptions import RedisError
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import category_cache_key, markets_list_cache_key, resolution_cache_key, suggest_cache_key
 from shared.categories import canonical_category_from_slug
@@ -29,6 +32,7 @@ from shared.onchain import OnChainConfigurationError
 from shared.onchain.client import load_account
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from web3 import Web3
 
 from app import crud, models, schemas
 from app.cache import get_redis_client
@@ -41,15 +45,11 @@ from app.onchain import fetch_factory_markets
 from app.pricing import PricingEngine, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
-from shared.onchain.client import load_account
-from eth_account import Account
-from eth_account.messages import encode_defunct
-from redis import Redis
-from redis.exceptions import RedisError
 
 setup_logging("reveal_market.api")
 
 settings = get_settings()
+_log_cors_warnings(settings.cors_allow_origins, scope="api")
 _sanitized_config = {
     k: v
     for k, v in settings.model_dump().items()
@@ -167,6 +167,76 @@ def _extract_cache_metadata(request: Request | None) -> dict[str, Any]:
             "cache_hit": ctx.get("cache_hit"),
         }
     return {"cache_key": None, "cache_source": None, "cache_hit": None}
+
+
+def _log_cors_warnings(origins: list[str], scope: str) -> None:
+    """Emit a warning when CORS is effectively wide-open so ops can tighten it."""
+
+    if not origins or origins == ["*"]:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cors.unbounded",
+            message="CORS allow_origins is wildcard; set explicit origins for production",
+            scope=scope,
+        )
+
+
+def _strip_0x(value: str | None) -> str:
+    if not value:
+        return ""
+    return value[2:] if value.startswith("0x") else value
+
+
+def _to_wei_amount(stake_zen: float | Decimal) -> int:
+    quantized = (Decimal(str(stake_zen)) * Decimal("1e18")).to_integral_value(rounding=ROUND_DOWN)
+    return int(quantized)
+
+
+def _scale_fx_value(zen_usd: float | Decimal) -> int:
+    quantized = (Decimal(str(zen_usd)) * Decimal("1e8")).to_integral_value(rounding=ROUND_DOWN)
+    return int(quantized)
+
+
+def _build_quote_digest(
+    chain_id: int,
+    market_address: str,
+    wallet_address: str,
+    outcome_id: int,
+    stake_wei: int,
+    zen_usd_scaled: int,
+    expiry_ts: int,
+    quote_id_hex: str,
+) -> bytes:
+    # Mirror the Solidity digest checked by RevealMarket.commitWithQuote:
+    # keccak256("QUOTE_V1", chainid, market, expectedUser, outcomeId, stakeWei, fxScaled1e8, expiry, quoteId)
+    quote_bytes = bytes.fromhex(_strip_0x(quote_id_hex))
+    if len(quote_bytes) != 32:
+        raise ValueError("quote_id must be 32 bytes hex")
+    return Web3.solidity_keccak(
+        [
+            "string",
+            "uint256",
+            "address",
+            "address",
+            "uint256",
+            "uint256",
+            "uint256",
+            "uint256",
+            "bytes32",
+        ],
+        [
+            "QUOTE_V1",
+            int(chain_id),
+            Web3.to_checksum_address(market_address),
+            Web3.to_checksum_address(wallet_address),
+            int(outcome_id),
+            int(stake_wei),
+            int(zen_usd_scaled),
+            int(expiry_ts),
+            quote_bytes,
+        ],
+    )
 
 
 def _estimate_response_bytes(response) -> int:
@@ -944,6 +1014,16 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
 
     if zen_usd is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
+    if settings.pricing_chain_id is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
+    if payload.wallet_address is None or payload.market_address is None or payload.outcome_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="wallet_address, market_address, and outcome_id are required for signed quotes",
+        )
+
+    stake_wei = _to_wei_amount(payload.stake_zen)
+    zen_usd_scaled = _scale_fx_value(zen_usd)
     engine = PricingEngine(settings)
     try:
         quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
@@ -952,23 +1032,28 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
 
     # Build a signed quote to prevent client tampering.
     expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
+    expiry_ts = int(expires_at.timestamp())
     quote_id = uuid4().hex
-    message_payload = {
-        "version": "v1",
-        "quote_id": quote_id,
-        "stake_zen": float(payload.stake_zen),
-        "zen_usd": float(zen_usd),
-        "market_id": payload.market_id,
-        "user_id": payload.user_id,
-        "expires_at": expires_at.isoformat(),
-    }
     if settings.pricing_signer_private_key is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable", headers=None
         )
     signer_account = load_account(settings.pricing_signer_private_key.get_secret_value())
-    sign_text = json.dumps(message_payload, separators=(",", ":"), sort_keys=True)
-    signed = Account.sign_message(encode_defunct(text=sign_text), signer_account.key)  # type: ignore[arg-type]
+    try:
+        # Sign the same digest the contract verifies to prevent client tampering.
+        digest = _build_quote_digest(
+            settings.pricing_chain_id,
+            payload.market_address,
+            payload.wallet_address,
+            int(payload.outcome_id),
+            stake_wei,
+            zen_usd_scaled,
+            expiry_ts,
+            quote_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)  # type: ignore[arg-type]
 
     quote = quote.model_copy(
         update={
@@ -977,10 +1062,19 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
             "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
             "remaining_user_stake_zen": user_remaining,
             "remaining_market_stake_zen": market_remaining,
+            "stake_wei": stake_wei,
+            "zen_usd_scaled": zen_usd_scaled,
             "quote_id": quote_id,
             "expires_at": expires_at,
+            "expiry_ts": expiry_ts,
             "signature": signed.signature.hex(),
             "signer": signer_account.address,
+            "market_id": payload.market_id,
+            "user_id": payload.user_id,
+            "wallet_address": payload.wallet_address,
+            "outcome_id": payload.outcome_id,
+            "market_address": payload.market_address,
+            "chain_id": settings.pricing_chain_id,
         }
     )
 
@@ -1009,9 +1103,27 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         event="pricing.quote",
         message="pricing quote generated",
         stake_zen=payload.stake_zen,
-        zen_usd=payload.zen_usd,
+        zen_usd=zen_usd,
         total_monetisation=str(quote.total_monetisation),
     )
+    # Persist issued quote for replay/audit (lightweight Redis).
+    try:
+        record = {
+            "status": "issued",
+            "issued_at": datetime.now(tz=UTC).isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "payload": quote.model_dump(mode="json"),
+        }
+        redis_client.set(f"quotes:issued:{quote_id}", json.dumps(record), ex=settings.quote_store_ttl_seconds, nx=True)
+    except Exception as exc:  # pragma: no cover - best effort
+        log_event(
+            logger,
+            logging.WARNING,
+            event="pricing.quote.store_failed",
+            message="failed to store issued quote",
+            error=str(exc),
+        )
+
     return quote
 
 
@@ -1023,6 +1135,13 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
     now = datetime.now(tz=UTC)
     if quote.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+    if settings.pricing_chain_id is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
+    if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="wallet_address, market_address, and outcome_id are required for signed quotes",
+        )
 
     signer_account = (
         load_account(settings.pricing_signer_private_key.get_secret_value())
@@ -1032,18 +1151,26 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
     if signer_account is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
 
-    message_payload = {
-        "version": "v1",
-        "quote_id": quote.quote_id,
-        "stake_zen": float(quote.stake_zen),
-        "zen_usd": float(quote.zen_usd),
-        "market_id": getattr(quote, "market_id", None),
-        "user_id": getattr(quote, "user_id", None),
-        "expires_at": quote.expires_at.isoformat(),
-    }
-    sign_text = json.dumps(message_payload, separators=(",", ":"), sort_keys=True)
+    expiry_ts = quote.expiry_ts or int(quote.expires_at.timestamp())
+    stake_wei = quote.stake_wei
+    zen_usd_scaled = quote.zen_usd_scaled
+    recalculated_stake = _to_wei_amount(quote.stake_zen)
+    recalculated_fx = _scale_fx_value(quote.zen_usd)
+    if recalculated_stake != stake_wei or recalculated_fx != zen_usd_scaled:
+        # Protect against client-side mutation: the numeric fields must match our scaled copies.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote fields do not match scaled values")
     try:
-        recovered = Account.recover_message(encode_defunct(text=sign_text), signature=quote.signature)
+        digest = _build_quote_digest(
+            settings.pricing_chain_id,
+            quote.market_address,
+            quote.wallet_address,
+            int(quote.outcome_id),
+            stake_wei,
+            zen_usd_scaled,
+            expiry_ts,
+            quote.quote_id,
+        )
+        recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote.signature)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
     if recovered.lower() != signer_account.address.lower():
@@ -1073,6 +1200,43 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
         raise
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}") from exc
+
+    # Ensure quote was issued and not reused beyond TTL.
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            key = f"quotes:issued:{quote.quote_id}"
+            cached = redis_client.get(key)
+            if cached is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
+            try:
+                cached_record = json.loads(cached)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Malformed quote record: {exc}"
+                ) from exc
+            if cached_record.get("status") == "consumed":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
+            # Mark consumed for audit/replay guard (best effort).
+            cached_record["status"] = "consumed"
+            cached_record["consumed_at"] = datetime.now(tz=UTC).isoformat()
+            cached_record["consumed_by"] = quote.signer
+            redis_client.set(
+                key,
+                json.dumps(cached_record),
+                ex=max(60, settings.quote_store_ttl_seconds),
+                xx=True,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - best effort guard
+        log_event(
+            logger,
+            logging.WARNING,
+            event="pricing.submit.store_lookup_failed",
+            message="failed to lookup issued quote",
+            error=str(exc),
+        )
 
     return schemas.PricingSubmitResponse(
         quote=quote,
@@ -1750,6 +1914,33 @@ def read_market(
         )
     update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:detail")
     return response
+
+
+@app.get("/clob/orderbook/{token_id}", response_model=schemas.ClobOrderBookResponse, tags=["markets"])
+def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
+    if not settings.clob_host:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="clob_unavailable")
+    try:
+        client = ClobClient(str(settings.clob_host))
+        summary = client.get_order_book(token_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="clob.orderbook.error",
+            message="failed to fetch clob orderbook",
+            token_id=token_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="clob_request_failed") from exc
+    log_event(
+        logger,
+        logging.INFO,
+        event="clob.orderbook.success",
+        message="fetched clob orderbook",
+        token_id=token_id,
+    )
+    return schemas.ClobOrderBookResponse.from_summary(summary)
 
 
 @app.post("/markets", response_model=schemas.MarketResponse, tags=["markets"], status_code=status.HTTP_201_CREATED)

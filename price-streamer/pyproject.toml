@@ -14,6 +14,7 @@ dependencies = [
     "websockets>=12.0,<13.0",
     "python-json-logger>=2.0,<3.0",
     "prometheus-client>=0.20,<1.0",
+    "py-clob-client>=0.28.0,<0.29",
 ]
 
 [project.optional-dependencies]

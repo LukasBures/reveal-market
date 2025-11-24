@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     )
     clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/ws/market")
     clob_rest_markets_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/markets")
+    clob_host: AnyHttpUrl | None = Field(
+        default="https://clob.polymarket.com",
+        validation_alias=AliasChoices("STREAMER_CLOB_HOST", "RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
+    )
     rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com")
     rtds_crypto_symbols: str | None = Field(
         default=None, description="Comma-separated symbols for crypto_prices (e.g., zenusdt,ethusdt)"

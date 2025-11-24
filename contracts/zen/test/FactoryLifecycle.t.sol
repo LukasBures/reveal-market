@@ -18,6 +18,7 @@ contract FactoryLifecycleTest is Test {
     address private constant WINNER = address(0x1111);
     address private constant LOSER = address(0x2222);
     uint256 private constant OUTCOME_ID = 0;
+    address private constant PRICING_SIGNER = address(0x1234);
     bytes32 private constant WIN_SALT = bytes32(uint256(555));
     bytes32 private constant LOSE_SALT = bytes32(uint256(777));
 
@@ -25,7 +26,9 @@ contract FactoryLifecycleTest is Test {
         implementation = new RevealMarket();
         rakeManager = new RakeManager(address(this), TREASURY, 100);
         verifier = new MockVerifier();
-        factory = new MarketFactory(address(implementation), address(rakeManager), TREASURY, address(verifier));
+        factory = new MarketFactory(
+            address(implementation), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER
+        );
     }
 
     function testLifecycleWithPausesAndGuardian() public {

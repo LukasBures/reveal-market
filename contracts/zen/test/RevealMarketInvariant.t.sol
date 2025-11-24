@@ -12,12 +12,14 @@ contract RevealMarketHandler is Test {
     RevealMarket public market;
     address public constant ORACLE = address(0xA11CE);
     address payable public constant TREASURY = payable(address(0xB0B));
+    address public constant PRICING_SIGNER = address(0x1234);
 
     constructor() {
         RakeManager rakeManager = new RakeManager(address(this), TREASURY, 100);
         MockVerifier verifier = new MockVerifier();
-        MarketFactory factory =
-            new MarketFactory(address(new RevealMarket()), address(rakeManager), TREASURY, address(verifier));
+        MarketFactory factory = new MarketFactory(
+            address(new RevealMarket()), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER
+        );
 
         MarketFactory.CreateMarketParams memory params;
         params.eventId = "INV";

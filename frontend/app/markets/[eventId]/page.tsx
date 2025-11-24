@@ -241,7 +241,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
               </section>
               <MarketDetailChart marketId={canonicalEventId} />
               <MarketDetailOutcomes market={market} />
-              <StakeQuoteCard />
+              <StakeQuoteCard marketAddress={market.marketAddress} marketId={canonicalEventId} outcomeId={0} />
               <MarketDetailMetadataPanel market={market} />
             </div>
             <MarketDetailSidebarPanel market={market} />
