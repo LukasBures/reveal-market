@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import AliasChoices, AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -62,10 +63,21 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 - intentional service binding inside docker
     api_port: int = Field(default=8100)
     signing_secret: str | None = Field(default=None, description="Optional HMAC secret to sign payloads")
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = Field(default=False)
 
     @property
     def total_monetisation(self) -> float:
         return self.worsen_percent + self.haircut_percent + self.rake_percent
+
+    @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
+    @classmethod
+    def _coerce_csv(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
 
 
 def get_settings() -> Settings:

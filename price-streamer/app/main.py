@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -68,6 +69,13 @@ def create_app() -> FastAPI:
                 await state.shutdown()
 
     app = FastAPI(title="Reveal Price Streamer", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allow_origins,
+        allow_methods=settings.cors_allow_methods,
+        allow_headers=settings.cors_allow_headers,
+        allow_credentials=settings.cors_allow_credentials,
+    )
 
     @app.get("/health")
     async def health() -> dict:

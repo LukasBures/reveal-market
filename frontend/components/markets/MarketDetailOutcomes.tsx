@@ -202,10 +202,6 @@ export function MarketDetailOutcomes({ market }: Props) {
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Refund after rake</span>
-              <span className="font-semibold text-white">{quote ? `${quote.refund_zen.toFixed(4)} ZEN` : "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
               <span>Profit in USDC</span>
               <span className="font-semibold text-emerald-200">
                 {profitUsd !== null ? `${profitUsd.toFixed(4)} USDC` : "—"}
@@ -223,9 +219,6 @@ export function MarketDetailOutcomes({ market }: Props) {
             {error}. Pricing uses live Polymarket odds + Binance FX; if stale, please retry.
           </p>
         )}
-        <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-          Rake, haircut, and worsen are applied on the backend; numbers shown reflect the final user-facing payout.
-        </p>
       </div>
       <div className="mt-5 rounded-3xl border border-amber-200/30 bg-amber-500/5 p-4 text-sm text-slate-200 sm:p-5">
         <p className="text-base font-semibold text-white">How payouts work</p>
