@@ -857,6 +857,7 @@ async def health_check(session: Session = Depends(get_session)) -> schemas.Healt
     return await build_health_response(session)
 
 
+@app.get("/healthz/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
 @app.get("/health/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
 def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
     now = datetime.now(tz=UTC)
