@@ -5,6 +5,7 @@ import type { MarketDetail } from "@/lib/api-types";
 import { useEffect, useMemo, useState } from "react";
 import { fetchFxQuote, fetchPricingQuoteWithMeta, type FxQuote, type PricingQuote } from "@/lib/pricing-client";
 import { OutcomeQuote } from "./OutcomeQuote";
+import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 
 type Props = {
   market: MarketDetail;
@@ -22,6 +23,7 @@ const formatZen = (value: number | undefined): string => {
 export function MarketDetailOutcomes({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = market.outcomePrices ?? [];
+  const { prices: livePrices } = useLiveOutcomePrices(market.eventId, prices);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [stakeZen, setStakeZen] = useState(10);
   const [fx, setFx] = useState<FxQuote | null>(null);
@@ -120,7 +122,7 @@ export function MarketDetailOutcomes({ market }: Props) {
           </thead>
           <tbody>
             {outcomes.map((outcome, idx) => {
-              const price = typeof prices[idx] === "number" ? prices[idx] : undefined;
+              const price = typeof livePrices[idx] === "number" ? livePrices[idx] : undefined;
               const probability = price !== undefined ? `${Math.round(price * 100)}%` : "—";
               const href = `/markets/${market.eventId}?outcome=${encodeURIComponent(String(idx))}`;
               const isYes = idx === 0;

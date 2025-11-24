@@ -18,6 +18,7 @@ export type PricingQuote = {
 
 export type FxQuote = {
   zen_usd: number;
+  raw_zen_usd?: number;
   stale: boolean;
 };
 
@@ -38,6 +39,19 @@ const toWebSocketScheme = (url: string) => {
 
 const getStreamerWsEndpoint = (path: string, preferInternal = false) =>
   toWebSocketScheme(getStreamerEndpoint(path, preferInternal));
+
+export async function fetchStreamerFxQuote(path = "/fx/zen-usdc"): Promise<FxQuote> {
+  const res = await fetch(getStreamerEndpoint(path, true), { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`FX fetch failed: ${res.status}`);
+  }
+  const payload = await res.json();
+  return {
+    zen_usd: Number(payload.zen_usd),
+    raw_zen_usd: payload.raw_zen_usd ? Number(payload.raw_zen_usd) : undefined,
+    stale: Boolean(payload.stale),
+  };
+}
 
 export async function fetchFxQuote(): Promise<FxQuote> {
   const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
@@ -96,7 +110,7 @@ export function createPriceStream(marketId: string): EventSource {
   return new EventSource(url);
 }
 
-export function createFxWebSocket(path = "/fx/zen-usd"): WebSocket {
+export function createFxWebSocket(path = "/fx/zen-usdc"): WebSocket {
   const url = getStreamerWsEndpoint(path, true);
   return new WebSocket(url);
 }
