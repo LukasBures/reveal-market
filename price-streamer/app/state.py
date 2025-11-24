@@ -13,11 +13,21 @@ import httpx
 from pydantic import AnyHttpUrl
 from redis.asyncio import Redis
 from websockets import connect
+from websockets.exceptions import InvalidStatusCode
 
 from .config import Settings, get_settings
 from .subscriptions import SubscriptionManager
 
 logger = logging.getLogger("reveal_market.price_streamer")
+
+
+class FatalWebsocketError(Exception):
+    """Raised when a websocket handshake fails with a fatal status code."""
+
+    def __init__(self, status_code: int, url: str):
+        super().__init__(f"ws rejected with status {status_code} ({url})")
+        self.status_code = status_code
+        self.url = url
 
 
 @dataclass(slots=True)
@@ -240,13 +250,29 @@ class StreamState:
         return quote
 
 
-async def iter_ws(ws_url: str):
-    """Yield websocket connections, reconnecting on drop."""
+async def iter_ws(ws_url: str, *, name: str = "ws", fatal_status: set[int] | None = None):
+    """Yield websocket connections, reconnecting on drop. Optionally bail on fatal HTTP statuses."""
 
+    fatal_status = fatal_status or set()
     while True:
         try:
             async with connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
                 yield ws
+        except InvalidStatusCode as exc:  # pragma: no cover - reconnection path
+            logger.warning(
+                "ws dropped; reconnecting",
+                extra={"event": f"{name}.ws.reconnect", "error": f"http_{exc.status_code}", "url": ws_url},
+            )
+            if exc.status_code in fatal_status:
+                logger.warning(
+                    "ws rejected with fatal status; giving up",
+                    extra={"event": f"{name}.ws.fatal", "status": exc.status_code, "url": ws_url},
+                )
+                raise FatalWebsocketError(exc.status_code, ws_url)
+            await asyncio.sleep(get_settings().ws_reconnect_seconds)
         except Exception as exc:  # pragma: no cover - reconnection path
-            logger.warning("ws dropped; reconnecting", extra={"event": "ws.reconnect", "error": str(exc)})
+            logger.warning(
+                "ws dropped; reconnecting",
+                extra={"event": f"{name}.ws.reconnect", "error": str(exc), "url": ws_url},
+            )
             await asyncio.sleep(get_settings().ws_reconnect_seconds)

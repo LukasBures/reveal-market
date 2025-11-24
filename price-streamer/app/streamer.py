@@ -9,7 +9,7 @@ from decimal import Decimal
 import httpx
 
 from .config import Settings
-from .state import StreamState, iter_ws
+from .state import FatalWebsocketError, StreamState, iter_ws
 
 logger = logging.getLogger("reveal_market.price_streamer.streamer")
 
@@ -46,7 +46,7 @@ class PriceStreamer:
             if not self.state.subscriptions.assets:
                 await asyncio.sleep(self.settings.ws_reconnect_seconds)
                 continue
-            async for ws in iter_ws(self.settings.clob_ws_url):
+            async for ws in iter_ws(self.settings.clob_ws_url, name="clob-ws"):
                 if self._stop.is_set():
                     break
                 try:
@@ -174,7 +174,7 @@ class PriceStreamer:
                     self.state.rtds_symbols.add(trimmed)
         while not self._stop.is_set():
             try:
-                async for ws in iter_ws(self.settings.rtds_ws_url):
+                async for ws in iter_ws(self.settings.rtds_ws_url, name="rtds-ws"):
                     if self._stop.is_set():
                         break
                     await self._send_rtds_subscribe(ws)
@@ -223,9 +223,17 @@ class PriceStreamer:
     async def _fx_ws_loop(self) -> None:
         if not self.settings.fx_ws_url:
             return
+        logger.info(
+            "Starting FX websocket listener",
+            extra={"event": "fx.ws.connect", "url": self.settings.fx_ws_url},
+        )
         while not self._stop.is_set():
             try:
-                async for ws in iter_ws(self.settings.fx_ws_url):
+                async for ws in iter_ws(
+                    self.settings.fx_ws_url,
+                    name="fx-ws",
+                    fatal_status={400, 401, 403, 404, 429},
+                ):
                     if self._stop.is_set():
                         break
                     async for raw in ws:
@@ -236,6 +244,14 @@ class PriceStreamer:
                         except json.JSONDecodeError:
                             continue
                         await self._handle_fx_ws(data)
+            except FatalWebsocketError as exc:
+                self.state.fx_ws_connected = False
+                self.state.fx_last_error = f"http_{exc.status_code}"
+                logger.warning(
+                    "FX ws disabled after fatal handshake status",
+                    extra={"event": "fx.ws.disabled", "status": exc.status_code, "url": exc.url},
+                )
+                return
             except Exception as exc:  # pragma: no cover - reconnect path
                 self.state.fx_ws_connected = False
                 self.state.fx_last_error = str(exc)

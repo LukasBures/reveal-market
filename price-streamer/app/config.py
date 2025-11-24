@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -77,6 +79,31 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @field_validator("fx_ws_url", mode="before")
+    @classmethod
+    def _normalize_fx_ws(cls, value: str | None):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.scheme.lower() != "wss":
+            raise ValueError("STREAMER_FX_WS_URL must use wss://")
+        path = (parsed.path or "").lower()
+        if not (path.startswith("/ws/") or path.startswith("/stream")):
+            raise ValueError("STREAMER_FX_WS_URL must include /ws/<stream> or /stream?streams=…")
+        normalized = urlunparse(
+            (
+                "wss",
+                parsed.netloc,
+                path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        return normalized
 
 
 def get_settings() -> Settings:
