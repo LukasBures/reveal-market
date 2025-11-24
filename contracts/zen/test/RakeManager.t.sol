@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {RakeManager} from "../src/RakeManager.sol";
 
@@ -95,5 +96,29 @@ contract RakeManagerTest is Test {
         uint256 net = manager.takeRake(address(0), amount, overrideBps);
         uint256 rakeAmount = (amount * applied) / 10_000;
         assertEq(net + rakeAmount, amount);
+    }
+
+    function testTwoStepOwnershipTransfer() public {
+        address newOwner = address(0x1111);
+        manager.transferOwnership(newOwner);
+        vm.prank(newOwner);
+        manager.acceptOwnership();
+        assertEq(manager.owner(), newOwner);
+
+        vm.prank(address(this));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        manager.setRakeBps(10);
+    }
+
+    function testPendingOwnerCanBeReset() public {
+        address newOwner = address(0x2222);
+        manager.transferOwnership(newOwner);
+        assertEq(manager.pendingOwner(), newOwner);
+
+        // Current owner can re-initiate transfer to self to reset pending owner
+        manager.transferOwnership(address(this));
+        assertEq(manager.pendingOwner(), address(this));
+        manager.acceptOwnership();
+        assertEq(manager.owner(), address(this));
     }
 }

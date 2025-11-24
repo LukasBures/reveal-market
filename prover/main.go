@@ -78,6 +78,7 @@ type app struct {
 	lastProofAt    atomic.Value
 	circuitHash    string
 	requestCounter atomic.Uint64
+	artifactPaths  []string
 }
 
 func newApp(cfg config, prover proverEngine) *app {
@@ -85,6 +86,11 @@ func newApp(cfg config, prover proverEngine) *app {
 		cfg:       cfg,
 		prover:    prover,
 		startedAt: time.Now().UTC(),
+		artifactPaths: []string{
+			cfg.WitnessScriptPath,
+			cfg.WasmPath,
+			cfg.ZKeyPath,
+		},
 	}
 	a.lastHeartbeat.Store(time.Now().UTC())
 	a.lastProofAt.Store(time.Time{})
@@ -185,6 +191,12 @@ func (a *app) heartbeatLoop() {
 func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 	lastHeartbeat, _ := a.lastHeartbeat.Load().(time.Time)
 	lastProof, _ := a.lastProofAt.Load().(time.Time)
+	artifactsOk, missing := checkArtifacts(a.artifactPaths)
+	if artifactsOk {
+		artifactsStatus.Set(1)
+	} else {
+		artifactsStatus.Set(0)
+	}
 	payload := map[string]any{
 		"status":          "ok",
 		"backend":         a.prover.Backend(),
@@ -201,6 +213,11 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 			"worsen_percent":     a.cfg.WorsenPercent,
 			"total_monetisation": a.cfg.TotalMonetisation,
 		},
+		"artifacts_ok":      artifactsOk,
+		"missing_artifacts": missing,
+	}
+	if !artifactsOk {
+		payload["status"] = "degraded"
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -218,6 +235,17 @@ func formatMillis(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func checkArtifacts(paths []string) (bool, []string) {
+	missing := make([]string, 0)
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil || info.Size() == 0 {
+			missing = append(missing, p)
+		}
+	}
+	return len(missing) == 0, missing
 }
 
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {

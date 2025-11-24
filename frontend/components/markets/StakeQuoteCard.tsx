@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchFxQuote, fetchPricingQuote, type FxQuote, type PricingQuote } from "@/lib/pricing-client";
+import { fetchPricingQuote, type PricingQuote } from "@/lib/pricing-client";
+import { useFxStream } from "@/hooks/useFxStream";
 
 type Props = {
   defaultStakeZen?: number;
@@ -16,31 +17,11 @@ const formatNumber = (value: number, decimals = 4) => {
 
 export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
-  const [fx, setFx] = useState<FxQuote | null>(null);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fxStale, setFxStale] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadFx = async () => {
-      try {
-        const payload = await fetchFxQuote();
-        if (!cancelled) setFx(payload);
-        if (!cancelled) setFxStale(payload.stale);
-        if (!cancelled && payload.stale) {
-          setError("Pricing temporarily unavailable (stale FX)");
-        }
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    };
-    loadFx();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const fxStale = status === "stale";
 
   const debouncedStake = useDebounce(stakeZen, 200);
 
@@ -88,7 +69,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
         </div>
         {fx && (
           <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.3em] text-white/80">
-            FX: 1 ZEN = {formatNumber(fx.zen_usd, 4)} USD{fx.stale ? " (stale)" : ""}
+            FX: 1 ZEN = ${formatNumber(fx.zen_usd, 4)} USDC{fx.stale ? " (stale)" : ""}
           </span>
         )}
       </div>

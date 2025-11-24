@@ -3,9 +3,10 @@
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
 import { useEffect, useMemo, useState } from "react";
-import { fetchFxQuote, fetchPricingQuoteWithMeta, type FxQuote, type PricingQuote } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { OutcomeQuote } from "./OutcomeQuote";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
+import { useFxStream } from "@/hooks/useFxStream";
 
 type Props = {
   market: MarketDetail;
@@ -23,40 +24,18 @@ const formatZen = (value: number | undefined): string => {
 export function MarketDetailOutcomes({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = market.outcomePrices ?? [];
-  const { prices: livePrices } = useLiveOutcomePrices(market.eventId, prices);
+  const { prices: livePrices, streamError } = useLiveOutcomePrices(market.eventId, prices);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [stakeZen, setStakeZen] = useState(10);
-  const [fx, setFx] = useState<FxQuote | null>(null);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const fxStale = status === "stale";
 
   useEffect(() => {
-    let cancelled = false;
-    const loadFx = async () => {
-      try {
-        const payload = await fetchFxQuote();
-        if (cancelled) return;
-        setFx(payload);
-        if (payload.stale) {
-          setError("Pricing paused (FX stale)");
-        } else {
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    };
-    loadFx();
-    const id = setInterval(loadFx, 10_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!fx || fx.stale || stakeZen <= 0) {
+    if (!fx || fxStale || stakeZen <= 0) {
+      if (fxStale) setError("Pricing paused (FX stale)");
       setQuote(null);
       return;
     }
@@ -82,7 +61,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [fx, stakeZen, market.eventId]);
+  }, [fx, fxStale, stakeZen, market.eventId]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;
@@ -99,6 +78,12 @@ export function MarketDetailOutcomes({ market }: Props) {
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-4 sm:p-6">
+      {(fxStale || streamError) && (
+        <div className="mb-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          Live pricing paused{fxStale ? " (FX stale)" : ""}{streamError ? ` (${streamError})` : ""}. Actions are
+          temporarily disabled.
+        </div>
+      )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Tradable outcomes</p>
@@ -141,7 +126,8 @@ export function MarketDetailOutcomes({ market }: Props) {
                           : isNo
                             ? "bg-rose-500 hover:bg-rose-400"
                             : "bg-white/20 hover:bg-white/30"
-                      }`}
+                      } ${fxStale ? "pointer-events-none opacity-60" : ""}`}
+                      aria-disabled={fxStale}
                     >
                       {isYes ? "Buy YES" : isNo ? "Buy NO" : `Buy ${outcome}`}
                     </Link>

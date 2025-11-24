@@ -168,6 +168,21 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the Dockerized API is reachable at `NEXT_PUBLIC_API_BASE_URL`. Keep `docker compose up` running locally (or point the env var at a staging host) before invoking the script.
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
+## Streaming & FX
+
+- **FX source** – Frontend consumes the price-streamer FX websocket at `/fx/zen-usdc` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
+- **Market prices** – Live odds stream from price-streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
+- **WSS/TLS** – Set `NEXT_PUBLIC_PRICE_STREAMER_URL` to your HTTPS streamer host (e.g., `https://stream.revealmarket.xyz`). The client auto-switches to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
+- **Env summary** – `NEXT_PUBLIC_PRICE_STREAMER_URL`, `STREAMER_INTERNAL_URL` (SSR), `NEXT_PUBLIC_API_BASE_URL`, and streamer-side `STREAMER_WORSEN_PERCENT` (controls applied dampening) must be set consistently across frontend and streamer.
+
+## Deployment / Runbook
+
+- **Env vars**: `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL` (HTTPS host for WSS), `STREAMER_INTERNAL_URL` (in-cluster), `NEXT_PUBLIC_SITE_URL` (canonical), wallet provider keys, and any analytics keys (ensure CSP allows them).
+- **TLS**: Terminate at Caddy/Nginx; price-streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
+- **Health**: API `/healthz`, streamer `/healthz`; frontend relies on a reachable API (build/tests fail fast if `/health` is down).
+- **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
+- **Smoke**: Run `npm run lint && npm run test && npm run build`; for live pricing, confirm `MainNav` shows FX and a market detail page receives live price ticks.
+
 ---
 
 ## Logging & Docker Observability

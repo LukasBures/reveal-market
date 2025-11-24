@@ -16,6 +16,8 @@ export function useLiveOutcomePrices(marketId: string, initialPrices: number[] =
   const [outcomes, setOutcomes] = useState<OutcomePrice[]>(
     initialPrices.map((p) => ({ price: p, displayPrice: p })),
   );
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [connected, setConnected] = useState<boolean>(false);
 
   useEffect(() => {
     setOutcomes(initialPrices.map((p) => ({ price: p, displayPrice: p })));
@@ -23,6 +25,10 @@ export function useLiveOutcomePrices(marketId: string, initialPrices: number[] =
 
   useEffect(() => {
     const es = createPriceStream(marketId);
+    es.onopen = () => {
+      setConnected(true);
+      setStreamError(null);
+    };
     es.onmessage = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data);
@@ -40,11 +46,15 @@ export function useLiveOutcomePrices(marketId: string, initialPrices: number[] =
           };
           return next;
         });
+        setConnected(true);
+        setStreamError(null);
       } catch {
         // ignore bad payloads
       }
     };
     es.onerror = () => {
+      setStreamError("Price stream disconnected");
+      setConnected(false);
       es.close();
     };
     return () => es.close();
@@ -53,5 +63,5 @@ export function useLiveOutcomePrices(marketId: string, initialPrices: number[] =
   const prices = outcomes.map((p) => p?.displayPrice).map((v) => (typeof v === "number" ? v : undefined));
   const fxStale = outcomes.some((p) => p?.fxStale);
 
-  return { prices, fxStale, outcomes };
+  return { prices, fxStale, outcomes, streamError, connected };
 }

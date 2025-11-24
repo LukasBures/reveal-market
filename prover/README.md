@@ -158,6 +158,7 @@ If the artifacts are missing or the Groth16 toolchain fails, the service exits w
 ```bash
 cd prover
 ./run_tests.sh            # wraps `go test -v ./...`
+# Fails fast if circuits/build artifacts are missing (check_artifacts.sh)
 ```
 
 The script is also invoked by repo-root `./run_tests.sh`, keeping local workflows aligned with CI’s Go job.
@@ -165,18 +166,21 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 ## Observability
 
 - Logs follow the global format (`timestamp | LEVEL | prover | file:line | event | request_id | json`).
-- `/metrics` exposes `expvar` counters (successes, failures, last latency). Scrape it with your Prometheus sidecar or use `curl` for quick debugging.
+- `/metrics` exposes `expvar` counters (successes, failures, last latency, artifacts_ok). Scrape it with your Prometheus sidecar or use `curl` for quick debugging.
 - `/debug/pprof/*` ships with Go’s built-in profiling handlers so you can capture CPU/heap profiles in staging before tuning concurrency.
 - The Groth16 engine logs command output/errors when witness or proving fail, making rapidsnark issues easy to audit.
-- `/healthz` includes `ready` and `backend` flags so orchestrators can alert when the prover downgrades.
+- `/healthz` includes `ready`, `backend`, and `artifacts_ok` fields so orchestrators can alert when the prover downgrades or artifacts go missing.
 - Response payloads carry a `warnings` array (e.g., if calldata export fails) with enough context for downstream teams to debug.
 
 ## Operational Tips
 
+- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity.
 - **Concurrency tuning** – Start with the default `PROVER_MAX_CONCURRENCY=runtime.NumCPU()` and raise it incrementally only after measuring CPU saturation and memory usage (rapidsnark typically peaks around 250–350 MB per job for this circuit).
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.
 - **Alerting** – Monitor `prover.request.failed` logs and add Prometheus alerts for rising 5xx counts, long proof latencies, or repeated rapidsnark exits to detect artifact corruption early.
+- **TLS / exposure** – If exposing the prover externally, front it with a reverse proxy (e.g., Caddy or Nginx) that terminates TLS and rate-limits the proof endpoint. Only `/healthz` and `/metrics` should be internet-reachable in most deployments; lock `/api/v1/proofs/settlement` behind internal networks.
+- **Deployment steps** – Generate/mount artifacts, set env (`PROVER_LISTEN_ADDR`, `PROVER_CIRCUIT_DIR`, `PROVER_RAPIDSNARK_BINARY`, `PROVER_NODE_BINARY`, timeout/concurrency), run `./run_tests.sh` (fails if artifacts missing), then start the service. Post-deploy smoke: hit `/healthz` and submit a small proof payload; alert on `artifacts_ok=0` or repeated `prover.request.failed`.
 
 ## Docker Notes
 

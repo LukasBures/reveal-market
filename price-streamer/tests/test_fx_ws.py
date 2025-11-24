@@ -14,6 +14,7 @@ def test_fx_websocket_stream(monkeypatch):
     adjusted = Decimal("5.5") * (Decimal("1") - Decimal(str(state.settings.worsen_percent)))
     state.fx_quote = FxQuote(zen_usd=adjusted, raw_zen_usd=Decimal("5.5"), fetched_at=now, stale=False, source="test")
     state.fx_last_update = now
+
     # Keep startup/shutdown from doing network work
     async def noop():
         return None

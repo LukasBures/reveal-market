@@ -16,6 +16,7 @@ export GOCACHE="${SCRIPT_DIR}/.gocache"
 mkdir -p "${GOCACHE}"
 
 log_step "Running Go tests for prover"
+(./check_artifacts.sh)
 go test "$@" -v ./...
 
 log_step "Prover tests completed successfully"

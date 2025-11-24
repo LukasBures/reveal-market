@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
-import { createFxWebSocket, fetchStreamerFxQuote } from "@/lib/pricing-client";
+import { useFxStream } from "@/hooks/useFxStream";
 import { PriceBanner } from "@/components/layout/PriceBanner";
 
 const navLinks = [
@@ -27,10 +27,9 @@ const externalHomeHref = /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [fxLabel, setFxLabel] = useState<string | null>(null);
-  const [fxStale, setFxStale] = useState(false);
-  const [fxError, setFxError] = useState<string | null>(null);
-  const fxLastUpdateRef = useRef<number>(0);
+  const { fx, error: fxError, status } = useFxStream("/fx/zen-usdc");
+  const fxStale = status === "stale";
+  const fxLabel = fx ? `ZEN/USDC $${Number(fx.zen_usd).toFixed(2)}` : null;
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -44,66 +43,6 @@ export function MainNav() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMobileMenuOpen]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let ws: WebSocket | null = null;
-    const applyFx = (data: { zen_usd?: number; stale?: boolean }) => {
-      const value = Number(data.zen_usd);
-      const stale = Boolean(data.stale);
-      const display = Number.isFinite(value) && value > 0 ? value.toFixed(2) : "0.00";
-      setFxLabel(`ZEN/USDC $${display}${stale ? " (stale)" : ""}`);
-      setFxStale(stale);
-      setFxError(null);
-      fxLastUpdateRef.current = Date.now();
-    };
-
-    const connectWs = () => {
-      ws = createFxWebSocket("/fx/zen-usdc");
-      ws.onmessage = (event) => {
-        if (cancelled) return;
-        try {
-          const payload = JSON.parse(event.data);
-          applyFx(payload);
-        } catch (err) {
-          setFxError((err as Error).message);
-        }
-      };
-      ws.onerror = () => {
-        if (cancelled) return;
-        setFxError("FX socket error");
-      };
-      ws.onclose = () => {
-        if (cancelled) return;
-        setTimeout(connectWs, 1500);
-      };
-    };
-
-    const fetchFallback = async () => {
-      try {
-        const data = await fetchStreamerFxQuote("/fx/zen-usdc");
-        applyFx(data);
-      } catch (err) {
-        if (!cancelled) setFxError((err as Error).message);
-      }
-    };
-
-    connectWs();
-    fetchFallback();
-    // Fallback poll in case the socket stalls.
-    const pollId = setInterval(() => {
-      const age = Date.now() - fxLastUpdateRef.current;
-      if (age > 10_000) fetchFallback();
-    }, 5_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(pollId);
-      if (ws && ws.readyState !== WebSocket.CLOSED) {
-        ws.close();
-      }
-    };
-  }, []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl">

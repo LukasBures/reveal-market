@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchFxQuote, fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
+import { useFxStream } from "@/hooks/useFxStream";
 
 type Props = {
   stakeZen: number;
@@ -11,19 +12,16 @@ type Props = {
 export function OutcomeQuote({ stakeZen, marketId }: Props) {
   const [refundZen, setRefundZen] = useState<string>("—");
   const [profitUsd, setProfitUsd] = useState<string>("—");
-  const [fxLabel, setFxLabel] = useState<string>("FX: loading…");
   const [error, setError] = useState<string | null>(null);
-  const [fxStale, setFxStale] = useState(false);
+  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const fxStale = status === "stale";
+  const fxLabel = fx ? `FX: 1 ZEN = $${fx.zen_usd.toFixed(4)} USDC${fxStale ? " (stale)" : ""}` : "FX: loading…";
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const fx = await fetchFxQuote();
-        if (cancelled) return;
-        setFxLabel(`FX: 1 ZEN = ${fx.zen_usd.toFixed(4)} USD${fx.stale ? " (stale)" : ""}`);
-        setFxStale(fx.stale);
-        if (fx.stale) {
+        if (!fx || fxStale) {
           setError("Pricing temporarily unavailable (stale FX)");
           return;
         }
@@ -41,11 +39,11 @@ export function OutcomeQuote({ stakeZen, marketId }: Props) {
         }
       }
     };
-    load();
+    if (fx) load();
     return () => {
       cancelled = true;
     };
-  }, [stakeZen, marketId]);
+  }, [stakeZen, marketId, fx, fxStale]);
 
   if (error) {
     return <p className="text-xs text-rose-300">Pricing unavailable: {error}</p>;

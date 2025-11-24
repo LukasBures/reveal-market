@@ -89,6 +89,15 @@ Both `.venv` directories stay ignored by git. `uv` keeps them consistent with th
 
 `./backend/run_tests.sh` automatically sets `-n 4` for every pytest invocation (API, shared modules, worker) so local runs match CI’s concurrency. Override via `PYTEST_WORKER_COUNT=<n>` if you’re on a smaller dev box or want to test with extra workers.
 
+## Deployment Runbook (API + Worker)
+
+- **Prereqs**: Postgres + Redis reachable; run `backend/migrations` before boot if you disable lifespan migrations.
+- **Env**: Set `RM_DATABASE_URL`, `RM_REDIS_URL`, Polymarket endpoints (`RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, rate limits), and FX feed URLs. For Docker compose, copy `.env.example` and adjust addresses.
+- **Migrations**: Default lifespan runs migrations on boot. For explicit smoke, run `python -m app.database` or `backend/run_tests.sh` (includes a startup smoke). If migrations fail, the service exits non-zero.
+- **Health / smoke**: After deploy, hit `/healthz` (API) and `/healthz` (worker via Docker healthcheck). Expect `status=ok`, Redis/DB/Polymarket `ok`, and fresh heartbeats. Logs emit `service.configuration` and `markets.cache.refresh.start` on boot.
+- **Cache warmup**: Optional—call `/markets?limit=20` and `/pricing/fx` to prime caches/CDN. Heartbeat dashboards at `/healthz/heartbeats`.
+- **TLS/proxy**: Terminate TLS at the ingress/proxy (e.g., Caddy in `docker/caddy/Caddyfile`). API/worker remain HTTP internally; set `ALLOWED_HOSTS`/CORS as needed.
+
 ## Logging Consistency
 
 Each service now bootstraps a production-grade logger at process start. The format matches `timestamp | LEVEL | logger | file:line | event | message | request_id=<value>` so API, worker, and scripts emit comparable lines. Control verbosity with `LOG_LEVEL`, and opt into rotating files by setting `LOG_TO_FILE=true` (optional knobs: `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`). All logs still stream to stdout for container aggregation, ensuring Docker/Kubernetes collectors see exactly the same structure across services.

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
@@ -16,6 +17,7 @@ contract MarketFactoryTest is Test {
     address payable private constant TREASURY = payable(address(0xBEEF));
     address private constant ORACLE = address(0xA11CE);
     address private constant USER = address(0xCAFE);
+    address private constant NEW_OWNER = address(0xB0B);
 
     uint256 private commitDeadline;
     uint256 private revealDeadline;
@@ -125,6 +127,25 @@ contract MarketFactoryTest is Test {
 
         vm.expectRevert(MarketFactory.GlobalLiabilityExceeded.selector);
         factory.setRiskLimits(0, 0, 0.5 ether);
+    }
+
+    function testOwnershipTransferTwoStep() public {
+        factory.transferOwnership(NEW_OWNER);
+        assertEq(factory.pendingOwner(), NEW_OWNER);
+
+        vm.prank(NEW_OWNER);
+        factory.acceptOwnership();
+        assertEq(factory.owner(), NEW_OWNER);
+
+        // New owner can update guardian to themselves.
+        vm.prank(NEW_OWNER);
+        factory.setGuardian(NEW_OWNER);
+        assertEq(factory.guardian(), NEW_OWNER);
+
+        // Previous guardian/owner can no longer toggle pauses.
+        vm.expectRevert(MarketFactory.NotGuardianOrOwner.selector);
+        vm.prank(address(this));
+        factory.setGlobalCommitPaused(true);
     }
 
     // helpers

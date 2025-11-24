@@ -25,3 +25,12 @@ forge test            # run all tests
 - Deflationary/fee-on-transfer assets are rejected via transfer-in amount checks.
 - Total assets are `idle + utilized`; withdrawals are limited to idle capital so hedger utilization cannot break redemptions.
 - `maxUtilizationBps` caps utilization (default 100%); owner can reduce this to limit hedger risk.
+
+## Deployment / Runbook (Polygon)
+
+- **Chain**: Polygon PoS (Chain ID 137). Configure RPC + gas params via Foundry/forge env (`POLYGON_RPC_URL`, `ETHERSCAN_API_KEY` for verification if desired).
+- **Contracts**: `BaseLpVault` (USDC 6 decimals), `HedgeStrategyExecutor`. Owner is `Ownable2Step`; transfer ownership using `transferOwnership` then `acceptOwnership`.
+- **Verifier/keys**: If wiring to on-chain verifiers, set the verifying key addresses and guardian/hedger roles at deploy time. Keep admin keys in a secure wallet and script ownership transfers (e.g., `forge script script/Deploy.s.sol --rpc-url ... --broadcast`).
+- **Pause/guards**: Before go-live set `maxUtilizationBps`, whitelist receivers, and test pause/unpause. Hedger-only functions are protected; ensure guardian can pause in incident response.
+- **Monitoring**: Subscribe to `Deposit`, `Withdraw`, `Borrowed`, `Repaid`, and pause/ownership events for indexers. Track vault share price and utilization; alert on utilization spikes or pauses.
+- **CI/Smoke**: `./run_local.sh` (or `run_tests.sh`) must pass before deploy. Include a dry-run deploy script against Polygon testnet with `--fork-url` to validate gas and configs.

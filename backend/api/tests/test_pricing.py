@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.config import Settings
 from app.pricing import fetch_fx_quote
 

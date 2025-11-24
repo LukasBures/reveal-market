@@ -1,19 +1,64 @@
 from __future__ import annotations
 
-import math
+import httpx
 
 
-def test_pricing_quote_success(client):
-    response = client.post("/pricing/quote", json={"stake_zen": 10, "zen_usd": 0.2})
-    assert response.status_code == 200
-    payload = response.json()
-    assert math.isclose(payload["displayed_odds_multiplier"], 0.97, rel_tol=1e-6)
-    assert math.isclose(payload["rake_zen"], 0.2, rel_tol=1e-6)
-    assert math.isclose(payload["refund_zen"], 9.8, rel_tol=1e-6)
-    assert math.isclose(payload["hedge_usdc"], 1.76, rel_tol=1e-6)
-    assert math.isclose(payload["total_monetisation"], 0.17, rel_tol=1e-6)
+class _AsyncClientSuccess:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    async def get(self, *args, **kwargs):
+        return _DummyResponse(self.payload)
 
 
-def test_pricing_quote_requires_fx_price(client):
-    response = client.post("/pricing/quote", json={"stake_zen": 5})
-    assert response.status_code == 503
+class _DummyResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def test_pricing_fx_parses_nested_payload(client, monkeypatch):
+    payload = {"horizen": {"usd": 7.5}, "stale": True}
+    monkeypatch.setattr("app.pricing.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientSuccess(payload))
+
+    resp = client.get("/pricing/fx")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["zen_usd"] == 7.5
+    assert data["stale"] is True
+
+
+def test_pricing_fx_falls_back_on_http_error(client, monkeypatch):
+    class FailingAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise httpx.HTTPError("boom")
+
+    monkeypatch.setattr("app.pricing.httpx.AsyncClient", FailingAsyncClient)
+    from app.config import get_settings
+
+    settings = get_settings()
+    resp = client.get("/pricing/fx")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stale"] is True
+    assert data["zen_usd"] == settings.fx_fallback_price
