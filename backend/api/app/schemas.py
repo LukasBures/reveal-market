@@ -155,7 +155,6 @@ class ResolutionSummary(BaseModel):
 
 class PricingQuoteRequest(BaseModel):
     stake_zen: float = Field(..., gt=0)
-    zen_usd: float | None = Field(default=None, gt=0)
     market_id: str | None = Field(default=None, description="Market ID for cap tracking")
     user_id: str | None = Field(default=None, description="User identifier for per-market caps")
 
@@ -176,11 +175,28 @@ class PricingQuoteResponse(BaseModel):
     max_market_stake_zen: float | None = None
     remaining_user_stake_zen: float | None = None
     remaining_market_stake_zen: float | None = None
+    quote_id: str
+    expires_at: datetime
+    signature: str
+    signer: str
+    market_id: str | None = None
+    user_id: str | None = None
 
 
 class FxQuoteResponse(BaseModel):
     zen_usd: float
     stale: bool = False
+
+
+class PricingSubmitRequest(BaseModel):
+    quote: PricingQuoteResponse
+    max_fx_diff_percent: float | None = Field(default=None, ge=0, description="Optional max FX drift percent vs live")
+
+
+class PricingSubmitResponse(BaseModel):
+    quote: PricingQuoteResponse
+    current_fx: float
+    valid: bool = True
 
 
 class TreasurySnapshot(BaseModel):

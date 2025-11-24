@@ -268,7 +268,7 @@ async def iter_ws(ws_url: str, *, name: str = "ws", fatal_status: set[int] | Non
                     "ws rejected with fatal status; giving up",
                     extra={"event": f"{name}.ws.fatal", "status": exc.status_code, "url": ws_url},
                 )
-                raise FatalWebsocketError(exc.status_code, ws_url)
+                raise FatalWebsocketError(exc.status_code, ws_url) from exc
             await asyncio.sleep(get_settings().ws_reconnect_seconds)
         except Exception as exc:  # pragma: no cover - reconnection path
             logger.warning(

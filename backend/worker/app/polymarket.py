@@ -245,7 +245,11 @@ class PolymarketClient:
                         extra={"offset": offset, "empty_pages": empty_pages},
                     )
                     self._record_empty_page()
-                    if (total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance):
+                    if (
+                        total_records is not None
+                        and offset < total_records
+                        and empty_pages <= self._empty_page_tolerance
+                    ):
                         offset += page_size
                         continue
                     if empty_pages <= self._empty_page_tolerance:

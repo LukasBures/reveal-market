@@ -46,7 +46,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     let cancelled = false;
     setLoading(true);
-    fetchPricingQuoteWithMeta(stakeZen, fx.zen_usd, { marketId: market.eventId })
+    fetchPricingQuoteWithMeta(stakeZen, { marketId: market.eventId })
       .then((payload) => {
         if (cancelled) return;
         setQuote(payload);
@@ -68,6 +68,15 @@ export function MarketDetailOutcomes({ market }: Props) {
     return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
   }, [quote]);
 
+  const expiresLabel = useMemo(() => {
+    if (!quote) return null;
+    const expiresTs = new Date(quote.expires_at).getTime();
+    const remainingMs = expiresTs - Date.now();
+    if (remainingMs <= 0) return "Expired";
+    const seconds = Math.ceil(remainingMs / 1000);
+    return `Quote expires in ${seconds}s`;
+  }, [quote]);
+
   if (outcomes.length === 0) {
     return (
       <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-slate-400">
@@ -83,6 +92,11 @@ export function MarketDetailOutcomes({ market }: Props) {
           Live pricing paused{fxStale ? " (FX stale)" : ""}{streamError ? ` (${streamError})` : ""}. Actions are
           temporarily disabled.
         </div>
+        {quote && (
+          <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+            Quote ID: {quote.quote_id} · {expiresLabel}
+          </p>
+        )}
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">

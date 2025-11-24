@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     performance_heartbeat_interval_seconds: int = Field(default=60, ge=10)
     worker_heartbeat_stale_seconds: int = Field(default=180, ge=30)
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
+    pricing_signer_private_key: SecretStr | None = Field(default=None)
+    pricing_quote_ttl_seconds: int = Field(default=120, ge=30, le=600)
 
     @field_validator("max_page_size")
     @classmethod

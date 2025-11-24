@@ -26,34 +26,46 @@ export function StakeQuoteCard({ defaultStakeZen = 10 }: Props) {
   const debouncedStake = useDebounce(stakeZen, 200);
 
   useEffect(() => {
-    if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
-      setQuote(null);
-      return;
-    }
-    if (debouncedStake > MAX_STAKE_ZEN) {
-      setQuote(null);
-      setError(`Max stake per bet is ${MAX_STAKE_ZEN} ZEN`);
-      return;
-    }
     let cancelled = false;
-    setLoading(true);
-    fetchPricingQuote(debouncedStake, fx.zen_usd)
-      .then((payload) => {
+    const requestQuote = async () => {
+      if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
+        setQuote(null);
+        if (fx?.stale) setError("Pricing paused (FX stale)");
+        return;
+      }
+      if (debouncedStake > MAX_STAKE_ZEN) {
+        setQuote(null);
+        setError(`Max stake per bet is ${MAX_STAKE_ZEN} ZEN`);
+        return;
+      }
+      setLoading(true);
+      try {
+        const payload = await fetchPricingQuote(debouncedStake);
         if (!cancelled) {
           setQuote(payload);
           setError(null);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) setError((err as Error).message);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+    requestQuote();
     return () => {
       cancelled = true;
     };
   }, [debouncedStake, fx]);
+
+  useEffect(() => {
+    if (!quote) return;
+    const expires = new Date(quote.expires_at).getTime();
+    const delay = expires - Date.now() - 1_000;
+    const timer = setTimeout(() => {
+      setQuote(null); // trigger refetch via effect above
+    }, Math.max(delay, 0));
+    return () => clearTimeout(timer);
+  }, [quote]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;

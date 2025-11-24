@@ -42,6 +42,7 @@ contract Deploy is ScriptBase {
         uint256 rakeBps = HEVM.envUint("RAKE_BPS");
         bool useStubVerifier = _envOrUint("USE_STUB_VERIFIER", 0) == 1;
         string memory vkPath = _envOrString("SETTLEMENT_VK_PATH", "contracts/cache/settlement-vk.json");
+        address pricingSigner = HEVM.envAddress("PRICING_SIGNER_ADDRESS");
 
         address deployer = HEVM.addr(deployerKey);
 
@@ -90,6 +91,8 @@ contract Deploy is ScriptBase {
         console.log("Expected signals:", expectedInputs);
 
         _writeArtifacts(rakeManager, implementation, factory, verifierAddress, oracle, circuitHash, expectedInputs);
+        // Log signer used for pricing quotes (off-chain signature verification)
+        console.log("Pricing signer:", pricingSigner);
 
         // Example (optional):
         // uint256 commitDeadline = block.timestamp + 3 days;
@@ -142,6 +145,7 @@ contract Deploy is ScriptBase {
         MarketFactory factory,
         address verifier,
         address oracle,
+        address pricingSigner,
         bytes32 circuitHash,
         uint256 expectedInputs
     ) private {
@@ -151,6 +155,7 @@ contract Deploy is ScriptBase {
         json = HEVM.serializeAddress(root, "revealMarketImplementation", address(implementation));
         json = HEVM.serializeAddress(root, "marketFactory", address(factory));
         json = HEVM.serializeAddress(root, "oracle", oracle);
+        json = HEVM.serializeAddress(root, "pricingSigner", pricingSigner);
         json = HEVM.serializeBytes32(root, "circuitHash", circuitHash);
         json = HEVM.serializeUint(root, "expectedInputs", expectedInputs);
 

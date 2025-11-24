@@ -14,6 +14,10 @@ export type PricingQuote = {
   max_market_stake_zen?: number | null;
   remaining_user_stake_zen?: number | null;
   remaining_market_stake_zen?: number | null;
+  quote_id: string;
+  expires_at: string;
+  signature: string;
+  signer: string;
 };
 
 export type FxQuote = {
@@ -61,13 +65,12 @@ export async function fetchFxQuote(): Promise<FxQuote> {
   return (await res.json()) as FxQuote;
 }
 
-export async function fetchPricingQuote(stakeZen: number, zenUsd: number): Promise<PricingQuote> {
-  return fetchPricingQuoteWithMeta(stakeZen, zenUsd, {});
+export async function fetchPricingQuote(stakeZen: number): Promise<PricingQuote> {
+  return fetchPricingQuoteWithMeta(stakeZen, {});
 }
 
 export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
-  zenUsd: number,
   opts: { marketId?: string; userId?: string } = {},
 ): Promise<PricingQuote> {
   const res = await fetch(getEndpoint("/pricing/quote"), {
@@ -75,7 +78,6 @@ export async function fetchPricingQuoteWithMeta(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       stake_zen: stakeZen,
-      zen_usd: zenUsd,
       market_id: opts.marketId,
       user_id: opts.userId,
     }),

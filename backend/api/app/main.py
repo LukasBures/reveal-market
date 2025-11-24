@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from threading import Event, Lock, Thread
 from typing import Annotated, Any
@@ -13,6 +13,8 @@ from urllib.parse import unquote_plus
 from uuid import uuid4
 
 import httpx
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,7 @@ from shared.categories import canonical_category_from_slug
 from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
+from shared.onchain.client import load_account
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -38,13 +41,11 @@ from app.onchain import fetch_factory_markets
 from app.pricing import PricingEngine, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
-
-try:
-    from redis import Redis
-    from redis.exceptions import RedisError
-except ImportError:  # pragma: no cover - redis is an optional dependency during certain tests
-    Redis = Any  # type: ignore
-    RedisError = Exception  # type: ignore
+from shared.onchain.client import load_account
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from redis import Redis
+from redis.exceptions import RedisError
 
 setup_logging("reveal_market.api")
 
@@ -874,30 +875,29 @@ def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
 def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteResponse:
     """Return a pricing quote for a ZEN stake, gating on FX availability."""
 
-    zen_usd = payload.zen_usd
     if payload.stake_zen > settings.max_stake_zen:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Stake exceeds max of {settings.max_stake_zen} ZEN",
         )
-    if zen_usd is None:
-        try:
-            fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
-            fx.raise_for_status()
-            data = fx.json()
-            if data.get("fx_stale") or data.get("stale"):
-                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price stale")
-            zen_usd = float(
-                data.get("price")
-                or data.get("zen_usd")
-                or data.get("zenUSD")
-                or data.get("fx_zen_usd")
-                or data.get("fx", {}).get("zen_usd")
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
+    # Always source FX server-side; ignore client-provided zen_usd.
+    try:
+        fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
+        fx.raise_for_status()
+        data = fx.json()
+        if data.get("fx_stale") or data.get("stale"):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price stale")
+        zen_usd = float(
+            data.get("price")
+            or data.get("zen_usd")
+            or data.get("zenUSD")
+            or data.get("fx_zen_usd")
+            or data.get("fx", {}).get("zen_usd")
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
 
     # Enforce optional per-user and per-market caps using Redis counters.
     redis_client = get_redis_client()
@@ -950,6 +950,26 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    # Build a signed quote to prevent client tampering.
+    expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
+    quote_id = uuid4().hex
+    message_payload = {
+        "version": "v1",
+        "quote_id": quote_id,
+        "stake_zen": float(payload.stake_zen),
+        "zen_usd": float(zen_usd),
+        "market_id": payload.market_id,
+        "user_id": payload.user_id,
+        "expires_at": expires_at.isoformat(),
+    }
+    if settings.pricing_signer_private_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable", headers=None
+        )
+    signer_account = load_account(settings.pricing_signer_private_key.get_secret_value())
+    sign_text = json.dumps(message_payload, separators=(",", ":"), sort_keys=True)
+    signed = Account.sign_message(encode_defunct(text=sign_text), signer_account.key)  # type: ignore[arg-type]
+
     quote = quote.model_copy(
         update={
             "max_stake_zen": settings.max_stake_zen,
@@ -957,6 +977,10 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
             "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
             "remaining_user_stake_zen": user_remaining,
             "remaining_market_stake_zen": market_remaining,
+            "quote_id": quote_id,
+            "expires_at": expires_at,
+            "signature": signed.signature.hex(),
+            "signer": signer_account.address,
         }
     )
 
@@ -989,6 +1013,72 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         total_monetisation=str(quote.total_monetisation),
     )
     return quote
+
+
+@app.post("/pricing/submit", response_model=schemas.PricingSubmitResponse, tags=["pricing"])
+def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubmitResponse:
+    """Validate a signed pricing quote and optionally enforce FX drift bounds."""
+
+    quote = payload.quote
+    now = datetime.now(tz=UTC)
+    if quote.expires_at <= now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+
+    signer_account = (
+        load_account(settings.pricing_signer_private_key.get_secret_value())
+        if settings.pricing_signer_private_key
+        else None
+    )
+    if signer_account is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
+
+    message_payload = {
+        "version": "v1",
+        "quote_id": quote.quote_id,
+        "stake_zen": float(quote.stake_zen),
+        "zen_usd": float(quote.zen_usd),
+        "market_id": getattr(quote, "market_id", None),
+        "user_id": getattr(quote, "user_id", None),
+        "expires_at": quote.expires_at.isoformat(),
+    }
+    sign_text = json.dumps(message_payload, separators=(",", ":"), sort_keys=True)
+    try:
+        recovered = Account.recover_message(encode_defunct(text=sign_text), signature=quote.signature)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
+    if recovered.lower() != signer_account.address.lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
+
+    # Enforce fresh FX vs quoted value if requested.
+    current_fx = None
+    try:
+        fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
+        fx.raise_for_status()
+        data = fx.json()
+        current_fx = float(
+            data.get("price")
+            or data.get("zen_usd")
+            or data.get("zenUSD")
+            or data.get("fx_zen_usd")
+            or data.get("fx", {}).get("zen_usd")
+        )
+        if payload.max_fx_diff_percent is not None:
+            fx_diff_percent = abs(current_fx - quote.zen_usd) / quote.zen_usd * 100 if quote.zen_usd else 0.0
+            if fx_diff_percent > payload.max_fx_diff_percent:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"FX drift {fx_diff_percent:.4f}% exceeds bound {payload.max_fx_diff_percent}%",
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}") from exc
+
+    return schemas.PricingSubmitResponse(
+        quote=quote,
+        current_fx=current_fx if current_fx is not None else quote.zen_usd,
+        valid=True,
+    )
 
 
 @app.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])

@@ -105,8 +105,6 @@ contract HedgeStrategyExecutor is EIP712, Ownable, Pausable, ReentrancyGuard {
         whenNotPaused
         returns (bytes32 orderHash)
     {
-        _validateOrder(order);
-
         orderHash = _hashTypedDataV4(
             keccak256(
                 abi.encode(
@@ -121,9 +119,12 @@ contract HedgeStrategyExecutor is EIP712, Ownable, Pausable, ReentrancyGuard {
             )
         );
 
-        if (ECDSA.recover(orderHash, signature) != signer) {
+        (address recoveredSigner, ECDSA.RecoverError recoverError, ) = ECDSA.tryRecover(orderHash, signature);
+        if (recoverError != ECDSA.RecoverError.NoError || recoveredSigner != signer) {
             revert InvalidSigner();
         }
+
+        _validateOrder(order);
 
         usedNonces[order.nonce] = true;
 
