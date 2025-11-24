@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
+from pydantic import AnyHttpUrl
 from redis.asyncio import Redis
 from websockets import connect
 
@@ -58,25 +59,37 @@ class StreamState:
         if self.redis:
             await self.redis.aclose()
 
-    async def refresh_fx(self, *, label: str = "coingecko_rest") -> FxQuote:
+    async def _fetch_fx_from_url(self, url: AnyHttpUrl, label: str) -> FxQuote | None:
+        async with httpx.AsyncClient(timeout=self.settings.fx_timeout_seconds) as client:
+            res = await client.get(str(url))
+            res.raise_for_status()
+            data = res.json()
+            price = (
+                data.get("price")
+                or data.get("zen_usd")
+                or data.get("zenUSD")
+                or data.get("horizen", {}).get("usd")
+                or data.get("USD")
+                or data.get("usd")
+            )
+            if price is None:
+                return None
+            return self._register_fx(Decimal(str(price)), source=label, allow_jump=True)
+
+    async def refresh_fx(self, *, label: str = "rest") -> FxQuote:
         async with self._fx_lock:
             try:
-                async with httpx.AsyncClient(timeout=self.settings.fx_timeout_seconds) as client:
-                    res = await client.get(str(self.settings.fx_feed_url))
-                    res.raise_for_status()
-                    data = res.json()
-                    price = (
-                        data.get("price")
-                        or data.get("zen_usd")
-                        or data.get("zenUSD")
-                        or data.get("horizen", {}).get("usd")
-                    )
-                    if price is None:
-                        raise ValueError("FX feed missing zen_usd/price")
-                    quote = self._register_fx(Decimal(str(price)), source=label, allow_jump=True)
-                    if quote:
-                        return quote
-                    raise ValueError("FX quote rejected by sanity checks")
+                # Avoid recursive self-calls if misconfigured to hit our own /fx endpoint.
+                if str(self.settings.fx_feed_url).startswith(
+                    f"http://{self.settings.api_host}:{self.settings.api_port}"
+                ):
+                    raise ValueError("FX feed URL points to price-streamer itself; skipping")
+                quote = await self._fetch_fx_from_url(self.settings.fx_feed_url, label)
+                if not quote and self.settings.fx_feed_alt_url:
+                    quote = await self._fetch_fx_from_url(self.settings.fx_feed_alt_url, "rest_fallback")
+                if quote:
+                    return quote
+                raise ValueError("FX quote rejected by sanity checks")
             except Exception as exc:  # pragma: no cover - network fallback
                 logger.warning(
                     "FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)}

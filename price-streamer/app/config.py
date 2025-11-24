@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     rtds_topic_crypto: str = Field(default="crypto_prices")
     rtds_topic_chainlink: str = Field(default="crypto_prices_chainlink")
     fx_feed_url: AnyHttpUrl = Field(
-        default="https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd"
+        default="https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT",
+        description="Primary REST fallback for FX (Binance HTTP).",
+    )
+    fx_feed_alt_url: AnyHttpUrl | None = Field(
+        default="https://min-api.cryptocompare.com/data/price?fsym=ZEN&tsyms=USD",
+        description="Secondary REST fallback for FX (CryptoCompare).",
     )
     fx_ws_url: str | None = Field(
         default="wss://stream.binance.com:9443/ws/zenusdt@ticker",
@@ -40,7 +45,7 @@ class Settings(BaseSettings):
     fx_rest_enabled: bool = Field(default=True)
     fx_rest_interval_seconds: int = Field(default=10, ge=5)
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
-    fx_fallback_price: float = Field(default=1.0, gt=0)
+    fx_fallback_price: float = Field(default=3.0, gt=0)
     market_stale_seconds: int = Field(default=60, ge=10)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
