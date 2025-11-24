@@ -28,10 +28,10 @@ from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import crud, models, schemas
+from app.cache import get_redis_client
 from app.config import Settings, get_settings
 from app.database import get_session, run_migrations, session_scope
 from app.health import build_health_response
-from app.cache import get_redis_client
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
@@ -910,7 +910,9 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         try:
             market_total = float(redis_client.get(market_key) or 0)
         except Exception as exc:  # pragma: no cover - defensive logging only
-            log_event(logger, logging.WARNING, event="betcaps.read.error", message="Failed to read market cap", error=str(exc))
+            log_event(
+                logger, logging.WARNING, event="betcaps.read.error", message="Failed to read market cap", error=str(exc)
+            )
             market_total = 0
         if market_total + payload.stake_zen > settings.max_market_stake_zen:
             raise HTTPException(
@@ -924,7 +926,13 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
             try:
                 user_total = float(redis_client.get(user_key) or 0)
             except Exception as exc:  # pragma: no cover
-                log_event(logger, logging.WARNING, event="betcaps.read.error", message="Failed to read user cap", error=str(exc))
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="betcaps.read.error",
+                    message="Failed to read user cap",
+                    error=str(exc),
+                )
                 user_total = 0
             if user_total + payload.stake_zen > settings.max_user_stake_per_market_zen:
                 raise HTTPException(
@@ -962,7 +970,13 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         try:
             pipeline.execute()
         except Exception as exc:  # pragma: no cover
-            log_event(logger, logging.WARNING, event="betcaps.write.error", message="Failed to persist bet caps", error=str(exc))
+            log_event(
+                logger,
+                logging.WARNING,
+                event="betcaps.write.error",
+                message="Failed to persist bet caps",
+                error=str(exc),
+            )
 
     log_event(
         logger,
