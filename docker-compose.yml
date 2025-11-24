@@ -249,6 +249,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Use tls_local to avoid ACME challenges during local runs.
+      CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE:-tls_prod}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -1,3 +1,24 @@
+(tls_prod) {
+  tls {
+    # Allow only TLS1.2+ (TLS1.3 preferred)
+    protocols tls1.2 tls1.3
+
+    # Strong ECDH curves for key exchange
+    curves x25519 secp521r1 secp384r1
+
+    # ACME certificate issuer settings
+    issuer acme {
+      email infra@revealmarket.xyz
+    }
+  }
+}
+
+# Local/dev profile: use Caddy's internal CA instead of ACME to avoid
+# external challenges during local runs.
+(tls_local) {
+  tls internal
+}
+
 {
   # ======================================================================
   #  GLOBAL OPTIONS
@@ -56,18 +77,7 @@ revealmarket.xyz {
   # ------------------------------------------------------------------
   #  TLS HARDENING
   # ------------------------------------------------------------------
-  tls {
-    # Allow only TLS1.2+ (TLS1.3 preferred)
-    protocols tls1.2 tls1.3
-
-    # Strong ECDH curves for key exchange
-    curves x25519 secp521r1 secp384r1
-
-    # ACME certificate issuer settings
-    issuer acme {
-      email infra@revealmarket.xyz
-    }
-  }
+  import {$CADDY_TLS_PROFILE:tls_prod}
 
   # ------------------------------------------------------------------
   #  SECURITY HEADERS
@@ -143,12 +153,7 @@ revealmarket.xyz {
 stream.revealmarket.xyz {
   encode zstd gzip
 
-  tls {
-    protocols tls1.2 tls1.3
-    issuer acme {
-      email infra@revealmarket.xyz
-    }
-  }
+  import {$CADDY_TLS_PROFILE:tls_prod}
 
   log {
     level WARN
@@ -179,12 +184,7 @@ www.revealmarket.xyz {
   # Enable compression for redirect responses
   encode zstd gzip
 
-  tls {
-    protocols tls1.2 tls1.3
-    issuer acme {
-      email infra@revealmarket.xyz
-    }
-  }
+  import {$CADDY_TLS_PROFILE:tls_prod}
 
   # HTTPS Strict Transport Security with preload (1 year)
   header {

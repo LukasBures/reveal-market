@@ -140,6 +140,8 @@ COMPOSE_ENV_ARGS=()
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
+# Production runs default to real certificates unless explicitly overridden.
+export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_prod}"
 
 RUN_BUILD="true"
 RUN_PRUNE="false"
