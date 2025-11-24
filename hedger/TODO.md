@@ -41,3 +41,4 @@ Short list of items to reach a functional hedger MVP.
 ## Deployability
 - Alembic migration for hedger tables/columns; data retention/backfill plan for commits/hedges/resolutions.
 - Health probes that verify Redis/Postgres/polymarket/vault reachability; runbooks for replay/backfill and incident handling.
+- Sanity check frontend/API/streamer CORS alignment in staging so hedger metrics/health endpoints remain reachable through the stack.

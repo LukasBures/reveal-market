@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from pydantic import AliasChoices, AnyHttpUrl, Field
+from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
 
 
 class Settings(BaseSettings):

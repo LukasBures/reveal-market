@@ -86,8 +86,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      prover:
-        condition: service_healthy
     # Expose FastAPI on the host so docs + frontend can talk to it directly.
     ports:
       - "8000:8000"
@@ -97,7 +95,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-m", "app.healthcheck"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -183,8 +181,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      prover:
-        condition: service_healthy
     ports:
       - "8090:8090"
     healthcheck:
@@ -227,7 +223,7 @@ services:
       LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE:-rm125}
       SITEMAP_API_BASE_URL: http://api:8000
       NEXT_PUBLIC_PRICE_STREAMER_URL: ${NEXT_PUBLIC_PRICE_STREAMER_URL:-http://localhost:8100}
-      STREAMER_INTERNAL_URL: ${STREAMER_INTERNAL_URL:-http://price_streamer:8100}
+      STREAMER_INTERNAL_URL: ${STREAMER_INTERNAL_URL:-http://price-streamer:8100}
     depends_on:
       api:
         condition: service_healthy
@@ -274,12 +270,6 @@ services:
       PROVER_BACKEND: ${PROVER_BACKEND:-groth16}
     ports:
       - "8085:8085"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     deploy:
       replicas: 1
       resources:
@@ -290,7 +280,7 @@ services:
           cpus: "0.5"
           memory: 256M
 
-  price_streamer:
+  price-streamer:
     build:
       context: .
       dockerfile: docker/price-streamer/Dockerfile
@@ -300,7 +290,7 @@ services:
       STREAMER_REDIS_URL: redis://redis:6379/0
       STREAMER_CLOB_WS_URL: wss://clob.polymarket.com/ws
       STREAMER_CLOB_REST_MARKETS_URL: https://gamma-api.polymarket.com/markets
-      STREAMER_INTERNAL_URL: http://price_streamer:8100
+      STREAMER_INTERNAL_URL: http://price-streamer:8100
       STREAMER_FX_FEED_URL: ${STREAMER_FX_FEED_URL:-https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT}
       STREAMER_FX_WS_URL: ${STREAMER_FX_WS_URL:-wss://stream.binance.com:9443/ws/zenusdt@ticker}
       STREAMER_FX_WS_STALE_TTL_SECONDS: ${STREAMER_FX_WS_STALE_TTL_SECONDS:-10}
@@ -310,9 +300,9 @@ services:
       STREAMER_API_HOST: 0.0.0.0
       STREAMER_API_PORT: 8100
       LOG_LEVEL: ${STREAMER_LOG_LEVEL:-INFO}
-      STREAMER_CORS_ALLOW_ORIGINS: ${STREAMER_CORS_ALLOW_ORIGINS:-http://localhost:3000}
-      STREAMER_CORS_ALLOW_METHODS: ${STREAMER_CORS_ALLOW_METHODS:-GET,HEAD,OPTIONS}
-      STREAMER_CORS_ALLOW_HEADERS: ${STREAMER_CORS_ALLOW_HEADERS:-*}
+      STREAMER_CORS_ALLOW_ORIGINS: ${STREAMER_CORS_ALLOW_ORIGINS:-["http://localhost:3000"]}
+      STREAMER_CORS_ALLOW_METHODS: ${STREAMER_CORS_ALLOW_METHODS:-["GET","HEAD","OPTIONS"]}
+      STREAMER_CORS_ALLOW_HEADERS: ${STREAMER_CORS_ALLOW_HEADERS:-["*"]}
       STREAMER_CORS_ALLOW_CREDENTIALS: ${STREAMER_CORS_ALLOW_CREDENTIALS:-false}
     depends_on:
       redis:
@@ -320,7 +310,7 @@ services:
     ports:
       - "8100:8100"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8100/health"]
+      test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 20s
       timeout: 5s
       retries: 3

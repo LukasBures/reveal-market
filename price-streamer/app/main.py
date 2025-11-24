@@ -77,7 +77,7 @@ def create_app() -> FastAPI:
         allow_credentials=settings.cors_allow_credentials,
     )
 
-    @app.get("/health")
+    @app.get("/healthz")
     async def health() -> dict:
         fx = await state.get_fx()
         stale_markets = state.stale_markets(settings.market_stale_seconds)
@@ -97,6 +97,10 @@ def create_app() -> FastAPI:
             "stale_markets": stale_markets,
             "last_seen": {k: v.isoformat() for k, v in state.last_seen.items()},
         }
+
+    @app.get("/healthz")
+    async def healthz() -> dict:
+        return await health()
 
     async def _fx_payload() -> dict:
         quote = await state.get_fx()

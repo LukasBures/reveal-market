@@ -38,7 +38,7 @@ def test_health_endpoint_reports_ok(client, monkeypatch):
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
 
-    response = client.get("/health")
+    response = client.get("/healthz")
     assert response.status_code == 200
 
     payload = response.json()
@@ -58,7 +58,7 @@ def test_health_endpoint_marks_worker_degraded_when_heartbeat_missing(client, mo
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
 
-    response = client.get("/health")
+    response = client.get("/healthz")
     assert response.status_code == 200
 
     payload = response.json()
@@ -90,7 +90,7 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", TimeoutAsyncClient)
 
-    response = client.get("/health")
+    response = client.get("/healthz")
     assert response.status_code == 200
 
     payload = response.json()
@@ -129,7 +129,7 @@ def test_heartbeat_dashboard_reports_components(client):
         ),
     )
 
-    response = client.get("/health/heartbeats")
+    response = client.get("/healthz/heartbeats")
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"]["service"] == "Reveal Market Worker"
@@ -142,7 +142,7 @@ def test_heartbeat_dashboard_handles_missing_payload(client):
     cache.delete("reveal_market_worker:heartbeat")
     cache.delete("reveal_market_api:heartbeat")
 
-    response = client.get("/health/heartbeats")
+    response = client.get("/healthz/heartbeats")
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"] is None
@@ -165,7 +165,7 @@ def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
         ),
     )
 
-    response = client.get("/health/heartbeats")
+    response = client.get("/healthz/heartbeats")
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"]["status"] == "degraded"
@@ -187,7 +187,7 @@ def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
         ),
     )
 
-    response = client.get("/health/heartbeats")
+    response = client.get("/healthz/heartbeats")
     assert response.status_code == 200
     payload = response.json()
     assert payload["api"]["status"] == "degraded"

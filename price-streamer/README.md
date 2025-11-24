@@ -18,6 +18,7 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
   - `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
   - `STREAMER_FX_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
   - `STREAMER_API_HOST`, `STREAMER_API_PORT`
+  - `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS` (align with your frontend origin, e.g., `http://localhost:3000` in dev)
   - Optional: `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_CRYPTO_SYMBOLS`, `STREAMER_SIGNING_SECRET`
 
 ## Local setup
@@ -28,7 +29,7 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 ```
 
 ## Endpoints
-- `GET /health` – service + feed status (stale flags, FX age).
+- `GET /healthz` – service + feed status (stale flags, FX age).
 - `GET /history?market_id=...&outcome=0&limit=100` – recent ticks.
 - `GET /stream?market_id=...&assets_ids=a1,a2&symbols=zenusdt` – SSE stream; subscribes to provided asset IDs and optional RTDS symbols.
 
@@ -39,10 +40,11 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 
 ## Docker
 ```bash
-docker compose build price_streamer
-docker compose up price_streamer
+docker compose build price-streamer
+docker compose up price-streamer
 ```
 
 ## Notes
 - Keep subscriptions scoped (assets_ids/symbols) to limit bandwidth.
 - If the backend API is offline, SSE still serves cached/streamed prices but flags FX as stale when applicable.
+ - Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.

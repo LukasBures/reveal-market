@@ -8,6 +8,7 @@ This doc lists the minimum cross-team work that must land before we can call the
 - **Frontend** – Investors must see real data everywhere (charts, search, proofs) and be able to export diligence artifacts without leaving the site.
 - **Proover** – Operators need artifact validation and Prometheus-grade telemetry so zk receipts remain trustworthy in production.
 - **Limits & gating** – Enforce per-bet and per-user caps off-chain (UI + API/hedger) and document on-chain equivalents for future hardening.
+- **CORS/stream alignment** – Keep API and price-streamer CORS settings in sync with frontend origins so FX, history, and stream endpoints stay reachable in browser builds.
 
 See the service-specific TODO files for deeper acceptance criteria.
 

@@ -10,4 +10,7 @@ Only two things block us from trusting the prover in MVP environments:
    - Export latency histograms and concurrency gauges via `/metrics` so ops can alert on slow proofs or stalled queues.
    - Include a build/version label so dashboards know exactly which prover binary is running.
 
+3. **Ops hygiene**
+   - Ensure prover debug endpoints stay reachable behind whatever CORS/ingress rules are applied in staging/prod; document expected origins in ops runbooks.
+
 Deliver these and the prover is MVP-ready.

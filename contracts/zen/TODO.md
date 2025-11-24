@@ -13,6 +13,7 @@
 ## Deployment / Ops
 - Update deployment docs/runbooks to match native-only collateral, 12 public signals, and max payout multiplier rules.
 - Add a sanity lint/CI step for forge-lint in the contracts job.
+- Add a note in deployment runbooks about frontend/API/streamer CORS origins to avoid blocked explorer links in staging.
 
 ## Observability
 - Add events for factory risk sync failures (currently silent) if you want explicit alerts on accounting drift.

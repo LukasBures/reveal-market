@@ -198,7 +198,7 @@ export function MarketDetailOutcomes({ market }: Props) {
             <div className="flex items-center justify-between">
               <span>FX (ZEN/USD)</span>
               <span className="font-semibold text-white">
-                {fx ? fx.zen_usd.toFixed(4) : "loading…"} {fx?.stale ? "(stale)" : ""}
+                {fx && fx.zen_usd > 0 ? fx.zen_usd.toFixed(2) : "0.00"} {fx?.stale ? "(stale)" : ""}
               </span>
             </div>
             <div className="flex items-center justify-between">

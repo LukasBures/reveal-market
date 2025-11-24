@@ -34,7 +34,7 @@ Additional docs live in each directory’s README.
 - **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `prover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
 - **Hedger** – FastAPI admin surface with Prometheus metrics; tracks exposures (YES/NO), FX haircuts, risk limits, and emits buy/sell/unwind hedge instructions with slippage gates. Uses Redis locks/idempotency + DB offsets for replay safety, hydrates state from Postgres on restart, and builds prover payloads from stored commits/outcomes before marking markets resolved. Metrics include exposures, coverage, LP utilization, float, PnL placeholders, event lag, hedge executions, and settlement/prover latency.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/run_local.sh full`, and `./run_tests.sh` are the same flows used in CI (`.github/workflows/ci.yml`). Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
-- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Coingecko fallback; `/fx/zen-usd` exposes the latest quote + staleness. API/hedger reject stale FX and cap per-quote stakes (100 ZEN surfaced in the UI) with haircut/worsen/rake applied server-side.
+- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Coingecko fallback; `/fx/zen-usd` exposes the latest quote + staleness. API/hedger reject stale FX and cap per-quote stakes (100 ZEN surfaced in the UI) with haircut/worsen/rake applied server-side. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
 - **Bet caps (off-chain)** – UI stake inputs clamp to 100 ZEN; API enforces `RM_MAX_STAKE_ZEN`, and hedger mirrors per-commit caps. Per-user/per-market caps are planned on-chain (see service TODOs) and will be mirrored off-chain first.
 
 ---
@@ -86,6 +86,7 @@ cd hedger && ./run_tests.sh
 # Price Streamer (WS/SSE service)
 uv sync --project price-streamer --extra dev --no-install-project
 cd price-streamer && ./run_tests.sh
+# If calling /stream or /history from the browser, set STREAMER_CORS_ALLOW_ORIGINS to your frontend origin (e.g., http://localhost:3000).
 
 # Full docker stack (API, worker, frontend, Postgres, Redis, prover)
 ./run_local.sh

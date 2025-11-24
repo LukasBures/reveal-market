@@ -50,9 +50,10 @@ export function MainNav() {
         const data = await fetchFxQuote();
         if (cancelled) return;
         const value = Number(data.zen_usd);
+        const stale = Boolean(data.stale);
         const display = Number.isFinite(value) && value > 0 ? value.toFixed(2) : "0.00";
-        setFxLabel(`ZEN/USD ${display}`);
-        setFxStale(Boolean(data.stale));
+        setFxLabel(`ZEN/USD ${display}${stale ? " (stale)" : ""}`);
+        setFxStale(stale);
         setFxError(null);
       } catch (err) {
         if (cancelled) return;
@@ -117,7 +118,7 @@ export function MainNav() {
             </Link>
           ))}
         </nav>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 text-sm md:text-base">
           <button
             type="button"
             className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
@@ -155,15 +156,15 @@ export function MainNav() {
         </>
       ) : null}
       <div className="border-t border-white/5 bg-black/60 px-4 py-2 text-xs text-white/80">
-        <div className="mx-auto flex max-w-7xl items-center justify-end gap-3">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-end gap-2 md:gap-3">
+          <div className="flex items-center gap-2 md:gap-3">
             {fxStale && <span className="text-amber-300 text-[11px] uppercase tracking-[0.2em]">FX stale</span>}
             {fxError && <span className="text-rose-300 text-[11px] uppercase tracking-[0.2em]">FX unavailable</span>}
             {!fxStale && !fxError && (
               <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>
             )}
           </div>
-          <span className="rounded-full bg-white/5 px-3 py-1 font-semibold tracking-wide">
+          <span className="rounded-full bg-white/5 px-2 py-1 text-[11px] font-semibold tracking-wide md:px-3">
             {fxLabel ? fxLabel : "ZEN/USD loading…"}
           </span>
         </div>

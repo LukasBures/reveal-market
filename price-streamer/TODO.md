@@ -6,5 +6,6 @@
 - [ ] Add metrics for per-market staleness, dropped messages, and SSE delivery counts; export Prometheus labels for source=ws/rest/rtds.
 - [ ] Support configurable debounce per market/outcome and bounded history trimming by age.
 - [ ] Document recommended CORS/allowed-origins when deploying behind a reverse proxy.
+- [ ] Enforce configurable CORS defaults (STREAMER_CORS_ALLOW_*) in code/tests and add a healthcheck to warn when frontend origins are missing.
 - [ ] Wire on-demand subscription control API and document max_subscriptions behavior for ops; surface current FX/market staleness in a dashboard.
 - [ ] Note future on-chain caps: mirror off-chain bet caps (maxTicketStake/maxUserStakePerMarket) once contracts expose them.

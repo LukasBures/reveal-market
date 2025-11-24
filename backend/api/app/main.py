@@ -852,7 +852,7 @@ def read_root() -> dict[str, str]:
     }
 
 
-@app.get("/health", response_model=schemas.HealthResponse, tags=["health"])
+@app.get("/healthz", response_model=schemas.HealthResponse, tags=["health"])
 async def health_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
     return await build_health_response(session)
 
