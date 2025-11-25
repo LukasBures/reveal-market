@@ -181,6 +181,56 @@ async def test_fetch_midpoints_handles_client_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_market_event_trade_caches_payload():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    await streamer._handle_market_event(
+        {"event_type": "last_trade_price", "market": "m1", "price": "0.42", "size": "10", "side": "BUY"},
+        source="ws",
+    )
+    assert state.cached
+    _, outcome, payload = state.cached[-1]
+    assert outcome == "trades"
+    assert payload["type"] == "trade"
+    assert payload["price"] == "0.42"
+    assert payload["side"] == "BUY"
+
+
+@pytest.mark.asyncio
+async def test_handle_market_event_book_applies_worsen():
+    settings = Settings(worsen_percent=0.1)
+    state = StubState()
+    streamer = PriceStreamer(state, settings)
+    await streamer._handle_market_event(
+        {
+            "event_type": "book",
+            "market": "m2",
+            "bids": [{"price": "1.0"}],
+            "asks": [{"price": "2.0"}],
+        },
+        source="ws",
+    )
+    assert state.cached
+    _, outcome, payload = state.cached[-1]
+    assert outcome == "meta"
+    assert Decimal(payload["display_best_bid"]) == Decimal("0.9")
+    assert Decimal(payload["display_best_ask"]) == Decimal("1.8")
+
+
+@pytest.mark.asyncio
+async def test_handle_market_event_tick_size():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    await streamer._handle_market_event(
+        {"event_type": "tick_size_change", "market": "m3", "new_tick_size": "0.01"}, source="ws"
+    )
+    assert state.cached
+    _, outcome, payload = state.cached[-1]
+    assert outcome == "meta"
+    assert payload["tick_size"] == "0.01"
+
+
+@pytest.mark.asyncio
 async def test_fx_ws_then_rest_fallback_metrics(monkeypatch):
     """WS preferred; staleness forces REST and updates metrics."""
 

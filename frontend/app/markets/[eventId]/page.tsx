@@ -9,6 +9,7 @@ import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
+import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -236,15 +237,34 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">
               <section className="rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
-                <p className="mt-3">{contextCopy}</p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
+                    <p className="mt-3">{contextCopy}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
+                    {market.category && (
+                      <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
+                    )}
+                    {market.status && (
+                      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
+                        {market.status.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </section>
-              <MarketDetailChart marketId={canonicalEventId} />
               <MarketDetailOutcomes market={market} />
-              <StakeQuoteCard marketAddress={market.marketAddress} marketId={canonicalEventId} outcomeId={0} />
+              <div className="grid gap-4 lg:grid-cols-2">
+                <MarketDetailChart marketId={canonicalEventId} />
+                <MarketLivePanels marketId={canonicalEventId} />
+              </div>
               <MarketDetailMetadataPanel market={market} />
             </div>
-            <MarketDetailSidebarPanel market={market} />
+            <div className="space-y-4">
+              <StakeQuoteCard marketAddress={market.marketAddress} marketId={canonicalEventId} outcomeId={0} />
+              <MarketDetailSidebarPanel market={market} />
+            </div>
           </div>
         </div>
       </div>

@@ -104,21 +104,33 @@ ensure_prover_artifacts() {
     log_warn "Skipping Groth16 artifact validation (SKIP_PROVER_CHECK=true)."
     return
   fi
-  local missing=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    if [[ ! -f "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
-      missing+=("${rel_path}")
+  # Prefer the Go-based verifier when Go is available; fall back to a simple file check.
+  if command -v go >/dev/null 2>&1; then
+    if ! (cd "${ROOT_DIR}/prover" && go run ./cmd/verify-artifacts >/dev/null 2>&1); then
+      cat <<EOF
+Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
+Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
+Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
+EOF
+      exit 1
     fi
-  done
-  if (( ${#missing[@]} > 0 )); then
-    cat <<EOF
+  else
+    local missing=()
+    for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+      if [[ ! -f "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
+        missing+=("${rel_path}")
+      fi
+    done
+    if (( ${#missing[@]} > 0 )); then
+      cat <<EOF
 Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
 Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
 Missing files:
 $(printf '  - %s\n' "${missing[@]}")
 Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
 EOF
-    exit 1
+      exit 1
+    fi
   fi
 }
 

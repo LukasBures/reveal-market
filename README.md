@@ -64,7 +64,7 @@ Additional docs live in each directory’s README.
 - **Logging** – Unified formatter across services (`timestamp | LEVEL | logger | file:line | event | request_id`). Optional rotating file output for regulated deployments, structured JSON-LD for site-wide schema.
 - **Edge canonicalization** – Caddy terminates TLS, forces HTTP→HTTPS, and redirects `www.` (and any stray HTTP hostnames) to `https://revealmarket.xyz` so crawlers only ever see the canonical domain.
 - **SLA telemetry** – Every request logs latency buckets, bytes sent, and cache hit/miss data. The API publishes aggregated metrics to Redis and exposes a live dashboard at `/health/heartbeats`, so you can verify worker/API heartbeats, cache hit rates, and average latency in one place.
-- **Tests** – `./backend/run_tests.sh` (pytest, 4-way xdist by default), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests; `./run_tests.sh` performs the same sequence locally (backend → frontend → contracts → prover).
+- **Tests** – `./backend/run_tests.sh` (pytest, 4-way xdist by default), `./frontend/run_tests.sh` (lint + Next build, fails fast if the API is unreachable), `cd contracts && forge test`. CI (`.github/workflows/ci.yml`) runs all three jobs in parallel and boots the backend stack before frontend tests; `./run_tests.sh` performs the same sequence locally (backend → frontend → contracts → prover) and now checks prover artifacts via `prover/cmd/verify-artifacts`.
 
 ---
 

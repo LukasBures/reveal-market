@@ -1,4 +1,4 @@
-import selectors from "../../contracts/cache/errors.json";
+import selectors from "@/lib/errors.json";
 
 // errors.json maps selector -> signature (e.g., {"0x0dc149f0":"AlreadyInitialized()"})
 const selectorMap: Record<string, string> = selectors as Record<string, string>;

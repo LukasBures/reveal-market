@@ -148,6 +148,30 @@ def upgrade() -> None:
     op.create_index("ix_settlements_market_id", "settlements", ["market_id"])
     op.create_index("ix_settlements_proof_status", "settlements", ["proof_status"])
 
+    # Hedger treasury snapshots (folded from former 0002 migration)
+    op.create_table(
+        "hedger_treasury_snapshots",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.String(), nullable=False),
+        sa.Column("outcome", sa.String(), nullable=False),
+        sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("refund_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("rake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("payout_profit_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("borrowed_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("lp_share_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("repay_amount_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("platform_usdc_revenue", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("zen_balance", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("usdc_balance", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index(
+        "ix_hedger_treasury_snapshots_market_id",
+        "hedger_treasury_snapshots",
+        ["market_id"],
+    )
+
     op.create_table(
         "schema_versions",
         sa.Column("key", sa.String(length=64), primary_key=True, nullable=False),
@@ -157,6 +181,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_hedger_treasury_snapshots_market_id", table_name="hedger_treasury_snapshots")
+    op.drop_table("hedger_treasury_snapshots")
     op.drop_index("ix_settlements_proof_status", table_name="settlements")
     op.drop_index("ix_settlements_market_id", table_name="settlements")
     op.drop_table("settlements")

@@ -107,6 +107,12 @@ check_prover_artifacts() {
     log_warn "Skipping Groth16 prover artifact validation (per flag)."
     return
   fi
+  # Prefer the Go-based verifier when available.
+  if command -v go >/dev/null 2>&1; then
+    if (cd "${ROOT_DIR}/prover" && go run ./cmd/verify-artifacts >/dev/null 2>&1); then
+      return
+    fi
+  fi
 
   local missing=()
   for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do

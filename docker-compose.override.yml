@@ -30,8 +30,3 @@ services:
     volumes:
       - ./hedger/app:/hedger/app
       - ./backend/shared:/hedger/shared
-
-  frontend:
-    # Alternate docs hostname used by the marketing site in development.
-    environment:
-      DOCS_HOST: docs.local.revealmarket.xyz

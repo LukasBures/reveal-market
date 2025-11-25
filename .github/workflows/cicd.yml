@@ -257,6 +257,16 @@ jobs:
         working-directory: prover
         run: ./run_tests.sh -v
 
+      - name: Go format check (prover)
+        working-directory: prover
+        run: |
+          CHANGED=$(gofmt -l .)
+          if [ -n "$CHANGED" ]; then
+            echo "gofmt would reformat:"
+            echo "$CHANGED"
+            exit 1
+          fi
+
       - name: Go vet
         working-directory: prover
         run: go vet -v ./...

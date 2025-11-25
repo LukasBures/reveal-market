@@ -24,14 +24,11 @@ See the service-specific TODO files for deeper acceptance criteria.
 4. **Stake caps (future on-chain)** – Add maxTicketStake and maxUserStakePerMarket to RevealMarket/Factory so on-chain rejects oversize commits; mirror off-chain caps until then.
 
 ### Frontend MVP gaps
-1. **Live market telemetry** – Replace the placeholder `MarketDetailChart` with real price/liquidity history sourced from the backend/worker so detail pages show actual performance.
-2. **Full search experience** – Ship a `/markets/search` surface (pagination, keyboard shortcuts, category pills) that calls the backend search endpoint instead of filtering placeholder cards.
-3. **Proof & diligence surfacing** – Add filters (status, verifier, market) + CSV export on `/proofs`, and include a visible trust CTA so investors can self-serve receipts.
-4. **Bet limit UX** – Persistently surface per-bet and per-user caps in stake inputs and disable actions when limits are exceeded or FX/market data is stale.
+1. **Proof & diligence surfacing** – Add filters (status, verifier, market) + CSV export on `/proofs`, and include a visible trust CTA so investors can self-serve receipts.
+2. **Bet limit UX** – Persistently surface per-bet and per-user caps in stake inputs and disable actions when limits are exceeded or FX/market data is stale.
 
 ### Proover MVP gaps
-1. **Artifact validation command** – Provide a CLI/env check that verifies `settlement_final.zkey` and `settlement_js` before the prover boots outside Docker so operators don’t accidentally run with stale artifacts. (Keygen regenerates circuitHash/pk/vk hashes; need CLI/health integration.)
-2. **Prometheus metrics** – Expose latency/concurrency counters via `/metrics` (histograms + gauges) so ops can alert on proof slowdowns and stalled queues.
+_Completed_: artifact validation CLI (`cmd/verify-artifacts`) wired into CI and startup; Prometheus metrics exposed at `/metrics`.
 
 Keep scope tight—shipping these items unblocks the MVP announcement.
 

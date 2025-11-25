@@ -22,6 +22,8 @@ type FxConnection = {
   subscribers: Set<() => void>;
   ws: WebSocket | null;
   backoff: number;
+  wsFailures: number;
+  wsDisabledUntil: number;
   startTs: number;
   fallbackTimer: ReturnType<typeof setInterval> | null;
   cancelled: boolean;
@@ -49,8 +51,7 @@ function setState(conn: FxConnection, patch: Partial<FxConnectionState>) {
 }
 
 function startFallback(path: string, conn: FxConnection, connect: () => void) {
-  if (conn.fallbackTimer) return;
-  conn.fallbackTimer = setInterval(async () => {
+  const runFetch = async () => {
     if (conn.cancelled) return;
     const age = Date.now() - conn.state.lastUpdate;
     const sinceStart = Date.now() - conn.startTs;
@@ -88,7 +89,11 @@ function startFallback(path: string, conn: FxConnection, connect: () => void) {
       }
       setTimeout(connect, 200);
     }
-  }, 5_000);
+  };
+  if (conn.fallbackTimer) return;
+  // First fetch immediately to avoid blank UI if WS is unavailable.
+  runFetch().catch(() => {});
+  conn.fallbackTimer = setInterval(runFetch, 5_000);
 }
 
 function startConnection(path: string) {
@@ -100,6 +105,8 @@ function startConnection(path: string) {
     subscribers: new Set(),
     ws: null,
     backoff: 1_000,
+    wsFailures: 0,
+    wsDisabledUntil: 0,
     startTs: Date.now(),
     fallbackTimer: null,
     cancelled: false,
@@ -107,6 +114,10 @@ function startConnection(path: string) {
 
   const connect = () => {
     if (conn.cancelled) return;
+    if (Date.now() < conn.wsDisabledUntil) {
+      setTimeout(connect, 5_000);
+      return;
+    }
     try {
       const ws = createFxWebSocket(path);
       conn.ws = ws;
@@ -114,6 +125,7 @@ function startConnection(path: string) {
         // Keep a single shared WS per path; reset backoff on success.
         setState(conn, { wsConnected: true, status: conn.state.status === "error" ? "connecting" : conn.state.status });
         conn.backoff = 1_000;
+        conn.wsFailures = 0;
       };
       ws.onmessage = (event) => {
         if (conn.cancelled) return;
@@ -137,19 +149,31 @@ function startConnection(path: string) {
         }
       };
       ws.onerror = () => {
-        setState(conn, { wsConnected: false, status: "error", error: "FX socket error" });
+        setState(conn, { wsConnected: false, status: "stale", error: "FX socket error" });
       };
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
         if (conn.cancelled) return;
         const delay = Math.min(conn.backoff, 10_000);
-        setState(conn, { wsConnected: false, status: "error" });
-        console.warn("FX socket closed, reconnecting", { delay });
+        // Treat suspension/closure as stale and let REST fill in.
+        setState(conn, { wsConnected: false, status: "stale" });
+        if (evt && typeof evt.reason === "string" && evt.reason.toLowerCase().includes("suspension")) {
+          console.warn("FX socket closed due to suspension; falling back to REST");
+        } else {
+          console.warn("FX socket closed, reconnecting", { delay });
+        }
+        conn.wsFailures += 1;
+        if (conn.wsFailures >= 3) {
+          conn.wsDisabledUntil = Date.now() + 60_000;
+          conn.wsFailures = 0;
+          return;
+        }
         conn.backoff = delay * 2;
         setTimeout(connect, delay);
       };
     } catch (err) {
-      setState(conn, { wsConnected: false, error: (err as Error).message, status: "error" });
-      console.error("FX stream init failed", err);
+      setState(conn, { wsConnected: false, error: (err as Error).message, status: "stale" });
+      conn.wsDisabledUntil = Date.now() + 60_000;
+      console.error("FX stream init failed; relying on REST", err);
     }
   };
 

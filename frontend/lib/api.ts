@@ -227,13 +227,17 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
   if (maybeShortCircuitOffline("fetchHealthSnapshot")) {
     return null;
   }
+  const endpoint = `${DEFAULT_API_BASE}/healthz`;
   try {
-    const endpoint = `${DEFAULT_API_BASE}/health`;
     logger.debug("fetchHealthSnapshot:request", { endpoint, baseUrl: DEFAULT_API_BASE });
     const response = await fetch(endpoint, {
       next: { revalidate: 45 },
     });
     if (!response.ok) {
+      // Advisory only; skip logging for 404/503 to avoid noise.
+      if (response.status === 404 || response.status === 503) {
+        return null;
+      }
       logger.error("fetchHealthSnapshot:failed", { status: response.status, endpoint, baseUrl: DEFAULT_API_BASE });
       return null;
     }
@@ -256,6 +260,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
     };
     logger.debug("fetchHealthSnapshot:success", {
       status: snapshot.status,
+      endpoint,
     });
     return snapshot;
   } catch (error) {
