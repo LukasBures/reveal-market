@@ -2,25 +2,13 @@
   admin off
   grace_period 5s
   email infra@revealmarket.xyz
-}
-
-(tls_local) {
-  tls internal
-}
-
-# ======================================================================
-# HTTP → HTTPS redirect (port 80)
-# ======================================================================
-:80 {
-  encode zstd gzip
-  redir https://{host}{uri} 308
+  auto_https off
 }
 
 # ======================================================================
 # PRIMARY DOMAIN — revealmarket.xyz
 # ======================================================================
 revealmarket.xyz {
-  import tls_local
   encode zstd gzip
 
   @health path /health
@@ -66,7 +54,6 @@ revealmarket.xyz {
 # STREAMER — stream.revealmarket.xyz
 # ======================================================================
 stream.revealmarket.xyz {
-  import tls_local
   encode zstd gzip
 
   log {
@@ -91,7 +78,6 @@ stream.revealmarket.xyz {
 # API — api.revealmarket.xyz
 # ======================================================================
 api.revealmarket.xyz {
-  import tls_local
   encode zstd gzip
 
   log {
@@ -116,7 +102,6 @@ api.revealmarket.xyz {
 # WWW REDIRECT — www → root
 # ======================================================================
 www.revealmarket.xyz {
-  import tls_local
   encode zstd gzip
 
   header {
@@ -130,7 +115,6 @@ www.revealmarket.xyz {
 # LOCALHOST (TLS via internal CA)
 # ======================================================================
 localhost {
-  import tls_local
   encode zstd gzip
 
   @health path /health
@@ -176,7 +160,6 @@ localhost {
 # LOCALHOST STREAMER/API SUBDOMAINS
 # ======================================================================
 stream.localhost {
-  import tls_local
   encode zstd gzip
 
   log {
@@ -198,7 +181,6 @@ stream.localhost {
 }
 
 api.localhost {
-  import tls_local
   encode zstd gzip
 
   log {
