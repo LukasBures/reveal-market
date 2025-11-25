@@ -42,6 +42,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
         x: new Date(point.timestamp).getTime(),
         y: point.display_price || point.price,
         fx_stale: point.fx_stale,
+        timestamp: point.timestamp,
       })),
     [streamState.histories, outcome],
   );
