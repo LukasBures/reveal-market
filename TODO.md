@@ -696,3 +696,18 @@ ____
   - Failure modes: If the Polymarket stream drops or FX is stale, serve the last known value with a “stale” flag and temporarily disable new bet pricing; resume live once fresh data arrives.
 
   Net: stream from Polymarket to your backend, apply all economics there, broadcast lean per-market updates to clients, and serve FX from your own oracle cache.
+
+
+  Hard
+
+  - Contracts: Merkle accumulator replacement and circuit/public-signal alignment; add on-chain stake caps (maxTicketStake/maxUserStakePerMarket); fuzz/tests for commitWithQuote digest/replay/expiry and signer upgrades.
+  - Backend/worker: persistent resolution ledger + on-chain mirroring (Factory events) and optional settlement automation; ingest real commitments/settlements to back proofs; durable quote audit store.
+  - Frontend+TX path: fully wire commitWithQuote UX (refresh on expiry, chain mismatch handling) and error surfacing; ensure single FX WS reuse across pages.
+  - Hedger: real Polymarket/vault/bridge clients with slippage/unwind logic, replay-safe offsets/locks, and settlement integration with prover payloads.
+
+  Hard
+
+  - Contracts/circuits: real Merkle accumulator + circuit/public-signal alignment; add on-chain stake caps and fuzz/tests for commitWithQuote (replay/expiry/digest).
+  - Backend/worker: ingest on-chain commitments/settlements, persistent resolution ledger, and optional settlement automation; durable replay/audit store for quotes.
+  - Frontend/tx flow: full commitWithQuote UX (expiry refresh, chain mismatch handling), and richer bet-cap UX tied to API caps.
+  - Hedger: production-grade Polymarket/vault/bridge integrations with slippage/unwind, replay-safe offsets/locks, and settlement/prover payload handoff.

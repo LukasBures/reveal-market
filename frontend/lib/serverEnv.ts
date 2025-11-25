@@ -1,5 +1,3 @@
-import "server-only";
-
 import { logger } from "./logging";
 
 export type ServerEnv = {
@@ -24,9 +22,8 @@ function resolveApiBase(): string {
     logger.info("serverEnv:offline_fallback", { fallback: offlineFallback });
     return assertValidUrl(offlineFallback, "offline API base URL");
   }
-  throw new Error(
-    "Missing RM_API_BASE_URL or NEXT_PUBLIC_API_BASE_URL. Set one of them so server components can reach the API.",
-  );
+  logger.warn("serverEnv:missing_base_url", { fallback: offlineFallback });
+  return assertValidUrl(offlineFallback, "fallback API base URL");
 }
 
 function assertValidUrl(value: string, label: string): string {

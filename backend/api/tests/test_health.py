@@ -4,6 +4,8 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
+from app.config import get_settings
+from pydantic import SecretStr
 
 
 class _BaseDummyRedis:
@@ -35,8 +37,17 @@ def test_health_endpoint_reports_ok(client, monkeypatch):
         def get(self, key):
             return b'{"markets_processed": 10}'
 
+    settings = get_settings()
+    settings.pricing_chain_id = 1
+    settings.pricing_signer_private_key = SecretStr(
+        "0x59c6995e998f97a5a004497e5a61829cb0d9bf5f7f19f6cbe9a6a5e4f6b9f9f5"
+    )
+    settings.polymarket_network = "137"
+    settings.cors_allow_origins = ["https://example.com"]
+
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
+    monkeypatch.setattr("app.health.get_settings", lambda: settings)
 
     response = client.get("/healthz")
     assert response.status_code == 200

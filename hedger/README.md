@@ -24,8 +24,10 @@ Useful env vars (defaults live in `app/config.py`):
 - `HEDGER_DATABASE_URL` – Postgres URL (defaults to the shared `postgres` service).
 - `HEDGER_REDIS_URL` – Redis URL for lightweight locks/state.
 - `HEDGER_POLYMARKET_API_BASE` – Base URL for Polymarket REST/GraphQL.
-- `HEDGER_FX_FEED_URL` – Trusted ZEN/USD feed.
+- `HEDGER_FX_FEED_URL` – Trusted ZEN/USD feed (align with API/price-streamer endpoint, e.g., http://price_streamer:8100/fx/zen-usd).
+- `HEDGER_FX_FEED_ALT_URL` – Optional secondary FX feed used if the primary feed is unreachable.
 - `HEDGER_FX_HAIRCUT_BPS` – FX haircut in basis points (e.g., 500 = 5% haircut).
+- `HEDGER_PRICING_SIGNER_ADDRESS` – If set, all commits must carry a signed quote from this address; validation occurs before hedging.
 - `HEDGER_RISK_MAX_GLOBAL_EXPOSURE_USD` – Cap on aggregate USD exposure.
 - `HEDGER_RISK_MAX_PER_MARKET_USD` – Per-market exposure cap before throttling.
 - `HEDGER_FLOAT_MIN_ZEN` – Minimum ZEN float before triggering a bridge top-up.

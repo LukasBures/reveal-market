@@ -166,6 +166,9 @@ jobs:
         with:
           version: nightly
 
+      - name: Generate contract error selectors
+        run: python scripts/generate_error_selectors.py > contracts/cache/errors.json
+
       - name: Zen contracts pipeline
         working-directory: contracts/zen
         run: ./run_tests.sh
@@ -245,6 +248,10 @@ jobs:
           RS_DIR="/tmp/rapidsnark/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}"
           echo "${RS_DIR}/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+      - name: Verify prover artifacts
+        working-directory: prover
+        run: go run ./cmd/verify-artifacts
 
       - name: Run prover tests
         working-directory: prover

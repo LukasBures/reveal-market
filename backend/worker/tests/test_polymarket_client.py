@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+
 import httpx
 from app.polymarket import MarketPayload, PolymarketClient, fetch_clob_markets, merge_clob_markets
 

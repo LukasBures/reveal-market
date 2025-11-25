@@ -159,6 +159,7 @@ If the artifacts are missing or the Groth16 toolchain fails, the service exits w
 cd prover
 ./run_tests.sh            # wraps `go test -v ./...`
 # Fails fast if circuits/build artifacts are missing (check_artifacts.sh)
+go run ./cmd/verify-artifacts  # CLI to verify settlement_final.zkey + settlement_js/* exist
 ```
 
 The script is also invoked by repo-root `./run_tests.sh`, keeping local workflows aligned with CI’s Go job.

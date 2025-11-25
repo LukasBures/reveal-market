@@ -12,6 +12,7 @@ from app.types import FxQuote
 async def test_fx_oracle_refresh_and_haircut(monkeypatch):
     oracle = FxOracle(
         feed_url="http://example.com/fx",
+        feed_alt_url=None,
         haircut_bps=500,
         timeout_seconds=1,
         max_age_seconds=120,
@@ -34,6 +35,7 @@ async def test_fx_oracle_refresh_and_haircut(monkeypatch):
 def test_fx_oracle_stale_detection():
     oracle = FxOracle(
         feed_url="http://example.com/fx",
+        feed_alt_url=None,
         haircut_bps=0,
         timeout_seconds=1,
         max_age_seconds=1,

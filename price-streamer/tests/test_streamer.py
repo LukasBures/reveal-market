@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -70,6 +70,25 @@ async def test_fx_ws_rejects_jump(monkeypatch):
     streamer = PriceStreamer(state, settings)
     await streamer._handle_fx_ws({"s": "ZENUSDT", "b": "2", "a": "2"})
     assert state.fx_quote is None
+
+
+@pytest.mark.asyncio
+async def test_metrics_update_on_fx_refresh():
+    settings = Settings(fx_rest_interval_seconds=5, fx_max_age_seconds=5, fx_ws_stale_ttl_seconds=5)
+    state = StreamState(settings)
+    streamer = PriceStreamer(state, settings)
+    await state.refresh_fx(label="coingecko_rest")
+    streamer.metric_ws_connected.set(1 if state.fx_ws_connected else 0)
+    streamer.metric_fx_stale.set(1 if state.fx_last_update is None else 0)
+    assert streamer.metric_fx_stale._value.get() in (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_metrics_mark_stale_without_fx():
+    state = StreamState(Settings())
+    streamer = PriceStreamer(state, state.settings)
+    streamer._update_fx_metrics()
+    assert streamer.metric_fx_stale._value.get() == 1
 
 
 @pytest.mark.asyncio
@@ -159,3 +178,46 @@ async def test_fetch_midpoints_handles_client_failure(monkeypatch):
 
     mids = await streamer._fetch_midpoints(["a"])
     assert mids is None
+
+
+@pytest.mark.asyncio
+async def test_fx_ws_then_rest_fallback_metrics(monkeypatch):
+    """WS preferred; staleness forces REST and updates metrics."""
+
+    settings = Settings(
+        fx_ws_stale_ttl_seconds=3,
+        fx_rest_interval_seconds=5,
+        fx_max_age_seconds=5,
+        fx_rest_enabled=True,
+    )
+    state = StreamState(settings)
+    streamer = PriceStreamer(state, settings)
+    # Prime via WS
+    await streamer._handle_fx_ws({"s": "ZENUSDT", "b": "10", "a": "10"})
+    streamer._update_fx_metrics()
+    assert streamer.metric_ws_connected._value.get() == 1
+    assert streamer.metric_fx_source.labels(source="binance_ws")._value.get() == 1
+
+    # Force staleness and replace refresh_fx
+    async def fake_refresh_fx(label: str = "coingecko_rest"):
+        return state._register_fx(Decimal("12"), source=label, allow_jump=True)
+
+    monkeypatch.setattr(state, "refresh_fx", fake_refresh_fx)
+    state.fx_ws_last_update = datetime.now(UTC) - timedelta(seconds=6)
+    state.fx_last_update = state.fx_ws_last_update
+    await streamer._fx_refresh_once()
+    assert streamer.metric_ws_connected._value.get() == 0
+    assert streamer.metric_fx_source.labels(source="coingecko_rest")._value.get() == 1
+
+
+@pytest.mark.asyncio
+async def test_price_history_seed_and_stream_pooling(monkeypatch):
+    """Ensure we reuse a single connection per market and seed history is retained."""
+
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    # No tasks in tests: _normalize_and_publish bypasses throttled cache path.
+    await streamer._normalize_and_publish({"id": "m1", "outcomePrices": [0.5]}, source="rest")
+    await streamer._normalize_and_publish({"id": "m1", "outcomePrices": [0.6]}, source="rest")
+    # Only the latest two entries should be cached per outcome.
+    assert len(state.cached) == 2

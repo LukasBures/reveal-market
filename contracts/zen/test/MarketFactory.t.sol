@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";

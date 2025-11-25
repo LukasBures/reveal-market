@@ -28,6 +28,8 @@ from shared.cache_keys import suggest_cache_key
 from shared.models import Base, Market
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+
 # Local helper to stand in for test_sync_market (keeps this test self contained)
 def create_in_memory_db():
     engine = create_engine("sqlite:///:memory:", future=True)

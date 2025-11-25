@@ -138,6 +138,18 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
         </div>
       </div>
       {loading && <p className="mt-2 text-xs text-slate-400">Fetching quote…</p>}
+      {quote && (
+        <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+          Remaining caps — user:{" "}
+          {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
+            ? `${formatNumber(quote.remaining_user_stake_zen, 3)} ZEN`
+            : "n/a"}
+          , market:{" "}
+          {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
+            ? `${formatNumber(quote.remaining_market_stake_zen, 3)} ZEN`
+            : "n/a"}
+        </p>
+      )}
       {error && (
         <p className="mt-2 text-xs text-rose-300">
           {error}. FX feed or pricing may be temporarily unavailable.

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/reveal-market/prover/internal/shared"
 )
 
 type httpStubProver struct{}
@@ -33,11 +35,11 @@ func TestHTTPHandlersHealthAndProof(t *testing.T) {
 		}
 	}
 
-	cfg := config{
+	cfg := shared.Config{
 		ListenAddr:        "127.0.0.1:0",
 		Version:           "test",
 		HeartbeatSeconds:  1,
-		BackendMode:       backendGroth16,
+		BackendMode:       shared.BackendGroth16,
 		NodeBinary:        "node",
 		RapidSnarkBinary:  "rapidsnark",
 		CircuitDir:        temp,

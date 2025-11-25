@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+from prometheus_client import Counter, Gauge
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
@@ -33,6 +34,44 @@ class PriceStreamer:
                 logger.warning(
                     "Failed to initialise CLOB client", extra={"event": "clob.init.failed", "error": str(exc)}
                 )
+        # Prometheus instruments (registered lazily in tests to avoid duplicates)
+        self.metric_fx_source = None
+        self.metric_fx_stale = None
+        self.metric_ws_connected = None
+        self.metric_ws_restarts = None
+        self.metric_ticks = None
+        self._init_metrics()
+
+    def _update_fx_metrics(self) -> None:
+        """Refresh Prometheus gauges from current FX state."""
+
+        if not self.metric_fx_source or not self.metric_fx_stale or not self.metric_ws_connected:
+            return
+        fx = self.state.fx_quote
+        source = fx.source if fx else (self.state.fx_last_source or "unknown")
+        stale_flag = 1 if (fx and fx.stale) or self.state.fx_last_update is None else 0
+        self.metric_ws_connected.set(1 if self.state.fx_ws_connected else 0)
+        self.metric_fx_stale.set(stale_flag)
+        for label in ("binance_ws", "rtds_crypto", "coingecko_rest", "rest_fallback", "fallback", "unknown"):
+            self.metric_fx_source.labels(source=label).set(1 if source == label else 0)
+
+    def _init_metrics(self) -> None:
+        # Only register once per process; Prometheus client raises on duplicates.
+        if self.metric_fx_source is not None:
+            return
+        self.metric_fx_source = Gauge(
+            "price_streamer_fx_source", "Current FX source (labels)", ["source"], registry=None
+        )
+        self.metric_fx_stale = Gauge("price_streamer_fx_stale", "FX stale flag (1=stale,0=fresh)", registry=None)
+        self.metric_ws_connected = Gauge(
+            "price_streamer_fx_ws_connected", "FX websocket connectivity (1/0)", registry=None
+        )
+        self.metric_ws_restarts = Counter(
+            "price_streamer_fx_ws_restarts_total", "FX websocket restart attempts", registry=None
+        )
+        self.metric_ticks = Counter(
+            "price_streamer_ticks_total", "Published ticks", ["source", "market", "outcome", "stale"], registry=None
+        )
 
     async def start(self) -> None:
         self._tasks = [
@@ -89,21 +128,26 @@ class PriceStreamer:
 
     async def _fx_refresh_loop(self) -> None:
         while not self._stop.is_set():
-            now = datetime.now(UTC)
-            ws_stale = False
-            if self.state.fx_ws_last_update:
-                ws_stale = (now - self.state.fx_ws_last_update).total_seconds() > self.settings.fx_ws_stale_ttl_seconds
-            else:
-                ws_stale = True
-            if ws_stale:
-                self.state.fx_ws_connected = False
-            if self.settings.fx_rest_enabled and (
-                ws_stale
-                or not self.state.fx_last_update
-                or (now - self.state.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds
-            ):
-                await self.state.refresh_fx(label="coingecko_rest")
+            await self._fx_refresh_once()
             await asyncio.sleep(self.settings.fx_rest_interval_seconds)
+
+    async def _fx_refresh_once(self) -> None:
+        """Single iteration of FX refresh to simplify testing."""
+
+        now = datetime.now(UTC)
+        if self.state.fx_ws_last_update:
+            ws_stale = (now - self.state.fx_ws_last_update).total_seconds() > self.settings.fx_ws_stale_ttl_seconds
+        else:
+            ws_stale = True
+        if ws_stale:
+            self.state.fx_ws_connected = False
+        if self.settings.fx_rest_enabled and (
+            ws_stale
+            or not self.state.fx_last_update
+            or (now - self.state.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds
+        ):
+            await self.state.refresh_fx(label="coingecko_rest")
+        self._update_fx_metrics()
 
     async def _flush_loop(self) -> None:
         interval = max(0.05, self.settings.publish_throttle_ms / 1000)
@@ -154,10 +198,82 @@ class PriceStreamer:
         return parsed or None
 
     async def _handle_tick(self, data: dict, source: str) -> None:
+        event_type = (data.get("event_type") or data.get("type") or "").lower()
+        if event_type in {"book", "price_change", "last_trade_price", "tick_size_change"}:
+            await self._handle_market_event(data, source)
+            return
         market = data.get("market") or data.get("marketId") or data.get("id")
         if not market:
             return
         await self._normalize_and_publish(data, source=source)
+
+    async def _handle_market_event(self, data: dict, source: str) -> None:
+        event_type = (data.get("event_type") or data.get("type") or "").lower()
+        market = data.get("market") or data.get("marketId") or data.get("id")
+        if not market:
+            return
+        if event_type == "last_trade_price":
+            await self._publish_trade_event(market, data, source)
+            return
+        if event_type == "tick_size_change":
+            payload = {
+                "market_id": market,
+                "type": "tick_size",
+                "tick_size": data.get("new_tick_size") or data.get("tick_size"),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            await self.state.cache_tick(market, "meta", payload)
+            return
+        if event_type == "book":
+            bids = data.get("bids") or data.get("buys") or data.get("bid")
+            asks = data.get("asks") or data.get("sells") or data.get("ask")
+            best_bid = None
+            best_ask = None
+            if isinstance(bids, list) and bids:
+                try:
+                    best_bid = max(Decimal(str(b.get("price") if isinstance(b, dict) else b)) for b in bids)
+                except Exception:
+                    best_bid = None
+            if isinstance(asks, list) and asks:
+                try:
+                    best_ask = min(Decimal(str(a.get("price") if isinstance(a, dict) else a)) for a in asks)
+                except Exception:
+                    best_ask = None
+            payload = {
+                "market_id": market,
+                "type": "book",
+                "best_bid": str(best_bid) if best_bid is not None else None,
+                "best_ask": str(best_ask) if best_ask is not None else None,
+                "display_best_bid": str(best_bid * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
+                if best_bid is not None
+                else None,
+                "display_best_ask": str(best_ask * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
+                if best_ask is not None
+                else None,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            await self.state.cache_tick(market, "meta", payload)
+            return
+        # price_change falls back to normalize flow
+        await self._normalize_and_publish(data, source=source)
+
+    async def _publish_trade_event(self, market_id: str, data: dict, source: str) -> None:
+        price = data.get("price") or data.get("last") or data.get("best_price") or data.get("p")
+        size = data.get("size") or data.get("quantity") or data.get("s")
+        side = data.get("side")
+        ts = data.get("timestamp") or data.get("ts")
+        if not ts:
+            ts = datetime.now(UTC).isoformat()
+        payload = {
+            "market_id": market_id,
+            "type": "trade",
+            "price": str(price) if price is not None else None,
+            "size": str(size) if size is not None else None,
+            "side": side,
+            "timestamp": ts,
+            "source": source,
+        }
+        await self.state.cache_tick(market_id, "trades", payload)
 
     async def _normalize_and_publish(self, raw: dict, source: str) -> None:
         market_id = (
@@ -199,6 +315,7 @@ class PriceStreamer:
             payload = {
                 "market_id": market_id,
                 "outcome": idx,
+                "type": "price",
                 "price": str(base_price),
                 "display_price": str(worsened),
                 "timestamp": ts,
@@ -206,7 +323,30 @@ class PriceStreamer:
                 "fx_raw_zen_usd": str(fx.raw_zen_usd or fx.zen_usd),
                 "fx_stale": fx.stale,
                 "source": source,
+                "best_bid": str(raw.get("best_bid")) if raw.get("best_bid") is not None else None,
+                "best_ask": str(raw.get("best_ask")) if raw.get("best_ask") is not None else None,
+                "display_best_bid": str(
+                    Decimal(str(raw.get("best_bid"))) * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
+                )
+                if raw.get("best_bid") is not None
+                else None,
+                "display_best_ask": str(
+                    Decimal(str(raw.get("best_ask"))) * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
+                )
+                if raw.get("best_ask") is not None
+                else None,
+                "tick_size": raw.get("tick_size") or raw.get("min_tick") or raw.get("tickSize"),
+                "status": raw.get("status") or raw.get("state"),
             }
+            try:
+                self.metric_ticks.labels(
+                    source=source, market=str(market_id), outcome=str(idx), stale=str(fx.stale)
+                ).inc()
+            except Exception as exc:
+                logger.debug(
+                    "failed to emit metric_ticks",
+                    extra={"event": "metrics.tick.error", "error": str(exc), "market_id": market_id},
+                )
             # In tests without the flush loop running, publish immediately.
             if self._tasks:
                 await self._throttled_publish(market_id, str(idx), payload)
@@ -341,3 +481,5 @@ class PriceStreamer:
             return
         self.state.fx_last_error = None
         self.state.fx_ws_connected = True
+        self.metric_ws_restarts.inc()
+        self._update_fx_metrics()

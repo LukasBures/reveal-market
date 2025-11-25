@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/reveal-market/prover/internal/shared"
 )
 
 func TestValidateRequest(t *testing.T) {
@@ -141,7 +143,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 			Warnings:      []string{"warn"},
 		},
 	}
-	app := newApp(config{Version: "test", RequestTimeout: time.Second}, stub)
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
@@ -188,7 +190,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 }
 
 func TestProofHandlerInvalidJSON(t *testing.T) {
-	app := newApp(config{Version: "test", RequestTimeout: time.Second}, &stubProver{ready: true})
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, &stubProver{ready: true})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewBufferString("{"))
 	app.proofHandler(rec, req)
@@ -199,7 +201,7 @@ func TestProofHandlerInvalidJSON(t *testing.T) {
 
 func TestProofHandlerProverError(t *testing.T) {
 	stub := &stubProver{err: newValidationError("bad payload"), ready: true}
-	app := newApp(config{Version: "test", RequestTimeout: time.Second}, stub)
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",

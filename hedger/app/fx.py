@@ -28,6 +28,7 @@ class FxOracle:
         self,
         *,
         feed_url: str,
+        feed_alt_url: str | None,
         haircut_bps: int,
         timeout_seconds: int,
         max_age_seconds: int,
@@ -42,6 +43,7 @@ class FxOracle:
                 "tenacity is required for FxOracle; install hedger dependencies (uv sync --project hedger)"
             )
         self.feed_url = feed_url
+        self.feed_alt_url = feed_alt_url
         self.haircut_bps = haircut_bps
         self.timeout_seconds = timeout_seconds
         self.max_age_seconds = max_age_seconds
@@ -80,14 +82,16 @@ class FxOracle:
 
     async def _fetch_quote(self) -> FxQuote:
         fallback_quote = FxQuote(zen_usd=self._fallback_zen_usd, fetched_at=datetime.now(UTC))
-        try:
+
+        # Helper to hit a specific URL so primary/alt share parsing logic.
+        async def _pull(url: str) -> FxQuote:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self._retry_attempts),
                 wait=wait_exponential(min=0.1, max=2),
                 retry=retry_if_exception_type(Exception),
             ):
                 with attempt:
-                    response = await self.client.get(self.feed_url, timeout=self.timeout_seconds)
+                    response = await self.client.get(url, timeout=self.timeout_seconds)
                     response.raise_for_status()
                     data = response.json()
                     if data.get("fx_stale") or data.get("stale"):
@@ -105,14 +109,13 @@ class FxOracle:
                     quote = FxQuote(zen_usd=zen_usd, fetched_at=datetime.now(UTC))
                     logger.debug(
                         "Fetched FX price",
-                        extra={
-                            "event": "fx.refresh",
-                            "zen_usd": str(zen_usd),
-                            "feed_url": self.feed_url,
-                        },
+                        extra={"event": "fx.refresh", "zen_usd": str(zen_usd), "feed_url": url},
                     )
                     self._stale_override = False
                     return quote
+
+        try:
+            return await _pull(self.feed_url)
         except RetryError as exc:
             logger.warning(
                 "FX feed unavailable; using fallback price",
@@ -123,9 +126,33 @@ class FxOracle:
                     "error": str(exc),
                 },
             )
+            if self.feed_alt_url:
+                try:
+                    return await _pull(self.feed_alt_url)
+                except Exception as alt_exc:
+                    logger.warning(
+                        "Alt FX feed unavailable; falling back",
+                        extra={
+                            "event": "fx.refresh.alt_failed",
+                            "feed_url": self.feed_alt_url,
+                            "error": str(alt_exc),
+                        },
+                    )
             self._stale_override = True
             return fallback_quote
         except (InvalidOperation, httpx.HTTPError, ValueError) as exc:
+            if self.feed_alt_url:
+                try:
+                    return await _pull(self.feed_alt_url)
+                except Exception as alt_exc:
+                    logger.warning(
+                        "Alt FX feed unavailable; falling back",
+                        extra={
+                            "event": "fx.refresh.alt_failed",
+                            "feed_url": self.feed_alt_url,
+                            "error": str(alt_exc),
+                        },
+                    )
             logger.warning(
                 "FX feed returned invalid response; using fallback price",
                 extra={

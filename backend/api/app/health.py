@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 
@@ -9,6 +10,7 @@ import httpx
 from redis.exceptions import RedisError
 from shared.cache import CacheStats, get_stats_client
 from shared.logging import log_event
+from shared.onchain.client import load_account
 from shared.polymarket import build_polymarket_markets_url
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -35,6 +37,8 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
         _check_redis_connectivity(),
         _check_worker_heartbeat(settings),
         await _check_polymarket_api(settings),
+        _check_pricing_signer(settings),
+        _check_cors(settings),
     ]
 
     for key, component in checks:
@@ -154,3 +158,47 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
     except Exception as exc:  # pragma: no cover - defensive
         component = schemas.HealthComponent(status="error", detail=str(exc))
     return "polymarket_api", component
+
+
+def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
+    """Smoke-test pricing signer envs so signed quotes/commitWithQuote can function."""
+
+    status: schemas.HealthState = "ok"
+    details: list[str] = []
+
+    if settings.pricing_chain_id is None:
+        status = "degraded"
+        details.append("RM_PRICING_CHAIN_ID missing")
+
+    if settings.pricing_signer_private_key is None:
+        status = "degraded"
+        details.append("RM_PRICING_SIGNER_PRIVATE_KEY missing")
+
+    env_addr = os.getenv("PRICING_SIGNER_ADDRESS")
+    if env_addr and settings.pricing_signer_private_key:
+        try:
+            acct = load_account(settings.pricing_signer_private_key.get_secret_value())
+            if acct.address.lower() != env_addr.lower():
+                status = "degraded"
+                details.append("PRICING_SIGNER_ADDRESS mismatch with derived key")
+        except Exception as exc:  # pragma: no cover - defensive
+            status = "error"
+            details.append(f"signer load failed: {exc}")
+
+    detail_text = "; ".join(details) if details else "pricing signer configured"
+    return "pricing_signer", schemas.HealthComponent(status=status, detail=detail_text)
+
+
+def _check_cors(settings) -> tuple[str, schemas.HealthComponent]:
+    """Warn when CORS is effectively wildcard to catch misconfiguration before prod."""
+
+    origins = settings.cors_allow_origins or []
+    if origins == ["*"] or not origins:
+        return (
+            "cors",
+            schemas.HealthComponent(
+                status="degraded",
+                detail="cors_allow_origins wildcard; set explicit origins for production",
+            ),
+        )
+    return ("cors", schemas.HealthComponent(status="ok", detail="cors_allow_origins configured"))

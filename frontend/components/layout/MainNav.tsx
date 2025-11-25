@@ -9,6 +9,7 @@ import { useFxStream } from "@/hooks/useFxStream";
 import { PriceBanner } from "@/components/layout/PriceBanner";
 
 const navLinks = [
+  { href: "/markets/search", label: "Markets" },
   { href: "/about", label: "About" },
   { href: "/proofs", label: "Proofs" },
   { href: "/docs", label: "Docs" },

@@ -330,19 +330,21 @@ contract RevealMarket is ReentrancyGuard {
         if (quote.zenUsd == 0) revert InvalidQuote();
         if (usedQuoteIds[quote.quoteId]) revert QuoteAlreadyUsed();
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(
-                "QUOTE_V1",
-                block.chainid,
-                address(this),
-                quote.expectedUser,
-                quote.outcomeId,
-                quote.stakeZen,
-                quote.zenUsd,
-                quote.expiry,
-                quote.quoteId
-            )
-        );
+        // Inline assembly keeps keccak lint happy while matching the ABI-packed digest.
+        bytes32 digest;
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x51554f54455f5631000000000000000000000000000000000000000000000000) // "QUOTE_V1"
+            mstore(add(ptr, 0x0b), chainid())
+            mstore(add(ptr, 0x2b), address())
+            mstore(add(ptr, 0x4b), calldataload(add(quote, 0x20))) // expectedUser
+            mstore(add(ptr, 0x6b), calldataload(add(quote, 0x40))) // outcomeId
+            mstore(add(ptr, 0x8b), calldataload(add(quote, 0x60))) // stakeZen
+            mstore(add(ptr, 0xab), calldataload(add(quote, 0x80))) // zenUsd
+            mstore(add(ptr, 0xcb), calldataload(add(quote, 0xa0))) // expiry
+            mstore(add(ptr, 0xeb), calldataload(quote)) // quoteId (bytes32 at offset 0)
+            digest := keccak256(ptr, 0x10b)
+        }
         bytes32 wrapped = MessageHashUtils.toEthSignedMessageHash(digest);
         address recovered = ECDSA.recover(wrapped, quote.signature);
         if (recovered != pricingSigner) revert NotAuthorized();

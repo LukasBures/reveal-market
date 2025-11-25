@@ -130,6 +130,11 @@ export function createMarketStream(marketId: string): EventSource {
   return new EventSource(url);
 }
 
+export function createMarketWebSocket(marketId: string): WebSocket {
+  const url = `${getStreamerWsEndpoint("/stream/ws", true)}?market_id=${encodeURIComponent(marketId)}`;
+  return new WebSocket(url);
+}
+
 export function createFxWebSocket(path = "/fx/zen-usdc"): WebSocket {
   const url = getStreamerWsEndpoint(path, true);
   return new WebSocket(url);

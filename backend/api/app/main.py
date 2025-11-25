@@ -49,7 +49,6 @@ from app.security import SecurityHeadersMiddleware
 setup_logging("reveal_market.api")
 
 settings = get_settings()
-_log_cors_warnings(settings.cors_allow_origins, scope="api")
 _sanitized_config = {
     k: v
     for k, v in settings.model_dump().items()
@@ -180,6 +179,9 @@ def _log_cors_warnings(origins: list[str], scope: str) -> None:
             message="CORS allow_origins is wildcard; set explicit origins for production",
             scope=scope,
         )
+
+
+_log_cors_warnings(settings.cors_allow_origins, scope="api")
 
 
 def _strip_0x(value: str | None) -> str:

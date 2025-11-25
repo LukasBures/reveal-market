@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { OutcomeQuote } from "./OutcomeQuote";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
+import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount, useChainId } from "wagmi";
 import type { Address } from "viem";
@@ -28,6 +29,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = market.outcomePrices ?? [];
   const { prices: livePrices, streamError } = useLiveOutcomePrices(market.eventId, prices);
+  const liveStore = usePriceStreamStore(market.eventId);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [stakeZen, setStakeZen] = useState(10);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
@@ -160,6 +162,20 @@ export function MarketDetailOutcomes({ market }: Props) {
           temporarily disabled.
         </div>
       )}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <span
+          className={`rounded-full px-2 py-1 ${
+            liveStore.status === "halted" || liveStore.status === "closed"
+              ? "bg-rose-500/20 text-rose-100"
+              : "bg-emerald-500/15 text-emerald-100"
+          }`}
+        >
+          Status: {liveStore.status ?? "open"}
+        </span>
+        {liveStore.tickSize && (
+          <span className="rounded-full bg-white/10 px-2 py-1 text-white/70">Tick size: {liveStore.tickSize}</span>
+        )}
+      </div>
       {quote && (
         <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-400">
           Quote ID: {quote.quote_id} · {expiresLabel}
@@ -198,11 +214,26 @@ export function MarketDetailOutcomes({ market }: Props) {
               const href = `/markets/${market.eventId}?outcome=${encodeURIComponent(String(idx))}`;
               const isYes = idx === 0;
               const isNo = idx === 1;
+              const outcomeState = liveStore.outcomes[idx] || {};
+              const bestBid = outcomeState.bestBid;
+              const bestAsk = outcomeState.bestAsk;
+              const spread =
+                bestBid !== undefined && bestAsk !== undefined && bestAsk > 0
+                  ? `${(((bestAsk - bestBid) / bestAsk) * 100).toFixed(2)}%`
+                  : "—";
               return (
                 <tr key={outcome} className="border-t border-white/5">
                   <td className="py-3 font-semibold text-white">{outcome}</td>
                   <td className="py-3 text-slate-300">{probability}</td>
-                  <td className="py-3 text-slate-300">{formatZen(price)}</td>
+                  <td className="py-3 text-slate-300">
+                    <div className="flex flex-col gap-1">
+                      <span>{formatZen(price)}</span>
+                      <span className="text-xs text-slate-400">
+                        Bid: {bestBid ? bestBid.toFixed(3) : "—"} · Ask: {bestAsk ? bestAsk.toFixed(3) : "—"} · Spread:{" "}
+                        {spread}
+                      </span>
+                    </div>
+                  </td>
                   <td className="py-3 text-right">
                     <Link
                       href={{ pathname: "/markets/[eventId]", query: { eventId: market.eventId, outcome: String(idx) } }}
@@ -312,6 +343,18 @@ export function MarketDetailOutcomes({ market }: Props) {
           </div>
         </div>
         {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}
+        {quote && (
+          <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Remaining caps — user:{" "}
+            {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
+              ? `${quote.remaining_user_stake_zen.toFixed(3)} ZEN`
+              : "n/a"}
+            , market:{" "}
+            {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
+              ? `${quote.remaining_market_stake_zen.toFixed(3)} ZEN`
+              : "n/a"}
+          </p>
+        )}
         {error && (
           <p className="mt-2 text-xs text-rose-300">
             {error}. Pricing uses live Polymarket odds + Binance FX; if stale, please retry.

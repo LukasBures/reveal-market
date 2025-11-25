@@ -54,6 +54,11 @@ def create_app() -> FastAPI:
         if not any(secret in k for secret in ["key", "private", "secret", "password"])
     }
     logger.info("service configuration", extra={"event": "service.config", "config": sanitized_config})
+    if not settings.cors_allow_origins or settings.cors_allow_origins == ["*"]:
+        logger.warning(
+            "price-streamer CORS allow_origins is wildcard; set explicit origins for browser clients",
+            extra={"event": "cors.unbounded", "scope": "price-streamer"},
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

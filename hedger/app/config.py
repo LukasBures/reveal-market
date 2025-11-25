@@ -36,11 +36,21 @@ class Settings(BaseSettings):
     polymarket_retry_attempts: int = Field(default=3)
     polymarket_retry_backoff_seconds: float = Field(default=0.5)
 
-    fx_feed_url: str = Field(default="https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd")
+    fx_feed_url: str = Field(
+        default="http://price_streamer:8100/fx/zen-usd",
+        description="Primary FX feed (align with API/price-streamer endpoint).",
+    )
+    fx_feed_alt_url: str | None = Field(
+        default=None,
+        description="Optional secondary FX feed used only if the primary feed is unreachable or stale.",
+    )
     fx_timeout_seconds: int = Field(default=5)
-    fx_max_age_seconds: int = Field(default=120)
+    fx_max_age_seconds: int = Field(default=60)
     fx_haircut_bps: int = Field(default=500, description="FX haircut in basis points (500 = 5%)")
     fx_fallback_price: Decimal = Field(default=Decimal("1"), description="Fallback ZEN/USD price when feed is down")
+    pricing_signer_address: str | None = Field(
+        default=None, description="Expected signer address for API-issued quotes (optional validation)."
+    )
 
     redis_lock_ttl_seconds: int = Field(default=10)
     redis_idempotency_ttl_seconds: int = Field(default=86400)

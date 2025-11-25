@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/reveal-market/prover/internal/shared"
 )
 
 func init() {
@@ -71,7 +73,7 @@ type proofResult struct {
 
 // app bundles configuration, prover backend, and simple state for /healthz.
 type app struct {
-	cfg            config
+	cfg            shared.Config
 	prover         proverEngine
 	startedAt      time.Time
 	lastHeartbeat  atomic.Value
@@ -81,7 +83,7 @@ type app struct {
 	artifactPaths  []string
 }
 
-func newApp(cfg config, prover proverEngine) *app {
+func newApp(cfg shared.Config, prover proverEngine) *app {
 	a := &app{
 		cfg:       cfg,
 		prover:    prover,
@@ -111,7 +113,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/healthz", a.healthHandler)
 	mux.HandleFunc("/heartbeat", a.heartbeatHandler)
 	mux.HandleFunc("/api/v1/proofs/settlement", a.proofHandler)
-	mux.Handle("/metrics", expvar.Handler())
+	mux.HandleFunc("/metrics", promMetricsHandler)
+	mux.Handle("/metrics/expvar", expvar.Handler())
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
@@ -121,7 +124,8 @@ func (a *app) routes() http.Handler {
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg := shared.LoadConfig()
+	requireArtifactsOrExit(cfg)
 	prover := initProver(cfg)
 	server := newApp(cfg, prover)
 
@@ -147,7 +151,7 @@ func main() {
 }
 
 // initProver chooses and initializes the requested backend. Only Groth16 is supported.
-func initProver(cfg config) proverEngine {
+func initProver(cfg shared.Config) proverEngine {
 	settings := groth16Settings{
 		NodeBinary:        cfg.NodeBinary,
 		RapidSnarkBinary:  cfg.RapidSnarkBinary,
@@ -161,9 +165,9 @@ func initProver(cfg config) proverEngine {
 	settings.CircuitHashOverride = cfg.ManualCircuitHash
 
 	switch cfg.BackendMode {
-	case backendMock:
+	case shared.BackendMock:
 		log.Fatalf("mock backend is disabled; provide Groth16 artifacts instead")
-	case backendGroth16, backendAuto:
+	case shared.BackendGroth16, shared.BackendAuto:
 		prover, err := newGroth16Prover(settings)
 		if err != nil {
 			log.Fatalf("failed to initialize groth16 prover: %v", err)
@@ -238,14 +242,19 @@ func formatMillis(t time.Time) string {
 }
 
 func checkArtifacts(paths []string) (bool, []string) {
-	missing := make([]string, 0)
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil || info.Size() == 0 {
-			missing = append(missing, p)
-		}
+	return shared.CheckArtifacts(paths)
+}
+
+func requireArtifactsOrExit(cfg shared.Config) {
+	ok, missing := shared.CheckArtifacts([]string{cfg.WitnessScriptPath, cfg.WasmPath, cfg.ZKeyPath})
+	if ok {
+		artifactsStatus.Set(1)
+		return
 	}
-	return len(missing) == 0, missing
+	logLine("error", "prover.artifacts.missing", map[string]any{
+		"missing": missing,
+	})
+	os.Exit(1)
 }
 
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +292,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 	defer cancel()
 	start := time.Now().UTC()
+	activeProofs.Add(1)
 
 	logLine("info", "prover.request.accepted", map[string]any{
 		"market_id":   req.MarketID,

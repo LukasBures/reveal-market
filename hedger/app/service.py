@@ -50,6 +50,7 @@ class HedgerService:
         self.redis: Redis | None = None
         self.fx_oracle = FxOracle(
             feed_url=settings.fx_feed_url,
+            feed_alt_url=settings.fx_feed_alt_url,
             haircut_bps=settings.fx_haircut_bps,
             timeout_seconds=settings.fx_timeout_seconds,
             max_age_seconds=settings.fx_max_age_seconds,
@@ -156,6 +157,14 @@ class HedgerService:
                 error=str(exc),
             )
             return {"status": "rejected", "reason": "fx_unavailable", "error": str(exc)}
+        signed_quote = getattr(commit, "signed_quote", None)
+        requires_signed_quote = bool(self.settings.pricing_signer_address)
+        if requires_signed_quote and not signed_quote:
+            return {"status": "rejected", "reason": "quote_required"}
+        if signed_quote:
+            valid, reason = await self._validate_signed_quote(commit, signed_quote)
+            if not valid:
+                return {"status": "rejected", "reason": reason or "invalid_quote"}
         if commit.stake_zen > self.settings.risk_max_commit_zen:
             log_event(
                 logger,
@@ -206,6 +215,112 @@ class HedgerService:
         if commit.stream_offset:
             self.repository.set_replay_offset(self.settings.commit_stream_name, commit.stream_offset)
         return response
+
+    async def _validate_signed_quote(self, commit, quote_payload) -> tuple[bool, str | None]:
+        """
+        If a SignedQuote payload is attached to the commit, ensure it is fresh and matches stake/outcome/fx.
+        This mirrors the on-chain digest and prevents hedging against tampered client inputs.
+        """
+
+        market_address = getattr(commit, "market_address", None)
+        outcome_id = getattr(commit, "outcome_id", None)
+        try:
+            from eth_account import Account
+            from eth_account.messages import encode_defunct
+            from web3 import Web3
+        except Exception as exc:  # pragma: no cover - runtime dependency guard
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.quote_validation_unavailable",
+                message="signature validation skipped (missing web3/eth_account)",
+                error=str(exc),
+            )
+            return True, None
+
+        try:
+            stake_wei = int(quote_payload.get("stake_wei"))
+            fx_scaled = int(quote_payload.get("zen_usd_scaled"))
+            expiry_ts = int(quote_payload.get("expiry_ts"))
+            chain_id = int(quote_payload.get("chain_id"))
+        except Exception as exc:
+            logger.debug("quote parse failed", extra={"event": "hedger.commit.quote_parse_failed", "error": str(exc)})
+            return False, "quote_fields_invalid"
+
+        # Reject expired quotes before hedging.
+        now = datetime.now(UTC).timestamp()
+        if expiry_ts <= now:
+            return False, "quote_expired"
+
+        # Basic field alignment with the commit.
+        if int(commit.stake_zen * Decimal("1e18")) != stake_wei:
+            return False, "quote_stake_mismatch"
+        if (
+            market_address
+            and quote_payload.get("market_address")
+            and market_address.lower() != quote_payload.get("market_address").lower()
+        ):
+            return False, "quote_market_mismatch"
+        if outcome_id is not None and quote_payload.get("outcome_id") is not None:
+            if int(outcome_id) != int(quote_payload["outcome_id"]):
+                return False, "quote_outcome_mismatch"
+
+        # Mirror the contract digest to verify signature.
+        try:
+            digest = Web3.solidity_keccak(
+                [
+                    "string",
+                    "uint256",
+                    "address",
+                    "address",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "bytes32",
+                ],
+                [
+                    "QUOTE_V1",
+                    chain_id,
+                    Web3.to_checksum_address(quote_payload["market_address"]),
+                    Web3.to_checksum_address(quote_payload["wallet_address"]),
+                    int(quote_payload["outcome_id"]),
+                    stake_wei,
+                    fx_scaled,
+                    expiry_ts,
+                    bytes.fromhex(quote_payload["quote_id"].removeprefix("0x")),
+                ],
+            )
+            recovered = Account.recover_message(
+                encode_defunct(hexstr=digest.hex()), signature=quote_payload["signature"]
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.quote_validation_failed",
+                message="signature validation failed",
+                error=str(exc),
+            )
+            return False, "quote_signature_invalid"
+
+        if self.settings.pricing_signer_address and recovered.lower() != self.settings.pricing_signer_address.lower():
+            return False, "quote_signer_mismatch"
+
+        # Optional FX drift check: reject if hedger FX differs materially from quote FX.
+        try:
+            live_quote = await self.fx_oracle.get_quote()
+            live_scaled = int((live_quote.zen_usd * Decimal("1e8")).to_integral_value())
+            drift_pct = abs(live_scaled - fx_scaled) / fx_scaled * 100 if fx_scaled else 0
+            if drift_pct > 5:  # 5% drift guardrail; adjust if needed
+                return False, "quote_fx_drift"
+        except Exception as exc:
+            logger.debug(
+                "quote FX validation skipped",
+                extra={"event": "hedger.commit.quote_fx_invalid", "error": str(exc)},
+            )
+
+        return True, None
 
     async def _execute_hedge(self, instruction: HedgeInstruction) -> dict:
         lock_ctx = self.lock_manager.lock(f"hedge:{instruction.market_id}") if self.lock_manager else self._noop_lock

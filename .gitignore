@@ -98,11 +98,11 @@ fabric.properties
 [Bb]in
 [Ii]nclude
 [Ll]ib
-!contracts/polygon/lib/
-!contracts/polygon/lib/**
 [Ll]ib64
 [Ll]ocal
 [Ss]cripts
+!scripts/
+!scripts/**
 !frontend/scripts/
 !frontend/scripts/**
 pyvenv.cfg
