@@ -19,7 +19,7 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
   - `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
   - `STREAMER_FX_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
   - `STREAMER_API_HOST`, `STREAMER_API_PORT`
-  - `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS` (align with your frontend origin, e.g., `http://localhost:3000` in dev)
+  - `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS` (align with your frontend origin, e.g., `https://revealmarket.xyz` even in dev with hosts/TLS)
   - Optional: `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_CRYPTO_SYMBOLS`, `STREAMER_SIGNING_SECRET`
 
 ## Local setup
@@ -37,11 +37,11 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 - `WS /stream/ws?market_id=...` – websocket stream for market ticks (mirrors SSE); auto-subscribes to `market_id` when `assets_ids` is omitted.
 - `WS /fx/zen-usd` (aliases: `/fx/zen-usdc`, `/fx/zen-usdt`) – websocket stream of ZEN/USD quotes (pushes on change, worsen% applied; raw price included).
 
-> For TLS/WSS, front the service with Caddy/Nginx (see docker/caddy/Caddyfile for the `stream.revealmarket.xyz` setup). Locally use `ws://localhost:8100/...`; in prod use `wss://stream.revealmarket.xyz/...`.
+> For TLS/WSS, front the service with Caddy/Nginx (see docker/caddy/Caddyfile for the `stream.revealmarket.xyz` setup). Use `wss://stream.revealmarket.xyz/...` everywhere (map the host locally so WSS works in dev).
 
 ### Client expectations
 - Prefer WS/WSS first (`/fx/zen-usdc`), let the client fall back to HTTP if WS is stale, and auto-attempt WS again after a few HTTP fallbacks.
-- Dev: `ws://localhost:8100/fx/zen-usdc`. Prod: `wss://stream.revealmarket.xyz/fx/zen-usdc`.
+- Dev/Prod: `wss://stream.revealmarket.xyz/fx/zen-usdc` (via your local TLS proxy/hosts entry).
 
 ## Tests
 ```bash

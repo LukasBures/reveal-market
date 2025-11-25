@@ -78,4 +78,3 @@ export function MarketLivePanels({ marketId }: Props) {
     </div>
   );
 }
-

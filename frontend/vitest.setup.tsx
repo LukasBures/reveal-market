@@ -9,7 +9,7 @@ if (!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) {
 if (typeof window !== "undefined") {
   try {
     if (window.location?.href === "about:blank") {
-      window.location.href = "http://localhost:3000/";
+      window.location.href = "https://revealmarket.xyz/";
     }
   } catch {
     // happy-dom may throw for read-only location; ignore in tests

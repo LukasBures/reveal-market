@@ -39,7 +39,8 @@ PROVER_REQUIRED_FILES=(
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
 )
-DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile"
+DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile.prod"
+TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 
 prune_docker_artifacts() {
   log_step "Pruning unused Docker images, containers, and build cache"
@@ -130,9 +131,13 @@ check_prover_artifacts() {
 
 check_caddyfile() {
   if [[ ! -f "${DEFAULT_CADDY_FILE}" ]]; then
-    log_warn "Missing Caddyfile at ${DEFAULT_CADDY_FILE}"
-    log_warn "Commit the desired config to docker/caddy/Caddyfile before deploying."
+    log_warn "Missing prod Caddyfile at ${DEFAULT_CADDY_FILE}"
+    log_warn "Commit the desired config to docker/caddy/Caddyfile.prod before deploying."
     exit 1
+  fi
+  if ! cmp -s "${DEFAULT_CADDY_FILE}" "${TARGET_CADDYFILE}" 2>/dev/null; then
+    log_step "Preparing prod Caddyfile (${TARGET_CADDYFILE})"
+    cp "${DEFAULT_CADDY_FILE}" "${TARGET_CADDYFILE}"
   fi
 }
 
@@ -249,8 +254,10 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} ps"
 # Emit a concise health summary when supported (Docker Compose v2+).
 if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
   log_step "Health summary"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python - <<'PY'
-import json, sys
+  HEALTH_SUMMARY_SCRIPT="$(cat <<'PY'
+import json
+import sys
+
 data = json.load(sys.stdin)
 for svc in data:
     name = svc.get("Name")
@@ -258,6 +265,8 @@ for svc in data:
     health = svc.get("Health")
     print(f"{name:30s} state={state} health={health}")
 PY
+)"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
 log_step "Deployment complete"

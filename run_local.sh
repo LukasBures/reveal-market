@@ -37,6 +37,8 @@ log_step() {
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
+TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
+CADDYFILE_LOCAL="${ROOT_DIR}/docker/caddy/Caddyfile.local"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_REQUIRED_FILES=(
   "settlement_js/generate_witness.js"
@@ -94,10 +96,19 @@ CPU_COUNT="$(detect_cpu_count)"
 PARALLEL_BUILDS="$(calc_parallel_builds "${CPU_COUNT}")"
 NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
-# Local runs should avoid real ACME challenges.
-export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_local}"
 COMPOSE_ENV_ARGS=()
 WAIT_FLAG=()
+
+ensure_caddyfile() {
+  if [[ ! -f "${CADDYFILE_LOCAL}" ]]; then
+    log_warn "Missing local Caddyfile at ${CADDYFILE_LOCAL}"
+    exit 1
+  fi
+  if ! cmp -s "${CADDYFILE_LOCAL}" "${TARGET_CADDYFILE}" 2>/dev/null; then
+    log_step "Preparing local Caddyfile (${TARGET_CADDYFILE})"
+    cp "${CADDYFILE_LOCAL}" "${TARGET_CADDYFILE}"
+  fi
+}
 
 ensure_prover_artifacts() {
   if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
@@ -234,6 +245,7 @@ if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts
 fi
 
+ensure_caddyfile
 ensure_prover_artifacts
 
 # Configure env file usage
@@ -325,15 +337,20 @@ EOF
 # Emit a quick health snapshot when supported (Compose v2+).
 if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
   log_step "Service status"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python - <<'PY'
-import json, sys
+  HEALTH_SUMMARY_SCRIPT="$(cat <<'PY'
+import json
+import sys
+
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
+
 for svc in data:
     print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
+)"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
 if [[ "${DETACH_MODE}" == "false" ]]; then

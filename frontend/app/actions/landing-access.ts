@@ -17,7 +17,7 @@ const resolveSiteUrl = () =>
   process.env.NEXT_PUBLIC_SITE_URL ??
   process.env.RM_SITE_URL ??
   process.env.VERCEL_URL ??
-  "http://localhost:3000";
+  "https://revealmarket.xyz";
 
 const shouldUseSecureCookie = (): boolean => {
   const siteUrl = resolveSiteUrl();

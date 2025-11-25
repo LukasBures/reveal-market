@@ -131,7 +131,7 @@ def start_heartbeat_logger(
         while not stop_event.is_set():
             log_event(
                 logger,
-                logging.DEBUG,
+                logging.INFO,
                 event="service.heartbeat",
                 message=message or f"{service_name} is alive",
                 service=service_name,

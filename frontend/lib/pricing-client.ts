@@ -35,14 +35,28 @@ export type FxQuote = {
   stale: boolean;
 };
 
-const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
-const streamerBasePublic = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL || "").replace(/\/$/, "");
+const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.RM_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(
+  /\/$/,
+  "",
+);
+const streamerBasePublic = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
 const streamerBaseInternal = (process.env.STREAMER_INTERNAL_URL || "").replace(/\/$/, "");
 
-const getEndpoint = (path: string) => `${apiBase || "http://localhost:8000"}${path}`;
+const isServer = typeof window === "undefined";
+const isBrowser = !isServer;
+const isHttpsPage = typeof window !== "undefined" && window.location?.protocol === "https:";
+const publicStreamerIsHttp = streamerBasePublic.startsWith("http://");
+const publicStreamerIsWs = streamerBasePublic.startsWith("ws://");
+// Mixed content is blocked by browsers; detect and gracefully fall back to REST.
+const mixedContentBlocked = isBrowser && isHttpsPage && (publicStreamerIsHttp || publicStreamerIsWs);
+const disableStreamerWs = process.env.NEXT_PUBLIC_DISABLE_STREAMER_WS === "true";
+export const shouldUseStreamerWs = () => !disableStreamerWs && !mixedContentBlocked;
+export const priceStreamsDisabled = process.env.NEXT_PUBLIC_DISABLE_PRICE_STREAMS === "true";
+
+const getEndpoint = (path: string) => `${apiBase}${path}`;
 const getStreamerEndpoint = (path: string, preferInternal = false) => {
-  if (preferInternal && streamerBaseInternal) return `${streamerBaseInternal}${path}`;
-  return `${streamerBasePublic || "http://localhost:8100"}${path}`;
+  if (preferInternal && isServer && streamerBaseInternal) return `${streamerBaseInternal}${path}`;
+  return `${streamerBasePublic}${path}`;
 };
 
 const toWebSocketScheme = (url: string) => {
@@ -51,19 +65,37 @@ const toWebSocketScheme = (url: string) => {
 };
 
 const getStreamerWsEndpoint = (path: string, preferInternal = false) =>
-  toWebSocketScheme(getStreamerEndpoint(path, preferInternal));
+  toWebSocketScheme(getStreamerEndpoint(path, preferInternal && isServer));
+
+const mapFxPayload = (payload: any): FxQuote => ({
+  zen_usd: Number(payload.zen_usd),
+  raw_zen_usd: payload.raw_zen_usd !== undefined ? Number(payload.raw_zen_usd) : undefined,
+  stale: Boolean(payload.stale),
+});
+
+const fetchApiFxQuote = async (): Promise<FxQuote> => {
+  const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`API FX fetch failed: ${res.status}`);
+  const payload = await res.json();
+  return mapFxPayload(payload);
+};
 
 export async function fetchStreamerFxQuote(path = "/fx/zen-usdc"): Promise<FxQuote> {
-  const res = await fetch(getStreamerEndpoint(path, true), { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`FX fetch failed: ${res.status}`);
+  if (mixedContentBlocked) {
+    // Browser would block streamer over http on an https page; use API endpoint instead.
+    return fetchApiFxQuote();
   }
-  const payload = await res.json();
-  return {
-    zen_usd: Number(payload.zen_usd),
-    raw_zen_usd: payload.raw_zen_usd ? Number(payload.raw_zen_usd) : undefined,
-    stale: Boolean(payload.stale),
-  };
+  try {
+    const res = await fetch(getStreamerEndpoint(path, true), { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`FX fetch failed: ${res.status}`);
+    }
+    const payload = await res.json();
+    return mapFxPayload(payload);
+  } catch (err) {
+    // Fallback to API if streamer is unreachable.
+    return fetchApiFxQuote();
+  }
 }
 
 export async function fetchFxQuote(): Promise<FxQuote> {
@@ -130,12 +162,26 @@ export function createMarketStream(marketId: string): EventSource {
   return new EventSource(url);
 }
 
-export function createMarketWebSocket(marketId: string): WebSocket {
+export function createMarketWebSocket(marketId: string): WebSocket | null {
+  if (!shouldUseStreamerWs()) {
+    return null;
+  }
   const url = `${getStreamerWsEndpoint("/stream/ws", true)}?market_id=${encodeURIComponent(marketId)}`;
-  return new WebSocket(url);
+  try {
+    return new WebSocket(url);
+  } catch {
+    return null;
+  }
 }
 
-export function createFxWebSocket(path = "/fx/zen-usdc"): WebSocket {
-  const url = getStreamerWsEndpoint(path, true);
-  return new WebSocket(url);
+export function createFxWebSocket(path = "/fx/zen-usdc"): WebSocket | null {
+  if (!shouldUseStreamerWs()) {
+    return null;
+  }
+  try {
+    const url = getStreamerWsEndpoint(path, true);
+    return new WebSocket(url);
+  } catch {
+    return null;
+  }
 }

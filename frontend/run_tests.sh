@@ -30,49 +30,50 @@ fi
 cd "${PROJECT_DIR}"
 
 # Load repo-root .env so NEXT_PUBLIC_* variables propagate.
+ROOT_ENV="${PROJECT_DIR}/../.env"
 ROOT_ENV_LOCAL="${PROJECT_DIR}/../.env.local"
 ROOT_ENV_PROD="${PROJECT_DIR}/../.env.prod"
-if [[ -f "${ROOT_ENV_LOCAL}" ]]; then
-  log_step "Loading environment from ${ROOT_ENV_LOCAL}"
+if [[ -f "${ROOT_ENV}" ]]; then
+  log_step "Loading environment from ${ROOT_ENV}"
+  # shellcheck disable=SC1090
+  set -a
+  source "${ROOT_ENV}"
+  set +a
+elif [[ -f "${ROOT_ENV_LOCAL}" ]]; then
+  log_warn ".env not found; falling back to ${ROOT_ENV_LOCAL}"
   # shellcheck disable=SC1090
   set -a
   source "${ROOT_ENV_LOCAL}"
   set +a
 elif [[ -f "${ROOT_ENV_PROD}" ]]; then
-  log_warn ".env.local not found; falling back to ${ROOT_ENV_PROD}"
+  log_warn ".env/.env.local not found; falling back to ${ROOT_ENV_PROD}"
   set -a
   # shellcheck disable=SC1090
   source "${ROOT_ENV_PROD}"
   set +a
 else
-  log_warn "No env file (.env.local or .env.prod) found; using current environment."
+  log_warn "No env file (.env, .env.local, or .env.prod) found; using current environment."
 fi
 
-# Try to reach the backend API but continue in "offline" mode when it is
-# unavailable. Offline mode points both server + browser env vars at an
-# unroutable loopback address so fetch() calls fail fast without needing the
-# Docker stack.
-DEFAULT_API_BASE="${RM_API_BASE_URL:-${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}}"
+# Try to reach the backend API; warn if unreachable but proceed by default so
+# local runs can still build against the configured host (override with FRONTEND_REQUIRE_API=true).
+DEFAULT_API_BASE="${RM_API_BASE_URL:-${NEXT_PUBLIC_API_BASE_URL:-https://api.revealmarket.xyz}}"
 CHECK_URL="${DEFAULT_API_BASE%/}/health"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
-OFFLINE_API_BASE="http://127.0.0.1:65535"
 STRICT_API_CHECK="${FRONTEND_REQUIRE_API:-false}"
 
 if curl -fsS --max-time "${API_TIMEOUT}" "${CHECK_URL}" >/dev/null 2>&1; then
   log_step "Frontend API reachable at ${CHECK_URL}"
-  export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
-  export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-${DEFAULT_API_BASE}}"
 else
   if [[ "${STRICT_API_CHECK}" == "true" ]]; then
     log_error "Frontend API ${CHECK_URL} is unreachable. Start the backend stack (./run_local.sh) before running frontend tests."
     exit 1
   fi
-  log_warn "Frontend API ${CHECK_URL} is unreachable; running in offline mode targeting ${OFFLINE_API_BASE}"
-  export RM_API_BASE_URL="${OFFLINE_API_BASE}"
-  export NEXT_PUBLIC_API_BASE_URL="${OFFLINE_API_BASE}"
-  export RM_OFFLINE_API_BASE_URL="${OFFLINE_API_BASE}"
-  export RM_FORCE_OFFLINE="true"
+  log_warn "Frontend API ${CHECK_URL} is unreachable; continuing with the configured base URL."
 fi
+
+export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
+export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-${DEFAULT_API_BASE}}"
 
 # Run lint before build to fail fast on lint errors.
 log_step "Running frontend lint"

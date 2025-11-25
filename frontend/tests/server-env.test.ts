@@ -46,13 +46,14 @@ describe("serverEnv", () => {
     expect(module.getServerEnv().apiBaseUrl).toBe("https://api.reveal.test");
   });
 
-  it("falls back to offline URL in non-production environments", async () => {
+  it("falls back to the default hosted API when nothing is configured", async () => {
     delete process.env.RM_API_BASE_URL;
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
-    process.env.NODE_ENV = "test";
     const module = await import("@/lib/serverEnv");
-    expect(module.getServerEnv().apiBaseUrl).toBe("http://localhost:8000");
-    expect(loggerMock.info).toHaveBeenCalledWith("serverEnv:offline_fallback", { fallback: "http://localhost:8000" });
+    expect(module.getServerEnv().apiBaseUrl).toBe("https://api.revealmarket.xyz");
+    expect(loggerMock.warn).toHaveBeenCalledWith("serverEnv:missing_base_url", {
+      fallback: "https://api.revealmarket.xyz",
+    });
   });
 
   it("throws when a malformed URL is configured in production", async () => {

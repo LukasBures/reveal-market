@@ -1,0 +1,133 @@
+{
+  admin off
+  grace_period 5s
+  email infra@revealmarket.xyz
+}
+
+(tls_prod) {
+  tls {
+    protocols tls1.2 tls1.3
+    curves x25519 secp384r1
+    issuer acme {
+      email infra@revealmarket.xyz
+    }
+  }
+}
+
+# ======================================================================
+# HTTP → HTTPS redirect (port 80)
+# ======================================================================
+:80 {
+  encode zstd gzip
+  redir https://{host}{uri} 308
+}
+
+# ======================================================================
+# PRIMARY DOMAIN — revealmarket.xyz
+# ======================================================================
+revealmarket.xyz {
+  import tls_prod
+  encode zstd gzip
+
+  @health path /health
+  respond @health "ok" 200
+
+  request_body {
+    max_size 20MB
+  }
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    Expect-CT "max-age=86400, enforce"
+    Cache-Control "public, max-age=60"
+    -Server
+  }
+
+  log {
+    level WARN
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+
+  reverse_proxy frontend:3000 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      dial_timeout 5s
+      read_timeout 30s
+      write_timeout 30s
+      max_conns_per_host 128
+      keepalive_idle_conns 128
+    }
+  }
+}
+
+# ======================================================================
+# STREAMER — stream.revealmarket.xyz
+# ======================================================================
+stream.revealmarket.xyz {
+  import tls_prod
+  encode zstd gzip
+
+  log {
+    level WARN
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+
+  reverse_proxy price-streamer:8100 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      keepalive_idle_conns 64
+      read_timeout 60s
+    }
+  }
+}
+
+# ======================================================================
+# API — api.revealmarket.xyz
+# ======================================================================
+api.revealmarket.xyz {
+  import tls_prod
+  encode zstd gzip
+
+  log {
+    level WARN
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+
+  reverse_proxy api:8000 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      keepalive_idle_conns 64
+      read_timeout 60s
+    }
+  }
+}
+
+# ======================================================================
+# WWW REDIRECT — www → root
+# ======================================================================
+www.revealmarket.xyz {
+  import tls_prod
+  encode zstd gzip
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+  }
+
+  redir https://revealmarket.xyz{uri} 308
+}

@@ -1,7 +1,7 @@
 import path from "node:path";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(/\/$/, "");
-const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "http://localhost:8100").replace(/\/$/, "");
+const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 

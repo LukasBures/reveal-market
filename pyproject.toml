@@ -1,14 +1,14 @@
 [project]
 name = "reveal-market"
-version = "0.1.0"
-description = ""
+version = "0.3.0"
+description = "Reveal Market delivers private, commit-and-reveal prediction markets with live odds streaming, signed quotes, and end-to-end settlement built for institutional-grade trading."
 authors = [
     {name = "Lukas Bures, Ph.D.",email = "me@lukasbures.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pre-commit>=3.8.0",
+    "pre-commit>=4.5.0",
 ]
 
 # ---------------------------------------------------------------------
@@ -19,6 +19,7 @@ line-length = 120
 target-version = "py312"
 extend-exclude = [
     "contracts/polygon/lib/**",
+    "contracts/zen/lib/**",
 ]
 
 [tool.ruff.lint]

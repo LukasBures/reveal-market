@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { createFxWebSocket, fetchStreamerFxQuote, type FxQuote } from "@/lib/pricing-client";
+import { createFxWebSocket, fetchStreamerFxQuote, shouldUseStreamerWs, type FxQuote } from "@/lib/pricing-client";
 
 type FxState = {
   fx: FxQuote | null;
@@ -27,6 +27,7 @@ type FxConnection = {
   startTs: number;
   fallbackTimer: ReturnType<typeof setInterval> | null;
   cancelled: boolean;
+  idleCloseTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const connections = new Map<string, FxConnection>();
@@ -110,16 +111,29 @@ function startConnection(path: string) {
     startTs: Date.now(),
     fallbackTimer: null,
     cancelled: false,
+    idleCloseTimer: null,
   };
 
   const connect = () => {
     if (conn.cancelled) return;
+    // If WS is explicitly disabled (env or after repeated failures), rely on REST-only mode.
+    const wsAllowed =
+      typeof window !== "undefined" && shouldUseStreamerWs() && "WebSocket" in window && conn.wsDisabledUntil !== Infinity;
+    if (!wsAllowed) {
+      setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
+      return;
+    }
     if (Date.now() < conn.wsDisabledUntil) {
       setTimeout(connect, 5_000);
       return;
     }
     try {
       const ws = createFxWebSocket(path);
+      if (!ws) {
+        conn.wsDisabledUntil = Infinity;
+        setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
+        return;
+      }
       conn.ws = ws;
       ws.onopen = () => {
         // Keep a single shared WS per path; reset backoff on success.
@@ -162,6 +176,11 @@ function startConnection(path: string) {
           console.warn("FX socket closed, reconnecting", { delay });
         }
         conn.wsFailures += 1;
+        // After a couple failures, stop trying WS entirely and rely on REST to keep UI working.
+        if (conn.wsFailures >= 2) {
+          conn.wsDisabledUntil = Infinity;
+          return;
+        }
         if (conn.wsFailures >= 3) {
           conn.wsDisabledUntil = Date.now() + 60_000;
           conn.wsFailures = 0;
@@ -185,16 +204,28 @@ function startConnection(path: string) {
 
 function subscribeToConnection(path: string, onChange: () => void) {
   const conn = startConnection(path);
+  if (conn.idleCloseTimer) {
+    clearTimeout(conn.idleCloseTimer);
+    conn.idleCloseTimer = null;
+  }
   conn.subscribers.add(onChange);
   return () => {
     conn.subscribers.delete(onChange);
     if (conn.subscribers.size === 0) {
-      conn.cancelled = true;
-      if (conn.fallbackTimer) clearInterval(conn.fallbackTimer);
-      if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) {
-        conn.ws.close();
+      if (conn.idleCloseTimer) {
+        clearTimeout(conn.idleCloseTimer);
       }
-      connections.delete(path);
+      conn.idleCloseTimer = setTimeout(() => {
+        if (conn.subscribers.size > 0) {
+          return;
+        }
+        conn.cancelled = true;
+        if (conn.fallbackTimer) clearInterval(conn.fallbackTimer);
+        if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) {
+          conn.ws.close();
+        }
+        connections.delete(path);
+      }, 30_000);
     }
   };
 }

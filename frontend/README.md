@@ -48,12 +48,12 @@ Set these in the repo-root `.env` (copied from `.env.example`). The frontend rea
 | Variable | Purpose |
 | -------- | ------- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
-| `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (e.g., `http://localhost:8000` when running Docker locally). |
-| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public price-streamer base (e.g., `https://stream.revealmarket.xyz` for WSS). Defaults to `http://localhost:8100` if omitted. |
-| `STREAMER_INTERNAL_URL` | In-cluster/base URL the server components should use to reach price-streamer. |
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (stick to the TLS host, e.g., `https://api.revealmarket.xyz` with /etc/hosts + Cloudflare). |
+| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public price-streamer base (HTTPS so clients upgrade to WSS automatically). Defaults to `https://stream.revealmarket.xyz`. |
+| `STREAMER_INTERNAL_URL` | Base URL the server components should use to reach price-streamer; point at the same HTTPS host when developing locally. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
-| `RM_API_BASE_URL` | Internal base URL for server-side fetches. Defaults to `http://api:8000` inside Docker networks. |
-| `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at an internal API host (e.g., `http://api:8000`) so the backend stays private. |
+| `RM_API_BASE_URL` | Internal base URL for server-side fetches. Use the same TLS host when running the frontend outside Docker. |
+| `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at your TLS API host so metadata stays consistent. |
 | `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
 
 When deploying, ensure these values align with the CDN or reverse proxy domain so CSP/HSTS headers reference the correct origin.
@@ -67,7 +67,7 @@ When deploying, ensure these values align with the CDN or reverse proxy domain s
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # serves on :3000 (hit https://revealmarket.xyz via your TLS proxy/hosts entry)
 ```
 
 Useful scripts:
@@ -173,7 +173,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
 - **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the Dockerized API is reachable at `NEXT_PUBLIC_API_BASE_URL`. Keep `docker compose up` running locally (or point the env var at a staging host) before invoking the script.
+- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API at `NEXT_PUBLIC_API_BASE_URL` responds to `/health` (set this to your TLS host, e.g., `https://api.revealmarket.xyz`, and rely on hosts/Cloudflare in dev).
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ## Streaming & FX

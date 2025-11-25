@@ -81,7 +81,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
       </div>
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-xl">
         <Link
-          href={{ pathname: "/markets/[eventId]", query: { eventId: market.eventId, outcome: "0" } }}
+          href={`/markets/${market.eventId}?outcome=0`}
           className="flex min-h-[56px] w-full items-center justify-center gap-3 rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-500/40 transition hover:-translate-y-0.5 hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
         >
           <span>Buy YES</span>
@@ -90,7 +90,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
           </span>
         </Link>
         <Link
-          href={{ pathname: "/markets/[eventId]", query: { eventId: market.eventId, outcome: "1" } }}
+          href={`/markets/${market.eventId}?outcome=1`}
           className="flex min-h-[56px] w-full items-center justify-center gap-3 rounded-xl bg-rose-500 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-rose-500/40 transition hover:-translate-y-0.5 hover:bg-rose-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
         >
           <span>Buy NO</span>

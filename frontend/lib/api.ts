@@ -26,19 +26,12 @@ const normalizeBase = (value: string) => {
   }
 };
 
-const OFFLINE_FALLBACK_BASE = normalizeBase(process.env.RM_OFFLINE_API_BASE_URL ?? "http://localhost:8000");
+const OFFLINE_FALLBACK_BASE = process.env.RM_OFFLINE_API_BASE_URL
+  ? normalizeBase(process.env.RM_OFFLINE_API_BASE_URL)
+  : null;
 const API_BASE_NORMALIZED = normalizeBase(DEFAULT_API_BASE);
-const IS_OFFLINE_BASE = API_BASE_NORMALIZED === OFFLINE_FALLBACK_BASE;
+const IS_OFFLINE_BASE = OFFLINE_FALLBACK_BASE ? API_BASE_NORMALIZED === OFFLINE_FALLBACK_BASE : false;
 const SHOULD_SKIP_NETWORK = FORCE_OFFLINE && IS_OFFLINE_BASE;
-
-const hostIsLocal = (() => {
-  try {
-    const parsed = new URL(DEFAULT_API_BASE);
-    return ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-})();
 
 const isNetworkUnavailable = (error: unknown) => {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
@@ -53,7 +46,7 @@ const isNetworkUnavailable = (error: unknown) => {
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
   const message = error instanceof Error ? error.message : String(error ?? "unknown");
   const payload = meta ? { ...meta, error: message } : { error: message };
-  if ((IS_OFFLINE_BASE || hostIsLocal) && isNetworkUnavailable(error)) {
+  if (IS_OFFLINE_BASE && isNetworkUnavailable(error)) {
     logger.debug(`${scope}:offline`, { baseUrl: DEFAULT_API_BASE, ...payload });
     return;
   }

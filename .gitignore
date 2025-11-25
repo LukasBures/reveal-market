@@ -923,3 +923,4 @@ cython_debug/
 .idea/
 
 prover/.gocache
+docker/caddy/Caddyfile

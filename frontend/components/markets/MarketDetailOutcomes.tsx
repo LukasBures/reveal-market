@@ -236,7 +236,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                   </td>
                   <td className="py-3 text-right">
                     <Link
-                      href={{ pathname: "/markets/[eventId]", query: { eventId: market.eventId, outcome: String(idx) } }}
+                      href={`/markets/${market.eventId}?outcome=${encodeURIComponent(String(idx))}`}
                       className={`inline-flex w-full sm:w-[180px] items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-white transition ${
                         isYes
                           ? "bg-emerald-500 hover:bg-emerald-400"
