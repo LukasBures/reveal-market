@@ -19,6 +19,13 @@ class SubscriptionManager:
                 break
             self.assets.add(str(asset_id))
 
+    def replace_asset(self, old_asset: str, new_assets: Iterable[str]) -> None:
+        """Swap a placeholder asset for concrete ids (e.g., clob token ids)."""
+
+        if old_asset in self.assets:
+            self.assets.discard(old_asset)
+        self.add_assets(new_assets)
+
     def remove_asset(self, asset_id: str) -> None:
         self.assets.discard(str(asset_id))
 

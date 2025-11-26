@@ -42,22 +42,20 @@ export function MarketCard({ market }: Props) {
   return (
     <Link
       href={`/markets/${market.eventId}`}
-      className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 hover:-translate-y-1.5 hover:border-brand-400/60 hover:bg-white/10"
+      className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 hover:-translate-y-1.5 hover:border-brand-400/60"
     >
-      <div className="pointer-events-none absolute -top-12 right-0 h-40 w-40 rounded-full bg-gradient-to-b from-white/10 to-transparent opacity-80 blur-3xl transition duration-200 group-hover:opacity-100" />
-      <div className="pointer-events-none absolute inset-0 border border-white/5 opacity-0 transition duration-200 group-hover:opacity-70" />
       <div className="flex items-start gap-4">
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
           <h3 className="mt-1 text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
         </div>
       </div>
-      <div className="relative flex items-center justify-between rounded-xl border border-white/5 bg-slate-950/60 px-3 py-2 text-sm backdrop-blur">
+      <div className="relative flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>
           <p className="text-2xl font-semibold text-white">{yesProbability !== null ? `${yesProbability}%` : "—"}</p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
+        <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
           <Image src="/brand/reveal-wolf-01.png" alt="" width={18} height={18} className="h-4 w-4 rounded-full object-cover" />
           ZK
         </div>
@@ -73,14 +71,14 @@ export function MarketCard({ market }: Props) {
                   : "—";
             const hoverColor =
               idx === 0
-                ? "transition hover:bg-emerald-500/20"
+                ? "transition hover:bg-emerald-900/40"
                 : idx === 1
-                  ? "transition hover:bg-rose-500/25"
+                  ? "transition hover:bg-rose-900/40"
                   : "transition hover:bg-white/10";
             return (
               <div
                 key={outcome}
-                className={`flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 ${hoverColor}`}
+                className={`flex items-center justify-between rounded-lg bg-slate-900 px-3 py-1.5 ${hoverColor}`}
               >
                 <span className="truncate">{outcome}</span>
                 <span className="font-semibold text-white">{probability}</span>

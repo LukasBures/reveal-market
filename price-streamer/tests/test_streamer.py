@@ -134,6 +134,85 @@ async def test_normalize_uses_raw_prices_when_midpoints_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_normalize_parses_stringified_arrays(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    seen_tokens = None
+
+    async def fake_midpoints(token_ids):
+        nonlocal seen_tokens
+        seen_tokens = token_ids
+        return [Decimal("0.55"), Decimal("0.45")]
+
+    monkeypatch.setattr(streamer, "_fetch_midpoints", fake_midpoints)
+    data = {
+        "id": "m4",
+        "outcomePrices": '["0.4", "0.6"]',
+        "clobTokenIds": '["t-one", "t-two"]',
+    }
+    await streamer._normalize_and_publish(data, source="rest")
+    assert seen_tokens == ["t-one", "t-two"]
+    assert len(state.cached) == 2
+    _, _, payload = state.cached[0]
+    assert payload["price"] == "0.55"
+
+
+@pytest.mark.asyncio
+async def test_normalize_registers_clob_tokens():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    data = {"id": "m5", "outcomePrices": [0.2, 0.8], "clobTokenIds": ["tok1", "tok2"]}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.market_tokens["m5"] == ["tok1", "tok2"]
+
+
+@pytest.mark.asyncio
+async def test_normalize_handles_camel_best_bid():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    data = {"id": "m6", "outcomePrices": [0.2], "bestBid": "0.33", "bestAsk": "0.44"}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.cached
+    _, _, payload = state.cached[0]
+    assert payload["best_bid"] == "0.33"
+    assert payload["best_ask"] == "0.44"
+
+
+@pytest.mark.asyncio
+async def test_register_clob_tokens_replaces_placeholder_subscription():
+    state = StubState()
+    state.subscriptions.add_assets(["m-placeholder"])
+    state.register_clob_tokens("m-placeholder", ["tok1", "tok2"])
+    assert "m-placeholder" not in state.subscriptions.assets
+    assert {"tok1", "tok2"} == state.subscriptions.assets
+
+
+@pytest.mark.asyncio
+async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    state.subscriptions.add_assets(["123"])
+
+    async def fake_client_get(url):
+        class Resp:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [{"id": "123", "outcomePrices": [0.5, 0.5], "clobTokenIds": ["a", "b"]}]
+
+        return Resp()
+
+    with monkeypatch.context() as m:
+        m.setattr("httpx.AsyncClient.get", lambda self, url: fake_client_get(url))
+        await streamer._poll_rest()
+    # placeholder should be swapped once token ids are known
+    assert "123" not in state.subscriptions.assets
+
+
+@pytest.mark.asyncio
 async def test_fetch_midpoints_parses_dict_payload(monkeypatch):
     state = StubState()
     streamer = PriceStreamer(state, state.settings)

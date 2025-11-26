@@ -236,6 +236,11 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
           <MarketDetailHeader market={market} coverImage={coverImage} />
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">
+              <MarketDetailOutcomes market={market} />
+              <div className="grid gap-4 lg:grid-cols-2">
+                <MarketDetailChart marketId={canonicalEventId} />
+                <MarketLivePanels marketId={canonicalEventId} />
+              </div>
               <section className="rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -254,11 +259,6 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                   </div>
                 </div>
               </section>
-              <MarketDetailOutcomes market={market} />
-              <div className="grid gap-4 lg:grid-cols-2">
-                <MarketDetailChart marketId={canonicalEventId} />
-                <MarketLivePanels marketId={canonicalEventId} />
-              </div>
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">

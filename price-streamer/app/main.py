@@ -100,7 +100,7 @@ def create_app() -> FastAPI:
             "fx_last_error": state.fx_last_error,
             "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
             "stale_markets": stale_markets,
-            "last_seen": {k: v.isoformat() for k, v in state.last_seen.items()},
+            "last_seen": state.snapshot_last_seen(),
         }
 
     @app.get("/health")
@@ -197,7 +197,8 @@ def create_app() -> FastAPI:
             assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
         # Default to the requested market_id so websocket streams stay hydrated even without explicit assets_ids.
         if not assets and market_id:
-            assets = [market_id]
+            tokens = state.get_clob_tokens(market_id)
+            assets = tokens or [market_id]
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:
@@ -223,7 +224,8 @@ def create_app() -> FastAPI:
         if assets_ids:
             assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
         if not assets and market_id:
-            assets = [market_id]
+            tokens = state.get_clob_tokens(market_id)
+            assets = tokens or [market_id]
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:

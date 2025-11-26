@@ -61,6 +61,7 @@ class StreamState:
         self.tick_sizes: dict[str, Decimal] = {}
         self._rtds_connected = False
         self.rtds_symbols: set[str] = set()
+        self.market_tokens: dict[str, list[str]] = {}
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
@@ -133,6 +134,11 @@ class StreamState:
             )
         return self.fx_quote
 
+    def snapshot_last_seen(self) -> dict[str, str]:
+        """Return ISO timestamps of last seen market updates for diagnostics."""
+
+        return {k: v.isoformat() for k, v in self.last_seen.items()}
+
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
         if not self.redis:
             return
@@ -155,6 +161,18 @@ class StreamState:
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(f"{self.settings.pubsub_prefix}:{market_id}")
         return pubsub
+
+    def register_clob_tokens(self, market_id: str, token_ids: list[str]) -> None:
+        if not market_id or not token_ids:
+            return
+        deduped = list(dict.fromkeys(token_ids))
+        self.market_tokens[market_id] = deduped
+        # If we previously subscribed using the market_id placeholder, swap to concrete token ids.
+        if market_id in self.subscriptions.assets:
+            self.subscriptions.replace_asset(market_id, deduped)
+
+    def get_clob_tokens(self, market_id: str) -> list[str]:
+        return self.market_tokens.get(market_id, [])
 
     async def get_history(self, market_id: str, outcome: str, limit: int) -> list[dict]:
         if not self.redis:

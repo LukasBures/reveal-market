@@ -38,17 +38,10 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
               <span className="rounded-full border border-emerald-400/40 px-2.5 py-1 text-emerald-200">
                 {market.status ?? "Active"}
               </span>
-              <span className="rounded-full border border-white/15 px-2.5 py-1 text-white/70">
-                ZEN in / USDC profit
-              </span>
-              <span className="rounded-full border border-sky-400/50 px-2.5 py-1 text-sky-200">
-                Live prices streaming
-              </span>
             </div>
             <h1 className="text-2xl font-semibold leading-snug text-white md:text-3xl">{market.title}</h1>
             <p className="text-sm leading-6 text-slate-400">
-              Last updated {market.updatedAt ? formatDateTime(market.updatedAt) : "recently"} ·{" "}
-              {market.resolutionSource ?? "Resolution mirrored from backend ledger"}
+              Last updated {market.updatedAt ? formatDateTime(market.updatedAt) : "recently"}
             </p>
           </div>
         </div>

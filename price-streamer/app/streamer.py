@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import httpx
 from prometheus_client import Counter, Gauge
@@ -41,6 +42,21 @@ class PriceStreamer:
         self.metric_ws_restarts = None
         self.metric_ticks = None
         self._init_metrics()
+
+    @staticmethod
+    def _coerce_array(value: Any) -> list | None:
+        """Parse lists or JSON-encoded lists from Polymarket payloads."""
+
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return None
+            if isinstance(parsed, list):
+                return parsed
+        return None
 
     def _update_fx_metrics(self) -> None:
         """Refresh Prometheus gauges from current FX state."""
@@ -93,13 +109,42 @@ class PriceStreamer:
         while not self._stop.is_set():
             # Avoid hammering the WS with empty subscriptions.
             if not self.state.subscriptions.assets:
+                logger.debug(
+                    "CLOB ws idle; no subscriptions yet",
+                    extra={"event": "clob.ws.idle", "subscriptions": 0},
+                )
                 await asyncio.sleep(self.settings.ws_reconnect_seconds)
                 continue
+            logger.info(
+                "Connecting to CLOB websocket",
+                extra={
+                    "event": "clob.ws.connect",
+                    "subscriptions": len(self.state.subscriptions.assets),
+                },
+            )
             async for ws in iter_ws(self.settings.clob_ws_url, name="clob-ws"):
                 if self._stop.is_set():
                     break
                 try:
-                    await ws.send(self.state.subscriptions.build_clob_subscribe())
+                    logger.info(
+                        "CLOB websocket connected",
+                        extra={
+                            "event": "clob.ws.connected",
+                            "url": self.settings.clob_ws_url,
+                            "subscriptions": len(self.state.subscriptions.assets),
+                        },
+                    )
+                    subscribe_payload = self.state.subscriptions.build_clob_subscribe()
+                    logger.debug(
+                        "Sending CLOB subscribe",
+                        extra={
+                            "event": "clob.ws.subscribe",
+                            "payload": subscribe_payload,
+                            "subscriptions": sorted(self.state.subscriptions.assets),
+                        },
+                    )
+                    await ws.send(subscribe_payload)
+                    msg_count = 0
                     async for raw in ws:
                         if self._stop.is_set():
                             break
@@ -107,6 +152,16 @@ class PriceStreamer:
                             payload = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
+                        msg_count += 1
+                        if msg_count % 50 == 1:
+                            logger.debug(
+                                "Received CLOB payload",
+                                extra={
+                                    "event": "clob.ws.message",
+                                    "count": msg_count,
+                                    "subscriptions": len(self.state.subscriptions.assets),
+                                },
+                            )
                         # Polymarket may send batch payloads as a list; handle both shapes.
                         if isinstance(payload, list):
                             for item in payload:
@@ -168,6 +223,16 @@ class PriceStreamer:
             markets = payload if isinstance(payload, list) else payload.get("data") or []
             for market in markets:
                 await self._normalize_and_publish(market, source="rest")
+            logger.debug(
+                "REST poll ingested markets",
+                extra={"event": "clob.rest.poll", "count": len(markets)},
+            )
+            # Proactively subscribe with discovered token ids if we only had market placeholders.
+            for market in markets:
+                market_id = str(market.get("id") or market.get("marketId") or "")
+                tokens = self.state.get_clob_tokens(market_id)
+                if market_id and tokens and market_id in self.state.subscriptions.assets:
+                    self.state.subscriptions.replace_asset(market_id, tokens)
 
     async def _fetch_midpoints(self, token_ids: list[str]) -> list[Decimal] | None:
         if not self.clob_client:
@@ -284,15 +349,42 @@ class PriceStreamer:
             or raw.get("condition_id")
         )
         raw_prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
-        token_ids = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
-        coerced_token_ids = [str(token) for token in token_ids or [] if str(token).strip()]
-        prices = raw_prices
+        prices = self._coerce_array(raw_prices) or []
+        token_ids_raw = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
+        token_ids = self._coerce_array(token_ids_raw) or []
+        coerced_token_ids = [str(token) for token in token_ids if str(token).strip()]
         if coerced_token_ids:
+            self.state.register_clob_tokens(str(market_id), coerced_token_ids)
             midpoints = await self._fetch_midpoints(coerced_token_ids)
             if midpoints and len(midpoints) == len(coerced_token_ids):
                 prices = midpoints
         if not market_id or not prices or not isinstance(prices, (list, tuple)):
             return
+        # Record last seen timestamp for diagnostics.
+        self.state.last_seen[str(market_id)] = datetime.now(UTC)
+        # Capture best bid/ask in both snake and camel variants.
+        best_bid_raw = (
+            raw.get("best_bid")
+            or raw.get("bestBid")
+            or raw.get("bestBidYes")
+            or raw.get("best_bid_yes")
+            or raw.get("bid")
+        )
+        best_ask_raw = (
+            raw.get("best_ask")
+            or raw.get("bestAsk")
+            or raw.get("bestAskYes")
+            or raw.get("best_ask_yes")
+            or raw.get("ask")
+        )
+        try:
+            best_bid_val = Decimal(str(best_bid_raw)) if best_bid_raw is not None else None
+        except Exception:
+            best_bid_val = None
+        try:
+            best_ask_val = Decimal(str(best_ask_raw)) if best_ask_raw is not None else None
+        except Exception:
+            best_ask_val = None
         fx = await self.state.get_fx()
         if fx.stale and fx.source != "fallback":
             logger.warning(
@@ -323,17 +415,17 @@ class PriceStreamer:
                 "fx_raw_zen_usd": str(fx.raw_zen_usd or fx.zen_usd),
                 "fx_stale": fx.stale,
                 "source": source,
-                "best_bid": str(raw.get("best_bid")) if raw.get("best_bid") is not None else None,
-                "best_ask": str(raw.get("best_ask")) if raw.get("best_ask") is not None else None,
+                "best_bid": str(best_bid_val) if best_bid_val is not None else None,
+                "best_ask": str(best_ask_val) if best_ask_val is not None else None,
                 "display_best_bid": str(
-                    Decimal(str(raw.get("best_bid"))) * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
+                    best_bid_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
                 )
-                if raw.get("best_bid") is not None
+                if best_bid_val is not None
                 else None,
                 "display_best_ask": str(
-                    Decimal(str(raw.get("best_ask"))) * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
+                    best_ask_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
                 )
-                if raw.get("best_ask") is not None
+                if best_ask_val is not None
                 else None,
                 "tick_size": raw.get("tick_size") or raw.get("min_tick") or raw.get("tickSize"),
                 "status": raw.get("status") or raw.get("state"),
@@ -433,6 +525,10 @@ class PriceStreamer:
                 ):
                     if self._stop.is_set():
                         break
+                    logger.info(
+                        "FX websocket connected",
+                        extra={"event": "fx.ws.connected", "url": self.settings.fx_ws_url},
+                    )
                     async for raw in ws:
                         if self._stop.is_set():
                             break
@@ -440,6 +536,10 @@ class PriceStreamer:
                             data = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
+                        logger.debug(
+                            "FX ws message received",
+                            extra={"event": "fx.ws.message", "raw_keys": list(data.keys()) if isinstance(data, dict) else None},
+                        )
                         await self._handle_fx_ws(data)
             except FatalWebsocketError as exc:
                 self.state.fx_ws_connected = False
@@ -479,6 +579,10 @@ class PriceStreamer:
         quote = self.state._register_fx(price_val, source="binance_ws")
         if not quote:
             return
+        logger.debug(
+            "FX quote updated from ws",
+            extra={"event": "fx.ws.update", "price": str(price_val)},
+        )
         self.state.fx_last_error = None
         self.state.fx_ws_connected = True
         self.metric_ws_restarts.inc()

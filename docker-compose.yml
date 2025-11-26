@@ -365,10 +365,10 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
         reservations:
           cpus: "0.25"
-          memory: 128M
+          memory: 256M
 
 volumes:
   # Named volumes keep state between docker compose up/down cycles.
