@@ -39,7 +39,6 @@ PROVER_REQUIRED_FILES=(
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
 )
-DEFAULT_CADDY_FILE="${ROOT_DIR}/docker/caddy/Caddyfile.prod"
 TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 
 prune_docker_artifacts() {
@@ -130,14 +129,9 @@ check_prover_artifacts() {
 }
 
 check_caddyfile() {
-  if [[ ! -f "${DEFAULT_CADDY_FILE}" ]]; then
-    log_warn "Missing prod Caddyfile at ${DEFAULT_CADDY_FILE}"
-    log_warn "Commit the desired config to docker/caddy/Caddyfile.prod before deploying."
+  if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
+    log_warn "Missing Caddyfile at ${TARGET_CADDYFILE}"
     exit 1
-  fi
-  if ! cmp -s "${DEFAULT_CADDY_FILE}" "${TARGET_CADDYFILE}" 2>/dev/null; then
-    log_step "Preparing prod Caddyfile (${TARGET_CADDYFILE})"
-    cp "${DEFAULT_CADDY_FILE}" "${TARGET_CADDYFILE}"
   fi
 }
 

@@ -38,7 +38,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
-CADDYFILE_LOCAL="${ROOT_DIR}/docker/caddy/Caddyfile.local"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_REQUIRED_FILES=(
   "settlement_js/generate_witness.js"
@@ -98,17 +97,6 @@ NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
 COMPOSE_ENV_ARGS=()
 WAIT_FLAG=()
-
-ensure_caddyfile() {
-  if [[ ! -f "${CADDYFILE_LOCAL}" ]]; then
-    log_warn "Missing local Caddyfile at ${CADDYFILE_LOCAL}"
-    exit 1
-  fi
-  if ! cmp -s "${CADDYFILE_LOCAL}" "${TARGET_CADDYFILE}" 2>/dev/null; then
-    log_step "Preparing local Caddyfile (${TARGET_CADDYFILE})"
-    cp "${CADDYFILE_LOCAL}" "${TARGET_CADDYFILE}"
-  fi
-}
 
 ensure_prover_artifacts() {
   if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
@@ -245,7 +233,10 @@ if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts
 fi
 
-ensure_caddyfile
+if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
+  log_warn "Missing Caddyfile at ${TARGET_CADDYFILE}"
+  exit 1
+fi
 ensure_prover_artifacts
 
 # Configure env file usage
@@ -323,14 +314,27 @@ REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
 
 cat <<EOF
 ------------------------------------------------------------
-Stack ready. Useful URLs while running locally:
-  • API docs / health:      http://localhost:${API_PORT}/docs  | http://localhost:${API_PORT}/health
-  • Hedger admin / metrics: http://localhost:8090/admin/exposures | http://localhost:8090/metrics
-  • Perf / SLA metrics:     http://localhost:${API_PORT}/health/heartbeats
-  • Frontend / marketing:   http://localhost:${FRONTEND_PORT}/
-  • Price streamer:         http://localhost:${STREAMER_PORT}/health | http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
-  • Postgres (psql):        ${POSTGRES_URI}
-  • Redis (CLI):            ${REDIS_CMD}
+Stack ready. Useful URLs (via Caddy):
+
+  • Frontend:               http://localhost
+  • API docs:               http://api.localhost/docs
+  • API health:             http://api.localhost/healthz
+  • API heartbeats:         http://api.localhost/health/heartbeats
+  • Streamer health:        http://stream.localhost/healthz
+  • Streamer history:       http://stream.localhost/history?market_id=...&outcome=0
+
+Internal service ports (for debugging):
+
+  • API direct:             http://localhost:8000
+  • Streamer direct:        http://localhost:8100
+  • Frontend direct:        http://localhost:3000
+  • Hedger metrics:         http://localhost:8090/admin/exposures
+                            http://localhost:8090/metrics
+
+Datastores:
+
+  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
+  • Redis (CLI):            redis-cli -h localhost -p 6379
 ------------------------------------------------------------
 EOF
 

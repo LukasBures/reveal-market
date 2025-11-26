@@ -1,0 +1,142 @@
+{
+  admin off
+  grace_period 5s
+  email infra@revealmarket.xyz
+}
+
+# ======================================================================
+# SHARED SNIPPETS
+# ======================================================================
+
+(health_common) {
+  @healthz path /healthz
+  respond @healthz "ok" 200
+}
+
+(header_common) {
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    Expect-CT "max-age=86400, enforce"
+    Cache-Control "public, max-age=60"
+    -Server
+  }
+}
+
+(log_common) {
+  log {
+    level WARN
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+}
+
+(proxy_frontend) {
+  reverse_proxy frontend:3000 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      dial_timeout 5s
+      read_timeout 30s
+      write_timeout 30s
+      max_conns_per_host 128
+      keepalive_idle_conns 128
+    }
+  }
+}
+
+(proxy_api) {
+  reverse_proxy api:8000 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      keepalive_idle_conns 64
+      read_timeout 60s
+    }
+  }
+}
+
+(proxy_streamer) {
+  reverse_proxy price-streamer:8100 {
+    trusted_proxies private_ranges
+    transport http {
+      versions 1.1
+      keepalive_idle_conns 64
+      read_timeout 60s
+    }
+  }
+}
+
+# ======================================================================
+# PRIMARY DOMAIN — revealmarket.xyz
+# ======================================================================
+revealmarket.xyz {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_frontend
+}
+
+# ======================================================================
+# STREAMER — stream.revealmarket.xyz
+# ======================================================================
+stream.revealmarket.xyz {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_streamer
+}
+
+# ======================================================================
+# API — api.revealmarket.xyz
+# ======================================================================
+api.revealmarket.xyz {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_api
+}
+
+# ======================================================================
+# WWW REDIRECT → apex
+# ======================================================================
+www.revealmarket.xyz {
+  encode zstd gzip
+  import health_common
+  redir https://revealmarket.xyz{uri} 308
+}
+
+# ======================================================================
+# LOCALHOST (HTTP ONLY)
+# ======================================================================
+localhost {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_frontend
+}
+
+api.localhost {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_api
+}
+
+stream.localhost {
+  encode zstd gzip
+  import health_common
+  import header_common
+  import log_common
+  import proxy_streamer
+}
