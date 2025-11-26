@@ -14,6 +14,8 @@ services:
     image: postgres:15-alpine
     container_name: reveal-market-postgres
     restart: unless-stopped
+    # mem_swappiness: 0
+    # command: ["postgres", "-c", "shared_buffers=128MB", "-c", "work_mem=4MB"]
     # Primary datastore for both API + worker. The binded volume keeps data
     # across container restarts so migrations/tests do not blow away fixtures.
     # Default credentials are baked into the sample data only. Override in prod.
@@ -36,15 +38,16 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 256M
 
   redis:
     image: redis:7-alpine
     container_name: reveal-market-redis
     restart: unless-stopped
+    # mem_swappiness: 0
     # Acts as cache + heartbeat store. We expose the default port so developers
     # can inspect metrics with redis-cli locally if needed.
     ports:
@@ -64,22 +67,27 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 3G
+          memory: 512M
         reservations:
           cpus: "0.25"
-          memory: 512M
+          memory: 256M
 
   api:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-api
     restart: unless-stopped
     init: true
+    mem_swappiness: 0
     environment:
       <<: *backend-env
       RM_ENVIRONMENT: local
-      APP_WORKERS: ${APP_WORKERS}
+      APP_WORKERS: ${APP_WORKERS:-2}
+      UVICORN_WORKERS: 2
+      PYTHONUNBUFFERED: 1
       HOST: 0.0.0.0
       # Surface CORS/host controls from env files into the API container.
       RM_ALLOWED_HOSTS: ${RM_ALLOWED_HOSTS}
@@ -111,18 +119,21 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 768M
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 384M
+          memory: 256M
 
   worker:
     build:
       context: .
       dockerfile: docker/worker/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-worker
     restart: unless-stopped
     init: true
+    mem_swappiness: 0
     environment:
       <<: *backend-env
       RM_POLYMARKET_CLOSED_FILTER: "false"
@@ -132,6 +143,9 @@ services:
       RM_MARKETS_CACHE_LIMIT: 18
       RM_PROVER_ENABLED: ${RM_PROVER_ENABLED}
       RM_PROVER_BASE_URL: ${RM_PROVER_BASE_URL}
+      APP_WORKERS: ${APP_WORKERS:-2}
+      UVICORN_WORKERS: 2
+      PYTHONUNBUFFERED: 1
     depends_on:
       postgres:
         condition: service_healthy
@@ -154,18 +168,21 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 768M
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 384M
+          memory: 256M
 
   hedger:
     build:
       context: .
       dockerfile: docker/hedger/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-hedger
     restart: unless-stopped
     init: true
+    mem_swappiness: 0
     environment:
       MODE: ${MODE}
       HEDGER_DATABASE_URL: ${HEDGER_DATABASE_URL}
@@ -182,6 +199,9 @@ services:
       HEDGER_API_HOST: 0.0.0.0
       HEDGER_API_PORT: 8090
       HEDGER_PROVER_BASE_URL: ${HEDGER_PROVER_BASE_URL}
+      APP_WORKERS: ${APP_WORKERS:-2}
+      UVICORN_WORKERS: 2
+      PYTHONUNBUFFERED: 1
     depends_on:
       postgres:
         condition: service_healthy
@@ -200,16 +220,17 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 768M
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 384M
+          memory: 256M
 
   frontend:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
       args:
+        BUILDKIT_INLINE_CACHE: 1
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
         NEXT_PUBLIC_PRICE_STREAMER_URL: ${NEXT_PUBLIC_PRICE_STREAMER_URL}
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
@@ -217,8 +238,10 @@ services:
         NEXT_PUBLIC_WALLET_CHAINS: ${NEXT_PUBLIC_WALLET_CHAINS}
     container_name: reveal-market-frontend
     restart: unless-stopped
+    mem_swappiness: 0
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=256
       # These are mostly for server-side code (if you use them there),
       # NOT for client-side code. Client uses the build-time values above.
       RM_API_BASE_URL: ${RM_API_BASE_URL}
@@ -237,15 +260,16 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 256M
         reservations:
           cpus: "0.5"
-          memory: 256M
+          memory: 128M
 
   caddy:
     image: caddy:2
     container_name: reveal-market-caddy
     restart: unless-stopped
+    mem_swappiness: 0
     depends_on:
       - frontend
     ports:
@@ -255,13 +279,25 @@ services:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
 
   prover:
     build:
       context: .
       dockerfile: docker/prover/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-prover
     restart: unless-stopped
+    mem_swappiness: 0
     volumes:
       - ./prover/circuits:/app/circuits:ro
     environment:
@@ -270,6 +306,7 @@ services:
       PROVER_VERSION: ${PROVER_VERSION}
       PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH}
       PROVER_BACKEND: ${PROVER_BACKEND}
+      PYTHONUNBUFFERED: 1
     ports:
       - "8085:8085"
     deploy:
@@ -277,17 +314,20 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 384M
         reservations:
           cpus: "0.5"
-          memory: 256M
+          memory: 192M
 
   price-streamer:
     build:
       context: .
       dockerfile: docker/price-streamer/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-price-streamer
     restart: unless-stopped
+    mem_swappiness: 0
     environment:
       STREAMER_REDIS_URL: ${STREAMER_REDIS_URL}
       STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL}
@@ -306,6 +346,9 @@ services:
       STREAMER_CORS_ALLOW_METHODS: ${STREAMER_CORS_ALLOW_METHODS}
       STREAMER_CORS_ALLOW_HEADERS: ${STREAMER_CORS_ALLOW_HEADERS}
       STREAMER_CORS_ALLOW_CREDENTIALS: ${STREAMER_CORS_ALLOW_CREDENTIALS}
+      APP_WORKERS: ${APP_WORKERS:-2}
+      UVICORN_WORKERS: 2
+      PYTHONUNBUFFERED: 1
     depends_on:
       redis:
         condition: service_healthy
@@ -317,6 +360,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
 volumes:
   # Named volumes keep state between docker compose up/down cycles.

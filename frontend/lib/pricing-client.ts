@@ -35,12 +35,11 @@ export type FxQuote = {
   stale: boolean;
 };
 
-const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.RM_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(
-  /\/$/,
-  "",
-);
+const rawApiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.RM_API_BASE_URL ?? "https://api.revealmarket.xyz";
+const apiBase = rawApiBase.replace(/\/$/, "");
 const streamerBasePublic = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
 const streamerBaseInternal = (process.env.STREAMER_INTERNAL_URL || "").replace(/\/$/, "");
+const offlineApiBase = (process.env.RM_OFFLINE_API_BASE_URL || "").replace(/\/$/, "");
 
 const isServer = typeof window === "undefined";
 const isBrowser = !isServer;
@@ -73,11 +72,43 @@ const mapFxPayload = (payload: any): FxQuote => ({
   stale: Boolean(payload.stale),
 });
 
+const getApiBases = (): string[] => {
+  const bases: string[] = [];
+  const env = process.env.NODE_ENV ?? "development";
+  bases.push(apiBase);
+  if (offlineApiBase && offlineApiBase !== apiBase) {
+    bases.push(offlineApiBase);
+  }
+  if (env !== "production" && typeof window !== "undefined") {
+    const origin = window.location?.origin?.replace(/\/$/, "");
+    if (origin && !bases.includes(origin)) {
+      bases.push(origin);
+    }
+    const devFallbacks = ["http://localhost:8000", "http://api.localhost"];
+    devFallbacks.forEach((base) => {
+      if (!bases.includes(base)) bases.push(base);
+    });
+  }
+  return bases;
+};
+
 const fetchApiFxQuote = async (): Promise<FxQuote> => {
-  const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
-  if (!res.ok) throw new Error(`API FX fetch failed: ${res.status}`);
-  const payload = await res.json();
-  return mapFxPayload(payload);
+  const bases = getApiBases();
+  let lastError: Error | null = null;
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/pricing/fx`, { cache: "no-store" });
+      if (!res.ok) {
+        lastError = new Error(`API FX fetch failed: ${res.status}`);
+        continue;
+      }
+      const payload = await res.json();
+      return mapFxPayload(payload);
+    } catch (err) {
+      lastError = err as Error;
+    }
+  }
+  throw lastError || new Error("API FX fetch failed");
 };
 
 export async function fetchStreamerFxQuote(path = "/fx/zen-usdc"): Promise<FxQuote> {

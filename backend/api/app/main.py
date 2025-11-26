@@ -113,9 +113,23 @@ app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifesp
 if settings.allowed_hosts and settings.allowed_hosts != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
+# Expand CORS origins in non-production environments to include local dev hosts
+# so browser clients hitting api.localhost/http://localhost work without manual overrides.
+cors_origins = list(settings.cors_allow_origins)
+if cors_origins != ["*"] and settings.environment.lower() != "production":
+    local_origins = {
+        "http://localhost",
+        "http://localhost:3000",
+        "http://127.0.0.1",
+        "http://127.0.0.1:3000",
+        "http://api.localhost",
+        "http://stream.localhost",
+    }
+    cors_origins = list({*cors_origins, *local_origins})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
+    allow_origins=cors_origins,
     allow_credentials=settings.cors_allow_credentials,
     allow_methods=settings.cors_allow_methods,
     allow_headers=settings.cors_allow_headers,
@@ -1252,6 +1266,13 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
     try:
         return await fetch_fx_quote(settings)
     except httpx.HTTPError as exc:
+        cached = settings.fx_fallback_price
+        try:
+            fx_state = getattr(fetch_fx_quote, "_cache_state", None)
+            if fx_state and fx_state.get("zen_usd") is not None:
+                cached = fx_state["zen_usd"]
+        except Exception:
+            cached = settings.fx_fallback_price
         log_event(
             logger,
             logging.WARNING,
@@ -1259,7 +1280,7 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="failed to fetch FX feed",
             error=str(exc),
         )
-        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
+        return schemas.FxQuoteResponse(zen_usd=cached, stale=True)
     except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
         log_event(
             logger,

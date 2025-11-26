@@ -1,3 +1,7 @@
+# syntax=docker/dockerfile:1.4
+
+ARG BUILDKIT_INLINE_CACHE=1
+
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
@@ -27,13 +31,11 @@ RUN set -eux; \
     cp -r /tmp/rapidsnark/rapidsnark-linux-*-${RAPIDSNARK_VERSION}/. /opt/rapidsnark; \
     rm -rf /tmp/rapidsnark /tmp/rapidsnark.zip
 
-FROM node:20-bookworm-slim
+FROM node:20-alpine
 
-RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends ca-certificates curl wget && \
-    rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apk apk add --no-cache ca-certificates curl wget gcompat libstdc++
 
-RUN useradd --create-home --shell /usr/sbin/nologin prover
+RUN adduser -D -H -s /sbin/nologin prover
 WORKDIR /app
 
 COPY prover/circuits /app/circuits

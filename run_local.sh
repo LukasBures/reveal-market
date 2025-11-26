@@ -4,8 +4,8 @@
 # -----------------------------------------------------------------------------
 # Full rebuild + launch script for developers.
 # - Enables BuildKit + parallel builds (leaving one CPU free).
-# - Defaults to a --no-cache + --pull compose build so every layer is fresh (use --cache to reuse layers).
-# - Optional --skip-build for faster iterations when only restarting containers.
+# - Defaults to cached compose builds so rebuilds are fast (pass --no-cache to force a clean build).
+# - Optional --skip-build for faster iterations when only restarting containers; service arguments limit rebuild scope.
 # - Starts docker compose (with --remove-orphans) in the foreground so logs stream to the terminal (use --detach to background).
 # - Tip: run `make test` (backend) / `npm run test` (frontend) before calling this to catch errors earlier.
 #
@@ -138,7 +138,7 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 
-BUILD_FLAG="--no-cache"
+BUILD_FLAG=""
 RUN_BUILD="true"
 RUN_PRUNE="${RUN_PRUNE:-false}"
 DETACH_MODE="false"
@@ -148,14 +148,16 @@ BUILD_SERVICES=()
 usage() {
   cat <<EOF
 Usage: ./run_local.sh [--cache|--no-cache] [--skip-build] [compose up args...]
-  --cache          Reuse existing build layers.
-  --no-cache       Force a clean rebuild (default).
+  --cache          Reuse existing build layers (default).
+  --no-cache       Force a clean rebuild.
   --skip-build     Skip the docker compose build step entirely.
   --build-services Comma-separated list of services to rebuild (e.g., api,worker,frontend).
   --env-file PATH  Use a specific env file (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
-  --prune          Run 'docker system prune -af' before building (disabled by default).
+  --prune          Run 'docker system prune -af' before building (disabled by default; clears caches).
   --detach         Start docker compose in the background (default streams logs in foreground).
   -h, --help       Show this help text.
+
+Passing service names (e.g., frontend,api) limits both the build and up steps to those services.
 EOF
 }
 
@@ -277,8 +279,8 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   fi
 
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
-  log_step "Building images (${BUILD_DESC}, pull latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  BUILD_OPTS=(--parallel --pull)
+  log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
+  BUILD_OPTS=(--parallel)
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi
@@ -345,12 +347,38 @@ if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
 import json
 import sys
 
-try:
-    data = json.load(sys.stdin)
-except Exception:
+raw = sys.stdin.read().strip()
+if not raw:
     sys.exit(0)
 
-for svc in data:
+items: list[dict] = []
+# docker compose ps --format json can emit a JSON array or one object per line,
+# depending on the version. Parse both shapes defensively.
+try:
+    data = json.loads(raw)
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        candidates = []
+        for key in ("services", "containers"):
+            val = data.get(key)
+            if isinstance(val, list):
+                candidates.extend(val)
+            elif isinstance(val, dict):
+                candidates.extend(val.values())
+        items = candidates or [data]
+except Exception:
+    for line in raw.splitlines():
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            items.append(obj)
+
+for svc in items:
+    if not isinstance(svc, dict):
+        continue
     print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
 )"

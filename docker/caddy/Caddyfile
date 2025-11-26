@@ -26,9 +26,21 @@
   }
 }
 
+(header_common_local) {
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    Expect-CT "max-age=86400, enforce"
+    Cache-Control "public, max-age=60"
+    -Server
+  }
+}
+
 (log_common) {
   log {
-    level WARN
+    level ERROR
     output stdout
     format filter {
       wrap json
@@ -117,26 +129,26 @@ www.revealmarket.xyz {
 # ======================================================================
 # LOCALHOST (HTTP ONLY)
 # ======================================================================
-localhost {
+http://localhost {
   encode zstd gzip
   import health_common
-  import header_common
+  import header_common_local
   import log_common
   import proxy_frontend
 }
 
-api.localhost {
+http://api.localhost {
   encode zstd gzip
   import health_common
-  import header_common
+  import header_common_local
   import log_common
   import proxy_api
 }
 
-stream.localhost {
+http://stream.localhost {
   encode zstd gzip
   import health_common
-  import header_common
+  import header_common_local
   import log_common
   import proxy_streamer
 }

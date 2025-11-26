@@ -1,22 +1,24 @@
+# syntax=docker/dockerfile:1.4
 # docker/frontend/Dockerfile
+
+ARG BUILDKIT_INLINE_CACHE=1
 
 # 1) Install dependencies
 FROM node:20-alpine AS deps
-RUN apk add --no-cache python3 make g++
-WORKDIR /app
+RUN --mount=type=cache,target=/var/cache/apk apk add --no-cache --virtual .build-deps python3 make g++
+WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 # Cache npm modules between builds when BuildKit is enabled.
 RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit
+RUN apk del .build-deps
 
 # 2) Build stage – all NEXT_PUBLIC_* must be passed as build args
 FROM node:20-alpine AS builder
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY frontend ./frontend
-
 WORKDIR /app/frontend
+
+COPY --from=deps /app/frontend/node_modules ./node_modules
+COPY frontend ./
 
 # Build-time envs (these are what Next.js actually embeds)
 ARG NEXT_PUBLIC_API_BASE_URL

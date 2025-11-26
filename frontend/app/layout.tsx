@@ -148,7 +148,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
         />
       </head>
-      <body className="text-white antialiased">
+      <body className="text-white antialiased" suppressHydrationWarning>
         <AppProviders>
           {showProtectedApp ? (
             <>

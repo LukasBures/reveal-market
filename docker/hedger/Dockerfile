@@ -1,5 +1,6 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.4
 
+ARG BUILDKIT_INLINE_CACHE=1
 ARG UV_BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim
 ARG SERVICE_DIR=hedger

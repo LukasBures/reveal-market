@@ -12,6 +12,10 @@ const GA_ORIGINS = [
 ];
 
 const scriptSrc = ["'self'", "'unsafe-inline'"];
+if (!IS_PRODUCTION) {
+  // React Fast Refresh relies on eval-like constructs in dev.
+  scriptSrc.push("'unsafe-eval'");
+}
 const styleSrc = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"];
 const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com"];
 const WALLET_PROVIDER_ORIGINS = [

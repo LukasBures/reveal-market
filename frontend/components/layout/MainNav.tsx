@@ -63,7 +63,7 @@ export function MainNav() {
               width={200}
               height={56}
               priority
-              className="h-10 w-auto select-none"
+              className="h-auto w-[200px] select-none"
               draggable={false}
             />
           </a>
@@ -79,7 +79,7 @@ export function MainNav() {
               width={200}
               height={56}
               priority
-              className="h-10 w-auto select-none"
+              className="h-auto w-[200px] select-none"
               draggable={false}
             />
           </Link>

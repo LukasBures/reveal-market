@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     )
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
+    fx_cache_ttl_seconds: float = Field(default=60.0, ge=1.0)
     max_stake_zen: float = Field(default=100.0, gt=0, description="Per-quote max stake in ZEN")
     max_user_stake_per_market_zen: float = Field(
         default=100.0, gt=0, description="Per-user cumulative stake per market in ZEN"

@@ -41,6 +41,7 @@ const initialState: FxConnectionState = {
   wsDelivered: false,
   restFallbacks: 0,
 };
+const initialFxSnapshot: FxState = { fx: null, error: null, status: "connecting" };
 
 function notify(conn: FxConnection) {
   conn.subscribers.forEach((cb) => cb());
@@ -232,8 +233,8 @@ function subscribeToConnection(path: string, onChange: () => void) {
 
 function getSnapshot(path: string): FxState {
   const conn = connections.get(path);
-  if (!conn) return { fx: null, error: null, status: "connecting" };
-  return { fx: conn.state.fx, error: conn.state.error, status: conn.state.status };
+  if (!conn) return initialFxSnapshot;
+  return conn.state as FxState;
 }
 
 export function useFxStream(path = "/fx/zen-usdc"): FxState {
@@ -243,7 +244,7 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
   const subscribe = (onStoreChange: () => void) => subscribeToConnection(pathRef.current, onStoreChange);
   const getSnap = () => getSnapshot(pathRef.current);
 
-  const state = useSyncExternalStore(subscribe, getSnap, getSnap);
+  const state = useSyncExternalStore(subscribe, getSnap, () => initialFxSnapshot);
 
   useEffect(() => {
     // Ensure connection starts when path changes.

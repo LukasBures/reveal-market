@@ -14,7 +14,14 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Link href="/" className="inline-flex items-center gap-3 text-white">
-            <Image src="/brand/reveal-logo-wordmark.svg" alt="Reveal Market logo" width={240} height={64} priority />
+            <Image
+              src="/brand/reveal-logo-wordmark.svg"
+              alt="Reveal Market logo"
+              width={240}
+              height={64}
+              priority
+              className="h-auto w-[240px]"
+            />
           </Link>
           <p className="text-base text-slate-200">
             Institutional-grade prediction markets with Horizen roots, zk-settled proofs, and provable custody.

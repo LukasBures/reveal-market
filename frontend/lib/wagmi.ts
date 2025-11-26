@@ -2,12 +2,16 @@ import { createConfig, http } from "wagmi";
 import type { CreateConnectorFn } from "wagmi";
 import { base } from "wagmi/chains";
 import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
+import { ensureLocalStorage } from "@/lib/localStoragePolyfill";
+
+ensureLocalStorage();
 
 const chains = [base] as const;
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  process.env.NEXT_PUBLIC_APP_URL ??
+const resolvedSiteUrl =
+  (typeof window !== "undefined" && window.location?.origin) ||
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
   (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : "https://revealmarket.xyz");
 
 if (!walletConnectProjectId) {
@@ -23,8 +27,8 @@ const createWalletConnectors = (): readonly CreateConnectorFn[] => {
       metadata: {
         name: "Reveal Market",
         description: "Private prediction markets",
-        url: siteUrl,
-        icons: [new URL("/icon/favicon-96x96.png", siteUrl).toString()],
+        url: resolvedSiteUrl,
+        icons: [new URL("/icon/favicon-96x96.png", resolvedSiteUrl).toString()],
       },
     }),
   ] as const;

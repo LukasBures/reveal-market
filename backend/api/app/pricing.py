@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from time import monotonic
 
 import httpx
 
@@ -8,6 +9,7 @@ from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
+_FX_CACHE: dict[str, float | bool] = {}
 
 
 class PricingEngine:
@@ -94,13 +96,27 @@ def _extract_fx_price(payload: dict) -> float | None:
 async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
     """Fetch the latest ZEN/USD price from the configured feed."""
 
+    now = monotonic()
+    cache_ttl = float(settings.fx_cache_ttl_seconds)
+    cache_expiry = _FX_CACHE.get("expires_at")
+
     async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
-        response = await client.get(str(settings.fx_feed_url))
-        response.raise_for_status()
-        data = response.json()
-        stale = bool(data.get("fx_stale") or data.get("stale"))
-        raw = _extract_fx_price(data)
-        if raw is None:
-            raise ValueError("FX feed response missing zen_usd/price")
-        zen_usd = float(raw)
-    return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
+        try:
+            response = await client.get(str(settings.fx_feed_url))
+            response.raise_for_status()
+            data = response.json()
+            stale = bool(data.get("fx_stale") or data.get("stale"))
+            raw = _extract_fx_price(data)
+            if raw is None:
+                raise ValueError("FX feed response missing zen_usd/price")
+            zen_usd = float(raw)
+            _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
+            return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
+        except Exception:
+            if "zen_usd" in _FX_CACHE and (cache_expiry is None or now < float(cache_expiry)):
+                # Serve cached FX on errors to avoid hammering upstream (mark as stale).
+                _FX_CACHE["stale"] = True
+                _FX_CACHE["expires_at"] = now + cache_ttl
+                fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
+                return FxQuoteResponse(zen_usd=float(_FX_CACHE["zen_usd"]), stale=True)
+            raise
