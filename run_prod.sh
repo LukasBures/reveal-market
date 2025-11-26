@@ -55,6 +55,7 @@ else
   log_warn "docker compose or docker-compose is required"
   exit 1
 fi
+COMPOSE_FILE_ARGS=(-f "${ROOT_DIR}/docker-compose.yml")
 
 cd "${ROOT_DIR}"
 
@@ -222,19 +223,19 @@ if [[ -n "${ENV_FILE}" && -f "${ENV_FILE}" && "${SUPPORTS_ENV_FILE}" == true ]];
 fi
 
 log_step "Validating docker compose files"
-log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} config"
-"${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
+log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} config"
+"${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
   log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull
+  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi
 
 log_step "Starting services in detached mode"
-UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}")
+UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}")
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
@@ -242,8 +243,8 @@ log_info "Running: ${UP_CMD[*]}"
 "${UP_CMD[@]}"
 
 log_step "Service status"
-log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} ps"
-"${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps
+log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} ps"
+"${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps
 
 # Emit a concise health summary when supported (Docker Compose v2+).
 if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
@@ -260,7 +261,7 @@ for svc in data:
     print(f"{name:30s} state={state} health={health}")
 PY
 )"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
 log_step "Deployment complete"

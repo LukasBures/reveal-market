@@ -76,6 +76,8 @@ else
   echo "docker compose or docker-compose is required" >&2
   exit 1
 fi
+# Always load base + local override.
+COMPOSE_FILE_ARGS=(-f "${ROOT_DIR}/docker-compose.yml" -f "${ROOT_DIR}/docker-compose.override.yml")
 
 calc_parallel_builds() {
   # Compose refuses to parallelise more builds than CPUs, so detect the host
@@ -269,8 +271,8 @@ if supports_wait_flag; then
 fi
 
 log_step "Validating docker compose files"
-log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} config"
-"${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
+log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} config"
+"${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
 if [[ "${RUN_BUILD}" == "true" ]]; then
   # If the user requested specific services to run and did not pass --build-services,
   # limit the build to those services to avoid rebuilding the entire stack.
@@ -284,7 +286,7 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi
-  BUILD_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${BUILD_OPTS[@]}")
+  BUILD_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${BUILD_OPTS[@]}")
   if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
     BUILD_CMD+=("${BUILD_SERVICES[@]}")
   fi
@@ -295,7 +297,7 @@ else
 fi
 
 log_step "Starting services"
-UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" up "--remove-orphans")
+UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "--remove-orphans")
 if [[ "${DETACH_MODE}" == "true" ]]; then
   UP_CMD+=("--detach")
 fi
@@ -390,11 +392,11 @@ if [[ "${DETACH_MODE}" == "false" ]]; then
 📜 Streaming logs (Ctrl+C to stop):
 ------------------------------------------------------------
 EOF
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_ENV_ARGS[*]} logs -f"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" logs -f
+  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} logs -f"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" logs -f
 else
   cat <<EOF
 📜 Services are running in the background (started with --detach).
-    View logs with: ${COMPOSE_CMD[*]} logs -f ${UP_ARGS[*]}
+    View logs with: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} logs -f ${UP_ARGS[*]}
 EOF
 fi

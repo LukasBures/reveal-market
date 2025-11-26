@@ -1,17 +1,36 @@
 PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 INFRA_SERVICES ?= postgres redis
+ALL_SERVICES := postgres redis api worker hedger frontend caddy prover price-streamer
 
-.PHONY: api worker stack down test fmt
+.PHONY: api worker hedger frontend caddy prover streamer all stack down test fmt local prod
 
 api:
-	$(COMPOSE) up --build $(INFRA_SERVICES) api
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) api
 
 worker:
-	$(COMPOSE) up --build $(INFRA_SERVICES) worker
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) worker
 
 stack:
-	$(COMPOSE) up --build $(INFRA_SERVICES) api worker frontend
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) api worker frontend
+
+hedger:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) hedger
+
+frontend:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) frontend
+
+caddy:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build caddy
+
+prover:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build prover
+
+streamer:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build price-streamer
+
+all:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(ALL_SERVICES)
 
 down:
 	$(COMPOSE) down
@@ -21,3 +40,9 @@ test:
 
 fmt:
 	pre-commit run --all-files
+
+local:
+	./run_local.sh
+
+prod:
+	./run_prod.sh

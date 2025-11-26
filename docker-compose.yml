@@ -48,10 +48,7 @@ services:
     container_name: reveal-market-redis
     restart: unless-stopped
     # mem_swappiness: 0
-    # Acts as cache + heartbeat store. We expose the default port so developers
-    # can inspect metrics with redis-cli locally if needed.
-    ports:
-      - "6379:6379"
+    # Acts as cache + heartbeat store. Port binding lives in docker-compose.override.yml for local-only access.
     volumes:
       - redis_data:/data
       - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
@@ -100,9 +97,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Expose FastAPI on the host so docs + frontend can talk to it directly.
-    ports:
-      - "8000:8000"
     logging:
       driver: "json-file"
       options:
@@ -207,8 +201,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "8090:8090"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 30s
@@ -252,9 +244,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    # Public entrypoint for the stack. Keep host mapping so preview builds work.
-    ports:
-      - "3000:3000"
     deploy:
       replicas: 1
       resources:
@@ -307,8 +296,6 @@ services:
       PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH}
       PROVER_BACKEND: ${PROVER_BACKEND}
       PYTHONUNBUFFERED: 1
-    ports:
-      - "8085:8085"
     deploy:
       replicas: 1
       resources:
@@ -352,8 +339,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    ports:
-      - "8100:8100"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 20s

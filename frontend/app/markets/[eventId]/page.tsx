@@ -8,7 +8,6 @@ import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
-import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 
 const MarketDetailMetadataPanel = dynamic(
@@ -234,14 +233,18 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
           <MarketDetailHeader market={market} coverImage={coverImage} />
-          <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
+          <div className="grid gap-6 lg:grid-cols-[1.65fr,1fr]">
             <div className="space-y-6">
               <MarketDetailOutcomes market={market} />
-              <div className="grid gap-4 lg:grid-cols-2">
-                <MarketDetailChart marketId={canonicalEventId} />
-                <MarketLivePanels marketId={canonicalEventId} />
-              </div>
-              <section className="rounded-3xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-300">
+              <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
+                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">How payouts work</p>
+                <ul className="mt-3 space-y-2 text-sm leading-relaxed text-slate-200">
+                  <li>• You deposit ZEN. If you win, you get two tokens.</li>
+                  <li>• Your stake back in ZEN minus the platform rake (rake is charged on the ZEN stake only).</li>
+                  <li>• Your winnings in stable USDC (the profit shown here), keeping gains stable.</li>
+                </ul>
+              </section>
+              <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
@@ -263,6 +266,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
             </div>
             <div className="space-y-4">
               <StakeQuoteCard marketAddress={market.marketAddress} marketId={canonicalEventId} outcomeId={0} />
+              <MarketLivePanels marketId={canonicalEventId} />
               <MarketDetailSidebarPanel market={market} />
             </div>
           </div>

@@ -1,4 +1,21 @@
 services:
+  redis:
+    # Bind Redis to localhost for local development/inspection only.
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  price-streamer:
+    ports:
+      - "127.0.0.1:8100:8100"
+
+  prover:
+    ports:
+      - "127.0.0.1:8085:8085"
+
   api:
     # Override prod-like defaults so local runs get verbose logs + live code reloading.
     environment:
@@ -9,6 +26,8 @@ services:
       - ./backend/api/app:/app/app
       - ./backend/shared:/app/shared
       - ./backend/migrations:/app/migrations
+    ports:
+      - "127.0.0.1:8000:8000"
 
   worker:
     environment:
@@ -30,3 +49,5 @@ services:
     volumes:
       - ./hedger/app:/hedger/app
       - ./backend/shared:/hedger/shared
+    ports:
+      - "127.0.0.1:8090:8090"
