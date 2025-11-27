@@ -67,7 +67,7 @@ const CONNECTOR_UI: ConnectorOption[] = [
   {
     id: "coinbase",
     label: "Coinbase Wallet",
-    connectorId: "coinbaseWallet",
+    connectorId: "coinbaseWalletSDK",
     description: "Browser & mobile",
     iconSrc: "/wallet-icons/coinbasewallet.svg",
     iconAlt: "Coinbase Wallet",
@@ -99,6 +99,8 @@ const CONNECTOR_UI: ConnectorOption[] = [
 ] as const;
 
 type ConnectorMap = Record<string, Connector | undefined>;
+const walletConnectEnabled =
+  Boolean(process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) || process.env.NODE_ENV === "test";
 
 function formatAddress(address?: string | null) {
   if (!address) {
@@ -169,31 +171,66 @@ export function ConnectWalletButton() {
 
   const providerFlags = useMemo(() => {
     if (!isMounted || typeof window === "undefined") {
-      return { ethereum: null as any };
+      return { ethereum: null as any, providers: [] as any[] };
     }
     const ethereum = (window as any).ethereum;
-    return { ethereum };
+    const providers = Array.isArray(ethereum?.providers)
+      ? ethereum.providers.filter(Boolean)
+      : ethereum
+        ? [ethereum]
+        : [];
+    return { ethereum, providers };
   }, [isMounted]);
+
+  const hasInjectedProvider = useCallback(
+    (predicate: (provider: any) => boolean) => providerFlags.providers.some(predicate),
+    [providerFlags.providers],
+  );
 
   const availableOptions = useMemo(() => {
     return CONNECTOR_UI.filter((option) => {
+      if (option.id === "walletconnect" && !walletConnectEnabled) {
+        return false;
+      }
       const connector = connectorsById[option.connectorId];
       if (!connector) return false;
       const ready = (connector as any).ready ?? true;
-      if (!ready) return false;
       if (!isMounted) return true;
-      if (!isMobileBrowser) return true;
-      if (option.connectorId === "walletConnect") return true;
       const ethereum = providerFlags.ethereum;
-      if (!ethereum) return false;
-      if (option.connectorId === "metaMask") return Boolean(ethereum.isMetaMask);
-      if (option.connectorId === "coinbaseWallet") return Boolean(ethereum.isCoinbaseWallet);
-      if (option.connectorId === "injected") {
-        return Boolean(ethereum && !ethereum.isMetaMask && !ethereum.isCoinbaseWallet);
+      const providersAvailable = providerFlags.providers.length > 0;
+
+      // Determine if this connector is actually available in the current environment.
+      let walletAvailable = false;
+      if (!isMobileBrowser) {
+        walletAvailable = true;
+      } else if (option.connectorId === "walletConnect") {
+        walletAvailable = true;
+      } else if (option.connectorId === "metaMask") {
+        walletAvailable =
+          Boolean(ethereum?.isMetaMask) ||
+          hasInjectedProvider((provider) => Boolean(provider?.isMetaMask));
+      } else if (option.connectorId === "coinbaseWalletSDK") {
+        walletAvailable =
+          Boolean(ethereum?.isCoinbaseWallet) ||
+          hasInjectedProvider((provider) => Boolean(provider?.isCoinbaseWallet));
+      } else if (option.connectorId === "injected") {
+        const hasNonMetaMask = hasInjectedProvider(
+          (provider) => !provider?.isMetaMask && !provider?.isCoinbaseWallet,
+        );
+        walletAvailable = Boolean(
+          (ethereum && !ethereum.isMetaMask && !ethereum.isCoinbaseWallet) || hasNonMetaMask,
+        );
       }
-      return false;
+
+      // If wagmi marks connector as not ready, allow it when we detected a matching provider.
+      if (!ready && !walletAvailable) return false;
+
+      // When no providers are present, hide injected wallets on mobile/desktop.
+      if (!walletAvailable && !providersAvailable && !ethereum) return false;
+
+      return walletAvailable;
     });
-  }, [connectorsById, isMobileBrowser, isMounted, providerFlags]);
+  }, [connectorsById, hasInjectedProvider, isMobileBrowser, isMounted, providerFlags]);
 
   useEffect(() => {
     if (!selectedOption) return;

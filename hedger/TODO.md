@@ -13,6 +13,7 @@ Short list of items to reach a functional hedger MVP.
 - Add bridge integration to move USDC→ZEN when float low and USDC→vault/bridge when PnL positive.
 - Expand risk metrics: slippage, fill quality, hedge latency, implied odds variance.
 - Enforce off-chain bet caps: per-bet (100 ZEN), per-user-per-market, and per-market caps mirrored from API; reject hedges before placement when caps are exceeded. Document future on-chain maxTicketStake/maxUserStakePerMarket.
+- Keep envs/chain config aligned to Horizen Testnet defaults (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`) when validating quote signatures and bridge targets.
 
 ## Settlement
 - Build prover payload assembly from stored commits + oracle outcome; handle disputed/late oracles.

@@ -35,6 +35,7 @@
 - Store real RPC URLs, wallet keys, and API keys in secret managers. `.env.example` is reference-only.
 - Verify smart-contract addresses/rake overrides before enabling auto on-chain operations.
 - API + frontend ship strong CSP/HSTS/COOP/Permissions-Policy headers. Whitelist new domains before referencing external assets.
+- Default chain is Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`). Keep frontend/backend/contract envs aligned when switching networks.
 
 ## Agent-Specific Instructions
 - Review `backend/TODO.md`, `contracts/TODO.md`, and `frontend/TODO.md` before large tasks; they capture prioritized work.

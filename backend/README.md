@@ -25,6 +25,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Smart economics tracking** – API responses expose rake basis points, settlement hashes, and on-chain identifiers. This enables LPs to model expected yield and for treasury to forecast protocol revenue.
 - **Security-first delivery** – Migrations run automatically, containers execute as non-root users, and optional on-chain helpers remain manual-only so production workers never sign transactions without explicit operator action.
 - **Perimeter controls baked in** – Trusted-host filters, configurable CORS allowlists, and CSP/HSTS/COOP headers ship with the API. Docker health checks call native Python probes rather than brittle shell scripts.
+- **Network defaults (Horizen Testnet)** – Default chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`. Keep `RM_PRICING_CHAIN_ID` aligned when signing quotes and configure on-chain addresses per environment.
 
 ## Horizen Indexing via Goldsky
 
@@ -61,7 +62,7 @@ These milestones ladder up to the same thesis: reliable data fuels confident liq
 - Category caches only register tags when a payload is actually written, preventing dangling invalidation sets during oversized/offset queries.
 - Resolution persistence in the worker was simplified to drop unused state flags, keeping the sync loop lean while still emitting cache payloads for downstream services.
 
-To learn how the backend can power your venue, reach out at hello@revealmarket.xyz or via [X](https://x.com/RevealMarket). We are actively onboarding exchanges, OTC desks, and liquidity programs who want transparent exposure to the next generation of prediction markets.
+To learn how the backend can power your venue, reach out through the site contact form or via [X](https://x.com/RevealMarket). We are actively onboarding exchanges, OTC desks, and liquidity programs who want transparent exposure to the next generation of prediction markets.
 
 ## Local Validation (Python 3.12 + uv)
 

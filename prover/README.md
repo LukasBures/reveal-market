@@ -21,6 +21,7 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
 - `snarkjs` is still required locally when running `generate_keys.sh` because the setup script shells out to it for Groth16 key generation, but runtime proof generation relies on the rapidsnark binary.
 
 > **Tip:** `docker/prover/Dockerfile` installs Node + `rapidsnark@0.0.2` via npm and mounts `./prover/circuits` into `/app/circuits`. Run `bash prover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2` today, so CI and Docker pin to that version to avoid ETARGET install failures; bump the pin once a newer release appears upstream.
+> **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
 
 ## Architecture Overview
 

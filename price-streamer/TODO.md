@@ -10,3 +10,4 @@
 - [ ] Wire on-demand subscription control API and document max_subscriptions behavior for ops; surface current FX/market staleness in a dashboard.
 - [ ] Note future on-chain caps: mirror off-chain bet caps (maxTicketStake/maxUserStakePerMarket) once contracts expose them.
 - [ ] Ensure WS-first FX flow with shared connections keeps retrying WS after HTTP fallbacks; add tests/logs for backoff + single-connection pooling.
+- [ ] Keep streamer env/host aligned to Horizen Testnet defaults (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`) and warn when origins don’t match frontend/API hosts.

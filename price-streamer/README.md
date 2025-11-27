@@ -9,6 +9,7 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
 - SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis.
 - Worsen/haircut/rake applied server-side; payload signing optional.
 - Connection pooling: one WS per path is shared across subscribers, with periodic HTTP fallback to refresh stale data and auto-reconnect back to WS.
+- Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services.
 
 ## Requirements
 - Python 3.12
@@ -59,3 +60,4 @@ docker compose up price-streamer
 - Keep subscriptions scoped (assets_ids/symbols) to limit bandwidth.
 - If the backend API is offline, SSE still serves cached/streamed prices but flags FX as stale when applicable.
  - Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.
+ - Frontend consumers default to Horizen Testnet (chain id `2651420`); align CORS origins/hosts and pricing chain envs when pointing at a different network.

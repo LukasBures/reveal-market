@@ -29,3 +29,4 @@ Ship these three items and the backend will meet MVP expectations for provenance
 ## 5. CORS/FX hardening
 - Add a smoke test to ensure `/pricing/fx` responds with configured CORS origins (RM_CORS_ALLOW_ORIGINS) and flags stale/fallback FX.
 - Surface a health warning when FX feeds fall back or when streamer/API origins are missing, so frontend SSE/history calls don’t get blocked.
+- Keep pricing signer chain/env vars aligned to Horizen Testnet defaults (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`) and warn when mismatched.

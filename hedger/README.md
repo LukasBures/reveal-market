@@ -32,6 +32,7 @@ Useful env vars (defaults live in `app/config.py`):
 - `HEDGER_RISK_MAX_PER_MARKET_USD` – Per-market exposure cap before throttling.
 - `HEDGER_FLOAT_MIN_ZEN` – Minimum ZEN float before triggering a bridge top-up.
 - `HEDGER_MAX_SLIPPAGE_BPS` – Max allowed slippage for hedge placement (bps).
+- Network defaults: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`). Keep signer/treasury addresses and pricing chain id aligned with this network when running end-to-end demos.
 
 API docs and metrics during local runs:
 - Health: `http://localhost:8090/health`

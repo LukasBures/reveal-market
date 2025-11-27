@@ -5,6 +5,7 @@ Reveal Market delivers a zero-knowledge prediction stack that regulated venues c
 Follow progress on X: [@RevealMarket](https://x.com/RevealMarket).
 
 Horizen chain support docs: https://docs.goldsky.com/chains/horizen
+Default testnet: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`).
 
 ---
 
@@ -129,6 +130,6 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 
 - **Exchanges & Brokerages** – Deploy the API-only slice behind your firewall, feed liquidity via our worker, or white-label the Next.js storefront. All tiers ship with the same server action + cache tagging strategy the marketing site uses in production.
 - **Liquidity Providers & DAOs** – Tap fee-sharing programs, structured webhooks, and rake analytics to model outcome-market exposure.
-- **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via `hello@revealmarket.xyz`.
+- **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via the contact form on the site.
 
 Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `prover/circuits/build` are missing or invalid. Run `prover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.

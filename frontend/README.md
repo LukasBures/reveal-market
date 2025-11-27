@@ -52,6 +52,8 @@ Set these in the repo-root `.env` (copied from `.env.example`). The frontend rea
 | `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public price-streamer base (HTTPS so clients upgrade to WSS automatically). Defaults to `https://stream.revealmarket.xyz`. |
 | `STREAMER_INTERNAL_URL` | Base URL the server components should use to reach price-streamer; point at the same HTTPS host when developing locally. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
+| `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_CHAIN_NAME` | Target chain for wagmi/viem (defaults: Horizen Testnet `2651420`, name `"Horizen Testnet"`). |
+| `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | RPC + explorer for the target chain (defaults: `https://horizen-testnet.rpc.caldera.xyz/http`, `https://horizen-testnet.explorer.caldera.xyz`). |
 | `RM_API_BASE_URL` | Internal base URL for server-side fetches. Use the same TLS host when running the frontend outside Docker. |
 | `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at your TLS API host so metadata stays consistent. |
 | `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |

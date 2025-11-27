@@ -8,5 +8,6 @@ Focus only on the investor-facing gaps that keep the site from reflecting live r
 4. **Bet limit UX + stale guards** – Keep the 100 ZEN per-bet cap surfaced in stake inputs, show per-user/per-market caps once exposed by the API, and disable betting when FX/market prices are stale (follow `/stream`/`/health` flags).
 5. **CSP/CORS alignment** – Keep `NEXT_PUBLIC_PRICE_STREAMER_URL` + CSP connect-src in sync, and surface a warning in dev when streamer/API origins aren’t allowed.
 6. **Signed-quote TX flow** – Ensure the client always requests quotes with wallet + market address + outcome id, reuses a single FX WS connection, and submits `commitWithQuote` with the signed payload (refreshing on expiry/chain mismatch).
+7. **Chain defaults** – Keep walletconnect/wagmi envs aligned to Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`); surface a wrong-network prompt and fallback when envs are missing.
 
 Everything else can follow once these three experiences are live.

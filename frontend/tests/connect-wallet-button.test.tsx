@@ -46,9 +46,9 @@ const createConnector = (id: string, name: string): Connector =>
 
 const metaMaskConnector = createConnector("metaMask", "MetaMask");
 const injectedConnector = createConnector("injected", "Injected");
-const coinbaseConnector = createConnector("coinbaseWallet", "Coinbase Wallet");
+const coinbaseConnector = createConnector("coinbaseWalletSDK", "Coinbase Wallet");
 const walletConnectConnector = createConnector("walletConnect", "WalletConnect");
-const baseChain = { id: 8453, name: "Base" } as const;
+const defaultChain = { id: 2651420, name: "Horizen Testnet" } as const;
 
 let currentAccountState: WagmiAccountState;
 let currentConnectState: WagmiConnectState;
@@ -90,7 +90,7 @@ describe("ConnectWalletButton", () => {
       signMessageAsync: vi.fn(async ({ message }: { message: string }) => `0xsigned-${message}`),
     };
     currentSwitchChainState = {
-      chains: [baseChain],
+      chains: [defaultChain],
       error: null,
       isPending: false,
       switchChain: vi.fn(),
@@ -139,8 +139,8 @@ describe("ConnectWalletButton", () => {
     fireEvent.click(signButton);
     expect(currentSignMessageState.signMessageAsync).toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /^base$/i }));
-    expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: baseChain.id });
+    fireEvent.click(screen.getByRole("button", { name: /horizen testnet/i }));
+    expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: defaultChain.id });
   });
 
   it("renders a fallback when no connectors are available", () => {
@@ -155,9 +155,9 @@ describe("ConnectWalletButton", () => {
   it("disables signing when the message input is empty", () => {
     currentAccountState = {
       address: "0x9999999999999999999999999999999999999999",
-      chain: baseChain,
-      status: "connected",
-    };
+    chain: defaultChain,
+    status: "connected",
+  };
     const signSpy = vi.fn();
     currentSignMessageState.signMessageAsync = signSpy;
 
@@ -183,7 +183,7 @@ describe("ConnectWalletButton", () => {
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
-    const baseButton = screen.getByRole("button", { name: /^base$/i });
-    expect(baseButton).toBeDisabled();
+    const chainButton = screen.getByRole("button", { name: /horizen testnet/i });
+    expect(chainButton).toBeDisabled();
   });
 });

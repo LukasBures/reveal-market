@@ -135,8 +135,10 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       if (payloadType === "book") {
         const bestBid = payload.display_best_bid !== undefined ? Number(payload.display_best_bid) : undefined;
         const bestAsk = payload.display_best_ask !== undefined ? Number(payload.display_best_ask) : undefined;
-        updateOutcome(conn, 0, (prev) => ({ ...prev, bestBid, bestAsk }));
-        updateOutcome(conn, 1, (prev) => ({ ...prev, bestBid, bestAsk }));
+        const totalOutcomes = Math.max(conn.state.outcomes.length || 0, normalizedTokens.length || 0, 2);
+        for (let i = 0; i < totalOutcomes; i += 1) {
+          updateOutcome(conn, i, (prev) => ({ ...prev, bestBid, bestAsk }));
+        }
         return;
       }
       const outcome = Number(payload.outcome);

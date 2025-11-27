@@ -118,7 +118,7 @@ export function StakeQuoteCard({
   }, [quote]);
 
   return (
-    <div className="sticky top-4 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-xl shadow-black/30 backdrop-blur">
+    <div className="md:sticky md:top-28 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-xl shadow-black/30 backdrop-blur">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trade</p>

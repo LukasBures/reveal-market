@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
@@ -176,17 +176,17 @@ export function MarketDetailOutcomes({ market }: Props) {
           <span className="rounded-full bg-rose-500/15 px-2 py-1 text-rose-100">Stream error: {streamError}</span>
         )}
         {fxStale && <span className="rounded-full bg-amber-500/15 px-2 py-1 text-amber-100">FX stale</span>}
-      </div>
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-        <span
-          className={`rounded-full px-2 py-1 ${
-            liveStore.status === "halted" || liveStore.status === "closed"
-              ? "bg-rose-500/20 text-rose-100"
-              : "bg-emerald-500/15 text-emerald-100"
-          }`}
-        >
-          Status: {liveStore.status ?? "open"}
-        </span>
+        {liveStore.status && (
+          <span
+            className={`rounded-full px-2 py-1 ${
+              liveStore.status === "halted" || liveStore.status === "closed"
+                ? "bg-rose-500/20 text-rose-100"
+                : "bg-emerald-500/15 text-emerald-100"
+            }`}
+          >
+            Status: {liveStore.status}
+          </span>
+        )}
         {liveStore.tickSize && (
           <span className="rounded-full bg-white/10 px-2 py-1 text-white/70">Tick size: {liveStore.tickSize}</span>
         )}
@@ -207,15 +207,7 @@ export function MarketDetailOutcomes({ market }: Props) {
         </span>
       </div>
 
-      <div className="mt-4 space-y-3">
-        <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500 px-1">
-          <span>Outcome</span>
-          <div className="flex items-center gap-6">
-            <span>% Chance</span>
-            <span className="hidden sm:inline">Price</span>
-            <span className="hidden sm:inline">Action</span>
-          </div>
-        </div>
+      <div className="mt-5 space-y-4">
         {outcomes.map((outcome, idx) => {
           const price = typeof livePrices[idx] === "number" ? livePrices[idx] : undefined;
           const probability = price !== undefined ? `${Math.round(price * 100)}%` : "—";
@@ -240,21 +232,41 @@ export function MarketDetailOutcomes({ market }: Props) {
               }}
             >
               <div className="absolute inset-0 pointer-events-none opacity-30 bg-[radial-gradient(circle_at_20%_20%,rgba(123,240,94,0.12),transparent_40%),radial-gradient(circle_at_80%_50%,rgba(94,182,255,0.12),transparent_35%)]" />
-              <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Outcome</p>
-                  <p className="text-lg font-semibold text-white">{outcome}</p>
-                  <p className="text-xs text-slate-400">
-                    Bid: {bestBid ? bestBid.toFixed(3) : "—"} · Ask: {bestAsk ? bestAsk.toFixed(3) : "—"} · Spread: {spread}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6">
-                  <div className="text-center sm:text-right">
-                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">% Chance</p>
-                    <p className="text-2xl font-semibold text-white">{probability}</p>
-                    <p className="text-xs text-slate-400">Price: {formatZen(price)}</p>
+              <div className="relative flex flex-col gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[11px] uppercase tracking-[0.25em] text-slate-500">Outcome</p>
+                    <p className="text-lg font-semibold text-white">{outcome}</p>
+                    <p className="text-xs text-slate-400">
+                      Bid: {bestBid ? bestBid.toFixed(3) : "—"} · Ask: {bestAsk ? bestAsk.toFixed(3) : "—"} · Spread:{" "}
+                      {spread}
+                    </p>
                   </div>
-                  <div className="flex flex-col gap-2 sm:min-w-[160px]">
+                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <span className="rounded-full bg-white/10 px-2 py-1 text-white/70">Outcome #{idx + 1}</span>
+                    {outcomeState.status && (
+                      <span className="rounded-full bg-white/10 px-2 py-1 text-white/70">
+                        Status: {outcomeState.status}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="text-center sm:text-left">
+                      <p className="text-[11px] uppercase tracking-[0.25em] text-slate-500">% Chance</p>
+                      <p className="text-3xl font-semibold text-white">{probability}</p>
+                      <p className="text-xs text-slate-400">Price: {formatZen(price)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
+                      <p className="font-semibold text-white">Orderbook signal</p>
+                      <p className="text-xs text-slate-400">
+                        Bid {bestBid ? bestBid.toFixed(3) : "—"} · Ask {bestAsk ? bestAsk.toFixed(3) : "—"}
+                      </p>
+                      <p className="text-xs text-slate-400">Spread {spread}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                     <button
                       type="button"
                       onClick={(e) => {
