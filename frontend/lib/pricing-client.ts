@@ -188,16 +188,38 @@ export async function fetchPriceHistory(
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-export function createMarketStream(marketId: string): EventSource {
-  const url = `${getStreamerEndpoint("/stream")}?market_id=${encodeURIComponent(marketId)}`;
+export function createMarketStream(marketId: string, tokenIds?: string[]): EventSource {
+  const params = new URLSearchParams();
+  params.set("market_id", marketId);
+  if (tokenIds && tokenIds.length) {
+    params.set(
+      "assets_ids",
+      tokenIds
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join(","),
+    );
+  }
+  const url = `${getStreamerEndpoint("/stream")}?${params.toString()}`;
   return new EventSource(url);
 }
 
-export function createMarketWebSocket(marketId: string): WebSocket | null {
+export function createMarketWebSocket(marketId: string, tokenIds?: string[]): WebSocket | null {
   if (!shouldUseStreamerWs()) {
     return null;
   }
-  const url = `${getStreamerWsEndpoint("/stream/ws", true)}?market_id=${encodeURIComponent(marketId)}`;
+  const params = new URLSearchParams();
+  params.set("market_id", marketId);
+  if (tokenIds && tokenIds.length) {
+    params.set(
+      "assets_ids",
+      tokenIds
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join(","),
+    );
+  }
+  const url = `${getStreamerWsEndpoint("/stream/ws", true)}?${params.toString()}`;
   try {
     return new WebSocket(url);
   } catch {

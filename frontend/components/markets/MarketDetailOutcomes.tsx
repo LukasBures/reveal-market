@@ -28,8 +28,9 @@ const formatZen = (value: number | undefined): string => {
 export function MarketDetailOutcomes({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = market.outcomePrices ?? [];
-  const { prices: livePrices, streamError } = useLiveOutcomePrices(market.eventId, prices);
-  const liveStore = usePriceStreamStore(market.eventId);
+  const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
+  const { prices: livePrices, streamError } = useLiveOutcomePrices(market.eventId, prices, tokenIds);
+  const liveStore = usePriceStreamStore(market.eventId, tokenIds);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [stakeZen, setStakeZen] = useState(10);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
@@ -156,12 +157,19 @@ export function MarketDetailOutcomes({ market }: Props) {
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-4 sm:p-6">
-      {(fxStale || streamError) && (
-        <div className="mb-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-          Live pricing paused{fxStale ? " (FX stale)" : ""}{streamError ? ` (${streamError})` : ""}. Actions are
-          temporarily disabled.
-        </div>
-      )}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        <span
+          className={`rounded-full px-2 py-1 ${
+            liveStore.connected ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100"
+          }`}
+        >
+          {liveStore.connected ? "Live prices" : "Streaming reconnecting"}
+        </span>
+        {streamError && (
+          <span className="rounded-full bg-rose-500/15 px-2 py-1 text-rose-100">Stream error: {streamError}</span>
+        )}
+        {fxStale && <span className="rounded-full bg-amber-500/15 px-2 py-1 text-amber-100">FX stale</span>}
+      </div>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
         <span
           className={`rounded-full px-2 py-1 ${

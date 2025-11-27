@@ -8,11 +8,12 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
-from prometheus_client import Counter, Gauge
+from prometheus_client import Counter, Gauge, REGISTRY
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
 from .config import Settings
+from .rtds_client import PolymarketRTDSClient, RTDSMessage, RTDSRouter, Subscription
 from .state import FatalWebsocketError, StreamState, iter_ws
 
 logger = logging.getLogger("reveal_market.price_streamer.streamer")
@@ -20,6 +21,13 @@ logger = logging.getLogger("reveal_market.price_streamer.streamer")
 
 class PriceStreamer:
     """Connects to Polymarket WS + REST, normalizes ticks, and publishes to Redis."""
+
+    # Shared Prometheus instruments so we register with the default REGISTRY only once per process.
+    _metric_fx_source_shared: Gauge | None = None
+    _metric_fx_stale_shared: Gauge | None = None
+    _metric_ws_connected_shared: Gauge | None = None
+    _metric_ws_restarts_shared: Counter | None = None
+    _metric_ticks_shared: Counter | None = None
 
     def __init__(self, state: StreamState, settings: Settings):
         self.state = state
@@ -42,6 +50,9 @@ class PriceStreamer:
         self.metric_ws_restarts = None
         self.metric_ticks = None
         self._init_metrics()
+        self.rtds_client: PolymarketRTDSClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._rtds_last_version: int = -1
 
     @staticmethod
     def _coerce_array(value: Any) -> list | None:
@@ -75,21 +86,33 @@ class PriceStreamer:
         # Only register once per process; Prometheus client raises on duplicates.
         if self.metric_fx_source is not None:
             return
-        self.metric_fx_source = Gauge(
-            "price_streamer_fx_source", "Current FX source (labels)", ["source"], registry=None
-        )
-        self.metric_fx_stale = Gauge("price_streamer_fx_stale", "FX stale flag (1=stale,0=fresh)", registry=None)
-        self.metric_ws_connected = Gauge(
-            "price_streamer_fx_ws_connected", "FX websocket connectivity (1/0)", registry=None
-        )
-        self.metric_ws_restarts = Counter(
-            "price_streamer_fx_ws_restarts_total", "FX websocket restart attempts", registry=None
-        )
-        self.metric_ticks = Counter(
-            "price_streamer_ticks_total", "Published ticks", ["source", "market", "outcome", "stale"], registry=None
-        )
+        if PriceStreamer._metric_fx_source_shared is None:
+            PriceStreamer._metric_fx_source_shared = Gauge(
+                "price_streamer_fx_source", "Current FX source (labels)", ["source"], registry=REGISTRY
+            )
+            PriceStreamer._metric_fx_stale_shared = Gauge(
+                "price_streamer_fx_stale", "FX stale flag (1=stale,0=fresh)", registry=REGISTRY
+            )
+            PriceStreamer._metric_ws_connected_shared = Gauge(
+                "price_streamer_fx_ws_connected", "FX websocket connectivity (1/0)", registry=REGISTRY
+            )
+            PriceStreamer._metric_ws_restarts_shared = Counter(
+                "price_streamer_fx_ws_restarts_total", "FX websocket restart attempts", registry=REGISTRY
+            )
+            PriceStreamer._metric_ticks_shared = Counter(
+                "price_streamer_ticks_total",
+                "Published ticks",
+                ["source", "market", "outcome", "stale"],
+                registry=REGISTRY,
+            )
+        self.metric_fx_source = PriceStreamer._metric_fx_source_shared
+        self.metric_fx_stale = PriceStreamer._metric_fx_stale_shared
+        self.metric_ws_connected = PriceStreamer._metric_ws_connected_shared
+        self.metric_ws_restarts = PriceStreamer._metric_ws_restarts_shared
+        self.metric_ticks = PriceStreamer._metric_ticks_shared
 
     async def start(self) -> None:
+        self._loop = asyncio.get_running_loop()
         self._tasks = [
             asyncio.create_task(self._ws_loop(), name="ws-loop"),
             asyncio.create_task(self._rest_poll_loop(), name="rest-poll"),
@@ -104,6 +127,8 @@ class PriceStreamer:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self.rtds_client:
+            self.rtds_client.stop(wait=False)
 
     async def _ws_loop(self) -> None:
         while not self._stop.is_set():
@@ -134,20 +159,14 @@ class PriceStreamer:
                             "subscriptions": len(self.state.subscriptions.assets),
                         },
                     )
-                    subscribe_payload = self.state.subscriptions.build_clob_subscribe()
-                    logger.debug(
-                        "Sending CLOB subscribe",
-                        extra={
-                            "event": "clob.ws.subscribe",
-                            "payload": subscribe_payload,
-                            "subscriptions": sorted(self.state.subscriptions.assets),
-                        },
-                    )
-                    await ws.send(subscribe_payload)
+                    last_version = await self._refresh_clob_subscription(ws, last_version=-1)
                     msg_count = 0
-                    async for raw in ws:
-                        if self._stop.is_set():
-                            break
+                    while not self._stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=1)
+                        except asyncio.TimeoutError:
+                            last_version = await self._refresh_clob_subscription(ws, last_version)
+                            continue
                         try:
                             payload = json.loads(raw)
                         except json.JSONDecodeError:
@@ -169,6 +188,7 @@ class PriceStreamer:
                                     await self._handle_tick(item, source="ws")
                         elif isinstance(payload, dict):
                             await self._handle_tick(payload, source="ws")
+                        last_version = await self._refresh_clob_subscription(ws, last_version)
                 except Exception as exc:  # pragma: no cover - reconnect path
                     logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
                     await asyncio.sleep(self.settings.ws_reconnect_seconds)
@@ -309,12 +329,19 @@ class PriceStreamer:
                 "type": "book",
                 "best_bid": str(best_bid) if best_bid is not None else None,
                 "best_ask": str(best_ask) if best_ask is not None else None,
+                "midpoint": str((best_bid + best_ask) / 2) if best_bid is not None and best_ask is not None else None,
                 "display_best_bid": str(best_bid * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
                 if best_bid is not None
                 else None,
                 "display_best_ask": str(best_ask * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
                 if best_ask is not None
                 else None,
+                "display_midpoint": (
+                    str(((best_bid + best_ask) / 2) * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
+                    if best_bid is not None and best_ask is not None
+                    else None
+                ),
+                "spread": str(best_ask - best_bid) if best_bid is not None and best_ask is not None else None,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
             await self.state.cache_tick(market, "meta", payload)
@@ -452,47 +479,79 @@ class PriceStreamer:
             return
         self._publish_cache[key] = payload
 
+
     async def _rtds_loop(self) -> None:
         if not self.settings.rtds_enabled:
             return
         # Prime symbol filters
         if self.settings.rtds_crypto_symbols:
-            for sym in self.settings.rtds_crypto_symbols.split(","):
-                trimmed = sym.strip()
-                if trimmed:
-                    self.state.rtds_symbols.add(trimmed)
+            self.state.add_rtds_symbols(sym.strip() for sym in self.settings.rtds_crypto_symbols.split(","))
+        self._ensure_rtds_client()
         while not self._stop.is_set():
             try:
-                async for ws in iter_ws(self.settings.rtds_ws_url, name="rtds-ws"):
-                    if self._stop.is_set():
-                        break
-                    await self._send_rtds_subscribe(ws)
-                    async for raw in ws:
-                        if self._stop.is_set():
-                            break
-                        try:
-                            data = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-                        await self._handle_rtds(data)
-                        await asyncio.sleep(0)
+                self._ensure_rtds_client()
+                await self._maybe_refresh_rtds_subscriptions()
             except Exception as exc:  # pragma: no cover - reconnect path
                 logger.warning("RTDS loop error", extra={"event": "rtds.error", "error": str(exc)})
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
-    async def _send_rtds_subscribe(self, ws) -> None:
-        subs: list[dict] = []
-        if self.state.rtds_symbols:
-            subs.append(
-                {
-                    "topic": self.settings.rtds_topic_crypto,
-                    "type": "update",
-                    "filters": ",".join(sorted(self.state.rtds_symbols)),
-                }
-            )
+    def _ensure_rtds_client(self) -> None:
+        if self.rtds_client or not self.settings.rtds_enabled:
+            return
+        router = RTDSRouter(logger=logger)
+        router.register(self.settings.rtds_topic_crypto, "*", self._dispatch_rtds_message)
+        self.rtds_client = PolymarketRTDSClient(
+            url=self.settings.rtds_ws_url,
+            router=router,
+            ping_interval=self.settings.rtds_ping_seconds,
+            ping_timeout=max(3, self.settings.rtds_ping_seconds // 2),
+            logger=logger,
+        )
+        self.rtds_client.start_in_thread(name="rtds-client")
+
+    async def _maybe_refresh_rtds_subscriptions(self) -> None:
+        if not self.rtds_client:
+            return
+        current_version = self.state.rtds_symbols_version
+        if current_version == self._rtds_last_version:
+            return
+        subs = self._build_rtds_subscriptions()
         if subs:
-            payload = json.dumps({"action": "subscribe", "subscriptions": subs})
+            self.rtds_client.add_subscriptions(subs)
+        self._rtds_last_version = current_version
+
+    def _build_rtds_subscriptions(self) -> list[Subscription]:
+        if not self.state.rtds_symbols:
+            return []
+        filters = ",".join(sorted(self.state.rtds_symbols))
+        return [Subscription(topic=self.settings.rtds_topic_crypto, type="update", filters=filters)]
+
+    def _dispatch_rtds_message(self, msg: RTDSMessage) -> None:
+        """Bridge RTDS messages into the asyncio loop for handling."""
+
+        if not self._loop:
+            return
+        payload = {"topic": msg.topic, "type": msg.type, "payload": msg.payload}
+        try:
+            asyncio.run_coroutine_threadsafe(self._handle_rtds(payload), self._loop)
+        except Exception as exc:  # pragma: no cover - thread dispatch
+            logger.warning("RTDS dispatch failed", extra={"event": "rtds.dispatch.failed", "error": str(exc)})
+
+    async def _refresh_clob_subscription(self, ws, last_version: int) -> int:
+        current_version = self.state.subscriptions.version
+        if current_version != last_version:
+            payload = self.state.subscriptions.build_clob_subscribe()
+            logger.debug(
+                "Sending CLOB subscribe",
+                extra={
+                    "event": "clob.ws.subscribe",
+                    "payload": payload,
+                    "subscriptions": sorted(self.state.subscriptions.assets),
+                },
+            )
             await ws.send(payload)
+            return current_version
+        return last_version
 
     async def _handle_rtds(self, data: dict) -> None:
         topic = data.get("topic")
@@ -529,6 +588,11 @@ class PriceStreamer:
                         "FX websocket connected",
                         extra={"event": "fx.ws.connected", "url": self.settings.fx_ws_url},
                     )
+                    try:
+                        self.metric_ws_restarts.inc()
+                    except Exception:
+                        # Metric may be uninitialised in some tests; ignore.
+                        pass
                     async for raw in ws:
                         if self._stop.is_set():
                             break
@@ -585,5 +649,4 @@ class PriceStreamer:
         )
         self.state.fx_last_error = None
         self.state.fx_ws_connected = True
-        self.metric_ws_restarts.inc()
         self._update_fx_metrics()

@@ -42,6 +42,7 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 ### Client expectations
 - Prefer WS/WSS first (`/fx/zen-usdc`), let the client fall back to HTTP if WS is stale, and auto-attempt WS again after a few HTTP fallbacks.
 - Dev/Prod: `wss://stream.revealmarket.xyz/fx/zen-usdc` (via your local TLS proxy/hosts entry).
+- For market streams, fetch `clobTokenIds` from your market-detail API and pass them in `assets_ids` when opening `/stream` or `/stream/ws` (e.g., `assets_ids=<yes_id>,<no_id>`). This is the fastest path to live CLOB ticks/books. Only omit `assets_ids` as a fallback; the streamer will temporarily use the `market_id` placeholder until REST polling reveals the real token ids, which is slower.
 
 ## Tests
 ```bash

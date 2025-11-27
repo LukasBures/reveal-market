@@ -5,11 +5,18 @@ import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
 type Props = {
   marketId: string;
+  tokenIds?: string[];
 };
 
-export function MarketLivePanels({ marketId }: Props) {
-  const stream = usePriceStreamStore(marketId);
+export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
+  const stream = usePriceStreamStore(marketId, tokenIds);
   const best = stream.outcomes[0] || {};
+  const statusText = stream.error ? "Stream error" : stream.connected ? "Live" : "Reconnecting…";
+  const statusClass = stream.error
+    ? "bg-rose-500/20 text-rose-200 border border-rose-500/30"
+    : stream.connected
+      ? "bg-emerald-500/15 text-emerald-100 border border-emerald-500/30"
+      : "bg-amber-500/15 text-amber-100 border border-amber-500/30";
   const trades = useMemo(
     () =>
       (stream.trades || [])
@@ -26,7 +33,10 @@ export function MarketLivePanels({ marketId }: Props) {
     <div className="flex h-full flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-4">
       <div className="flex items-center justify-between text-sm text-slate-200">
         <span className="text-xs uppercase tracking-[0.25em] text-slate-500">
-          Live order flow {stream.connected ? "" : "(reconnecting…)"}
+          Live order flow
+        </span>
+        <span className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.2em] ${statusClass}`}>
+          {statusText}
         </span>
         {stream.tickSize && (
           <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-white/70">
@@ -34,6 +44,11 @@ export function MarketLivePanels({ marketId }: Props) {
           </span>
         )}
       </div>
+      {stream.error && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+          {stream.error}
+        </div>
+      )}
       <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-3 text-sm text-slate-200">
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Best bid</span>

@@ -16,3 +16,19 @@ def test_subscription_manager_payloads_and_limits():
     assert "crypto_prices" in payload
     # Should only have two topics due to max_items cap.
     assert payload.count("crypto_prices") == 2
+
+
+def test_subscription_manager_versions():
+    manager = SubscriptionManager(max_items=3)
+    assert manager.version == 0
+    manager.add_assets(["a1"])
+    assert manager.version == 1
+    # Duplicates should not bump version.
+    manager.add_assets(["a1"])
+    assert manager.version == 1
+    manager.replace_asset("a1", ["a2", "a3"])
+    assert manager.version == 2
+    manager.remove_asset("a2")
+    assert manager.version == 3
+    manager.add_rtds_topic("crypto_prices", "update", "zenusdt")
+    assert manager.version == 4

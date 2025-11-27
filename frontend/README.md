@@ -36,7 +36,7 @@ Tech stack callouts:
 - **Tailwind (utility-first)** layered with custom glassmorphism helpers defined in `app/globals.css`.
 - **Vitest + Testing Library** for behavioral tests.
 - **ESLint + Typescript** enforced via `npm run lint`.
-- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `price-streamer` (via SSE and `/pricing/fx`), surfaces a header ticker, and enforces a 100 ZEN per-bet UI cap that mirrors backend limits.
+- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `price-streamer` (via SSE and `/pricing/fx`). Market detail pages fetch `clobTokenIds` from the backend and include them in `assets_ids` when opening `/stream`/`/stream/ws`, so live prices/books/trades start immediately. A 100 ZEN per-bet UI cap mirrors backend limits.
 - **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
 
 ---

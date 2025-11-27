@@ -27,6 +27,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const { address } = useAccount();
+  const fxUnavailable = status === "error";
 
   const debouncedStake = useDebounce(stakeZen, 200);
 
@@ -41,6 +42,11 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
       if (!marketAddress) {
         setQuote(null);
         setError("Missing market address for quote");
+        return;
+      }
+      if (fxUnavailable) {
+        setQuote(null);
+        setError("FX feed unavailable");
         return;
       }
       if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {

@@ -11,6 +11,7 @@ from decimal import Decimal
 
 import httpx
 from pydantic import AnyHttpUrl
+from typing import Iterable
 from redis.asyncio import Redis
 from websockets import connect
 from websockets.exceptions import InvalidStatusCode
@@ -61,6 +62,7 @@ class StreamState:
         self.tick_sizes: dict[str, Decimal] = {}
         self._rtds_connected = False
         self.rtds_symbols: set[str] = set()
+        self.rtds_symbols_version: int = 0
         self.market_tokens: dict[str, list[str]] = {}
 
     async def startup(self) -> None:
@@ -170,6 +172,16 @@ class StreamState:
         # If we previously subscribed using the market_id placeholder, swap to concrete token ids.
         if market_id in self.subscriptions.assets:
             self.subscriptions.replace_asset(market_id, deduped)
+
+    def add_rtds_symbols(self, symbols: Iterable[str]) -> None:
+        changed = False
+        for sym in symbols:
+            trimmed = str(sym).strip()
+            if trimmed and trimmed not in self.rtds_symbols:
+                self.rtds_symbols.add(trimmed)
+                changed = True
+        if changed:
+            self.rtds_symbols_version += 1
 
     def get_clob_tokens(self, market_id: str) -> list[str]:
         return self.market_tokens.get(market_id, [])

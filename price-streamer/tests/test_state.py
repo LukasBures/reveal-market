@@ -119,3 +119,13 @@ def test_stale_markets_detection():
     state.last_seen["old"] = datetime.now(UTC) - timedelta(seconds=120)
     stale = state.stale_markets(stale_after_seconds=60)
     assert "old" in stale and "fresh" not in stale
+
+
+def test_add_rtds_symbols_increments_version():
+    state = StreamState(Settings())
+    assert state.rtds_symbols_version == 0
+    state.add_rtds_symbols(["zenusdt", "ethusdt"])
+    assert state.rtds_symbols_version == 1
+    # Adding duplicates should not increment.
+    state.add_rtds_symbols(["zenusdt"])
+    assert state.rtds_symbols_version == 1

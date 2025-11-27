@@ -47,6 +47,11 @@ type StreamConnection = {
 };
 
 const connections = new Map<string, StreamConnection>();
+const normalizeTokens = (tokenIds: string[]) =>
+  tokenIds
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .sort();
 
 const initialState: StreamState = {
   connected: false,
@@ -88,8 +93,10 @@ function appendTrade(conn: StreamConnection, trade: { price?: number; size?: num
   setState(conn, { trades });
 }
 
-function startConnection(marketId: string) {
-  const existing = connections.get(marketId);
+function startConnection(marketId: string, tokenIds: string[] = []) {
+  const normalizedTokens = normalizeTokens(tokenIds);
+  const key = `${marketId}|${normalizedTokens.join(",")}`;
+  const existing = connections.get(key);
   if (existing) return existing;
 
   const conn: StreamConnection = {
@@ -162,7 +169,7 @@ function startConnection(marketId: string) {
   const connectSse = () => {
     if (conn.cancelled) return;
     try {
-      const es = createMarketStream(marketId);
+      const es = createMarketStream(marketId, normalizedTokens);
       conn.es = es;
       conn.transport = "sse";
       es.onopen = () => {
@@ -198,7 +205,7 @@ function startConnection(marketId: string) {
       return;
     }
     try {
-      const ws = createMarketWebSocket(marketId);
+      const ws = createMarketWebSocket(marketId, normalizedTokens);
       if (!ws) {
         // If WS can't be constructed (e.g., mixed content), fall back to SSE.
         connectSse();
@@ -252,12 +259,14 @@ function startConnection(marketId: string) {
   } else {
     connectSse();
   }
-  connections.set(marketId, conn);
+  connections.set(key, conn);
   return conn;
 }
 
-function subscribe(marketId: string, onChange: () => void) {
-  const conn = startConnection(marketId);
+function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
+  const normalizedTokens = normalizeTokens(tokenIds);
+  const key = `${marketId}|${normalizedTokens.join(",")}`;
+  const conn = startConnection(marketId, normalizedTokens);
   if (conn.idleCloseTimer) {
     clearTimeout(conn.idleCloseTimer);
     conn.idleCloseTimer = null;
@@ -274,38 +283,39 @@ function subscribe(marketId: string, onChange: () => void) {
         conn.cancelled = true;
         if (conn.es) conn.es.close();
         if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) conn.ws.close();
-        connections.delete(marketId);
+        connections.delete(key);
       }, 30_000);
     }
   };
 }
 
-function snapshot(marketId: string): StreamState {
-  const conn = connections.get(marketId);
+function snapshot(marketId: string, tokenIds: string[]): StreamState {
+  const key = `${marketId}|${normalizeTokens(tokenIds).join(",")}`;
+  const conn = connections.get(key);
   if (!conn) return { ...initialState };
   return conn.state;
 }
 
-export function usePriceStreamStore(marketId: string): StreamState {
+export function usePriceStreamStore(marketId: string, tokenIds: string[] = []): StreamState {
   if (priceStreamsDisabled) {
     return initialState;
   }
-  const subscribeFn = (onStoreChange: () => void) => subscribe(marketId, onStoreChange);
-  const getSnapshot = () => snapshot(marketId);
+  const subscribeFn = (onStoreChange: () => void) => subscribe(marketId, tokenIds, onStoreChange);
+  const getSnapshot = () => snapshot(marketId, tokenIds);
   return useSyncExternalStore(subscribeFn, getSnapshot, getSnapshot);
 }
 
-export function seedHistory(marketId: string, outcome: number, points: PricePoint[]) {
-  const conn = startConnection(marketId);
+export function seedHistory(marketId: string, outcome: number, points: PricePoint[], tokenIds: string[] = []) {
+  const conn = startConnection(marketId, tokenIds);
   if (!points.length) return;
   const histories = { ...conn.state.histories };
   histories[outcome] = points.slice(-200);
   setState(conn, { histories });
 }
 
-export function seedInitialOutcomes(marketId: string, prices: number[]) {
+export function seedInitialOutcomes(marketId: string, prices: number[], tokenIds: string[] = []) {
   if (!prices.length) return;
-  const conn = startConnection(marketId);
+  const conn = startConnection(marketId, tokenIds);
   const hasData = conn.state.outcomes.some((p) => p.price !== undefined);
   if (hasData) return;
   const outcomes = prices.map((p) => ({ price: p, displayPrice: p }));

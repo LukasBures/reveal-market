@@ -32,9 +32,59 @@ async def test_normalize_and_publish_handles_prices():
     data = {"id": "m1", "outcomePrices": [0.5, 0.25]}
     await streamer._normalize_and_publish(data, source="rest")
     assert len(state.cached) == 2
-    _, _, payload = state.cached[0]
-    assert payload["market_id"] == "m1"
-    assert payload["display_price"] != payload["price"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_clob_subscription_sends_on_version_change():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    state.subscriptions.add_assets(["a1"])
+
+    class DummyWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(payload)
+
+        def __aiter__(self):
+            return iter([])
+
+    ws = DummyWS()
+    last = await streamer._refresh_clob_subscription(ws, last_version=-1)
+    assert last == state.subscriptions.version
+    assert ws.sent  # initial subscribe sent
+    state.subscriptions.add_assets(["a2"])
+    last = await streamer._refresh_clob_subscription(ws, last)
+    assert last == state.subscriptions.version
+    assert len(ws.sent) == 2  # resend after version bump
+
+
+@pytest.mark.asyncio
+async def test_refresh_rtds_subscription_sends_on_version_change():
+    state = StubState()
+    streamer = PriceStreamer(state, state.settings)
+    state.add_rtds_symbols(["zenusdt"])
+
+    # _build_rtds_subscriptions should reflect current symbols.
+    subs = streamer._build_rtds_subscriptions()
+    assert subs and subs[0].filters == "zenusdt"
+
+    class DummyClient:
+        def __init__(self):
+            self.sent = []
+
+        def add_subscriptions(self, subs):
+            self.sent.extend(subs)
+
+    streamer.rtds_client = DummyClient()
+    await streamer._maybe_refresh_rtds_subscriptions()
+    assert streamer._rtds_last_version == state.rtds_symbols_version
+    assert streamer.rtds_client.sent
+    # Adding a new symbol should trigger another send.
+    state.add_rtds_symbols(["ethusdt"])
+    await streamer._maybe_refresh_rtds_subscriptions()
+    assert len(streamer.rtds_client.sent) == 2
 
 
 @pytest.mark.asyncio

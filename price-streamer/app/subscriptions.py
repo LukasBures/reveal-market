@@ -12,22 +12,40 @@ class SubscriptionManager:
     max_items: int
     assets: set[str] = field(default_factory=set)
     topics: set[tuple[str, str, str | None]] = field(default_factory=set)  # (topic, type, filters)
+    version: int = 0
 
-    def add_assets(self, asset_ids: Iterable[str]) -> None:
+    def _bump_version(self) -> None:
+        self.version += 1
+
+    def add_assets(self, asset_ids: Iterable[str], *, bump: bool = True) -> bool:
+        changed = False
         for asset_id in asset_ids:
             if len(self.assets) >= self.max_items:
                 break
-            self.assets.add(str(asset_id))
+            asset = str(asset_id)
+            if asset not in self.assets:
+                self.assets.add(asset)
+                changed = True
+        if changed and bump:
+            self._bump_version()
+        return changed
 
     def replace_asset(self, old_asset: str, new_assets: Iterable[str]) -> None:
         """Swap a placeholder asset for concrete ids (e.g., clob token ids)."""
 
+        changed = False
         if old_asset in self.assets:
             self.assets.discard(old_asset)
-        self.add_assets(new_assets)
+            changed = True
+        added = self.add_assets(new_assets, bump=False)
+        if changed or added:
+            self._bump_version()
 
     def remove_asset(self, asset_id: str) -> None:
-        self.assets.discard(str(asset_id))
+        asset = str(asset_id)
+        if asset in self.assets:
+            self.assets.discard(asset)
+            self._bump_version()
 
     def build_clob_subscribe(self) -> str:
         return json.dumps({"assets_ids": sorted(self.assets), "type": "market"})
@@ -38,7 +56,12 @@ class SubscriptionManager:
         ]
         return json.dumps({"action": "subscribe", "subscriptions": subs})
 
-    def add_rtds_topic(self, topic: str, type_: str, filters: str | None = None) -> None:
+    def add_rtds_topic(self, topic: str, type_: str, filters: str | None = None) -> bool:
         if len(self.topics) >= self.max_items:
-            return
-        self.topics.add((topic, type_, filters))
+            return False
+        entry = (topic, type_, filters)
+        if entry not in self.topics:
+            self.topics.add(entry)
+            self._bump_version()
+            return True
+        return False

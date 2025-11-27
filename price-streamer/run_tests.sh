@@ -22,7 +22,7 @@ if (major, minor) != (3, 12):
 PY
 
 # Install dev dependencies if missing.
-if ! "$PYTHON_BIN" -c "import pytest, pytest_asyncio, prometheus_client, xdist" >/dev/null 2>&1; then
+if ! "$PYTHON_BIN" -c "import pytest, pytest_asyncio, prometheus_client, xdist, websocket" >/dev/null 2>&1; then
   "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
   "$PYTHON_BIN" -m pip install --no-cache-dir -e .[dev]
 fi

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchPriceHistory } from "@/lib/pricing-client";
 import { seedHistory, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
-export function usePriceStream(marketId: string, outcome = 0) {
+export function usePriceStream(marketId: string, outcome = 0, tokenIds: string[] = []) {
   const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const streamState = usePriceStreamStore(marketId);
+  const streamState = usePriceStreamStore(marketId, tokenIds);
 
   useEffect(() => {
     setHistoryLoaded(false);
@@ -25,6 +25,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
               fx_stale: entry.fx_stale,
             }))
             .filter((p) => Number.isFinite(p.price)),
+          tokenIds,
         );
         setHistoryLoaded(true);
       } catch (err) {
@@ -34,7 +35,7 @@ export function usePriceStream(marketId: string, outcome = 0) {
     return () => {
       cancelled = true;
     };
-  }, [marketId, outcome]);
+  }, [marketId, outcome, tokenIds]);
 
   const chartPoints = useMemo(
     () =>

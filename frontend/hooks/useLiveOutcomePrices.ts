@@ -5,12 +5,12 @@ import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStream
  * Subscribe to live market prices via SSE and expose the latest display prices per outcome.
  * Falls back to initial SSR prices until a tick arrives.
  */
-export function useLiveOutcomePrices(marketId: string, initialPrices: number[] = []) {
-  const streamState = usePriceStreamStore(marketId);
+export function useLiveOutcomePrices(marketId: string, initialPrices: number[] = [], tokenIds: string[] = []) {
+  const streamState = usePriceStreamStore(marketId, tokenIds);
 
   useEffect(() => {
-    seedInitialOutcomes(marketId, initialPrices);
-  }, [marketId, initialPrices]);
+    seedInitialOutcomes(marketId, initialPrices, tokenIds);
+  }, [marketId, initialPrices, tokenIds]);
 
   const outcomes = useMemo(() => streamState.outcomes, [streamState.outcomes]);
   const prices = outcomes.map((p) => p?.displayPrice).map((v) => (typeof v === "number" ? v : undefined));

@@ -1,7 +1,6 @@
 "use client";
 
 import type { MarketDetail } from "@/lib/api-types";
-import Link from "next/link";
 import { formatDate, formatDateTime, formatUsd } from "@/lib/formatters";
 
 type Props = {
@@ -146,12 +145,12 @@ export function MarketDetailSidebar({ market }: Props) {
     pickStringArray(sources, ["clobTokenIds", "tokenIds", "clob_token_ids", "tokens"]) ?? undefined;
 
   const tradingStats = [
-    { label: "24h volume", value: formatUsd(volume24h) },
-    { label: "Total volume", value: formatUsd(totalVolume) },
-    { label: "Open interest", value: formatUsd(openInterest) },
-    { label: "Best bid", value: formatProbability(bestBid) },
-    { label: "Best ask", value: formatProbability(bestAsk) },
-  ].filter((stat) => stat.value !== "—");
+    { label: "24h volume", value: volume24h, formatted: formatUsd(volume24h) },
+    { label: "Total volume", value: totalVolume, formatted: formatUsd(totalVolume) },
+    { label: "Open interest", value: openInterest, formatted: formatUsd(openInterest) },
+    { label: "Best bid", value: bestBid, formatted: formatProbability(bestBid) },
+    { label: "Best ask", value: bestAsk, formatted: formatProbability(bestAsk) },
+  ];
 
   const feeRows = [
     { label: "Rake", value: formatBps(rakeBps) },
@@ -207,19 +206,28 @@ export function MarketDetailSidebar({ market }: Props) {
           </div>
         )}
       </div>
-      {tradingStats.length > 0 && (
-        <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
+      <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
+        <div className="flex items-center justify-between">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trading metrics</p>
-          <div className="space-y-3">
-            {tradingStats.map((stat) => (
-              <div key={stat.label} className="flex items-center justify-between">
-                <span>{stat.label}</span>
-                <span className="text-white">{stat.value}</span>
-              </div>
-            ))}
-          </div>
+          <span
+            className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.2em] ${
+              tradingStats.some((s) => s.value !== null && s.value !== undefined)
+                ? "bg-emerald-500/15 text-emerald-100"
+                : "bg-amber-500/15 text-amber-100"
+            }`}
+          >
+            {tradingStats.some((s) => s.value !== null && s.value !== undefined) ? "Live" : "Awaiting data"}
+          </span>
         </div>
-      )}
+        <div className="space-y-3">
+          {tradingStats.map((stat) => (
+            <div key={stat.label} className="flex items-center justify-between">
+              <span>{stat.label}</span>
+              <span className="text-white">{stat.formatted}</span>
+            </div>
+          ))}
+        </div>
+      </div>
       {feeRows.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Fee schedule</p>
@@ -262,26 +270,6 @@ export function MarketDetailSidebar({ market }: Props) {
           )}
         </div>
       )}
-      <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-5">
-        <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Documentation</p>
-        <ul className="mt-3 space-y-2 text-sm text-slate-300">
-          <li>
-            <Link href="/docs/architecture" className="text-brand-300 hover:underline">
-              Market architecture guide
-            </Link>
-          </li>
-          <li>
-            <Link href="/docs/privacy-security" className="text-brand-300 hover:underline">
-              Risk controls
-            </Link>
-          </li>
-          <li>
-            <Link href="/docs/tokenomics" className="text-brand-300 hover:underline">
-              Rake and incentives
-            </Link>
-          </li>
-        </ul>
-      </div>
     </aside>
   );
 }

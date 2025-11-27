@@ -5,10 +5,11 @@ import { usePriceStream } from "@/hooks/usePriceStream";
 
 type Props = {
   marketId: string;
+  tokenIds?: string[];
 };
 
-export function MarketDetailChart({ marketId }: Props) {
-  const { history, error } = usePriceStream(marketId, 0);
+export function MarketDetailChart({ marketId, tokenIds = [] }: Props) {
+  const { history, error } = usePriceStream(marketId, 0, tokenIds);
   const hasStaleFx = history.some((p) => p.fx_stale);
   const latestTs = history.length ? history[history.length - 1].timestamp : null;
 

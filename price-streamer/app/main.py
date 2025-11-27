@@ -202,10 +202,7 @@ def create_app() -> FastAPI:
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:
-            for sym in symbols.split(","):
-                trimmed = sym.strip()
-                if trimmed:
-                    state.rtds_symbols.add(trimmed)
+            state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
         pubsub = await state.subscribe(market_id)
         return StreamingResponse(
             _sse_events(pubsub, heartbeat_seconds=heartbeat, max_events=max_events),
@@ -229,10 +226,7 @@ def create_app() -> FastAPI:
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:
-            for sym in symbols.split(","):
-                trimmed = sym.strip()
-                if trimmed:
-                    state.rtds_symbols.add(trimmed)
+            state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
         pubsub = await state.subscribe(market_id)
         await websocket.accept()
         try:
