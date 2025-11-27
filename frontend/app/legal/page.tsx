@@ -57,10 +57,10 @@ export default function LegalCenterPage() {
         ))}
       </div>
       <p className="text-sm text-slate-400">
-        For additional legal inquiries or signed agreements, contact{" "}
-        <a href="mailto:legal@revealmarket.xyz" className="text-brand-200 underline">
-          legal@revealmarket.xyz
-        </a>
+        For additional legal inquiries or signed agreements, submit a note through the{" "}
+        <Link href="/contact" className="text-brand-200 underline">
+          contact form
+        </Link>
         .
       </p>
     </section>

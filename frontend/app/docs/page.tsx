@@ -49,14 +49,11 @@ export default function DocsOverview() {
       </div>
       <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
         <p className="text-sm text-slate-300">
-          Need direct access to the data room, KPI exports, or the founding team?
-          <a
-            href="mailto:hello@revealmarket.xyz?subject=Investor%20Docs%20Brief"
-            className="ml-2 text-brand-300 underline"
-          >
-            Connect With The Team
-          </a>{" "}
-          and we will schedule a bespoke diligence walkthrough.
+          Need direct access to the data room, KPI exports, or the founding team? Use the{" "}
+          <Link href="/contact" className="text-brand-300 underline">
+            contact form
+          </Link>{" "}
+          and we will schedule a diligence walkthrough.
         </p>
       </div>
       <p className="mt-6 text-sm text-slate-400">
@@ -69,11 +66,11 @@ export default function DocsOverview() {
         >
           @RevealMarket
         </a>
-        . Reach out via{" "}
-        <a href="mailto:hello@revealmarket.xyz" className="text-brand-300 underline">
-          hello@revealmarket.xyz
-        </a>{" "}
-        for partner access.
+        . Partner access requests can be shared through the{" "}
+        <Link href="/contact" className="text-brand-300 underline">
+          contact form
+        </Link>
+        .
       </p>
     </>
   );

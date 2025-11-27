@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
-from prometheus_client import Counter, Gauge, REGISTRY
+from prometheus_client import REGISTRY, Counter, Gauge
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
@@ -164,7 +164,7 @@ class PriceStreamer:
                     while not self._stop.is_set():
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=1)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             last_version = await self._refresh_clob_subscription(ws, last_version)
                             continue
                         try:
@@ -444,14 +444,10 @@ class PriceStreamer:
                 "source": source,
                 "best_bid": str(best_bid_val) if best_bid_val is not None else None,
                 "best_ask": str(best_ask_val) if best_ask_val is not None else None,
-                "display_best_bid": str(
-                    best_bid_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
-                )
+                "display_best_bid": str(best_bid_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
                 if best_bid_val is not None
                 else None,
-                "display_best_ask": str(
-                    best_ask_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
-                )
+                "display_best_ask": str(best_ask_val * (Decimal("1") - Decimal(str(self.settings.worsen_percent))))
                 if best_ask_val is not None
                 else None,
                 "tick_size": raw.get("tick_size") or raw.get("min_tick") or raw.get("tickSize"),
@@ -478,7 +474,6 @@ class PriceStreamer:
         if existing and existing.get("price") == payload.get("price"):
             return
         self._publish_cache[key] = payload
-
 
     async def _rtds_loop(self) -> None:
         if not self.settings.rtds_enabled:
@@ -590,9 +585,8 @@ class PriceStreamer:
                     )
                     try:
                         self.metric_ws_restarts.inc()
-                    except Exception:
-                        # Metric may be uninitialised in some tests; ignore.
-                        pass
+                    except Exception as exc:  # pragma: no cover - defensive metric guard
+                        logger.debug("metric_ws_restarts_increment_failed", exc_info=exc)
                     async for raw in ws:
                         if self._stop.is_set():
                             break
@@ -602,7 +596,10 @@ class PriceStreamer:
                             continue
                         logger.debug(
                             "FX ws message received",
-                            extra={"event": "fx.ws.message", "raw_keys": list(data.keys()) if isinstance(data, dict) else None},
+                            extra={
+                                "event": "fx.ws.message",
+                                "raw_keys": list(data.keys()) if isinstance(data, dict) else None,
+                            },
                         )
                         await self._handle_fx_ws(data)
             except FatalWebsocketError as exc:

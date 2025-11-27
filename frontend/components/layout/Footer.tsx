@@ -6,6 +6,7 @@ const footerLinks = [
   { href: "/docs", label: "Docs" } as const,
   { href: "/proofs", label: "Proofs" } as const,
   { href: "/legal", label: "Legal Center" } as const,
+  { href: "/contact", label: "Contact" } as const,
 ];
 
 export function Footer() {

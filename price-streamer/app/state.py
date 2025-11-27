@@ -5,13 +5,13 @@ import hashlib
 import hmac
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
 from pydantic import AnyHttpUrl
-from typing import Iterable
 from redis.asyncio import Redis
 from websockets import connect
 from websockets.exceptions import InvalidStatusCode

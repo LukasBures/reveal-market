@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
@@ -22,8 +23,8 @@ export default function PrivacyPage() {
           (timestamp, route, response time) for debugging.
         </li>
         <li>
-          <strong>Contact info.</strong> If you email us, we store your email to
-          respond. We do not sell personal data.
+          <strong>Contact info.</strong> If you submit the contact form, we store your details only to respond to your
+          request. We do not sell personal data.
         </li>
         <li>
           <strong>Cookies.</strong> The site may set functional cookies for
@@ -35,14 +36,11 @@ export default function PrivacyPage() {
         </li>
       </ul>
       <p className="mt-8">
-        Questions? Contact{" "}
-        <a
-          href="mailto:hello@revealmarket.xyz"
-          className="text-brand-300 underline"
-        >
-          hello@revealmarket.xyz
-        </a>
-        .
+        Questions? Use the{" "}
+        <Link href="/contact" className="text-brand-300 underline">
+          contact form
+        </Link>{" "}
+        and the team will respond directly.
       </p>
     </div>
   );

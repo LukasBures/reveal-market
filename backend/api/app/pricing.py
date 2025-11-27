@@ -93,12 +93,11 @@ def _extract_fx_price(payload: dict) -> float | None:
     return None
 
 
-async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
+async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True) -> FxQuoteResponse:
     """Fetch the latest ZEN/USD price from the configured feed."""
 
     now = monotonic()
     cache_ttl = float(settings.fx_cache_ttl_seconds)
-    cache_expiry = _FX_CACHE.get("expires_at")
 
     async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
         try:
@@ -113,10 +112,13 @@ async def fetch_fx_quote(settings: Settings) -> FxQuoteResponse:
             _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
             return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
         except Exception:
-            if "zen_usd" in _FX_CACHE and (cache_expiry is None or now < float(cache_expiry)):
-                # Serve cached FX on errors to avoid hammering upstream (mark as stale).
-                _FX_CACHE["stale"] = True
-                _FX_CACHE["expires_at"] = now + cache_ttl
+            if use_cache_on_error and "zen_usd" in _FX_CACHE:
+                _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
                 fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
                 return FxQuoteResponse(zen_usd=float(_FX_CACHE["zen_usd"]), stale=True)
-            raise
+
+            _FX_CACHE.update(
+                {"zen_usd": float(settings.fx_fallback_price), "stale": True, "expires_at": now + cache_ttl}
+            )
+            fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
+            return FxQuoteResponse(zen_usd=float(settings.fx_fallback_price), stale=True)

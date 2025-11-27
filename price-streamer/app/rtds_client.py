@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+import websocket  # type: ignore[import-not-found]  # pip install websocket-client
+
 """
 Polymarket Real-Time Data Streaming (RTDS) client.
 
@@ -10,19 +20,10 @@ Polymarket Real-Time Data Streaming (RTDS) client.
 - Dispatches messages via pluggable router / callbacks.
 """
 
-import json
-import logging
-import threading
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-import websocket  # type: ignore[import-not-found]  # pip install websocket-client
-
-
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Subscription:
@@ -39,10 +40,10 @@ class Subscription:
 
     topic: str
     type: str = "*"
-    filters: Optional[Any] = None
+    filters: Any | None = None
 
-    def to_wire(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_wire(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "topic": self.topic,
             "type": self.type,
         }
@@ -67,7 +68,7 @@ class RTDSMessage:
     topic: str
     type: str
     payload: Any
-    raw: Dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -87,12 +88,12 @@ class RTDSRouter:
     - register(topic="*", type="*", handler=fn) for a catch-all
     """
 
-    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, logger: logging.Logger | None = None) -> None:
         self._logger = logger or logging.getLogger(__name__)
-        self._handlers: Dict[Tuple[str, str], HandlerFn] = {}
-        self._wildcard_topic_handlers: Dict[str, HandlerFn] = {}
-        self._wildcard_type_handlers: Dict[str, HandlerFn] = {}
-        self._catch_all: Optional[HandlerFn] = None
+        self._handlers: dict[tuple[str, str], HandlerFn] = {}
+        self._wildcard_topic_handlers: dict[str, HandlerFn] = {}
+        self._wildcard_type_handlers: dict[str, HandlerFn] = {}
+        self._catch_all: HandlerFn | None = None
 
     def register(
         self,
@@ -156,6 +157,7 @@ class RTDSRouter:
 # RTDS client
 # ---------------------------------------------------------------------------
 
+
 class PolymarketRTDSClient:
     """
     Low-level RTDS WebSocket client.
@@ -171,17 +173,17 @@ class PolymarketRTDSClient:
     def __init__(
         self,
         url: str = "wss://ws-live-data.polymarket.com",
-        router: Optional[RTDSRouter] = None,
-        on_raw_message: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_connect: Optional[Callable[["PolymarketRTDSClient"], None]] = None,
-        on_disconnect: Optional[Callable[["PolymarketRTDSClient"], None]] = None,
+        router: RTDSRouter | None = None,
+        on_raw_message: Callable[[dict[str, Any]], None] | None = None,
+        on_connect: Callable[[PolymarketRTDSClient], None] | None = None,
+        on_disconnect: Callable[[PolymarketRTDSClient], None] | None = None,
         ping_interval: int = 20,
         ping_timeout: int = 10,
         reconnect: bool = True,
-        max_retries: Optional[int] = None,
+        max_retries: int | None = None,
         backoff_initial: float = 1.0,
         backoff_max: float = 30.0,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self.url = url
         self.router = router or RTDSRouter()
@@ -196,11 +198,11 @@ class PolymarketRTDSClient:
         self.backoff_max = backoff_max
 
         self._logger = logger or logging.getLogger("polymarket_rtds")
-        self._ws: Optional[websocket.WebSocketApp] = None
-        self._thread: Optional[threading.Thread] = None
+        self._ws: websocket.WebSocketApp | None = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._subscriptions: List[Subscription] = []
+        self._subscriptions: list[Subscription] = []
         self._sub_lock = threading.Lock()
 
         self._retry_count = 0
@@ -221,11 +223,11 @@ class PolymarketRTDSClient:
             except Exception:
                 self._logger.exception("Failed to send subscription to RTDS")
 
-    def add_subscriptions(self, subs: List[Subscription]) -> None:
+    def add_subscriptions(self, subs: list[Subscription]) -> None:
         """
         Register multiple subscriptions at once.
         """
-        to_send: List[Subscription] = []
+        to_send: list[Subscription] = []
         with self._sub_lock:
             for sub in subs:
                 if sub not in self._subscriptions:
@@ -377,8 +379,8 @@ class PolymarketRTDSClient:
     def _on_close(
         self,
         ws: websocket.WebSocketApp,
-        close_status_code: Optional[int],
-        close_msg: Optional[str],
+        close_status_code: int | None,
+        close_msg: str | None,
     ) -> None:
         self._logger.warning("RTDS WebSocket closed (code=%s, msg=%s)", close_status_code, close_msg)
         if self.on_disconnect_cb:
@@ -389,7 +391,7 @@ class PolymarketRTDSClient:
 
     # ---------------------------- helpers -----------------------------------
 
-    def _send_subscriptions(self, subs: List[Subscription]) -> None:
+    def _send_subscriptions(self, subs: list[Subscription]) -> None:
         """
         Send a subscription message for given subscriptions.
 

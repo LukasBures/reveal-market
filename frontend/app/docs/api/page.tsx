@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("api");
@@ -30,13 +31,10 @@ export default function ApiReferencePage() {
         </li>
       </ul>
       <p className="mt-6">
-        API keys are granted to verified partners under commercial terms. Contact{" "}
-        <a
-          href="mailto:hello@revealmarket.xyz"
-          className="text-brand-300 underline"
-        >
-          hello@revealmarket.xyz
-        </a>{" "}
+        API keys are granted to verified partners under commercial terms. Use the{" "}
+        <Link href="/contact" className="text-brand-300 underline">
+          contact form
+        </Link>{" "}
         to begin due diligence.
       </p>
     </>

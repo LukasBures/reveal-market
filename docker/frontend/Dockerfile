@@ -41,15 +41,18 @@ RUN npm run build
 
 # 3) Runtime stage
 FROM node:20-alpine AS runner
-WORKDIR /app/frontend
+WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# Force Next to bind on all interfaces instead of the container hostname.
+ENV HOSTNAME=0.0.0.0
 
-# Copy built app
-COPY --from=builder /app/frontend ./
+# Copy only what the standalone server needs: server bundle, static assets, public assets.
+COPY --from=builder /app/frontend/.next/standalone ./
+COPY --from=builder /app/frontend/.next/static ./.next/static
+COPY --from=builder /app/frontend/public ./public
 
 EXPOSE 3000
 
-# Next.js standalone output requires running the standalone server directly.
-CMD ["node", ".next/standalone/server.js"]
+CMD ["node", "server.js"]

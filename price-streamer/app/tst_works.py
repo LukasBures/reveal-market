@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 try:
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import BookParams
 except Exception as exc:  # pragma: no cover - probe script
     print("py_clob_client is missing; run with price-streamer/.venv active (pip install -e .[dev]).")
-    raise SystemExit(exc)
+    raise SystemExit(exc) from exc
 
 try:
     import httpx

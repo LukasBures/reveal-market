@@ -60,7 +60,7 @@ const organizationJsonLd = {
     {
       "@type": "ContactPoint",
       contactType: "Partnerships",
-      email: "hello@revealmarket.xyz",
+      url: absoluteUrl("/contact"),
     },
   ],
 };

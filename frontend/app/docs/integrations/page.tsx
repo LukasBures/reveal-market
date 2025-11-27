@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("integrations");
@@ -31,13 +32,10 @@ export default function IntegrationsPage() {
       <p>
         The integration team handles technical scoping and prioritises
         partnerships that expand geographic reach or bring novel distribution.
-        Begin the conversation at{" "}
-        <a
-          href="mailto:hello@revealmarket.xyz"
-          className="text-brand-300 underline"
-        >
-          hello@revealmarket.xyz
-        </a>
+        Begin the conversation via the{" "}
+        <Link href="/contact" className="text-brand-300 underline">
+          contact form
+        </Link>
         .
       </p>
     </>

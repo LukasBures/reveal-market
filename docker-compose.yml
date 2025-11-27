@@ -137,8 +137,9 @@ services:
       RM_MARKETS_CACHE_LIMIT: 18
       RM_PROVER_ENABLED: ${RM_PROVER_ENABLED}
       RM_PROVER_BASE_URL: ${RM_PROVER_BASE_URL}
-      APP_WORKERS: ${APP_WORKERS:-2}
-      UVICORN_WORKERS: 2
+      # Keep worker footprint light to avoid OOM restarts during sync.
+      APP_WORKERS: ${APP_WORKERS:-1}
+      UVICORN_WORKERS: 1
       PYTHONUNBUFFERED: 1
     depends_on:
       postgres:
@@ -162,10 +163,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 1024M
         reservations:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
 
   hedger:
     build:
@@ -233,6 +234,7 @@ services:
     mem_swappiness: 0
     environment:
       NODE_ENV: production
+      HOSTNAME: 0.0.0.0
       NODE_OPTIONS: --max-old-space-size=256
       # These are mostly for server-side code (if you use them there),
       # NOT for client-side code. Client uses the build-time values above.
@@ -244,6 +246,13 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      # Prefer IPv4 loopback to avoid IPv6-only DNS resolutions inside Alpine.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     deploy:
       replicas: 1
       resources:

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { MarketDetail } from "@/lib/api-types";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { OutcomeQuote } from "./OutcomeQuote";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
@@ -46,6 +46,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   const { commitWithQuote, isPending: txPending, error: wagmiError } = useCommitWithQuote(
     (market.marketAddress ?? "") as Address,
   );
+  const tradeFormRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!fx || fxStale || stakeZen <= 0) {
@@ -147,6 +148,12 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
   }
 
+  const scrollToTrade = () => {
+    if (tradeFormRef.current) {
+      tradeFormRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   if (outcomes.length === 0) {
     return (
       <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-slate-400">
@@ -193,77 +200,91 @@ export function MarketDetailOutcomes({ market }: Props) {
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Tradable outcomes</p>
           <h2 className="text-xl font-semibold text-white leading-snug">{market.title}</h2>
-          <p className="text-sm text-slate-400">Pick your side below and trade directly from this page.</p>
+          <p className="text-sm text-slate-400">Tap an outcome to preview pricing, then place a trade below.</p>
         </div>
         <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.3em] text-white/70">
           Prices shown in ZEN
         </span>
       </div>
-      <OutcomeQuote
-        stakeZen={10}
-        marketId={market.eventId}
-        marketAddress={market.marketAddress}
-        outcomeId={selectedOutcome}
-      />
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm text-slate-200">
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-[0.25em] text-slate-500">
-              <th className="py-2">Outcome</th>
-              <th className="py-2">Odds</th>
-              <th className="py-2">Est. price</th>
-              <th className="py-2 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {outcomes.map((outcome, idx) => {
-              const price = typeof livePrices[idx] === "number" ? livePrices[idx] : undefined;
-              const probability = price !== undefined ? `${Math.round(price * 100)}%` : "—";
-              const href = `/markets/${market.eventId}?outcome=${encodeURIComponent(String(idx))}`;
-              const isYes = idx === 0;
-              const isNo = idx === 1;
-              const outcomeState = liveStore.outcomes[idx] || {};
-              const bestBid = outcomeState.bestBid;
-              const bestAsk = outcomeState.bestAsk;
-              const spread =
-                bestBid !== undefined && bestAsk !== undefined && bestAsk > 0
-                  ? `${(((bestAsk - bestBid) / bestAsk) * 100).toFixed(2)}%`
-                  : "—";
-              return (
-                <tr key={outcome} className="border-t border-white/5">
-                  <td className="py-3 font-semibold text-white">{outcome}</td>
-                  <td className="py-3 text-slate-300">{probability}</td>
-                  <td className="py-3 text-slate-300">
-                    <div className="flex flex-col gap-1">
-                      <span>{formatZen(price)}</span>
-                      <span className="text-xs text-slate-400">
-                        Bid: {bestBid ? bestBid.toFixed(3) : "—"} · Ask: {bestAsk ? bestAsk.toFixed(3) : "—"} · Spread:{" "}
-                        {spread}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-3 text-right">
+
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500 px-1">
+          <span>Outcome</span>
+          <div className="flex items-center gap-6">
+            <span>% Chance</span>
+            <span className="hidden sm:inline">Price</span>
+            <span className="hidden sm:inline">Action</span>
+          </div>
+        </div>
+        {outcomes.map((outcome, idx) => {
+          const price = typeof livePrices[idx] === "number" ? livePrices[idx] : undefined;
+          const probability = price !== undefined ? `${Math.round(price * 100)}%` : "—";
+          const outcomeState = liveStore.outcomes[idx] || {};
+          const bestBid = outcomeState.bestBid;
+          const bestAsk = outcomeState.bestAsk;
+          const spread =
+            bestBid !== undefined && bestAsk !== undefined && bestAsk > 0
+              ? `${(((bestAsk - bestBid) / bestAsk) * 100).toFixed(2)}%`
+              : "—";
+          const isSelected = selectedOutcome === idx;
+
+          return (
+            <div
+              key={outcome}
+              className={`relative overflow-hidden rounded-2xl border bg-black/40 p-4 transition hover:border-white/20 ${
+                isSelected ? "border-emerald-400/60 bg-white/5" : "border-white/10"
+              }`}
+              onClick={() => {
+                setSelectedOutcome(idx);
+                scrollToTrade();
+              }}
+            >
+              <div className="absolute inset-0 pointer-events-none opacity-30 bg-[radial-gradient(circle_at_20%_20%,rgba(123,240,94,0.12),transparent_40%),radial-gradient(circle_at_80%_50%,rgba(94,182,255,0.12),transparent_35%)]" />
+              <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Outcome</p>
+                  <p className="text-lg font-semibold text-white">{outcome}</p>
+                  <p className="text-xs text-slate-400">
+                    Bid: {bestBid ? bestBid.toFixed(3) : "—"} · Ask: {bestAsk ? bestAsk.toFixed(3) : "—"} · Spread: {spread}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6">
+                  <div className="text-center sm:text-right">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">% Chance</p>
+                    <p className="text-2xl font-semibold text-white">{probability}</p>
+                    <p className="text-xs text-slate-400">Price: {formatZen(price)}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:min-w-[160px]">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedOutcome(idx);
+                        scrollToTrade();
+                      }}
+                      className={`inline-flex items-center justify-center rounded-sm px-4 py-2 text-sm font-semibold transition ${
+                        fxStale
+                          ? "bg-white/10 text-white/60 cursor-not-allowed"
+                          : "bg-emerald-500 text-white hover:bg-emerald-400"
+                      }`}
+                      disabled={fxStale}
+                    >
+                      Trade {outcome}
+                    </button>
                     <Link
                       href={`/markets/${market.eventId}?outcome=${encodeURIComponent(String(idx))}`}
-                      className={`inline-flex w-full sm:w-[180px] items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-white transition ${
-                        isYes
-                          ? "bg-emerald-500 hover:bg-emerald-400"
-                          : isNo
-                            ? "bg-rose-500 hover:bg-rose-400"
-                            : "bg-white/20 hover:bg-white/30"
-                      } ${fxStale ? "pointer-events-none opacity-60" : ""}`}
-                      aria-disabled={fxStale}
+                      className="inline-flex items-center justify-center rounded-sm bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20"
                     >
-                      {isYes ? "Buy YES" : isNo ? "Buy NO" : `Buy ${outcome}`}
+                      View details
                     </Link>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
-      <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/60 p-4 sm:p-5">
+      <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/60 p-4 sm:p-5" ref={tradeFormRef}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Place a trade</p>

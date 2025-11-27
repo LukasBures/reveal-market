@@ -19,6 +19,7 @@
     "asyncstorage-down": "^4.1.0",
     "clsx": "^2.1.0",
     "next": "15.4.7",
+    "nodemailer": "^7.0.11",
     "pino-pretty": "^11.2.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
@@ -27,6 +28,7 @@
   },
   "type": "module",
   "devDependencies": {
+    "@types/nodemailer": "^6.4.15",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

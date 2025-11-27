@@ -57,13 +57,10 @@ export default function AboutPage() {
           >
             docs
           </Link>{" "}
-          or email{" "}
-          <a
-            href="mailto:hello@revealmarket.xyz"
-            className="text-brand-300 underline decoration-brand-400"
-          >
-            hello@revealmarket.xyz
-          </a>
+          or reach out via the{" "}
+          <Link href="/contact" className="text-brand-300 underline decoration-brand-400">
+            contact form
+          </Link>
           .
         </p>
       </div>

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("roadmap");
@@ -52,8 +53,8 @@ export default function RoadmapPage() {
           <h2 className="text-2xl font-semibold text-white">Pillar 3 · Institutional Readiness</h2>
           <ul className="list-disc space-y-3 pl-6">
             <li>
-              <strong>Docs & legal alignment.</strong> Investor narratives, legal center links, and CTA funnels that push
-              prospects directly to the diligence inbox.
+              <strong>Docs & legal alignment.</strong> Investor narratives, legal center links, and CTA funnels that route
+              prospects through the contact form for tracked follow-ups.
             </li>
             <li>
               <strong>Structured tracing.</strong> OpenTelemetry spans that connect API requests, Redis cache hits, and
@@ -69,12 +70,9 @@ export default function RoadmapPage() {
       <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
         <p className="text-sm text-slate-300">
           Need a milestone-by-milestone walkthrough or the latest KPI exports?{" "}
-          <a
-            href="mailto:hello@revealmarket.xyz?subject=Reveal%20Market%20Roadmap"
-            className="text-brand-300 underline"
-          >
-            Connect with the team
-          </a>{" "}
+          <Link href="/contact" className="text-brand-300 underline">
+            Connect with the team via the contact form
+          </Link>{" "}
           for a tailored diligence session.
         </p>
       </div>

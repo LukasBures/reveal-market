@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 import websockets
 
@@ -88,9 +88,7 @@ async def watch_ws(token_ids: Iterable[str]) -> None:
                             if isinstance(event, dict):
                                 etype = event.get("event_type") or event.get("type")
                                 market = event.get("market") or event.get("marketId") or event.get("id")
-                                print(
-                                    f"  #{msg_count}.{idx} event={etype} market={market} payload={event}"
-                                )
+                                print(f"  #{msg_count}.{idx} event={etype} market={market} payload={event}")
                             else:
                                 print(f"  #{msg_count}.{idx} list item: {event!r}")
                     elif isinstance(data, dict):

@@ -22,11 +22,6 @@ describe("DocsNav", () => {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     });
 
-    expect(
-      screen.getByRole("link", { name: /Connect With The Team/i })
-    ).toHaveAttribute(
-      "href",
-      "mailto:hello@revealmarket.xyz?subject=Reveal%20Market%20Docs%20Inquiry"
-    );
+    expect(screen.getByRole("link", { name: /Connect With The Team/i })).toHaveAttribute("href", "/contact");
   });
 });

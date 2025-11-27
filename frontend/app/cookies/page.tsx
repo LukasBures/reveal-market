@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
@@ -32,13 +33,10 @@ export default function CookiesPage() {
       </ul>
       <p className="mt-8">
         You can disable cookies in your browser settings, but some features may
-        stop working. Questions? Email{" "}
-        <a
-          href="mailto:hello@revealmarket.xyz"
-          className="text-brand-300 underline"
-        >
-          hello@revealmarket.xyz
-        </a>
+        stop working. Questions? Use the{" "}
+        <Link href="/contact" className="text-brand-300 underline">
+          contact form
+        </Link>
         .
       </p>
     </div>

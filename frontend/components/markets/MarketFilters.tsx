@@ -347,10 +347,10 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
         <div>
           <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Need a bespoke feed?</p>
           <p className="mt-2">
-            Email{" "}
-            <a href="mailto:hello@revealmarket.xyz" className="font-semibold text-brand-200 underline underline-offset-4">
-              hello@revealmarket.xyz
-            </a>{" "}
+            Use the{" "}
+            <Link href="/contact" className="font-semibold text-brand-200 underline underline-offset-4">
+              contact form
+            </Link>{" "}
             for curation tiers, design support, and API priorities.
           </p>
         </div>

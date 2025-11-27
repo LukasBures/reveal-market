@@ -1264,15 +1264,8 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
 @app.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])
 async def pricing_fx() -> schemas.FxQuoteResponse:
     try:
-        return await fetch_fx_quote(settings)
+        return await fetch_fx_quote(settings, use_cache_on_error=False)
     except httpx.HTTPError as exc:
-        cached = settings.fx_fallback_price
-        try:
-            fx_state = getattr(fetch_fx_quote, "_cache_state", None)
-            if fx_state and fx_state.get("zen_usd") is not None:
-                cached = fx_state["zen_usd"]
-        except Exception:
-            cached = settings.fx_fallback_price
         log_event(
             logger,
             logging.WARNING,
@@ -1280,7 +1273,7 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="failed to fetch FX feed",
             error=str(exc),
         )
-        return schemas.FxQuoteResponse(zen_usd=cached, stale=True)
+        return schemas.FxQuoteResponse(zen_usd=settings.fx_fallback_price, stale=True)
     except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
         log_event(
             logger,

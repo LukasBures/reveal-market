@@ -228,4 +228,4 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |
 | Market cards overflow on xl screens | Ensure new props still pass through `MarketGrid` so it can balance columns. |
 
-Need more details? Ping `hello@revealmarket.xyz` or open an issue referencing this README so we can keep the documentation current.
+Need more details? Open an issue referencing this README or reach out via the `/contact` page so we can keep the documentation current.

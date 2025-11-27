@@ -1,11 +1,10 @@
-FROM caddy:2.8.4-builder AS builder
+FROM caddy:2-builder AS builder
 
 RUN xcaddy build \
-    --with github.com/caddy-dns/cloudflare \
-    --with github.com/caddyserver/caddy/v2@v2.8.4 \
+    --with github.com/caddy-dns/cloudflare@v0.2.2 \
     --output /usr/bin/caddy
 
-FROM caddy:2.8.4-alpine
+FROM caddy:2-alpine
 
 RUN apk add --no-cache curl
 

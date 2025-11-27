@@ -13,6 +13,7 @@ const navLinks = [
   { href: "/about", label: "About" },
   { href: "/proofs", label: "Proofs" },
   { href: "/docs", label: "Docs" },
+  { href: "/contact", label: "Contact" },
 ] as const;
 
 const rawHomeLink = (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();

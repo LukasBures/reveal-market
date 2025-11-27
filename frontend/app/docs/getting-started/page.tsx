@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("getting-started");
@@ -16,15 +17,11 @@ export default function GettingStartedPage() {
         <li>
           <h3 className="font-semibold text-white">Request partner access</h3>
           <p className="text-slate-300">
-            Email{" "}
-            <a
-              href="mailto:hello@revealmarket.xyz"
-              className="text-brand-300 underline"
-            >
-              hello@revealmarket.xyz
-            </a>{" "}
-            to receive the investor deck, compliance packet, and marketplace
-            sandbox credentials.
+            Use the{" "}
+            <Link href="/contact" className="text-brand-300 underline">
+              contact form
+            </Link>{" "}
+            to request the investor deck, compliance packet, and marketplace sandbox credentials.
           </p>
         </li>
         <li>
@@ -39,8 +36,8 @@ export default function GettingStartedPage() {
           <h3 className="font-semibold text-white">Integrate & launch</h3>
           <p className="text-slate-300">
             Our team co-pilots technical integration, provides marketing assets,
-            and lines up press/launch support. Investors get early access to the
-            $REVEAL token pool and governance channels.
+            and lines up press/launch support. Governance and token details will
+            be shared directly during diligence.
           </p>
         </li>
       </ol>
