@@ -9,7 +9,8 @@ type Props = {
   defaultStakeZen?: number;
   marketAddress?: string | null;
   marketId?: string;
-  outcomeId?: number;
+  outcomes?: string[];
+  initialOutcomeId?: number;
 };
 
 const MAX_STAKE_ZEN = 100;
@@ -19,17 +20,35 @@ const formatNumber = (value: number, decimals = 4) => {
   return value.toFixed(decimals);
 };
 
-export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, outcomeId = 0 }: Props) {
+export function StakeQuoteCard({
+  defaultStakeZen = 10,
+  marketAddress,
+  marketId,
+  outcomes = [],
+  initialOutcomeId = 0,
+}: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
+  const [selectedOutcome, setSelectedOutcome] = useState<number>(initialOutcomeId);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const { address } = useAccount();
   const fxUnavailable = status === "error";
+  const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
+  const outcomeLabel =
+    outcomeOptions[selectedOutcome] ??
+    (selectedOutcome === 0 ? "Yes" : selectedOutcome === 1 ? "No" : `Outcome ${selectedOutcome + 1}`);
 
   const debouncedStake = useDebounce(stakeZen, 200);
+
+  useEffect(() => {
+    if (selectedOutcome >= outcomeOptions.length) {
+      setSelectedOutcome(0);
+    }
+  }, [outcomeOptions, selectedOutcome]);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +84,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
           marketId,
           walletAddress: address,
           marketAddress,
-          outcomeId,
+          outcomeId: selectedOutcome,
         });
         if (!cancelled) {
           setQuote(payload);
@@ -81,7 +100,7 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
     return () => {
       cancelled = true;
     };
-  }, [debouncedStake, fx, address, marketAddress, marketId, outcomeId]);
+  }, [debouncedStake, fx, address, marketAddress, marketId, selectedOutcome, fxUnavailable, refreshNonce]);
 
   useEffect(() => {
     if (!quote) return;
@@ -99,20 +118,46 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
   }, [quote]);
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5 text-sm text-slate-100 shadow-lg shadow-black/20">
-      <div className="flex items-center justify-between gap-3">
+    <div className="sticky top-4 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-xl shadow-black/30 backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Preview payout</p>
-          <p className="text-lg font-semibold text-white">Live quote (ZEN in / USDC profit)</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trade</p>
+          <p className="text-lg font-semibold text-white">Buy/Sell {outcomeLabel}</p>
+          <p className="text-xs text-slate-400">Live quotes with FX applied. Max stake {MAX_STAKE_ZEN} ZEN.</p>
         </div>
-        {fx && (
-          <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.3em] text-white/80">
-            FX: 1 ZEN = ${formatNumber(fx.zen_usd, 4)} USDC{fx.stale ? " (stale)" : ""}
+        <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
+          <span
+            className={`rounded-full px-3 py-1 ${
+              fxStale || fxUnavailable ? "bg-amber-500/20 text-amber-100" : "bg-emerald-500/15 text-emerald-100"
+            }`}
+          >
+            FX {fxStale || fxUnavailable ? "stale" : "live"}
           </span>
-        )}
+          {quote && (
+            <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
+              Quote {quote.quote_id.slice(0, 6)}… expires {new Date(quote.expires_at).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
       </div>
-      <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
-        <label className="flex flex-1 flex-col gap-1">
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {outcomeOptions.map((label, idx) => (
+          <button
+            key={`${label}-${idx}`}
+            type="button"
+            onClick={() => setSelectedOutcome(idx)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+              selectedOutcome === idx ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Stake (ZEN)</span>
           <input
             type="number"
@@ -128,44 +173,61 @@ export function StakeQuoteCard({ defaultStakeZen = 10, marketAddress, marketId, 
               }
               setStakeZen(Math.min(Math.max(next, 0), MAX_STAKE_ZEN));
             }}
-            className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
+            className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
           />
-          <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-            Max per bet: {MAX_STAKE_ZEN} ZEN
-          </span>
+          <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+            {[5, 10, 25, 50].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setStakeZen(preset)}
+                className="rounded-full bg-white/5 px-3 py-1 font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
+              >
+                {preset} ZEN
+              </button>
+            ))}
+          </div>
         </label>
-        <div className="grid flex-1 grid-cols-2 gap-3 text-xs md:grid-cols-3">
-          <Metric label="Refund (ZEN)" value={formatNumber(quote?.refund_zen ?? NaN, 4)} />
-          <Metric label="Rake (ZEN)" value={formatNumber(quote?.rake_zen ?? NaN, 4)} />
-          <Metric label="Hedge size (USDC)" value={formatNumber(quote?.hedge_usdc ?? NaN, 4)} />
-          <Metric label="Displayed odds" value={formatNumber(quote?.displayed_odds_multiplier ?? NaN, 3)} />
-          <Metric label="Est. profit (USDC)" value={formatNumber(profitUsd ?? NaN, 4)} highlight />
-          <Metric label="Total monetisation" value={formatNumber(quote?.total_monetisation ?? NaN, 3)} />
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <Metric label="Refund (ZEN)" value={formatNumber(quote?.refund_zen ?? NaN, 3)} />
+          <Metric label="Rake (ZEN)" value={formatNumber(quote?.rake_zen ?? NaN, 3)} />
+          <Metric label="Profit (USDC)" value={formatNumber(profitUsd ?? NaN, 3)} highlight />
+          <Metric label="Odds" value={formatNumber(quote?.displayed_odds_multiplier ?? NaN, 3)} />
         </div>
       </div>
-      {loading && <p className="mt-2 text-xs text-slate-400">Fetching quote…</p>}
-      {quote && (
-        <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-          Remaining caps — user:{" "}
-          {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
-            ? `${formatNumber(quote.remaining_user_stake_zen, 3)} ZEN`
-            : "n/a"}
-          , market:{" "}
-          {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
-            ? `${formatNumber(quote.remaining_market_stake_zen, 3)} ZEN`
-            : "n/a"}
-        </p>
-      )}
-      {error && (
-        <p className="mt-2 text-xs text-rose-300">
-          {error}. FX feed or pricing may be temporarily unavailable.
-        </p>
-      )}
-      {fxStale && (
-        <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-amber-300">
-          Pricing paused due to stale FX. Please retry in a moment.
-        </p>
-      )}
+
+      <div className="mt-4 flex flex-col gap-2">
+        <button
+          type="button"
+          disabled={loading || fxStale || fxUnavailable || !address || !marketAddress}
+          onClick={() => setRefreshNonce((prev) => prev + 1)}
+          className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
+            loading || fxStale || fxUnavailable || !address || !marketAddress
+              ? "cursor-not-allowed bg-white/20 text-white/60"
+              : "bg-emerald-500 text-white hover:bg-emerald-400"
+          }`}
+        >
+          {loading ? "Pricing…" : `Buy ${outcomeLabel}`}
+        </button>
+        {quote && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Caps — user:{" "}
+            {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
+              ? `${formatNumber(quote.remaining_user_stake_zen, 3)} ZEN`
+              : "n/a"}
+            , market:{" "}
+            {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
+              ? `${formatNumber(quote.remaining_market_stake_zen, 3)} ZEN`
+              : "n/a"}
+          </p>
+        )}
+        {error && <p className="text-xs text-rose-300">{error}</p>}
+        {fxStale && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
+            Pricing paused due to stale FX. Please retry in a moment.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

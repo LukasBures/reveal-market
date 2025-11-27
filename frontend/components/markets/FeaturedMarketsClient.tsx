@@ -14,7 +14,7 @@ import { categorySlugFromLabel } from "@/lib/slugs";
  * We auto-load up to three batches via IntersectionObserver to give users a lazy-loading feel
  * before they need to press the button. After that the CTA becomes the explicit interaction.
  */
-export const AUTO_LOAD_BATCHES = 3;
+export const AUTO_LOAD_BATCHES = 5;
 
 type ClientProps = {
   initialMarkets: MarketSummary[];
@@ -42,7 +42,7 @@ export function FeaturedMarketsClient({
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const DEFAULT_BATCH = 20;
+  const DEFAULT_BATCH = 40;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}`;
 
@@ -177,7 +177,7 @@ export function FeaturedMarketsClient({
             type="button"
             disabled={!hasMore || isPending}
             onClick={() => handleLoadMore("manual")}
-            className="rounded-full border border-white/20 px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 disabled:cursor-not-allowed disabled:opacity-40"
+            className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}
           </button>

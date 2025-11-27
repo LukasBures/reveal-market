@@ -1,7 +1,8 @@
 {
-  admin off
+  admin localhost:2019
   grace_period 5s
   email infra@revealmarket.xyz
+  acme_ca https://acme-v02.api.letsencrypt.org/directory
 }
 
 # ======================================================================
@@ -84,11 +85,29 @@
   }
 }
 
+(tls_prod) {
+  tls {
+    # HTTP + TLS-ALPN ACME (default)
+  }
+}
+
+(tls_dns) {
+  tls {
+    dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    resolvers 1.1.1.1 1.0.0.1
+  }
+}
+
+(tls_local) {
+  tls internal
+}
+
 # ======================================================================
 # PRIMARY DOMAIN — revealmarket.xyz
 # ======================================================================
 revealmarket.xyz {
   encode zstd gzip
+  import tls_dns
   import health_common
   import header_common
   import log_common
@@ -100,6 +119,7 @@ revealmarket.xyz {
 # ======================================================================
 stream.revealmarket.xyz {
   encode zstd gzip
+  import tls_dns
   import health_common
   import header_common
   import log_common
@@ -111,6 +131,7 @@ stream.revealmarket.xyz {
 # ======================================================================
 api.revealmarket.xyz {
   encode zstd gzip
+  import tls_dns
   import health_common
   import header_common
   import log_common
@@ -122,6 +143,7 @@ api.revealmarket.xyz {
 # ======================================================================
 www.revealmarket.xyz {
   encode zstd gzip
+  import tls_dns
   import health_common
   redir https://revealmarket.xyz{uri} 308
 }
@@ -132,6 +154,7 @@ www.revealmarket.xyz {
 http://localhost {
   encode zstd gzip
   import health_common
+  import tls_local
   import header_common_local
   import log_common
   import proxy_frontend
@@ -140,6 +163,7 @@ http://localhost {
 http://api.localhost {
   encode zstd gzip
   import health_common
+  import tls_local
   import header_common_local
   import log_common
   import proxy_api
@@ -148,6 +172,7 @@ http://api.localhost {
 http://stream.localhost {
   encode zstd gzip
   import health_common
+  import tls_local
   import header_common_local
   import log_common
   import proxy_streamer

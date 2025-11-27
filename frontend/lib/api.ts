@@ -332,9 +332,13 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
   try {
     const detailUrl = `${DEFAULT_API_BASE}/markets/${eventId}`;
     logger.info("fetchMarketByEventId:request", { eventId, endpoint: detailUrl });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(detailUrl, {
+      signal: controller.signal,
       next: { revalidate: 30 },
     });
+    clearTimeout(timeout);
     if (response.status === 404) {
       logger.warn("fetchMarketByEventId:not_found", { eventId });
       return null;

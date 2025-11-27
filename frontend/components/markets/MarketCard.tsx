@@ -42,6 +42,7 @@ export function MarketCard({ market }: Props) {
   return (
     <Link
       href={`/markets/${market.eventId}`}
+      prefetch
       className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 hover:-translate-y-1.5 hover:border-brand-400/60"
     >
       <div className="flex items-start gap-4">

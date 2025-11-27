@@ -64,10 +64,10 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 512M
+          memory: 1G
         reservations:
           cpus: "0.25"
-          memory: 256M
+          memory: 512M
 
   api:
     build:
@@ -255,7 +255,10 @@ services:
           memory: 128M
 
   caddy:
-    image: caddy:2
+    build:
+      context: ./docker/caddy
+      dockerfile: Dockerfile
+    image: reveal-market-caddy
     container_name: reveal-market-caddy
     restart: unless-stopped
     mem_swappiness: 0
@@ -268,6 +271,14 @@ services:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:2019/config/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: 1
       resources:

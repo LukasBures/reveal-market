@@ -51,4 +51,5 @@ COPY --from=builder /app/frontend ./
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Next.js standalone output requires running the standalone server directly.
+CMD ["node", ".next/standalone/server.js"]

@@ -6,7 +6,7 @@ export type ServerEnv = {
 
 function resolveApiBase(): string {
   const preferDockerApi = process.env.RUNNING_IN_DOCKER === "true";
-  const fallbackBase = process.env.RM_OFFLINE_API_BASE_URL ?? "https://api.revealmarket.xyz";
+  const fallbackBase = process.env.RM_OFFLINE_API_BASE_URL ?? "http://api.localhost";
   const explicitBase = process.env.RM_API_BASE_URL ?? null;
   const publicBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? null;
   const selectedBase =

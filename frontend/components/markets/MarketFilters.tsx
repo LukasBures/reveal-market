@@ -128,12 +128,14 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
         const params = new URLSearchParams();
         params.set("limit", "5");
         params.set("q", trimmed);
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const response = await fetch(`/api/markets/suggest?${params.toString()}`, {
           signal: controller.signal,
           headers: {
             Accept: "application/json",
           },
         });
+        clearTimeout(timeoutId);
         if (!response.ok) {
           throw new Error(`suggestions failed (${response.status})`);
         }

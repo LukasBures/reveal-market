@@ -265,7 +265,12 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">
-              <StakeQuoteCard marketAddress={market.marketAddress} marketId={canonicalEventId} outcomeId={0} />
+              <StakeQuoteCard
+                marketAddress={market.marketAddress}
+                marketId={canonicalEventId}
+                outcomes={market.outcomes ?? []}
+                initialOutcomeId={0}
+              />
               <MarketLivePanels
                 marketId={canonicalEventId}
                 tokenIds={Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : []}

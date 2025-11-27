@@ -30,7 +30,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
   );
 
   return (
-    <div className="flex h-full flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-4">
+    <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-4">
       <div className="flex items-center justify-between text-sm text-slate-200">
         <span className="text-xs uppercase tracking-[0.25em] text-slate-500">
           Live order flow
@@ -64,12 +64,12 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
           </p>
         )}
       </div>
-      <div className="flex-1 rounded-2xl border border-white/5 bg-slate-950/70 p-3">
+      <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-3">
         <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
           <span>Recent trades</span>
           <span className="text-slate-400">{trades.length ? "" : "Waiting…"}</span>
         </div>
-        <div className="mt-2 flex flex-col gap-1">
+        <div className="mt-2 flex max-h-52 flex-col gap-1 overflow-y-auto">
           {trades.map((trade, idx) => (
             <div
               key={`${trade.timestamp}-${idx}`}
