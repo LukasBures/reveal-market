@@ -135,6 +135,8 @@ contract MarketFactoryTest is Test {
             revert("expected revert");
         } catch (bytes memory err) {
             reverted = true;
+            // casting to bytes4 is safe because ABI-encoded reverts always prefix a 4-byte selector.
+            // forge-lint: disable-next-line(unsafe-typecast)
             assertEq(bytes4(err), RevealMarket.CommitmentTooSmall.selector);
         }
         vm.stopPrank();

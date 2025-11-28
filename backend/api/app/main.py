@@ -7,6 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
+from secrets import token_hex
 from threading import Event, Lock, Thread
 from typing import Annotated, Any
 from urllib.parse import unquote_plus
@@ -1229,7 +1230,7 @@ def pricing_quote(
     # Build a signed quote to prevent client tampering.
     expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
     expiry_ts = int(expires_at.timestamp())
-    quote_id = uuid4().hex
+    quote_id = token_hex(32)
     if settings.pricing_signer_private_key is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable", headers=None
@@ -1331,6 +1332,14 @@ def pricing_submit(
 
     quote = payload.quote
     now = datetime.now(tz=UTC)
+
+    def _as_aware(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=UTC)
+        return dt
+
     if settings.pricing_chain_id is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
     if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
@@ -1352,11 +1361,13 @@ def pricing_submit(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
     if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
-    if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or db_quote.expires_at <= now:
+    db_expires_at = _as_aware(db_quote.expires_at)
+    if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
-    if quote.expires_at <= now:
+    quote_expires_at = _as_aware(quote.expires_at)
+    if quote_expires_at and quote_expires_at <= now:
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
@@ -1370,7 +1381,8 @@ def pricing_submit(
         if db_quote.outcome_id != quote.outcome_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote outcome mismatch")
 
-    expiry_ts = quote.expiry_ts or int(quote.expires_at.timestamp())
+    expiry_reference = quote_expires_at or db_expires_at or now
+    expiry_ts = quote.expiry_ts or int(expiry_reference.timestamp())
     stake_wei = quote.stake_wei
     zen_usd_scaled = quote.zen_usd_scaled
     recalculated_stake = _to_wei_amount(quote.stake_zen)
@@ -1984,6 +1996,7 @@ def read_resolution(
         else:
             if summary:
                 if market:
+                    summary.setdefault("marketId", market.id)
                     summary.setdefault("eventId", market.event_id)
                     summary.setdefault("title", market.title)
                     summary.setdefault("slug", market.slug)

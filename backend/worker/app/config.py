@@ -143,6 +143,7 @@ class Settings(BaseSettings):
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
     proof_cache_prefix: str = Field(default="reveal_market:proof_receipts")
     proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
+    auto_settlement_enabled: bool = Field(default=False, description="Automatically request settlement proofs when data is present")
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)

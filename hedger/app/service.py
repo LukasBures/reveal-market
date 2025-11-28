@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from .bet_processor_zen import BetProcessorZen
 from .config import Settings
 from .exposure import ExposureLedger
+from .bridge import BridgeClient
 from .fx import FxOracle
 from .hedger_usdc import HedgerUSDC
 from .local_logging import log_event
@@ -65,6 +66,12 @@ class HedgerService:
         self.bet_processor = BetProcessorZen(self.pricing_engine, self.treasury)
         self.polymarket_client = PolymarketClient(
             base_url=settings.polymarket_api_base,
+            timeout_seconds=settings.polymarket_timeout_seconds,
+            retry_attempts=settings.polymarket_retry_attempts,
+            retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
+        )
+        self.bridge_client = BridgeClient(
+            base_url=settings.bridge_endpoint,
             timeout_seconds=settings.polymarket_timeout_seconds,
             retry_attempts=settings.polymarket_retry_attempts,
             retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
@@ -343,15 +350,48 @@ class HedgerService:
                 )
                 return {"status": "rejected", "reason": "slippage_limit", "quote": quote}
 
+            order_payload: dict = {}
+            filled_size = instruction.size_usd
+            client_order_id = f"{instruction.market_id}:{int(instruction.created_at.timestamp() * 1000)}"
+            if hasattr(self.polymarket_client, "execute_order"):
+                try:
+                    order_payload = await self.polymarket_client.execute_order(  # type: ignore[attr-defined]
+                        instruction.market_id,
+                        outcome=instruction.hedge_outcome,
+                        action=instruction.action,
+                        size_usd=instruction.size_usd,
+                        max_slippage_bps=self.settings.max_slippage_bps,
+                        client_order_id=client_order_id,
+                    )
+                    filled_size = self._extract_filled_size(order_payload, instruction.size_usd)
+                except Exception as exc:  # pragma: no cover - network errors handled via retry
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        event="hedger.hedge.order_failed",
+                        message="polymarket order failed",
+                        market_id=instruction.market_id,
+                        error=str(exc),
+                    )
+                    return {"status": "rejected", "reason": "order_failed", "error": str(exc)}
+
+            if filled_size <= 0:
+                return {
+                    "status": "rejected",
+                    "reason": "no_fill",
+                    "order": order_payload,
+                    "quote": quote,
+                }
+
             if instruction.is_unwind:
-                borrow_receipt = await self.hedger_usdc.repay(instruction.size_usd)
+                borrow_receipt = await self.hedger_usdc.repay(filled_size)
             else:
-                borrow_receipt = await self.hedger_usdc.borrow(instruction.size_usd)
+                borrow_receipt = await self.hedger_usdc.borrow(filled_size)
                 if borrow_receipt.get("status") == "rejected":
                     return borrow_receipt
 
             await self.exposure_ledger.register_fill(
-                instruction.market_id, instruction.size_usd, is_unwind=instruction.is_unwind
+                instruction.market_id, filled_size, is_unwind=instruction.is_unwind
             )
             await self.repository.record_hedge_instruction(instruction, response_payload=quote)
             utilization = borrow_receipt.get("utilization") if isinstance(borrow_receipt, dict) else None
@@ -368,12 +408,15 @@ class HedgerService:
                 message="hedge placed on Polymarket",
                 market_id=instruction.market_id,
                 action=instruction.action,
-                size_usd=str(instruction.size_usd),
+                size_usd=str(filled_size),
                 utilization=utilization,
+                partial_fill=float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0,
             )
             return {
                 "borrow": borrow_receipt,
                 "quote": quote,
+                "order": order_payload,
+                "filled_size_usd": str(filled_size),
                 "utilization": utilization,
             }
 
@@ -394,39 +437,56 @@ class HedgerService:
             outcome_value = outcome.value
         else:
             outcome_value = outcome
-        if self.repository.is_market_resolved(market_id):
-            return {"status": "already_resolved", "market_id": market_id}
+        lock_ctx = self.lock_manager.lock(f"settle:{market_id}") if self.lock_manager else self._noop_lock
+        async with lock_ctx:
+            if self.repository.is_market_resolved(market_id):
+                return {"status": "already_resolved", "market_id": market_id}
 
-        payload = self._build_prover_payload(market_id, outcome_value)
-        log_event(
-            logger,
-            logging.INFO,
-            event="hedger.settlement.request",
-            message="requesting settlement proof",
-            market_id=market_id,
-            outcome=outcome_value,
-            commit_count=len(payload["commits"]),
-        )
-        response = await self.settlement.request_settlement(market_id, payload)
-        await self.repository.record_settlement(
-            market_id=market_id,
-            outcome=outcome_value,
-            proof_payload=response,
-            prover_latency_seconds=None,
-            submitted_tx=None,
-        )
-        economics = await self._build_and_persist_economics(market_id, outcome_value)
-        self.repository.mark_market_resolved(market_id, outcome_value)
-        await self.exposure_ledger.finalize_market(market_id)
-        log_event(
-            logger,
-            logging.INFO,
-            event="hedger.market.resolved",
-            message="market marked resolved and exposure cleared",
-            market_id=market_id,
-            outcome=outcome_value,
-        )
-        return {"status": "resolved", "payload": payload, "proof": response, "economics": economics}
+            payload = self._build_prover_payload(market_id, outcome_value)
+            log_event(
+                logger,
+                logging.INFO,
+                event="hedger.settlement.request",
+                message="requesting settlement proof",
+                market_id=market_id,
+                outcome=outcome_value,
+                commit_count=len(payload["commits"]),
+            )
+            response = await self.settlement.request_settlement(market_id, payload)
+            await self.repository.record_settlement(
+                market_id=market_id,
+                outcome=outcome_value,
+                proof_payload=response,
+                prover_latency_seconds=None,
+                submitted_tx=None,
+            )
+            economics = await self._build_and_persist_economics(market_id, outcome_value)
+            self.repository.mark_market_resolved(market_id, outcome_value)
+            await self.exposure_ledger.finalize_market(market_id)
+            log_event(
+                logger,
+                logging.INFO,
+                event="hedger.market.resolved",
+                message="market marked resolved and exposure cleared",
+                market_id=market_id,
+                outcome=outcome_value,
+            )
+            return {"status": "resolved", "payload": payload, "proof": response, "economics": economics}
+
+    async def request_bridge(
+        self, direction: str, amount: Decimal, destination: str, *, slippage_bps: int | None = None
+    ) -> dict:
+        """
+        Manually request a bridge transfer. Direction must be `usdc_to_zen` or `zen_to_usdc`.
+        """
+
+        slippage = slippage_bps if slippage_bps is not None else self.settings.max_slippage_bps
+        idempotency = f"{direction}:{destination}:{amount}"
+        if direction == "usdc_to_zen":
+            return await self.bridge_client.bridge_to_zen(amount, destination, slippage_bps=slippage, idempotency=idempotency)
+        if direction == "zen_to_usdc":
+            return await self.bridge_client.bridge_to_usdc(amount, destination, slippage_bps=slippage, idempotency=idempotency)
+        raise ValueError("direction must be 'usdc_to_zen' or 'zen_to_usdc'")
 
     async def health(self) -> dict:
         latest_commit_at = self.repository.latest_commit_timestamp()
@@ -478,6 +538,23 @@ class HedgerService:
             return int(slippage) <= self.settings.max_slippage_bps
         except (TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _extract_filled_size(order_payload: dict, requested: Decimal) -> Decimal:
+        """
+        Extract the filled size from a polymarket order response, falling back to the requested size on missing data.
+        """
+
+        keys = ("filled_size", "size_filled", "filled")
+        for key in keys:
+            value = order_payload.get(key)
+            if value is None:
+                continue
+            try:
+                return Decimal(str(value))
+            except Exception:
+                continue
+        return requested
 
     @staticmethod
     @asynccontextmanager

@@ -65,11 +65,13 @@ def create_app() -> FastAPI:
     state = StreamState(settings, metrics=metrics)
     streamer = PriceStreamer(state, settings, metrics=metrics)
     heartbeat_stop = start_heartbeat(logger, "price_streamer", interval_seconds=60)
+    cors_allow_origins = settings.cors_allow_origins_resolved
     sanitized_config = {
         k: v
         for k, v in settings.model_dump().items()
         if not any(secret in k for secret in ["key", "private", "secret", "password"])
     }
+    sanitized_config["cors_allow_origins_resolved"] = cors_allow_origins
     logger.info("service configuration", extra={"event": "service.config", "config": sanitized_config})
     public_host = urlparse(str(settings.public_base_url)).hostname if settings.public_base_url else None
     internal_host = urlparse(str(settings.internal_base_url)).hostname if settings.internal_base_url else None
@@ -87,13 +89,13 @@ def create_app() -> FastAPI:
         "https://revealmarket.xyz",
         "https://stream.revealmarket.xyz",
     }
-    if not settings.cors_allow_origins or settings.cors_allow_origins == ["*"]:
+    if not cors_allow_origins or cors_allow_origins == ["*"]:
         logger.warning(
             "price-streamer CORS allow_origins is wildcard; set explicit origins for browser clients",
             extra={"event": "cors.unbounded", "scope": "price-streamer"},
         )
     else:
-        missing_origins = sorted(origin for origin in expected_origins if origin not in settings.cors_allow_origins)
+        missing_origins = sorted(origin for origin in expected_origins if origin not in cors_allow_origins)
         if missing_origins:
             logger.warning(
                 "price-streamer CORS origins missing expected entries",
@@ -125,7 +127,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Reveal Price Streamer", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_allow_origins,
+        allow_origins=cors_allow_origins,
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
         allow_credentials=settings.cors_allow_credentials,

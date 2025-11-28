@@ -39,8 +39,12 @@ if (!walletConnectEnabled && typeof console !== "undefined") {
   console.warn("WalletConnect disabled: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set.");
 }
 
-const createWalletConnectors = (): readonly CreateConnectorFn[] => {
-  const shared: CreateConnectorFn[] = [metaMask(), injected({ shimDisconnect: true }), coinbaseWallet({ appName: "Reveal Market" })];
+const createWalletConnectors = (): CreateConnectorFn[] => {
+  const shared: CreateConnectorFn[] = [
+    metaMask(),
+    injected({ shimDisconnect: true }),
+    coinbaseWallet({ appName: "Reveal Market" }),
+  ];
 
   if (walletConnectEnabled) {
     shared.push(
@@ -57,7 +61,7 @@ const createWalletConnectors = (): readonly CreateConnectorFn[] => {
     );
   }
 
-  return shared as const;
+  return shared;
 };
 
 export const wagmiConfig = createConfig({

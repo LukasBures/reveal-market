@@ -1,9 +1,9 @@
 import path from "node:path";
+import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from "next/constants.js";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(/\/$/, "");
 const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const GA_ORIGINS = [
   "https://www.googletagmanager.com",
@@ -11,11 +11,6 @@ const GA_ORIGINS = [
   "https://region1.google-analytics.com",
 ];
 
-const scriptSrc = ["'self'", "'unsafe-inline'"];
-if (!IS_PRODUCTION) {
-  // React Fast Refresh relies on eval-like constructs in dev.
-  scriptSrc.push("'unsafe-eval'");
-}
 const styleSrc = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"];
 const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com"];
 const WALLET_PROVIDER_ORIGINS = [
@@ -56,87 +51,99 @@ const WALLET_PROVIDER_WS = [
   "wss://metamask-sdk.api.cx.metamask.io",
 ];
 
-const connectSrc = ["'self'", API_BASE, STREAMER_BASE, STREAMER_WS, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
-if (IS_PRODUCTION) {
-  scriptSrc.push(...GA_ORIGINS);
-  connectSrc.push(...GA_ORIGINS);
-}
-
 const walletFrameOrigins = [
   "https://verify.walletconnect.org",
   "https://*.walletconnect.com",
   "https://wallet.coinbase.com",
 ];
 
-const csp = [
-  "default-src 'self'",
-  `script-src ${scriptSrc.join(" ")}`,
-  `style-src ${styleSrc.join(" ")}`,
-  "img-src 'self' data: https: blob:",
-  `font-src ${fontSrc.join(" ")}`,
-  `connect-src ${connectSrc.join(" ")}`,
-  `frame-src 'self' ${walletFrameOrigins.join(" ")}`,
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
-
-const securityHeaders = [
-  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
-  { key: 'X-Frame-Options', value: 'DENY' },
-  { key: 'X-Content-Type-Options', value: 'nosniff' },
-  { key: 'Referrer-Policy', value: 'no-referrer' },
-  { key: 'Permissions-Policy', value: 'geolocation=(), camera=(), microphone=()' },
-  { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
-  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
-  { key: 'X-DNS-Prefetch-Control', value: 'off' },
-  { key: 'Content-Security-Policy', value: csp },
-];
-
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-  output: 'standalone',
-  images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'images.revealmarket.xyz' },
-      { protocol: 'https', hostname: 'cdn.revealmarket.xyz' },
-      { protocol: 'https', hostname: '*.polymarket.com' },
-      { protocol: 'https', hostname: 'polymarket-upload.s3.us-east-2.amazonaws.com' },
-      { protocol: 'https', hostname: '*.cloudfront.net' },
-    ],
-  },
-  experimental: {
-    typedRoutes: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  webpack: (config) => {
-    config.resolve = config.resolve ?? {};
-    config.resolve.alias = config.resolve.alias ?? {};
-    config.resolve.alias["@react-native-async-storage/async-storage"] = path.resolve(
-      process.cwd(),
-      "lib/wallet/asyncStorageShim.ts",
-    );
-    return config;
-  },
-  headers: async () => [
-    {
-      source: '/docs/:path*',
-      headers: [
-        ...securityHeaders,
-        {
-          key: 'Cache-Control',
-          value: 'public, s-maxage=600, stale-while-revalidate=86400',
-        },
+const nextConfig = (phase) => {
+  const isDev = phase === PHASE_DEVELOPMENT_SERVER;
+  const isProd = phase === PHASE_PRODUCTION_BUILD || phase === PHASE_PRODUCTION_SERVER;
+
+  const scriptSrc = ["'self'", "'unsafe-inline'"];
+  if (isDev) {
+    // React Fast Refresh relies on eval-like constructs in dev. Restrict to the dev server phase
+    // so production CSP stays strict even if NODE_ENV is mis-set.
+    scriptSrc.push("'unsafe-eval'");
+  }
+
+  const connectSrc = ["'self'", API_BASE, STREAMER_BASE, STREAMER_WS, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
+  if (isProd) {
+    scriptSrc.push(...GA_ORIGINS);
+    connectSrc.push(...GA_ORIGINS);
+  }
+
+  const csp = [
+    "default-src 'self'",
+    `script-src ${scriptSrc.join(" ")}`,
+    `style-src ${styleSrc.join(" ")}`,
+    "img-src 'self' data: https: blob:",
+    `font-src ${fontSrc.join(" ")}`,
+    `connect-src ${connectSrc.join(" ")}`,
+    `frame-src 'self' ${walletFrameOrigins.join(" ")}`,
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+
+  const securityHeaders = [
+    { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+    { key: 'X-Frame-Options', value: 'DENY' },
+    { key: 'X-Content-Type-Options', value: 'nosniff' },
+    { key: 'Referrer-Policy', value: 'no-referrer' },
+    { key: 'Permissions-Policy', value: 'geolocation=(), camera=(), microphone=()' },
+    { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
+    { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
+    { key: 'X-DNS-Prefetch-Control', value: 'off' },
+    { key: 'Content-Security-Policy', value: csp },
+  ];
+
+  return {
+    reactStrictMode: true,
+    output: 'standalone',
+    images: {
+      remotePatterns: [
+        { protocol: 'https', hostname: 'images.revealmarket.xyz' },
+        { protocol: 'https', hostname: 'cdn.revealmarket.xyz' },
+        { protocol: 'https', hostname: '*.polymarket.com' },
+        { protocol: 'https', hostname: 'polymarket-upload.s3.us-east-2.amazonaws.com' },
+        { protocol: 'https', hostname: '*.cloudfront.net' },
       ],
     },
-    {
-      source: '/:path*',
-      headers: securityHeaders,
+    experimental: {
+      typedRoutes: true,
     },
-  ],
+    eslint: {
+      ignoreDuringBuilds: true,
+    },
+    webpack: (config) => {
+      config.resolve = config.resolve ?? {};
+      config.resolve.alias = config.resolve.alias ?? {};
+      config.resolve.alias["@react-native-async-storage/async-storage"] = path.resolve(
+        process.cwd(),
+        "lib/wallet/asyncStorageShim.ts",
+      );
+      return config;
+    },
+    headers: async () => [
+      {
+        source: '/docs/:path*',
+        headers: [
+          ...securityHeaders,
+          {
+            key: 'Cache-Control',
+            value: 'public, s-maxage=600, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      {
+        source: '/:path*',
+        headers: securityHeaders,
+      },
+    ],
+  };
 };
 
 export default nextConfig;

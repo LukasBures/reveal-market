@@ -44,6 +44,34 @@ class PolymarketClient:
         payload = {"market": market_id, "outcome": outcome.value, "action": action.value, "size": float(size_usd)}
         return await self._get_json("/markets/quote", params=payload)
 
+    async def execute_order(
+        self,
+        market_id: str,
+        outcome: OutcomeSide,
+        action: HedgeAction,
+        size_usd: Decimal,
+        *,
+        max_slippage_bps: int,
+        client_order_id: str | None = None,
+    ) -> dict:
+        """
+        Place an order against Polymarket with an explicit slippage guard.
+
+        The API shape here mirrors the public gamma order endpoint; we intentionally pass a client_order_id for
+        deduplication/replay protection on retries.
+        """
+
+        payload = {
+            "market": market_id,
+            "outcome": outcome.value,
+            "action": action.value,
+            "size": float(size_usd),
+            "max_slippage_bps": max_slippage_bps,
+        }
+        if client_order_id:
+            payload["client_order_id"] = client_order_id
+        return await self._post_json("/markets/order", json=payload)
+
     async def _get_json(self, path: str, params: dict | None = None) -> dict:
         url = f"{self.base_url}{path}"
         try:
@@ -71,6 +99,38 @@ class PolymarketClient:
                 logging.ERROR,
                 event="polymarket.http.error",
                 message="failed to reach polymarket after retries",
+                url=url,
+                error=str(exc),
+            )
+            raise
+
+    async def _post_json(self, path: str, json: dict) -> dict:
+        url = f"{self.base_url}{path}"
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(self.retry_attempts),
+                wait=wait_exponential(multiplier=self.retry_backoff_seconds, min=0.1, max=2),
+                retry=retry_if_exception_type(httpx.HTTPError),
+            ):
+                with attempt:
+                    response = await self.client.post(url, timeout=self.timeout_seconds, json=json)
+                    response.raise_for_status()
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="polymarket.http",
+                        message="posted polymarket order",
+                        url=url,
+                        status=response.status_code,
+                        payload=json,
+                    )
+                    return response.json()
+        except RetryError as exc:  # pragma: no cover - network failure
+            log_event(
+                logger,
+                logging.ERROR,
+                event="polymarket.http.error",
+                message="failed to post polymarket order after retries",
                 url=url,
                 error=str(exc),
             )

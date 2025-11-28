@@ -177,3 +177,135 @@ def apply_market_summary(
     market.summary_requested_at = None
     session.add(market)
     return market
+
+
+def upsert_settlement_snapshot(session: Session, market_id: int, data: Mapping[str, Any]) -> models.Settlement:
+    """Insert or update a settlement snapshot for a market."""
+
+    settlement = (
+        session.execute(select(models.Settlement).where(models.Settlement.market_id == market_id)).scalar_one_or_none()
+    )
+    payload = dict(data)
+    if settlement is None:
+        settlement = models.Settlement(market_id=market_id)
+    for field, value in payload.items():
+        if hasattr(settlement, field):
+            setattr(settlement, field, value)
+    session.add(settlement)
+    return settlement
+
+
+def record_commitments(session: Session, market_id: int, tickets: list[Mapping[str, Any]]) -> int:
+    """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
+
+    count = 0
+    existing_hashes = {
+        row[0]
+        for row in session.execute(
+            select(models.Commitment.ticket_hash).where(models.Commitment.market_id == market_id)
+        ).all()
+    }
+    for ticket in tickets:
+        ticket_hash = str(ticket.get("ticketHash") or ticket.get("ticket_hash") or "").lower()
+        if not ticket_hash or ticket_hash in existing_hashes:
+            continue
+        commitment = models.Commitment(
+            market_id=market_id,
+            user_address=str(ticket.get("user") or ticket.get("user_address") or "").lower(),
+            outcome_id=int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
+            amount_wei=int(ticket.get("amount") or ticket.get("amount_wei") or 0),
+            salt=str(ticket.get("salt") or "0x0"),
+            ticket_hash=ticket_hash,
+            leaf=str(ticket.get("leaf") or ""),
+            leaf_index=int(ticket.get("merkleIndex") or ticket.get("leaf_index") or 0),
+        )
+        session.add(commitment)
+        session.flush()
+        siblings = ticket.get("merklePath") or ticket.get("merkle_path") or []
+        for level, sibling in enumerate(siblings):
+            session.add(
+                models.CommitmentMerklePath(
+                    commitment_id=commitment.id,
+                    level=level,
+                    sibling_hash=str(sibling),
+                )
+            )
+        count += 1
+    return count
+
+
+def record_factory_event(
+    session: Session,
+    *,
+    factory_address: str,
+    market_address: str | None,
+    event: str,
+    tx_hash: str | None = None,
+    block_number: int | None = None,
+    block_timestamp: datetime | None = None,
+    payload: Mapping[str, Any] | None = None,
+) -> models.FactoryEvent:
+    """Persist a factory event for audit/mirroring, deduplicating by tx hash + event."""
+
+    normalized_tx = tx_hash.lower() if isinstance(tx_hash, str) else None
+    existing: models.FactoryEvent | None = None
+    if normalized_tx:
+        existing = (
+            session.execute(
+                select(models.FactoryEvent).where(
+                    models.FactoryEvent.tx_hash == normalized_tx,
+                    models.FactoryEvent.event == event,
+                )
+            ).scalar_one_or_none()
+        )
+    if existing:
+        return existing
+    record = models.FactoryEvent(
+        factory_address=factory_address.lower(),
+        market_address=market_address.lower() if isinstance(market_address, str) else None,
+        event=event,
+        tx_hash=normalized_tx,
+        block_number=block_number,
+        block_timestamp=block_timestamp,
+        payload=dict(payload or {}),
+    )
+    session.add(record)
+    return record
+
+
+def record_settlement_receipt(
+    session: Session,
+    *,
+    market_id: int,
+    market_address: str | None,
+    request_id: str,
+    proof_hash: str | None,
+    public_signals: list[str] | None,
+    prover_version: str | None,
+    circuit_hash: str | None,
+    generated_at: datetime | None,
+) -> models.SettlementReceipt:
+    """Persist a prover receipt for downstream automation/audits."""
+
+    existing = (
+        session.execute(
+            select(models.SettlementReceipt).where(
+                models.SettlementReceipt.market_id == market_id,
+                models.SettlementReceipt.request_id == request_id,
+            )
+        ).scalar_one_or_none()
+    )
+    if existing:
+        return existing
+    receipt = models.SettlementReceipt(
+        market_id=market_id,
+        market_address=market_address.lower() if isinstance(market_address, str) else None,
+        request_id=request_id,
+        proof_hash=proof_hash,
+        public_signals=public_signals or [],
+        prover_version=prover_version,
+        circuit_hash=circuit_hash,
+        generated_at=generated_at,
+    )
+    session.add(receipt)
+    return receipt

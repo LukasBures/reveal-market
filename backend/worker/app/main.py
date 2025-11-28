@@ -261,6 +261,69 @@ def _snapshot_market_record(record) -> dict[str, Any]:
     }
 
 
+def _persist_settlement_snapshot(session: Session, market_id: int, snapshot: dict[str, Any]) -> None:
+    """Write settlement + commitment data to the ledger tables for durability."""
+
+    def _as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    settlement_fields = {
+        "merkle_root": snapshot.get("merkleRoot") or snapshot.get("commitments_root"),
+        "commitments_count": _as_int(snapshot.get("commitmentsCount") or snapshot.get("commitments_count")),
+        "pool_total_yes": _as_int(snapshot.get("poolTotalYes") or (snapshot.get("poolTotals") or [None, None])[0]),
+        "pool_total_no": _as_int(snapshot.get("poolTotalNo") or (snapshot.get("poolTotals") or [None, None])[-1]),
+        "total_escrow": _as_int(snapshot.get("totalEscrow") or snapshot.get("total_escrow")),
+        "total_liability": _as_int(snapshot.get("totalLiability") or snapshot.get("total_liability")),
+        "rake_bps": _as_int(snapshot.get("rakeBps") or snapshot.get("rake_bps")),
+        "winning_outcome_id": _as_int(snapshot.get("winningOutcomeId") or snapshot.get("winning_outcome_id")),
+        "circuit_hash": snapshot.get("circuitHash") or snapshot.get("circuit_hash"),
+    }
+    settlement_payload = {k: v for k, v in settlement_fields.items() if v not in (None, "")}
+    if settlement_payload:
+        shared_repository.upsert_settlement_snapshot(session, market_id, settlement_payload)
+
+    tickets = snapshot.get("tickets") or []
+    if tickets:
+        try:
+            shared_repository.record_commitments(session, market_id, tickets)
+        except Exception as exc:  # pragma: no cover - durability best-effort
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.commitment.persist_failed",
+                message="failed to persist commitments snapshot",
+                market_id=market_id,
+                error=str(exc),
+            )
+
+
+def _record_factory_state(session: Session, market: shared_models.Market | None, payload: MarketPayload) -> None:
+    """Mirror factory/rake events into the ledger so address drift is auditable."""
+
+    factory_address = payload.factory or getattr(market, "factory", None) or settings.factory_address
+    if not factory_address:
+        return
+    market_address = payload.market_address or getattr(market, "market_address", None)
+    event_payload = {
+        "rake_bps": payload.rake_bps if hasattr(payload, "rake_bps") else None,
+        "oracle": payload.oracle,
+        "event_id": payload.event_id,
+    }
+    shared_repository.record_factory_event(
+        session,
+        factory_address=str(factory_address),
+        market_address=str(market_address) if market_address else None,
+        event="sync",
+        tx_hash=None,
+        block_number=None,
+        block_timestamp=None,
+        payload=event_payload,
+    )
+
+
 def _run_with_retries[T](
     action: Callable[[], T],
     max_attempts: int,
@@ -976,6 +1039,8 @@ def _persist_resolution_cache_updates(redis_client: Redis | None, summary: SyncS
 
 
 def _run_prover_jobs(summary: SyncSummary, redis_client: Redis | None) -> int:
+    if not settings.auto_settlement_enabled:
+        return 0
     proofs_generated = 0
     for snapshot, payload, condition in summary.proof_jobs:
         if maybe_generate_settlement_proof(
@@ -1197,6 +1262,7 @@ def sync_market(
 
     if market.rake_bps is not None and db_market is not None:
         db_market.rake_bps = market.rake_bps
+    _record_factory_state(session, db_market, market)
     resolution_outcome = _apply_resolution(session, db_market, market)
     session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))
@@ -1677,6 +1743,13 @@ def maybe_generate_settlement_proof(
         merkle_root=payload.get("merkleRoot"),
     )
     try:
+        with session_scope() as session:
+            try:
+                numeric_market_id = int(payload["marketId"])
+            except Exception:
+                numeric_market_id = None
+            if numeric_market_id is not None:
+                _persist_settlement_snapshot(session, numeric_market_id, payload)
         response = PROVER_CLIENT.generate_settlement_proof(payload)
     except ProverError as exc:
         log_event(
@@ -1715,6 +1788,17 @@ def maybe_generate_settlement_proof(
                 settlement.proof_request_id = response.request_id
                 settlement.proof_hash = f"0x{proof_hash}" if proof_hash else None
                 session.add(settlement)
+                shared_repository.record_settlement_receipt(
+                    session,
+                    market_id=settlement.market_id,
+                    market_address=market_snapshot.get("market_address"),
+                    request_id=response.request_id,
+                    proof_hash=f"0x{proof_hash}" if proof_hash else None,
+                    public_signals=response.public_signals,
+                    prover_version=response.prover_version,
+                    circuit_hash=response.circuit_hash,
+                    generated_at=response.generated_at,
+                )
                 session.commit()
     except Exception as exc:  # pragma: no cover - best effort
         log_event(

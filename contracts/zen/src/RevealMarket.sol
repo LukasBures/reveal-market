@@ -386,19 +386,20 @@ contract RevealMarket is ReentrancyGuard {
         if (quote.quoteId == bytes32(0)) revert InvalidQuote();
         if (usedQuoteIds[quote.quoteId]) revert QuoteAlreadyUsed();
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(
-                "QUOTE_V1",
-                block.chainid,
-                address(this),
-                quote.expectedUser,
-                quote.outcomeId,
-                quote.stakeZen,
-                quote.zenUsd,
-                quote.expiry,
-                quote.quoteId
-            )
+        bytes memory digestPayload = abi.encodePacked(
+            "QUOTE_V1",
+            block.chainid,
+            address(this),
+            quote.expectedUser,
+            quote.outcomeId,
+            quote.stakeZen,
+            quote.zenUsd,
+            quote.expiry,
+            quote.quoteId
         );
+        // Keccak is canonical for off-chain signing compatibility; assembly variant would not change gas materially here.
+        // forge-lint: disable-next-line(asm-keccak256)
+        bytes32 digest = keccak256(digestPayload);
         bytes32 wrapped = MessageHashUtils.toEthSignedMessageHash(digest);
         address recovered = ECDSA.recover(wrapped, quote.signature);
         if (recovered != pricingSigner) revert NotAuthorized();

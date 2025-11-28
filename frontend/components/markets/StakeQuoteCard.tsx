@@ -13,7 +13,7 @@ type Props = {
   initialOutcomeId?: number;
 };
 
-const MAX_STAKE_ZEN = 100;
+const DEFAULT_MAX_STAKE_ZEN = 100;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -43,6 +43,20 @@ export function StakeQuoteCard({
     (selectedOutcome === 0 ? "Yes" : selectedOutcome === 1 ? "No" : `Outcome ${selectedOutcome + 1}`);
 
   const debouncedStake = useDebounce(stakeZen, 200);
+  const effectiveMaxStake = useMemo(() => {
+    const caps = [
+      DEFAULT_MAX_STAKE_ZEN,
+      quote?.max_stake_zen ?? null,
+      quote?.remaining_user_stake_zen ?? null,
+      quote?.remaining_market_stake_zen ?? null,
+      quote?.max_user_stake_per_market_zen ?? null,
+      quote?.max_market_stake_zen ?? null,
+    ]
+      .filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v))
+      .map((v) => Math.max(0, v));
+    if (!caps.length) return DEFAULT_MAX_STAKE_ZEN;
+    return Math.max(0.01, Math.min(...caps));
+  }, [quote]);
 
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
@@ -73,14 +87,14 @@ export function StakeQuoteCard({
         if (fx?.stale) setError("Pricing paused (FX stale)");
         return;
       }
-      if (debouncedStake > MAX_STAKE_ZEN) {
-        setQuote(null);
-        setError(`Max stake per bet is ${MAX_STAKE_ZEN} ZEN`);
-        return;
+      const cappedStake = Math.min(debouncedStake, effectiveMaxStake);
+      if (cappedStake !== debouncedStake) {
+        setStakeZen(cappedStake);
+        setError(`Adjusted stake to cap (${cappedStake.toFixed(3)} ZEN)`);
       }
       setLoading(true);
       try {
-        const payload = await fetchPricingQuoteWithMeta(debouncedStake, {
+        const payload = await fetchPricingQuoteWithMeta(cappedStake, {
           marketId,
           walletAddress: address,
           marketAddress,
@@ -100,7 +114,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [debouncedStake, fx, address, marketAddress, marketId, selectedOutcome, fxUnavailable, refreshNonce]);
+  }, [debouncedStake, fx, address, marketAddress, marketId, selectedOutcome, fxUnavailable, refreshNonce, effectiveMaxStake]);
 
   useEffect(() => {
     if (!quote) return;
@@ -123,7 +137,9 @@ export function StakeQuoteCard({
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trade</p>
           <p className="text-lg font-semibold text-white">Buy/Sell {outcomeLabel}</p>
-          <p className="text-xs text-slate-400">Live quotes with FX applied. Max stake {MAX_STAKE_ZEN} ZEN.</p>
+          <p className="text-xs text-slate-400">
+            Live quotes with FX applied. Max stake {effectiveMaxStake.toFixed(3)} ZEN (API caps).
+          </p>
         </div>
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           <span
@@ -136,6 +152,12 @@ export function StakeQuoteCard({
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
               Quote {quote.quote_id.slice(0, 6)}… expires {new Date(quote.expires_at).toLocaleTimeString()}
+            </span>
+          )}
+          {quote && (
+            <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
+              Caps — user {quote.remaining_user_stake_zen?.toFixed(2) ?? "n/a"} ZEN · market{" "}
+              {quote.remaining_market_stake_zen?.toFixed(2) ?? "n/a"} ZEN
             </span>
           )}
         </div>
@@ -162,7 +184,7 @@ export function StakeQuoteCard({
           <input
             type="number"
             min={0}
-            max={MAX_STAKE_ZEN}
+            max={effectiveMaxStake}
             step="0.01"
             value={stakeZen}
             onChange={(e) => {
@@ -171,7 +193,8 @@ export function StakeQuoteCard({
                 setStakeZen(0);
                 return;
               }
-              setStakeZen(Math.min(Math.max(next, 0), MAX_STAKE_ZEN));
+              const capped = Math.min(Math.max(next, 0), effectiveMaxStake);
+              setStakeZen(capped);
             }}
             className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
           />
@@ -180,7 +203,7 @@ export function StakeQuoteCard({
               <button
                 key={preset}
                 type="button"
-                onClick={() => setStakeZen(preset)}
+                onClick={() => setStakeZen(Math.min(preset, effectiveMaxStake))}
                 className="rounded-full bg-white/5 px-3 py-1 font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
               >
                 {preset} ZEN

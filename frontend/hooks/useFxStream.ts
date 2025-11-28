@@ -54,7 +54,7 @@ function setState(conn: FxConnection, patch: Partial<FxConnectionState>) {
 
 function startFallback(path: string, conn: FxConnection, connect: () => void) {
   const runFetch = async () => {
-    if (conn.cancelled) return;
+    if (conn.cancelled || conn.subscribers.size === 0) return;
     const age = Date.now() - conn.state.lastUpdate;
     const sinceStart = Date.now() - conn.startTs;
     const wsHealthy = conn.state.wsConnected && conn.state.wsDelivered && !conn.state.fx?.stale && age < 15_000;
@@ -205,29 +205,10 @@ function startConnection(path: string) {
 
 function subscribeToConnection(path: string, onChange: () => void) {
   const conn = startConnection(path);
-  if (conn.idleCloseTimer) {
-    clearTimeout(conn.idleCloseTimer);
-    conn.idleCloseTimer = null;
-  }
   conn.subscribers.add(onChange);
   return () => {
     conn.subscribers.delete(onChange);
-    if (conn.subscribers.size === 0) {
-      if (conn.idleCloseTimer) {
-        clearTimeout(conn.idleCloseTimer);
-      }
-      conn.idleCloseTimer = setTimeout(() => {
-        if (conn.subscribers.size > 0) {
-          return;
-        }
-        conn.cancelled = true;
-        if (conn.fallbackTimer) clearInterval(conn.fallbackTimer);
-        if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) {
-          conn.ws.close();
-        }
-        connections.delete(path);
-      }, 30_000);
-    }
+    // Keep the connection warm for reuse across pages/routes; we intentionally do not close the socket on unsubscribe.
   };
 }
 

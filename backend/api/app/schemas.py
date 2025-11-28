@@ -197,11 +197,11 @@ class PricingQuoteResponse(BaseModel):
     max_market_stake_zen: float | None = None
     remaining_user_stake_zen: float | None = None
     remaining_market_stake_zen: float | None = None
-    quote_id: str
-    expires_at: datetime
+    quote_id: str | None = None
+    expires_at: datetime | None = None
     expiry_ts: int = 0
-    signature: str
-    signer: str
+    signature: str | None = None
+    signer: str | None = None
     market_id: str | None = None
     user_id: str | None = None
     wallet_address: str | None = None

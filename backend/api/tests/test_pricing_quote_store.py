@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app import models
-from app.main import settings
+from app.config import get_settings
 from pydantic import SecretStr
 
 
@@ -17,6 +17,7 @@ def _mock_fx(monkeypatch, price: float = 2.5):
 
 
 def _configure_signer():
+    settings = get_settings()
     settings.pricing_chain_id = 1337
     settings.pricing_signer_private_key = SecretStr(
         "0x4c0883a69102937d6231471b5dbb6204fe512961708279fe52e05f728621f081"

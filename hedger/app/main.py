@@ -62,6 +62,7 @@ def create_app() -> FastAPI:
         with suppress(Exception):
             await service.fx_oracle.client.aclose()
             await service.settlement.client.aclose()
+            await service.bridge_client.client.aclose()
             if service.redis:
                 await service.redis.aclose()
 

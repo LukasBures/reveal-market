@@ -25,7 +25,7 @@ class SettlementCoordinator:
 
         started = time.perf_counter()
         response = await self.client.post(
-            f"{self.base_url}/prove",
+            f"{self.base_url}/api/v1/proofs/settlement",
             json=payload,
             timeout=self.timeout_seconds,
         )

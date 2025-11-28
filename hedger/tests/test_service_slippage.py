@@ -17,6 +17,12 @@ class StubPolymarketClient:
     ) -> dict:
         return {"slippage_bps": self.slippage_bps}
 
+    async def execute_order(
+        self, market_id: str, outcome: OutcomeSide, action: HedgeAction, size_usd: Decimal, **_: Decimal
+    ) -> dict:
+        # Mirror a full fill to keep the hedge path simple for this test.
+        return {"filled_size": float(size_usd)}
+
 
 @pytest.mark.asyncio
 async def test_execute_hedge_rejects_high_slippage(monkeypatch):

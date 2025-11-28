@@ -681,18 +681,6 @@ This architecture provides:
 
 ____
 
-• Here’s a pragmatic setup that balances bandwidth, consistency, and latency:
-
-  - Centralize feeds in the backend: Run a small price streamer service/worker that connects to Polymarket’s WebSocket (with REST fallback) and normalizes ticks. Apply your worsen/haircut/LP logic server-side so the math is consistent and auditable. Don’t do price math in the browser.
-  - Publish lightweight deltas: Cache the latest price per market in Redis and fan out via a backend WebSocket/SSE endpoint that clients subscribe to per-market. Send minimal payloads (market_id, outcome, mid/last, ts) and compress; avoid streaming every market to every user. On the frontend, use the live stream to
-    update odds/charts; fall back to cached REST (/markets) for initial load and occasional refresh.
-  - Limit bandwidth: Only stream markets the user is viewing or has open positions in; throttle updates (e.g., 250–500ms debounce) and aggregate to candles server-side. With per-market subscriptions and small deltas, 20 TB/month is plenty.
-  - FX (ZEN/USD) sourcing: Keep FX in the backend (your hedger’s FX oracle). Cache the latest quote with staleness checks and expose it via a tiny endpoint or include it in the pricing quote response. If you want extra integrity, sign the price server-side and have the frontend verify the signature; never rely on
-    client-sourced FX for hedging math.
-  - Charts: Build candles/time-series in the backend from the Polymarket stream (or periodic REST snapshots) and serve pre-aggregated series to the frontend; update with live ticks pushed over the same WebSocket/SSE.
-  - Failure modes: If the Polymarket stream drops or FX is stale, serve the last known value with a “stale” flag and temporarily disable new bet pricing; resume live once fresh data arrives.
-
-  Net: stream from Polymarket to your backend, apply all economics there, broadcast lean per-market updates to clients, and serve FX from your own oracle cache.
 
 
   Hard
@@ -725,4 +713,6 @@ ____
   - You can leave createMarket unused; it won’t do anything unless the owner calls it with a payable float amount (if any).
   - If you want to prevent any future market creation entirely, you can optionally transfer ownership to a burn address or timelock with no proposer, but that also blocks updates to guardian/risk limits.
 
+› 
 
+  

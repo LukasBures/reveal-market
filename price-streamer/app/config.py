@@ -147,6 +147,21 @@ class Settings(BaseSettings):
             raise ValueError("NEXT_PUBLIC_PRICE_STREAMER_URL must use https://")
         return value
 
+    @property
+    def cors_allow_origins_resolved(self) -> list[str]:
+        """Return the configured CORS origins, normalized and deduplicated."""
+
+        if self.cors_allow_origins == ["*"]:
+            return ["*"]
+
+        normalized: list[str] = []
+        for origin in self.cors_allow_origins:
+            trimmed = origin.rstrip("/")
+            if trimmed and trimmed not in normalized:
+                normalized.append(trimmed)
+
+        return normalized
+
 
 def get_settings() -> Settings:
     from functools import lru_cache

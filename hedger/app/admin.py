@@ -61,6 +61,21 @@ async def trigger_settlement(market_id: str, payload: dict, service: HedgerServi
     return await service.trigger_settlement(market_id, payload)
 
 
+@router.post("/bridge")
+async def bridge_liquidity(
+    direction: str,
+    amount: Decimal,
+    destination: str,
+    slippage_bps: int | None = None,
+    service: HedgerService = Depends(get_service),
+):
+    """
+    Manually trigger a bridge transfer between USDC and ZEN rails.
+    """
+
+    return await service.request_bridge(direction, amount, destination, slippage_bps=slippage_bps)
+
+
 @router.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
