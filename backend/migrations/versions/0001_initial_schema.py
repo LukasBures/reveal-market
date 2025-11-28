@@ -220,6 +220,154 @@ def upgrade() -> None:
         ["market_id"],
     )
 
+    # Optional ledger/audit helpers for future features
+    op.create_table(
+        "chains",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("chain_id", sa.BigInteger(), nullable=False, unique=True),
+        sa.Column("name", sa.String(length=128), nullable=False),
+        sa.Column("rpc_url", sa.String(length=512), nullable=False),
+        sa.Column("explorer_url", sa.String(length=512), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+
+    op.create_table(
+        "wallet_sessions",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("wallet_address", sa.String(length=64), nullable=False),
+        sa.Column("preferred_chain_id", sa.BigInteger(), nullable=True),
+        sa.Column("referral_code", sa.String(length=64), nullable=True),
+        sa.Column("terms_accepted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("risk_acknowledged_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("metadata", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_wallet_sessions_wallet", "wallet_sessions", ["wallet_address"])
+
+    op.create_table(
+        "audit_logs",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("actor_wallet", sa.String(length=64), nullable=True),
+        sa.Column("actor_type", sa.String(length=64), nullable=True),
+        sa.Column("action", sa.String(length=128), nullable=False),
+        sa.Column("subject_type", sa.String(length=128), nullable=True),
+        sa.Column("subject_id", sa.String(length=128), nullable=True),
+        sa.Column("metadata", sa.JSON(), nullable=True),
+        sa.Column("request_id", sa.String(length=128), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_audit_logs_action", "audit_logs", ["action"])
+    op.create_index("ix_audit_logs_subject", "audit_logs", ["subject_type", "subject_id"])
+
+    op.create_table(
+        "ingestion_jobs",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("source", sa.String(length=128), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
+        sa.Column("cursor", sa.JSON(), nullable=True),
+        sa.Column("metrics", sa.JSON(), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_ingestion_jobs_source_status", "ingestion_jobs", ["source", "status"])
+
+    op.create_table(
+        "webhooks_outbox",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("kind", sa.String(length=64), nullable=False),
+        sa.Column("target_url", sa.String(length=512), nullable=False),
+        sa.Column("headers", sa.JSON(), nullable=True),
+        sa.Column("payload", sa.JSON(), nullable=True),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
+        sa.Column("retries", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("next_retry_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_webhooks_outbox_status", "webhooks_outbox", ["status"])
+
+    op.create_table(
+        "rate_limits",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("scope", sa.String(length=64), nullable=False),
+        sa.Column("key", sa.String(length=256), nullable=False),
+        sa.Column("window_seconds", sa.Integer(), nullable=False),
+        sa.Column("count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("reset_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_request_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_rate_limits_scope_key", "rate_limits", ["scope", "key"])
+
+    op.create_table(
+        "fx_prices",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("source", sa.String(length=128), nullable=False),
+        sa.Column("price", sa.Float(), nullable=False),
+        sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_fx_prices_source_time", "fx_prices", ["source", "recorded_at"])
+
+    op.create_table(
+        "market_stats",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=False),
+        sa.Column("as_of_date", sa.Date(), nullable=False),
+        sa.Column("volume_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("liquidity_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("open_interest_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("fees_collected_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("trades_count", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ux_market_stats_market_date", "market_stats", ["market_id", "as_of_date"], unique=True)
+
+    op.create_table(
+        "hedger_positions",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=False),
+        sa.Column("outcome_id", sa.Integer(), nullable=False),
+        sa.Column("provider", sa.String(length=64), nullable=False),
+        sa.Column("state", sa.String(length=32), nullable=False, server_default="open"),
+        sa.Column("size_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("size_zen", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("avg_price", sa.Float(), nullable=True),
+        sa.Column("fees_paid_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("opened_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_hedger_positions_market_outcome", "hedger_positions", ["market_id", "outcome_id"])
+    op.create_index("ix_hedger_positions_state", "hedger_positions", ["state"])
+
+    op.create_table(
+        "proof_jobs",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=True),
+        sa.Column("request_id", sa.String(length=128), nullable=False),
+        sa.Column("circuit_hash", sa.String(length=66), nullable=True),
+        sa.Column("prover_version", sa.String(length=64), nullable=True),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
+        sa.Column("payload", sa.JSON(), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_proof_jobs_request_id", "proof_jobs", ["request_id"])
+    op.create_index("ix_proof_jobs_status", "proof_jobs", ["status"])
+
     op.create_table(
         "settlement_receipts",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
@@ -251,6 +399,28 @@ def downgrade() -> None:
     op.drop_index("ix_settlement_receipts_market_address", table_name="settlement_receipts")
     op.drop_index("ix_settlement_receipts_market_id", table_name="settlement_receipts")
     op.drop_table("settlement_receipts")
+    op.drop_index("ix_proof_jobs_status", table_name="proof_jobs")
+    op.drop_index("ix_proof_jobs_request_id", table_name="proof_jobs")
+    op.drop_table("proof_jobs")
+    op.drop_index("ix_hedger_positions_state", table_name="hedger_positions")
+    op.drop_index("ix_hedger_positions_market_outcome", table_name="hedger_positions")
+    op.drop_table("hedger_positions")
+    op.drop_index("ux_market_stats_market_date", table_name="market_stats")
+    op.drop_table("market_stats")
+    op.drop_index("ix_fx_prices_source_time", table_name="fx_prices")
+    op.drop_table("fx_prices")
+    op.drop_index("ix_rate_limits_scope_key", table_name="rate_limits")
+    op.drop_table("rate_limits")
+    op.drop_index("ix_webhooks_outbox_status", table_name="webhooks_outbox")
+    op.drop_table("webhooks_outbox")
+    op.drop_index("ix_ingestion_jobs_source_status", table_name="ingestion_jobs")
+    op.drop_table("ingestion_jobs")
+    op.drop_index("ix_audit_logs_subject", table_name="audit_logs")
+    op.drop_index("ix_audit_logs_action", table_name="audit_logs")
+    op.drop_table("audit_logs")
+    op.drop_index("ix_wallet_sessions_wallet", table_name="wallet_sessions")
+    op.drop_table("wallet_sessions")
+    op.drop_table("chains")
     op.drop_index("ix_hedger_treasury_snapshots_market_id", table_name="hedger_treasury_snapshots")
     op.drop_table("hedger_treasury_snapshots")
     op.drop_index("ix_settlements_proof_status", table_name="settlements")
