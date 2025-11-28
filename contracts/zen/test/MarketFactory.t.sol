@@ -36,6 +36,8 @@ contract MarketFactoryTest is Test {
     function testCreateMarketDeploysCloneWithFloat() public {
         MarketFactory.CreateMarketParams memory params = _defaultParams();
         params.floatAmount = 1 ether;
+        params.minCommitmentSize = 0;
+        params.maxTicketsPerUser = 0;
 
         address marketAddr;
         vm.deal(address(this), params.floatAmount);
@@ -67,6 +69,7 @@ contract MarketFactoryTest is Test {
         MarketFactory.CreateMarketParams memory params = _defaultParams();
         params.payoutMultiplier = 2e18;
         params.floatAmount = 2 ether;
+        params.maxTicketsPerUser = 0;
         vm.deal(address(this), params.floatAmount);
         address marketAddr = factory.createMarket{value: params.floatAmount}(params);
         RevealMarket market = RevealMarket(payable(marketAddr));
@@ -81,6 +84,7 @@ contract MarketFactoryTest is Test {
         MarketFactory.CreateMarketParams memory params = _defaultParams();
         params.maxMarketSize = 2 ether;
         params.floatAmount = 1 ether;
+        params.maxTicketsPerUser = 0;
         vm.deal(address(this), params.floatAmount);
         address marketAddr = factory.createMarket{value: params.floatAmount}(params);
         RevealMarket market = RevealMarket(payable(marketAddr));
@@ -112,6 +116,29 @@ contract MarketFactoryTest is Test {
         factory.setGlobalCommitPaused(false);
         vm.prank(USER);
         market.commit{value: 1 ether}(0, 1 ether, bytes32(uint256(2)));
+    }
+
+    function testCreateMarketPropagatesCommitLimits() public {
+        MarketFactory.CreateMarketParams memory params = _defaultParams();
+        params.minCommitmentSize = 0.5 ether;
+        params.maxTicketsPerUser = 1;
+        params.maxCommitments = 5;
+        address marketAddr = factory.createMarket(params);
+        RevealMarket market = RevealMarket(payable(marketAddr));
+        assertEq(market.minCommitmentSize(), params.minCommitmentSize);
+        assertEq(market.maxTicketsPerUser(), params.maxTicketsPerUser);
+        assertEq(market.maxCommitments(), params.maxCommitments);
+        vm.deal(USER, 0.25 ether);
+        vm.startPrank(USER);
+        bool reverted;
+        try market.commit{value: 0.25 ether}(0, 0.25 ether, bytes32(uint256(7))) {
+            revert("expected revert");
+        } catch (bytes memory err) {
+            reverted = true;
+            assertEq(bytes4(err), RevealMarket.CommitmentTooSmall.selector);
+        }
+        vm.stopPrank();
+        assertTrue(reverted);
     }
 
     function testSetRiskLimitsRevertsWhenExistingExposureTooHigh() public {
@@ -174,6 +201,9 @@ contract MarketFactoryTest is Test {
         params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
         params.floatAmount = 0;
         params.maxMarketSize = 0;
+        params.minCommitmentSize = 0;
+        params.maxTicketsPerUser = 0;
+        params.maxCommitments = 0;
     }
 
     function _deploy() private returns (address) {

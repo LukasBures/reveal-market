@@ -33,6 +33,11 @@ contract VerifierStub is IVerifier {
     }
 
     /// @inheritdoc IVerifier
+    function expectedInputs() external pure returns (uint256) {
+        return 10;
+    }
+
+    /// @inheritdoc IVerifier
     function verifyProof(bytes calldata, uint256[10] calldata) external override returns (bool success) {
         emit ProofChecked(_shouldVerify, msg.sender);
         return _shouldVerify;

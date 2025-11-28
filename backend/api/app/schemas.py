@@ -120,11 +120,21 @@ class MarketRead(MarketBase):
 class MarketResponse(MarketRead):
     description: str | None = None
     clob_pair_id: str | None = None
+    resolution: ResolutionSummary | None = None
+    caps: MarketCaps | None = None
 
 
 class MarketStatusBreakdown(BaseModel):
     status: str
     count: int
+
+
+class MarketCaps(BaseModel):
+    max_stake_zen: float
+    max_user_stake_per_market_zen: float
+    max_market_stake_zen: float
+    remaining_user_stake_zen: float | None = None
+    remaining_market_stake_zen: float | None = None
 
 
 class ResolutionWinner(BaseModel):
@@ -150,6 +160,11 @@ class ResolutionSummary(BaseModel):
     transaction_hash: str | None = Field(default=None, alias="transactionHash")
     block_number: int | None = Field(default=None, alias="blockNumber")
     block_timestamp: datetime | None = Field(default=None, alias="blockTimestamp")
+    winning_outcome_id: int | None = Field(default=None, alias="winningOutcomeId")
+    rake_bps: int | None = Field(default=None, alias="rakeBps")
+    request_id: str | None = Field(default=None, alias="requestId")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
 
     model_config = ConfigDict(populate_by_name=True, validate_by_name=True)
 
@@ -208,6 +223,28 @@ class PricingSubmitResponse(BaseModel):
     quote: PricingQuoteResponse
     current_fx: float
     valid: bool = True
+
+
+class QuoteRecord(BaseModel):
+    quote_id: str = Field(alias="quoteId")
+    status: str
+    stake_zen: float = Field(alias="stakeZen")
+    stake_wei: int = Field(alias="stakeWei")
+    fx_scaled: int = Field(alias="fxScaled")
+    zen_usd: float = Field(alias="zenUsd")
+    market_id: str | None = Field(default=None, alias="marketId")
+    market_address: str | None = Field(default=None, alias="marketAddress")
+    user_id: str | None = Field(default=None, alias="userId")
+    wallet_address: str | None = Field(default=None, alias="walletAddress")
+    outcome_id: int | None = Field(default=None, alias="outcomeId")
+    chain_id: int | None = Field(default=None, alias="chainId")
+    expires_at: datetime = Field(alias="expiresAt")
+    consumed_at: datetime | None = Field(default=None, alias="consumedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    payload: dict[str, Any]
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class OrderBookLevel(BaseModel):

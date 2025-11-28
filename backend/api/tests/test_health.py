@@ -32,16 +32,20 @@ class _AsyncClientSuccess:
         return _DummyResponse()
 
 
+def _configure_signer(settings):
+    settings.pricing_chain_id = 1
+    settings.pricing_signer_private_key = SecretStr(
+        "0x59c6995e998f97a5a004497e5a61829cb0d9bf5f7f19f6cbe9a6a5e4f6b9f9f5"
+    )
+    return settings
+
+
 def test_health_endpoint_reports_ok(client, monkeypatch):
     class DummyRedis(_BaseDummyRedis):
         def get(self, key):
             return b'{"markets_processed": 10}'
 
-    settings = get_settings()
-    settings.pricing_chain_id = 1
-    settings.pricing_signer_private_key = SecretStr(
-        "0x59c6995e998f97a5a004497e5a61829cb0d9bf5f7f19f6cbe9a6a5e4f6b9f9f5"
-    )
+    settings = _configure_signer(get_settings())
     settings.polymarket_network = "137"
     settings.cors_allow_origins = ["https://example.com"]
 
@@ -66,6 +70,8 @@ def test_health_endpoint_marks_worker_degraded_when_heartbeat_missing(client, mo
         def get(self, key):
             return None
 
+    settings = _configure_signer(get_settings())
+    monkeypatch.setattr("app.health.get_settings", lambda: settings)
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
 
@@ -84,6 +90,9 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
     class DummyRedis(_BaseDummyRedis):
         def get(self, key):
             return b'{"markets_processed": 5}'
+
+    settings = _configure_signer(get_settings())
+    monkeypatch.setattr("app.health.get_settings", lambda: settings)
 
     class TimeoutAsyncClient:
         def __init__(self, *args, **kwargs):

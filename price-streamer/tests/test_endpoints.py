@@ -15,7 +15,16 @@ from fastapi.testclient import TestClient
 def test_app(monkeypatch):
     # Use in-memory state with no Redis connection.
     state = StreamState()
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(
+        zen_usd=Decimal("1.0"),
+        raw_zen_usd=Decimal("1.0"),
+        fetched_at=now,
+        stale=False,
+        source="test",
+    )
+    state.fx_last_update = now
 
     # Avoid starting real streamer/network loops in tests.
     class DummyStreamer:
@@ -53,7 +62,7 @@ def test_health_status_stale(monkeypatch):
     )
     state.fx_last_update = state.fx_quote.fetched_at
     state.fx_ws_connected = False
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     class DummyStreamer:
@@ -82,7 +91,7 @@ def test_health_status_degraded(monkeypatch):
     state.fx_last_update = state.fx_quote.fetched_at
     state.fx_ws_connected = True
     state.last_seen["m1"] = datetime.now(UTC) - timedelta(seconds=120)
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     class DummyStreamer:
@@ -113,7 +122,7 @@ def test_fx_endpoint(monkeypatch):
         zen_usd=expected, raw_zen_usd=Decimal("2"), fetched_at=now, stale=False, source="binance_ws"
     )
     state.fx_last_update = now
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     class DummyStreamer:
@@ -144,7 +153,7 @@ def test_subscriptions_endpoint(monkeypatch):
     state = StreamState(settings)
     state.subscriptions.add_assets(["a1", "a2"])
     state.rtds_symbols.add("zenusdt")
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     class DummyStreamer:
@@ -231,3 +240,41 @@ def test_stream_websocket_sends_messages(test_app):
             incoming = ws.receive_text()
         assert '"price":"0.42"' in incoming
     assert "m1" in state.subscriptions.assets
+
+
+def test_dashboard_endpoint(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(
+        zen_usd=Decimal("1.25"),
+        raw_zen_usd=Decimal("1.25"),
+        fetched_at=now,
+        stale=False,
+        source="test",
+    )
+    state.fx_last_update = now
+    state.last_seen["dash-m1"] = now
+    state.last_published["dash-m1"] = now
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+
+    class DummyStreamer:
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/dashboard")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["subscriptions"]["count"] == 0
+        assert "fx" in payload
+        assert "dash-m1" in payload["last_seen"]

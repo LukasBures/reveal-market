@@ -24,6 +24,9 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
         RevealMarket.PayoutCurve payoutCurve;
         uint256 floatAmount;
         uint256 maxMarketSize;
+        uint256 minCommitmentSize;
+        uint256 maxTicketsPerUser;
+        uint256 maxCommitments;
     }
 
     event MarketCreated(
@@ -66,6 +69,7 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
     mapping(address => uint256) public marketSizeLimit;
 
     error ZeroAddress();
+    error InvalidPayoutMultiplier();
     error InvalidDeadlines();
     error NotGuardianOrOwner();
     error UnknownMarket();
@@ -180,7 +184,7 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
         if (params.commitDeadline <= block.timestamp || params.revealDeadline <= params.commitDeadline) {
             revert InvalidDeadlines();
         }
-        if (params.payoutMultiplier == 0) revert ZeroAddress();
+        if (params.payoutMultiplier == 0) revert InvalidPayoutMultiplier();
         uint256 maxRake = IRakeManager(rakeManager).maxRakeBps();
         if (params.rakeBpsOverride > maxRake) revert InvalidRakeBps();
         if (msg.value != params.floatAmount) revert InvalidFloatPayment();
@@ -200,7 +204,10 @@ contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus
             payoutMultiplier: params.payoutMultiplier,
             payoutCurve: params.payoutCurve,
             maxMarketSize: marketSize,
-            pricingSigner: pricingSigner
+            pricingSigner: pricingSigner,
+            minCommitmentSize: params.minCommitmentSize,
+            maxTicketsPerUser: params.maxTicketsPerUser,
+            maxCommitments: params.maxCommitments
         });
         RevealMarket(payable(market)).initialize(cfg);
 

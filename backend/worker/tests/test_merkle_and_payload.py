@@ -67,7 +67,7 @@ def test_build_prover_payload(session):
         pool_total_yes=100,
         pool_total_no=101,
         total_escrow=201,
-        total_liability=201,
+        total_liability=202,
         rake_bps=100,
         winning_outcome_id=1,
         circuit_hash="0xdead",
@@ -80,6 +80,7 @@ def test_build_prover_payload(session):
     assert payload["merkleRoot"] == "0x" + root.hex()
     assert len(payload["tickets"]) == 2
     assert payload["poolTotals"] == ["100", "101"]
+    assert payload["payoutMultiplierWad"] == str((202 * 10**18) // 101)
 
 
 def test_build_prover_payload_missing_data(session):

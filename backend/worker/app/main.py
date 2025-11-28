@@ -32,6 +32,7 @@ from shared.migrations import get_current_revision
 from shared.migrations import run_migrations as apply_migrations
 from shared.models import MarketStatusEnum
 from shared.onchain import ConditionalTokensClient
+from shared.onchain.conditional_tokens import _derive_winners
 from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -177,6 +178,7 @@ class SyncSummary:
     markets_deleted: int = 0
     summaries_enqueued: int = 0
     proofs_generated: int = 0
+    resolutions_backfilled: int = 0
 
     def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
         return {
@@ -191,6 +193,7 @@ class SyncSummary:
             "summaries_enqueued": self.summaries_enqueued,
             "proofs_generated": self.proofs_generated,
             "cache_invalidations": cache_invalidations,
+            "resolutions_backfilled": self.resolutions_backfilled,
         }
 
 
@@ -695,19 +698,40 @@ def _parse_checked_at(value: Any, fallback: datetime) -> datetime:
     return fallback
 
 
-def _build_resolution_record(summary: dict[str, Any], market: MarketPayload, checked_at: datetime) -> dict[str, Any]:
+def _build_resolution_record(
+    summary: dict[str, Any],
+    market: MarketPayload,
+    checked_at: datetime,
+    db_market: shared_models.Market | None = None,
+) -> dict[str, Any]:
+    outcomes = summary.get("outcomes") or (market.outcomes or [])
+    payouts = summary.get("payouts") or []
+    winners = summary.get("winners") or []
+    if not winners:
+        winners = summary.get("winners") or _derive_winners(payouts, outcomes)
+    winning_outcome = summary.get("winningOutcomeId") or summary.get("winning_outcome_id")
+    if winning_outcome is None and winners:
+        try:
+            winning_outcome = winners[0].get("index")
+        except Exception:
+            winning_outcome = None
     return {
         "condition_id": summary.get("condition_id") or summary.get("conditionId"),
         "source": summary.get("source", "conditional_tokens"),
         "resolved": bool(summary.get("resolved")),
-        "payouts": summary.get("payouts") or [],
-        "winners": summary.get("winners") or [],
-        "outcomes": summary.get("outcomes") or (market.outcomes or []),
+        "payouts": payouts,
+        "winners": winners,
+        "outcomes": outcomes,
         "oracle": summary.get("oracle"),
         "question_id": summary.get("questionId"),
         "transaction_hash": summary.get("transactionHash"),
         "block_number": summary.get("blockNumber"),
         "block_timestamp": summary.get("blockTimestamp"),
+        "winning_outcome_id": winning_outcome,
+        "rake_bps": summary.get("rakeBps") or getattr(market, "rake_bps", None),
+        "request_id": summary.get("request_id") or summary.get("requestId"),
+        "market_id": getattr(db_market, "id", None),
+        "event_id": getattr(db_market, "event_id", None) or market.event_id,
         "checked_at": checked_at,
     }
 
@@ -782,6 +806,122 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
                 )
             )
     return summary
+
+
+def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
+    return MarketPayload(
+        event_id=record.event_id,
+        title=record.title or record.event_id or "Market",
+        slug=record.slug,
+        category=record.category,
+        metadata_uri=record.metadata_uri,
+        oracle=record.oracle or "polymarket",
+        factory=record.factory,
+        market_address=record.market_address,
+        status=record.status or MarketStatusEnum.COMMIT.value,
+        outcomes=record.outcomes,
+        outcome_prices=record.outcome_prices,
+        tags=record.tags,
+        extra_data=record.extra_data,
+        rake_bps=record.rake_bps,
+        condition_id=record.condition_id,
+        question_id=record.question_id,
+        image_url=record.image_url,
+        closed=record.closed,
+        uma_resolution_status=record.uma_resolution_status,
+        source_updated_at=record.source_updated_at,
+        content_hash=record.content_hash,
+        starts_at=record.starts_at,
+        orders_opened_at=record.orders_opened_at,
+        resolution_source=record.resolution_source,
+        market_maker=record.market_maker,
+        order_min_size=record.order_min_size,
+        price_tick_size=record.price_tick_size,
+        enable_order_book=record.enable_order_book,
+        clob_token_ids=record.clob_token_ids,
+        image_variants=record.image_variants,
+        closes_at=record.closes_at,
+    )
+
+
+def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int:
+    """Hydrate historical resolutions for markets missing ledger entries."""
+
+    limit = max(0, getattr(settings, "resolution_backfill_limit", 0))
+    if limit <= 0:
+        return 0
+
+    stmt = (
+        select(shared_models.Market)
+        .where(
+            shared_models.Market.condition_id.isnot(None),
+            ~shared_models.Market.condition_id.in_(select(shared_models.Resolution.condition_id)),
+        )
+        .limit(limit)
+    )
+    backfilled = 0
+    for record in session.scalars(stmt):
+        if not record.condition_id or not record.event_id:
+            continue
+        try:
+            payload = _market_record_to_payload(record)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.backfill_payload_failed",
+                message="failed to convert market record to payload for backfill",
+                event_id=getattr(record, "event_id", None),
+                error=str(exc),
+            )
+            continue
+        outcome = _apply_resolution(session, record, payload)
+        if outcome.changed and outcome.condition_id:
+            summary.changed_conditions.add(outcome.condition_id)
+            if outcome.cache_payload:
+                summary.resolution_cache_updates.append((outcome.condition_id, outcome.cache_payload))
+            backfilled += 1
+    summary.resolutions_backfilled += backfilled
+    return backfilled
+
+
+def _count_resolution_gaps(session: Session) -> tuple[int, list[str]]:
+    cutoff_seconds = getattr(settings, "resolution_gap_warn_seconds", 0)
+    if cutoff_seconds <= 0:
+        return 0, []
+    cutoff = datetime.now(UTC) - timedelta(seconds=cutoff_seconds)
+    stmt = select(
+        shared_models.Market.event_id,
+        shared_models.Market.condition_id,
+        shared_models.Market.resolved_at,
+    ).where(
+        shared_models.Market.condition_id.isnot(None),
+        shared_models.Market.resolved_at.isnot(None),
+        shared_models.Market.resolved_at < cutoff,
+        ~shared_models.Market.condition_id.in_(select(shared_models.Resolution.condition_id)),
+    )
+    events: list[str] = []
+    for event_id, _condition_id, _resolved_at in session.execute(stmt):
+        if isinstance(event_id, str):
+            events.append(event_id)
+    return len(events), events
+
+
+def _log_resolution_gaps(session: Session) -> int:
+    threshold = getattr(settings, "resolution_gap_warn_threshold", 0)
+    if threshold <= 0:
+        return 0
+    count, events = _count_resolution_gaps(session)
+    if count >= threshold:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.resolution.gaps",
+            message="markets missing resolution ledger entries",
+            gaps=count,
+            sample_events=events[: min(len(events), 5)],
+        )
+    return count
 
 
 def _apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
@@ -900,8 +1040,21 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
         return ResolutionOutcome()
 
     checked_at_dt = _parse_checked_at(summary.get("checkedAt"), now)
-    record_payload = _build_resolution_record(summary, market, checked_at_dt)
+    record_payload = _build_resolution_record(summary, market, checked_at_dt, db_market=db_market)
     record_payload["condition_id"] = normalized_condition_id
+
+    if record_payload["resolved"] and (
+        record_payload.get("transaction_hash") is None or record_payload.get("block_number") is None
+    ):
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.resolution.partial_payload",
+            message="resolution payload missing block metadata",
+            condition_id=normalized_condition_id,
+            tx_hash=record_payload.get("transaction_hash"),
+            block_number=record_payload.get("block_number"),
+        )
 
     shared_repository.upsert_resolution(session, record_payload)
     cache_payload = {
@@ -1244,6 +1397,7 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
         "summaries_enqueued": stats.get("summaries_enqueued"),
         "proofs_generated": stats.get("proofs_generated"),
         "cache_invalidations": stats.get("cache_invalidations"),
+        "resolution_gaps": stats.get("resolution_gaps"),
     }
 
     def _publish() -> bool:
@@ -1279,6 +1433,7 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
             markets_changed=payload["markets_changed"],
             resolutions_changed=payload["resolutions_changed"],
             latency_ms=payload["latency_ms"],
+            resolution_gaps=payload.get("resolution_gaps"),
             heartbeat_key=settings.heartbeat_key,
         )
 
@@ -1339,6 +1494,8 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
         "summaries_enqueued": 0,
         "proofs_generated": 0,
         "cache_invalidations": 0,
+        "resolution_gaps": 0,
+        "resolutions_backfilled": 0,
     }
 
 
@@ -1386,6 +1543,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         return stats
 
     summary = SyncSummary()
+    gap_count = 0
     try:
         with session_scope() as session:
             if markets:
@@ -1399,6 +1557,16 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
                         message="skipping DB persistence because no markets were returned",
                     )
             _apply_retention_cleanup(session, summary)
+            backfilled = _backfill_missing_resolutions(session, summary)
+            if backfilled:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.resolution.backfill_complete",
+                    message="backfilled missing resolution snapshots",
+                    count=backfilled,
+                )
+            gap_count = _log_resolution_gaps(session)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
             "failed to synchronise markets",
@@ -1412,6 +1580,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     summary.proofs_generated = _run_prover_jobs(summary, redis_client)
     cache_report = _invalidate_cache_tags(redis_client, summary)
     stats = summary.to_stats(len(markets), latency_ms, cache_report.total)
+    stats["resolution_gaps"] = gap_count
 
     log_event(
         logger,
@@ -1423,6 +1592,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         updated=summary.markets_updated,
         deleted=summary.markets_deleted,
         resolutions=len(summary.changed_conditions),
+        resolutions_backfilled=summary.resolutions_backfilled,
         summaries=summary.summaries_enqueued,
         proofs=summary.proofs_generated,
         latency_ms=round(latency_ms, 2),

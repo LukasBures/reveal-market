@@ -52,6 +52,19 @@ const disableStreamerWs = process.env.NEXT_PUBLIC_DISABLE_STREAMER_WS === "true"
 export const shouldUseStreamerWs = () => !disableStreamerWs && !mixedContentBlocked;
 export const priceStreamsDisabled = process.env.NEXT_PUBLIC_DISABLE_PRICE_STREAMS === "true";
 
+const normalizeAssetIds = (tokenIds?: string[]) =>
+  (tokenIds ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+const warnMissingAssets = (tokens: string[], transport: "ws" | "sse") => {
+  if (tokens.length === 0 && typeof console !== "undefined" && process.env.NODE_ENV !== "production") {
+    console.warn(
+      `[pricing-client] ${transport} connecting without assets_ids; falling back to market_id placeholder for subscriptions.`,
+    );
+  }
+};
+
 const getEndpoint = (path: string) => `${apiBase}${path}`;
 const getStreamerEndpoint = (path: string, preferInternal = false) => {
   if (preferInternal && isServer && streamerBaseInternal) return `${streamerBaseInternal}${path}`;
@@ -65,6 +78,35 @@ const toWebSocketScheme = (url: string) => {
 
 const getStreamerWsEndpoint = (path: string, preferInternal = false) =>
   toWebSocketScheme(getStreamerEndpoint(path, preferInternal && isServer));
+
+if (typeof console !== "undefined") {
+  const parseHost = (value: string) => {
+    if (!value) return null;
+    try {
+      return new URL(value).host;
+    } catch {
+      try {
+        return new URL(`https://${value}`).host;
+      } catch {
+        return null;
+      }
+    }
+  };
+  try {
+    const publicHost = parseHost(streamerBasePublic);
+    const internalHost = parseHost(streamerBaseInternal) ?? publicHost;
+    if (internalHost && publicHost && internalHost !== publicHost && process.env.NODE_ENV !== "production") {
+      console.warn(
+        `[pricing-client] STREAMER hosts differ (public=${publicHost}, internal=${internalHost}); align NEXT_PUBLIC_PRICE_STREAMER_URL and STREAMER_INTERNAL_URL to avoid CORS/mixed-content issues.`,
+      );
+    }
+  } catch {
+    // Ignore URL parse issues here; they will surface when requests are made.
+  }
+  if (disableStreamerWs) {
+    console.warn("[pricing-client] NEXT_PUBLIC_DISABLE_STREAMER_WS is true; forcing SSE fallbacks.");
+  }
+}
 
 const mapFxPayload = (payload: any): FxQuote => ({
   zen_usd: Number(payload.zen_usd),
@@ -191,14 +233,10 @@ export async function fetchPriceHistory(
 export function createMarketStream(marketId: string, tokenIds?: string[]): EventSource {
   const params = new URLSearchParams();
   params.set("market_id", marketId);
-  if (tokenIds && tokenIds.length) {
-    params.set(
-      "assets_ids",
-      tokenIds
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .join(","),
-    );
+  const tokens = normalizeAssetIds(tokenIds);
+  warnMissingAssets(tokens, "sse");
+  if (tokens.length) {
+    params.set("assets_ids", tokens.join(","));
   }
   const url = `${getStreamerEndpoint("/stream")}?${params.toString()}`;
   return new EventSource(url);
@@ -210,14 +248,10 @@ export function createMarketWebSocket(marketId: string, tokenIds?: string[]): We
   }
   const params = new URLSearchParams();
   params.set("market_id", marketId);
-  if (tokenIds && tokenIds.length) {
-    params.set(
-      "assets_ids",
-      tokenIds
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .join(","),
-    );
+  const tokens = normalizeAssetIds(tokenIds);
+  warnMissingAssets(tokens, "ws");
+  if (tokens.length) {
+    params.set("assets_ids", tokens.join(","));
   }
   const url = `${getStreamerWsEndpoint("/stream/ws", true)}?${params.toString()}`;
   try {

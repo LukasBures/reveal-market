@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,24 +15,38 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .config import get_settings
 from .logging_utils import setup_logging, start_heartbeat
+from .metrics import get_metrics
 from .state import StreamState
 from .streamer import PriceStreamer
 
 logger = logging.getLogger("reveal_market.price_streamer")
 
 
-async def _sse_events(pubsub, heartbeat_seconds: int, max_events: int | None = None) -> AsyncGenerator[str, None]:
+async def _sse_events(
+    pubsub,
+    heartbeat_seconds: int,
+    max_events: int | None = None,
+    *,
+    metrics=None,
+) -> AsyncGenerator[str, None]:
     try:
         heartbeat = asyncio.create_task(asyncio.sleep(heartbeat_seconds))
         emitted = 0
         while True:
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat_seconds)
             if message and message.get("data"):
-                yield f"data: {message['data']}\n\n"
+                payload = message["data"]
+                yield f"data: {payload}\n\n"
+                if metrics:
+                    with suppress(Exception):
+                        metrics.record_delivery("sse", payload)
                 emitted += 1
                 if max_events and emitted >= max_events:
                     break
             if heartbeat.done():
+                if metrics:
+                    with suppress(Exception):
+                        metrics.record_drop("sse", "heartbeat")
                 yield "event: ping\ndata: {}\n\n"
                 heartbeat = asyncio.create_task(asyncio.sleep(heartbeat_seconds))
                 emitted += 1
@@ -45,8 +61,9 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging("reveal_market.price_streamer", settings.log_level)
 
-    state = StreamState(settings)
-    streamer = PriceStreamer(state, settings)
+    metrics = get_metrics()
+    state = StreamState(settings, metrics=metrics)
+    streamer = PriceStreamer(state, settings, metrics=metrics)
     heartbeat_stop = start_heartbeat(logger, "price_streamer", interval_seconds=60)
     sanitized_config = {
         k: v
@@ -54,10 +71,42 @@ def create_app() -> FastAPI:
         if not any(secret in k for secret in ["key", "private", "secret", "password"])
     }
     logger.info("service configuration", extra={"event": "service.config", "config": sanitized_config})
+    public_host = urlparse(str(settings.public_base_url)).hostname if settings.public_base_url else None
+    internal_host = urlparse(str(settings.internal_base_url)).hostname if settings.internal_base_url else None
+    if public_host and internal_host and public_host != internal_host:
+        logger.warning(
+            "streamer host mismatch between public/internal URLs",
+            extra={
+                "event": "streamer.host.mismatch",
+                "public_host": public_host,
+                "internal_host": internal_host,
+            },
+        )
+    expected_origins = {
+        "http://localhost:3000",
+        "https://revealmarket.xyz",
+        "https://stream.revealmarket.xyz",
+    }
     if not settings.cors_allow_origins or settings.cors_allow_origins == ["*"]:
         logger.warning(
             "price-streamer CORS allow_origins is wildcard; set explicit origins for browser clients",
             extra={"event": "cors.unbounded", "scope": "price-streamer"},
+        )
+    else:
+        missing_origins = sorted(origin for origin in expected_origins if origin not in settings.cors_allow_origins)
+        if missing_origins:
+            logger.warning(
+                "price-streamer CORS origins missing expected entries",
+                extra={
+                    "event": "cors.origins.missing",
+                    "scope": "price-streamer",
+                    "missing": missing_origins,
+                },
+            )
+    if os.getenv("NEXT_PUBLIC_DISABLE_STREAMER_WS", "").lower() == "true":
+        logger.warning(
+            "NEXT_PUBLIC_DISABLE_STREAMER_WS is enabled; websocket upgrades will be skipped",
+            extra={"event": "stream.ws.disabled_env"},
         )
 
     @asynccontextmanager
@@ -85,6 +134,16 @@ def create_app() -> FastAPI:
     async def _health_payload() -> dict:
         fx = await state.get_fx()
         stale_markets = state.stale_markets(settings.market_stale_seconds)
+        if stale_markets:
+            logger.warning(
+                "stale markets detected",
+                extra={
+                    "event": "stream.stale.markets",
+                    "count": len(stale_markets),
+                    "threshold_seconds": settings.market_stale_seconds,
+                    "stale_markets": stale_markets,
+                },
+            )
         status = "ok"
         if fx.stale or not state.fx_ws_connected:
             status = "stale"
@@ -100,6 +159,8 @@ def create_app() -> FastAPI:
             "fx_last_error": state.fx_last_error,
             "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
             "stale_markets": stale_markets,
+            "stale_count": len(stale_markets),
+            "market_stale_threshold_seconds": settings.market_stale_seconds,
             "last_seen": state.snapshot_last_seen(),
         }
 
@@ -193,19 +254,33 @@ def create_app() -> FastAPI:
     ):
         # Allow on-demand subscription scoping.
         assets: list[str] = []
+        assets_supplied = bool(assets_ids)
         if assets_ids:
             assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
         # Default to the requested market_id so websocket streams stay hydrated even without explicit assets_ids.
         if not assets and market_id:
             tokens = state.get_clob_tokens(market_id)
             assets = tokens or [market_id]
+            if not assets_supplied:
+                fallback_target = "clob_tokens" if tokens else "market_id"
+                logger.warning(
+                    "assets_ids missing; falling back",
+                    extra={
+                        "event": "stream.assets.fallback",
+                        "market_id": market_id,
+                        "transport": "sse",
+                        "target": fallback_target,
+                    },
+                )
+                with suppress(Exception):
+                    metrics.assets_fallback.labels(transport="sse", target=fallback_target).inc()
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:
             state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
         pubsub = await state.subscribe(market_id)
         return StreamingResponse(
-            _sse_events(pubsub, heartbeat_seconds=heartbeat, max_events=max_events),
+            _sse_events(pubsub, heartbeat_seconds=heartbeat, max_events=max_events, metrics=metrics),
             media_type="text/event-stream",
         )
 
@@ -218,11 +293,25 @@ def create_app() -> FastAPI:
         symbols: str | None = None,
     ):
         assets: list[str] = []
+        assets_supplied = bool(assets_ids)
         if assets_ids:
             assets = [asset.strip() for asset in assets_ids.split(",") if asset.strip()]
         if not assets and market_id:
             tokens = state.get_clob_tokens(market_id)
             assets = tokens or [market_id]
+            if not assets_supplied:
+                fallback_target = "clob_tokens" if tokens else "market_id"
+                logger.warning(
+                    "assets_ids missing; falling back",
+                    extra={
+                        "event": "stream.assets.fallback",
+                        "market_id": market_id,
+                        "transport": "ws",
+                        "target": fallback_target,
+                    },
+                )
+                with suppress(Exception):
+                    metrics.assets_fallback.labels(transport="ws", target=fallback_target).inc()
         if assets:
             state.subscriptions.add_assets(assets)
         if symbols:
@@ -237,7 +326,11 @@ def create_app() -> FastAPI:
                     if isinstance(data, bytes):
                         data = data.decode("utf-8")
                     await websocket.send_text(str(data))
+                    with suppress(Exception):
+                        metrics.record_delivery("ws", data)
                 else:
+                    with suppress(Exception):
+                        metrics.record_drop("ws", "heartbeat")
                     await websocket.send_json({"event": "ping", "ts": datetime.now(UTC).isoformat()})
         except WebSocketDisconnect:
             return
@@ -265,6 +358,25 @@ def create_app() -> FastAPI:
             "symbols": sorted(state.rtds_symbols),
             "count": len(state.subscriptions.assets),
             "max": settings.max_subscriptions,
+        }
+
+    @app.get("/dashboard")
+    async def dashboard():
+        fx = await _fx_payload()
+        stale_markets = state.stale_markets(settings.market_stale_seconds)
+        last_published = {k: v.isoformat() for k, v in state.last_published.items()}
+        return {
+            "fx": fx,
+            "fx_ws_connected": state.fx_ws_connected,
+            "subscriptions": {
+                "assets": sorted(state.subscriptions.assets),
+                "symbols": sorted(state.rtds_symbols),
+                "count": len(state.subscriptions.assets),
+                "max": settings.max_subscriptions,
+            },
+            "stale_markets": stale_markets,
+            "last_seen": state.snapshot_last_seen(),
+            "last_published": last_published,
         }
 
     return app

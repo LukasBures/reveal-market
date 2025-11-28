@@ -29,6 +29,7 @@ contract RevealMarketHandler is Test {
         params.payoutMultiplier = 2e18;
         params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
         params.maxMarketSize = 10 ether;
+        params.minCommitmentSize = 0;
         address deployed = factory.createMarket(params);
         market = RevealMarket(payable(deployed));
         vm.deal(address(this), 10 ether);

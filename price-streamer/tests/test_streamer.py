@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -400,3 +402,80 @@ async def test_price_history_seed_and_stream_pooling(monkeypatch):
     await streamer._normalize_and_publish({"id": "m1", "outcomePrices": [0.6]}, source="rest")
     # Only the latest two entries should be cached per outcome.
     assert len(state.cached) == 2
+
+
+class PubSubState(StreamState):
+    def __init__(self):
+        super().__init__(Settings(rest_poll_seconds=5, ws_reconnect_seconds=5))
+        self.queue: asyncio.Queue = asyncio.Queue()
+
+    async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
+        self.last_seen[market_id] = datetime.now(UTC)
+        await self.queue.put({"data": json.dumps(payload)})
+
+    async def subscribe(self, market_id: str):  # type: ignore[override]
+        queue = self.queue
+
+        class DummyPubSub:
+            def __init__(self, q: asyncio.Queue):
+                self._q = q
+
+            async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+                try:
+                    return await asyncio.wait_for(self._q.get(), timeout=timeout or 0.5)
+                except TimeoutError:
+                    return None
+
+            async def close(self):
+                return
+
+        return DummyPubSub(queue)
+
+    async def get_fx(self):  # type: ignore[override]
+        return FxQuote(zen_usd=Decimal("1.0"), raw_zen_usd=Decimal("1.0"), fetched_at=datetime.now(UTC), stale=False)
+
+
+@pytest.mark.asyncio
+async def test_streamer_publishes_book_and_price_over_pubsub():
+    """Mock Polymarket feeds and ensure ticks reach the pubsub stream."""
+
+    state = PubSubState()
+    streamer = PriceStreamer(state, state.settings)
+    await streamer._handle_market_event(
+        {"event_type": "book", "market": "live-1", "bids": [{"price": "0.4"}], "asks": [{"price": "0.6"}]},
+        source="ws",
+    )
+    await streamer._normalize_and_publish({"id": "live-1", "outcomePrices": [0.4, 0.6]}, source="rest")
+    pubsub = await state.subscribe("live-1")
+    payloads: list[dict] = []
+    for _ in range(2):
+        msg = await pubsub.get_message(timeout=1)
+        if msg and msg.get("data"):
+            payloads.append(json.loads(msg["data"]))
+    assert any(p.get("type") == "book" for p in payloads)
+    assert any(p.get("type") == "price" for p in payloads)
+
+
+@pytest.mark.asyncio
+async def test_fx_ws_rest_retry_flow(monkeypatch):
+    """HTTP fallback when WS is stale then auto-recover when WS resumes."""
+
+    settings = Settings(fx_ws_stale_ttl_seconds=5, fx_rest_interval_seconds=5, fx_max_age_seconds=5)
+    state = StreamState(settings)
+    streamer = PriceStreamer(state, settings)
+    calls: list[str] = []
+
+    async def fake_refresh_fx(label: str = "coingecko_rest"):
+        calls.append(label)
+        return state._register_fx(Decimal("11"), source=label, allow_jump=True)
+
+    monkeypatch.setattr(state, "refresh_fx", fake_refresh_fx)
+    state.fx_ws_last_update = datetime.now(UTC) - timedelta(seconds=8)
+    await streamer._fx_refresh_once()
+    assert calls == ["coingecko_rest"]
+    assert state.fx_quote and state.fx_quote.source == "coingecko_rest"
+
+    await streamer._handle_fx_ws({"s": "ZENUSDT", "b": "9.5", "a": "9.5"})
+    assert state.fx_quote and state.fx_quote.source == "binance_ws"
+    assert state.fx_ws_connected is True
+    assert streamer.metric_ws_connected._value.get() == 1

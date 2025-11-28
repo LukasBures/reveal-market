@@ -40,6 +40,8 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     ]
     if any(v in (None, 0, "") for v in required_fields):
         raise SettlementDataMissingError("settlement missing required fields")
+    if settlement.winning_outcome_id not in (0, 1):
+        raise SettlementDataMissingError("winning outcome out of range")
 
     commitments: list[Commitment] = (
         session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id))
@@ -73,6 +75,11 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
             }
         )
 
+    winning_pool = settlement.pool_total_yes if settlement.winning_outcome_id == 0 else settlement.pool_total_no
+    if winning_pool in (None, 0):
+        raise SettlementDataMissingError("winning pool missing or zero")
+    payout_multiplier_wad = (int(settlement.total_liability) * 10**18) // int(winning_pool)
+
     payload = {
         "marketId": str(market_id),
         "merkleRoot": settlement.merkle_root,
@@ -80,6 +87,7 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
         "poolTotals": [str(settlement.pool_total_yes or 0), str(settlement.pool_total_no or 0)],
         "totalEscrow": str(settlement.total_escrow),
         "totalLiability": str(settlement.total_liability),
+        "payoutMultiplierWad": str(payout_multiplier_wad),
         "rakeBps": str(settlement.rake_bps or 0),
         "circuitHash": settlement.circuit_hash,
         "tickets": tickets,

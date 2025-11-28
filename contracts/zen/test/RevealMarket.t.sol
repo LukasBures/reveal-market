@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {RakeManager} from "../src/RakeManager.sol";
@@ -23,7 +24,9 @@ contract RevealMarketTest is Test {
     address private constant ORACLE = address(0xA11CE);
     address private constant USER = address(0xCAFE);
     address private constant LOSER = address(0xD00D);
-    address private constant PRICING_SIGNER = address(0x1234);
+    address private constant NEW_OWNER = address(0xB0B0);
+    uint256 private constant PRICING_SIGNER_KEY = 0xBEEF;
+    address private pricingSigner;
 
     uint256 private constant OUTCOME_ID = 0;
     bytes32 private constant WIN_SALT = bytes32(uint256(1));
@@ -34,11 +37,12 @@ contract RevealMarketTest is Test {
         market = new RevealMarketHarness();
         rakeManager = new RakeManager(address(this), TREASURY, 100); // 1% rake
         verifier = new MockVerifier();
+        pricingSigner = vm.addr(PRICING_SIGNER_KEY);
 
         commitDeadline = block.timestamp + 1 days;
         revealDeadline = commitDeadline + 1 days;
 
-        factory = new MarketFactory(address(market), address(rakeManager), TREASURY, address(verifier), PRICING_SIGNER);
+        factory = new MarketFactory(address(market), address(rakeManager), TREASURY, address(verifier), pricingSigner);
 
         MarketFactory.CreateMarketParams memory params;
         params.eventId = "EVT-1";
@@ -48,6 +52,8 @@ contract RevealMarketTest is Test {
         params.payoutMultiplier = 2e18;
         params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
         params.maxMarketSize = 5 ether;
+        params.minCommitmentSize = 0;
+        params.maxTicketsPerUser = 0;
 
         address deployed = factory.createMarket(params);
         market = RevealMarketHarness(payable(deployed));
@@ -70,6 +76,21 @@ contract RevealMarketTest is Test {
         market.commit{value: 1 ether}(0, 1 ether, WIN_SALT);
         assertEq(market.userEscrow(), 1 ether);
         assertGt(market.maxLiability(), 0);
+    }
+
+    function testCommitWithQuoteValidSignature() public {
+        vm.deal(address(this), 2 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+
+        RevealMarket.SignedQuote memory quote =
+            _buildQuote(1 ether, OUTCOME_ID, block.timestamp + 1 hours, keccak256("quote-1"), USER, 1_000e18);
+
+        vm.deal(USER, quote.stakeZen);
+        vm.prank(USER);
+        market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote);
+
+        assertTrue(market.usedQuoteIds(quote.quoteId));
+        assertEq(market.commitmentsCount(), 1);
     }
 
     function testFundMarketRequiresTreasuryOrFactory() public {
@@ -111,7 +132,7 @@ contract RevealMarketTest is Test {
         assertLt(market.houseFloat(), beforeFloat);
     }
 
-    function testVerifyAndSettleRevertsWhenFloatUsedExceedsBalance() public {
+    function testVerifyAndSettleRevertsWhenLiabilityNotAligned() public {
         _prepareMarketWithFloat();
         vm.warp(commitDeadline + 1);
         market.lock();
@@ -119,10 +140,8 @@ contract RevealMarketTest is Test {
         market.postResult(OUTCOME_ID);
 
         uint256[10] memory signals = _buildSignals();
-        signals[4] = market.houseFloat() + market.userEscrow() + 1;
-        uint256 netEscrow = market.userEscrow() - (market.userEscrow() * rakeManager.rakeBps()) / 10_000;
-        uint256 netPool = netEscrow + market.houseFloat();
-        vm.expectRevert(abi.encodeWithSelector(RevealMarket.LiabilityExceedsCoverage.selector, signals[4], netPool));
+        signals[4] = signals[4] + 1;
+        vm.expectRevert(RevealMarket.ProofTotalsMismatch.selector);
         market.verifyAndSettle("", signals);
     }
 
@@ -140,6 +159,7 @@ contract RevealMarketTest is Test {
     }
 
     function testWithdrawFloatBeforeSettlementReverts() public {
+        vm.prank(address(factory));
         vm.expectRevert(abi.encodeWithSelector(RevealMarket.InvalidPhase.selector, RevealMarket.Phase.Settled, 0));
         market.withdrawFloat(TREASURY, 1);
     }
@@ -161,7 +181,7 @@ contract RevealMarketTest is Test {
         assertEq(market.paidOut(), market.totalLiability());
 
         uint256 treasuryBefore = TREASURY.balance;
-        vm.prank(address(this));
+        vm.prank(address(factory));
         market.withdrawFloat(TREASURY, market.houseFloat());
         assertGt(TREASURY.balance, treasuryBefore);
         assertEq(market.houseFloat(), 0);
@@ -190,6 +210,19 @@ contract RevealMarketTest is Test {
         market.verifyAndSettle("", signals);
     }
 
+    function testProofPoolTotalsMismatchReverts() public {
+        _prepareMarketWithFloat();
+        vm.warp(commitDeadline + 1);
+        market.lock();
+        vm.prank(ORACLE);
+        market.postResult(OUTCOME_ID);
+
+        uint256[10] memory signals = _buildSignals();
+        signals[6] = signals[6] + 1;
+        vm.expectRevert(RevealMarket.ProofTotalsMismatch.selector);
+        market.verifyAndSettle("", signals);
+    }
+
     function testInitializeRejectsExcessivePayoutMultiplier() public {
         RevealMarketHarness bad = new RevealMarketHarness();
         vm.expectRevert(RevealMarket.InvalidPayoutMultiplier.selector);
@@ -206,7 +239,10 @@ contract RevealMarketTest is Test {
             payoutMultiplier: 6e18,
             payoutCurve: RevealMarket.PayoutCurve.FixedOdds,
             maxMarketSize: 5 ether,
-            pricingSigner: PRICING_SIGNER
+            pricingSigner: pricingSigner,
+            minCommitmentSize: 0,
+            maxTicketsPerUser: 0,
+            maxCommitments: 0
         });
         bad.initialize(cfg);
     }
@@ -226,16 +262,192 @@ contract RevealMarketTest is Test {
         market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, WIN_SALT);
     }
 
+    function testCommitWithQuoteRejectsExpired() public {
+        vm.deal(address(this), 2 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+        RevealMarket.SignedQuote memory quote =
+            _buildQuote(1 ether, OUTCOME_ID, block.timestamp - 1, keccak256("expired"), USER, 1_000e18);
+        vm.deal(USER, quote.stakeZen);
+        vm.prank(USER);
+        vm.expectRevert(RevealMarket.InvalidTimestamp.selector);
+        market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote);
+    }
+
+    function testCommitWithQuoteRejectsReplay() public {
+        vm.deal(address(this), 2 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+        RevealMarket.SignedQuote memory quote =
+            _buildQuote(1 ether, OUTCOME_ID, block.timestamp + 1 hours, keccak256("replay"), USER, 1_000e18);
+        vm.deal(USER, quote.stakeZen);
+        vm.prank(USER);
+        market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote);
+        vm.deal(USER, quote.stakeZen);
+        vm.prank(USER);
+        bool reverted;
+        try market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote) {
+            revert("expected revert");
+        } catch (bytes memory err) {
+            reverted = true;
+            require(err.length >= 4, "missing selector");
+            bytes4 sel;
+            assembly {
+                sel := mload(add(err, 0x20))
+            }
+            assertEq(sel, RevealMarket.QuoteAlreadyUsed.selector);
+        }
+        assertTrue(reverted);
+    }
+
+    function testCommitWithQuoteRejectsBadSignature() public {
+        vm.deal(address(this), 2 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+        RevealMarket.SignedQuote memory quote =
+            _buildQuote(1 ether, OUTCOME_ID, block.timestamp + 1 hours, keccak256("bad-sig"), USER, 1_000e18);
+        // Resign with the wrong key.
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "QUOTE_V1",
+                block.chainid,
+                address(market),
+                quote.expectedUser,
+                quote.outcomeId,
+                quote.stakeZen,
+                quote.zenUsd,
+                quote.expiry,
+                quote.quoteId
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PRICING_SIGNER_KEY + 1, MessageHashUtils.toEthSignedMessageHash(digest));
+        quote.signature = abi.encodePacked(r, s, v);
+        vm.deal(USER, quote.stakeZen);
+        vm.prank(USER);
+        vm.expectRevert(RevealMarket.NotAuthorized.selector);
+        market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote);
+    }
+
+    function testCommitRejectsBelowMinCommitment() public {
+        MarketFactory.CreateMarketParams memory params;
+        params.eventId = "MIN";
+        params.commitDeadline = block.timestamp + 1 days;
+        params.revealDeadline = params.commitDeadline + 1 days;
+        params.oracle = ORACLE;
+        params.payoutMultiplier = 2e18;
+        params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
+        params.maxMarketSize = 5 ether;
+        params.minCommitmentSize = 0.5 ether;
+        params.maxTicketsPerUser = 0;
+        address addr = factory.createMarket(params);
+        market = RevealMarketHarness(payable(addr));
+        vm.deal(address(this), 1 ether);
+        market.fundMarket{value: 1 ether}(1 ether);
+        assertEq(market.minCommitmentSize(), params.minCommitmentSize);
+        vm.deal(USER, 0.25 ether);
+        vm.startPrank(USER);
+        bool reverted;
+        try market.commit{value: 0.25 ether}(0, 0.25 ether, WIN_SALT) {
+            revert("expected revert");
+        } catch (bytes memory err) {
+            reverted = true;
+            assertEq(bytes4(err), RevealMarket.CommitmentTooSmall.selector);
+        }
+        vm.stopPrank();
+        assertTrue(reverted);
+    }
+
+    function testCommitRespectsUserTicketLimit() public {
+        MarketFactory.CreateMarketParams memory params;
+        params.eventId = "LIMIT";
+        params.commitDeadline = block.timestamp + 1 days;
+        params.revealDeadline = params.commitDeadline + 1 days;
+        params.oracle = ORACLE;
+        params.payoutMultiplier = 2e18;
+        params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
+        params.maxMarketSize = 5 ether;
+        params.maxTicketsPerUser = 1;
+        params.maxCommitments = 5;
+        params.minCommitmentSize = 0;
+        address addr = factory.createMarket(params);
+        market = RevealMarketHarness(payable(addr));
+        vm.deal(address(this), 3 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+        vm.deal(USER, 2 ether);
+        vm.startPrank(USER);
+        market.commit{value: 1 ether}(OUTCOME_ID, 1 ether, WIN_SALT);
+        bool reverted;
+        try market.commit{value: 0.5 ether}(OUTCOME_ID, 0.5 ether, keccak256("second")) {
+            revert("expected revert");
+        } catch (bytes memory err) {
+            reverted = true;
+            assertEq(bytes4(err), RevealMarket.UserCommitLimitReached.selector);
+        }
+        vm.stopPrank();
+        assertTrue(reverted);
+    }
+
+    function testCommitLimitReachedAtCap() public {
+        MarketFactory.CreateMarketParams memory params;
+        params.eventId = "CAP";
+        params.commitDeadline = block.timestamp + 1 days;
+        params.revealDeadline = params.commitDeadline + 1 days;
+        params.oracle = ORACLE;
+        params.payoutMultiplier = 1e18;
+        params.payoutCurve = RevealMarket.PayoutCurve.FixedOdds;
+        params.maxMarketSize = 10 ether;
+        params.maxCommitments = 2;
+        address addr = factory.createMarket(params);
+        market = RevealMarketHarness(payable(addr));
+        vm.deal(address(this), 3 ether);
+        market.fundMarket{value: 2 ether}(2 ether);
+        vm.deal(USER, 2 ether);
+        vm.prank(USER);
+        market.commit{value: 0.5 ether}(OUTCOME_ID, 0.5 ether, WIN_SALT);
+        vm.prank(USER);
+        market.commit{value: 0.5 ether}(OUTCOME_ID, 0.5 ether, keccak256("next"));
+        vm.prank(USER);
+        vm.expectRevert(RevealMarket.CommitLimitReached.selector);
+        market.commit{value: 0.5 ether}(OUTCOME_ID, 0.5 ether, keccak256("third"));
+    }
+
+    function _buildQuote(
+        uint256 stake,
+        uint256 outcome,
+        uint256 expiry,
+        bytes32 quoteId,
+        address expectedUser,
+        uint256 zenUsd
+    ) private view returns (RevealMarket.SignedQuote memory quote) {
+        quote = RevealMarket.SignedQuote({
+            quoteId: quoteId,
+            stakeZen: stake,
+            zenUsd: zenUsd,
+            expiry: expiry,
+            outcomeId: outcome,
+            expectedUser: expectedUser,
+            signature: ""
+        });
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "QUOTE_V1",
+                block.chainid,
+                address(market),
+                quote.expectedUser,
+                quote.outcomeId,
+                quote.stakeZen,
+                quote.zenUsd,
+                quote.expiry,
+                quote.quoteId
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PRICING_SIGNER_KEY, MessageHashUtils.toEthSignedMessageHash(digest));
+        quote.signature = abi.encodePacked(r, s, v);
+    }
+
     function _buildSignals() private view returns (uint256[10] memory signals) {
         uint256 totalEscrow = market.userEscrow();
         uint256 rakeBps = rakeManager.rakeBps();
-        uint256 rakeAmount = (totalEscrow * rakeBps) / 10_000;
-        uint256 netEscrow = totalEscrow - rakeAmount;
-        uint256 netPool = netEscrow + market.houseFloat();
         uint256 liability = (totalEscrow * market.payoutMultiplier()) / market.WAD();
-        if (liability > netPool) {
-            liability = netPool;
-        }
 
         signals[0] = uint256(market.commitmentsRoot());
         signals[1] = market.marketId();

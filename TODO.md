@@ -708,3 +708,21 @@ ____
   - Backend/worker: ingest on-chain commitments/settlements, persistent resolution ledger, and optional settlement automation; durable replay/audit store for quotes.
   - Frontend/tx flow: full commitWithQuote UX (expiry refresh, chain mismatch handling), and richer bet-cap UX tied to API caps.
   - Hedger: production-grade Polymarket/vault/bridge integrations with slippage/unwind, replay-safe offsets/locks, and settlement/prover payload handoff.
+
+
+• Remaining gaps in contracts/zen (highest to lowest):
+
+  - Proof/Merkle binding (still high risk): Circuit doesn’t prove commitments inclusion or aggregate winning stakes. Prover/oracle can still fabricate pools/roots; claims rely on off-chain honesty. Needs circuit upgrade + contract alignment (Merkle accumulator, sum of winning stakes, binding to tickets).
+  - Merkle accumulator robustness: Current tree is basic keccak array; no frontier/MMR, no ordering guarantees beyond insertion. Large commitment counts could make lock() expensive; consider canonical accumulator, min stake, and/or max commitments per market.
+  - Governance surface: Guardian still has broad powers (pauses, cancel, emergency settle). Float withdrawals are now restricted to treasury/factory/owner, but consider timelocks/multisig for controller actions and clearer separation of duties.
+  - Risk caps configurability: On-chain per-market caps exist; optional minCommitmentSize/maxTicketsPerUser are set at deploy time. There’s no dynamic update path—decide if you need ability to tighten caps post-deploy or keep immutable.
+  - Circuit/verification assumptions: Verifier remains 10-signal; any circuit change requires new deployment. No zk attestations beyond on-chain verify/stub—document operational steps for vk rotation and ensure frontend/backend surface the circuit hash.
+  - Operational invariants not enforced on-chain: No per-claimer payout caps, no maxUserStakePerMarket on-chain, no aggregate accounting invariant beyond coverage checks. Consider adding if risk appetite requires.
+  - Docs/runbooks: README/TODO mention future work (Merkle upgrade, circuit hash binding). Update deployment/runbooks when circuit upgrades land to avoid drift.
+
+
+  - Keep factory ownership with a secure multisig/timelock so no one else can deploy rogue markets.
+  - You can leave createMarket unused; it won’t do anything unless the owner calls it with a payable float amount (if any).
+  - If you want to prevent any future market creation entirely, you can optionally transfer ownership to a burn address or timelock with no proposer, but that also blocks updates to guardian/risk limits.
+
+

@@ -34,6 +34,7 @@ describe("requestLandingAccessAction", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    delete process.env.NEXT_PUBLIC_SITE_URL;
     if (originalEnv === undefined) {
       delete process.env.LANDING_ACCESS_CODE;
     } else {
@@ -69,6 +70,7 @@ describe("requestLandingAccessAction", () => {
 
   it("sets the cookie and returns success when the code matches", async () => {
     process.env.LANDING_ACCESS_CODE = "rm125";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://revealmarket.xyz";
     const { requestLandingAccessAction } = await importActionModule();
     const formData = new FormData();
     formData.set("accessCode", "rm125");
@@ -80,7 +82,7 @@ describe("requestLandingAccessAction", () => {
       name: LANDING_ACCESS_COOKIE_NAME,
       value: "granted",
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: true,
       sameSite: "lax",
       path: "/",
       maxAge: LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,

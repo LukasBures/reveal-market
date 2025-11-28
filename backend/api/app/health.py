@@ -167,19 +167,29 @@ def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
     details: list[str] = []
 
     if settings.pricing_chain_id is None:
-        status = "degraded"
+        status = "error"
         details.append("RM_PRICING_CHAIN_ID missing")
 
     if settings.pricing_signer_private_key is None:
-        status = "degraded"
+        status = "error"
         details.append("RM_PRICING_SIGNER_PRIVATE_KEY missing")
+
+    env_chain = os.getenv("RM_PRICING_CHAIN_ID")
+    if env_chain and settings.pricing_chain_id is not None:
+        try:
+            if int(env_chain) != int(settings.pricing_chain_id):
+                status = "error"
+                details.append("RM_PRICING_CHAIN_ID mismatch with env")
+        except ValueError:  # pragma: no cover - defensive
+            status = "error"
+            details.append("RM_PRICING_CHAIN_ID env malformed")
 
     env_addr = os.getenv("PRICING_SIGNER_ADDRESS")
     if env_addr and settings.pricing_signer_private_key:
         try:
             acct = load_account(settings.pricing_signer_private_key.get_secret_value())
             if acct.address.lower() != env_addr.lower():
-                status = "degraded"
+                status = "error"
                 details.append("PRICING_SIGNER_ADDRESS mismatch with derived key")
         except Exception as exc:  # pragma: no cover - defensive
             status = "error"

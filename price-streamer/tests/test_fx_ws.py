@@ -22,7 +22,7 @@ def test_fx_websocket_stream(monkeypatch):
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
 
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
 
     class DummyStreamer:
         async def start(self): ...

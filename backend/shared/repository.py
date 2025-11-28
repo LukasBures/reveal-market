@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import models
@@ -53,6 +54,82 @@ def upsert_resolution(session: Session, data: Mapping[str, Any]) -> models.Resol
         for field, value in payload.items():
             setattr(record, field, value)
     return record
+
+
+def get_quote(session: Session, quote_id: str) -> models.Quote | None:
+    """Return a stored pricing quote."""
+
+    return session.get(models.Quote, quote_id)
+
+
+def create_quote(session: Session, data: Mapping[str, Any]) -> models.Quote:
+    """Persist a freshly issued pricing quote."""
+
+    payload = dict(data)
+    quote_id = payload["quote_id"]
+    existing = session.get(models.Quote, quote_id)
+    if existing is not None:
+        raise ValueError(f"quote {quote_id} already exists")
+    record = models.Quote(**payload)
+    session.add(record)
+    return record
+
+
+def mark_quote_status(
+    session: Session,
+    quote: models.Quote,
+    status: models.QuoteStatusEnum,
+    consumed_at: datetime | None = None,
+) -> models.Quote:
+    """Update quote status, capturing consumption time when applicable."""
+
+    quote.status = status.value
+    if consumed_at:
+        quote.consumed_at = consumed_at
+    session.add(quote)
+    return quote
+
+
+def expire_stale_quotes(session: Session, *, now: datetime | None = None) -> int:
+    """Mark any expired quotes as stale so cap calculations stay accurate."""
+
+    reference = now or datetime.now(UTC)
+    stmt = select(models.Quote).where(
+        models.Quote.status == models.QuoteStatusEnum.ISSUED.value,
+        models.Quote.expires_at < reference,
+    )
+    count = 0
+    for quote in session.scalars(stmt):
+        quote.status = models.QuoteStatusEnum.EXPIRED.value
+        session.add(quote)
+        count += 1
+    return count
+
+
+def sum_quote_stakes(
+    session: Session,
+    *,
+    market_id: str | None = None,
+    user_id: str | None = None,
+    window_seconds: int | None = None,
+    statuses: set[str] | None = None,
+) -> Decimal:
+    """Return the aggregate stake_zen for quotes matching the filters."""
+
+    active_statuses = statuses or {
+        models.QuoteStatusEnum.ISSUED.value,
+        models.QuoteStatusEnum.CONSUMED.value,
+    }
+    stmt = select(func.coalesce(func.sum(models.Quote.stake_zen), 0))
+    stmt = stmt.where(models.Quote.status.in_(active_statuses))
+    if market_id:
+        stmt = stmt.where(models.Quote.market_id == market_id)
+    if user_id:
+        stmt = stmt.where(models.Quote.user_id == user_id)
+    if window_seconds and window_seconds > 0:
+        cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+        stmt = stmt.where(models.Quote.created_at >= cutoff)
+    return Decimal(session.scalar(stmt) or 0)
 
 
 def get_schema_version(session: Session, key: str = DEFAULT_SCHEMA_VERSION_KEY) -> models.SchemaVersion | None:

@@ -44,6 +44,7 @@ type settlementProofRequest struct {
 	PoolTotals     []string          `json:"poolTotals"`
 	TotalEscrow    string            `json:"totalEscrow"`
 	TotalLiability string            `json:"totalLiability"`
+	PayoutMulWad   string            `json:"payoutMultiplierWad"`
 	RakeBps        string            `json:"rakeBps"`
 	CircuitHash    string            `json:"circuitHash"`
 	Tickets        []ticketProof     `json:"tickets"`
@@ -370,6 +371,8 @@ func validateRequest(req settlementProofRequest) error {
 		return errors.New("totalEscrow required")
 	case strings.TrimSpace(req.TotalLiability) == "":
 		return errors.New("totalLiability required")
+	case strings.TrimSpace(req.PayoutMulWad) == "":
+		return errors.New("payoutMultiplierWad required")
 	case strings.TrimSpace(req.RakeBps) == "":
 		return errors.New("rakeBps required")
 	case len(req.PoolTotals) != 2:

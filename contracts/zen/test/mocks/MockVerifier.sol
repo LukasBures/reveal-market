@@ -23,6 +23,10 @@ contract MockVerifier is IVerifier {
         return _circuitHash;
     }
 
+    function expectedInputs() external pure returns (uint256) {
+        return 10;
+    }
+
     function lastSignals() external view returns (uint256[10] memory) {
         return _lastSignals;
     }

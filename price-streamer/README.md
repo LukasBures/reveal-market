@@ -20,6 +20,7 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
   - `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
   - `STREAMER_FX_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
   - `STREAMER_API_HOST`, `STREAMER_API_PORT`
+  - `STREAMER_PUBLIC_URL` / `NEXT_PUBLIC_PRICE_STREAMER_URL` (HTTPS for WSS upgrade) and `STREAMER_INTERNAL_URL` (SSR/server-to-server); keep hosts aligned so DNS/hosts entries map to the same streamer.
   - `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS` (align with your frontend origin, e.g., `https://revealmarket.xyz` even in dev with hosts/TLS)
   - Optional: `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_CRYPTO_SYMBOLS`, `STREAMER_SIGNING_SECRET`
 
@@ -32,6 +33,7 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 
 ## Endpoints
 - `GET /healthz` – service + feed status (stale flags, FX age).
+- `GET /dashboard` – subscriptions, last-seen/published timestamps, FX status, and stale market list for quick ops checks.
 - `GET /history?market_id=...&outcome=0&limit=100` – recent ticks.
 - `GET /stream?market_id=...&assets_ids=a1,a2&symbols=zenusdt` – SSE stream; subscribes to provided asset IDs and optional RTDS symbols.
 - `GET /fx/zen-usd` (and `zen-usdc`, `zen-usdt`) – latest FX snapshot (worsen% applied; raw price also returned).
@@ -59,5 +61,6 @@ docker compose up price-streamer
 ## Notes
 - Keep subscriptions scoped (assets_ids/symbols) to limit bandwidth.
 - If the backend API is offline, SSE still serves cached/streamed prices but flags FX as stale when applicable.
- - Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.
- - Frontend consumers default to Horizen Testnet (chain id `2651420`); align CORS origins/hosts and pricing chain envs when pointing at a different network.
+- Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.
+- Frontend consumers default to Horizen Testnet (chain id `2651420`); align CORS origins/hosts and pricing chain envs when pointing at a different network.
+- Prometheus: gauges/counters expose FX source/staleness plus stream deliveries/dropped events and per-market staleness (`/metrics`). Watch for `streamer.host.mismatch`/`cors.origins.missing` logs when hosts or CORS config diverge from frontend/API origins.

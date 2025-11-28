@@ -76,6 +76,8 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'conditional_tokens'"),
         ),
+        sa.Column("market_id", sa.Integer(), nullable=True),
+        sa.Column("event_id", sa.String(length=128), nullable=True),
         sa.Column("resolved", sa.Boolean(), nullable=False),
         sa.Column("payouts", sa.JSON(), nullable=False),
         sa.Column("winners", sa.JSON(), nullable=True),
@@ -85,6 +87,9 @@ def upgrade() -> None:
         sa.Column("transaction_hash", sa.String(length=66), nullable=True),
         sa.Column("block_number", sa.BigInteger(), nullable=True),
         sa.Column("block_timestamp", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("winning_outcome_id", sa.Integer(), nullable=True),
+        sa.Column("rake_bps", sa.Integer(), nullable=True),
+        sa.Column("request_id", sa.String(length=128), nullable=True),
         sa.Column("checked_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column(
@@ -95,6 +100,33 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_resolutions_block_number", "resolutions", ["block_number"])
+    op.create_index("ix_resolutions_market_id", "resolutions", ["market_id"])
+    op.create_index("ix_resolutions_event_id", "resolutions", ["event_id"])
+
+    op.create_table(
+        "quotes",
+        sa.Column("quote_id", sa.String(length=66), primary_key=True, nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="issued"),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+        sa.Column("stake_wei", sa.BigInteger(), nullable=False),
+        sa.Column("fx_scaled", sa.BigInteger(), nullable=False),
+        sa.Column("zen_usd", sa.Float(), nullable=False),
+        sa.Column("market_id", sa.String(length=128), nullable=True),
+        sa.Column("market_address", sa.String(length=64), nullable=True),
+        sa.Column("user_id", sa.String(length=128), nullable=True),
+        sa.Column("wallet_address", sa.String(length=64), nullable=True),
+        sa.Column("outcome_id", sa.Integer(), nullable=True),
+        sa.Column("chain_id", sa.BigInteger(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_quotes_market_id", "quotes", ["market_id"])
+    op.create_index("ix_quotes_user_id", "quotes", ["user_id"])
+    op.create_index("ix_quotes_status", "quotes", ["status"])
+    op.create_index("ix_quotes_expires_at", "quotes", ["expires_at"])
 
     # Commitments and settlement data for zk-proof generation
     op.create_table(
@@ -181,6 +213,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_quotes_expires_at", table_name="quotes")
+    op.drop_index("ix_quotes_status", table_name="quotes")
+    op.drop_index("ix_quotes_user_id", table_name="quotes")
+    op.drop_index("ix_quotes_market_id", table_name="quotes")
+    op.drop_table("quotes")
     op.drop_index("ix_hedger_treasury_snapshots_market_id", table_name="hedger_treasury_snapshots")
     op.drop_table("hedger_treasury_snapshots")
     op.drop_index("ix_settlements_proof_status", table_name="settlements")
@@ -192,6 +229,8 @@ def downgrade() -> None:
     op.drop_index("ix_commitments_market_id", table_name="commitments")
     op.drop_table("commitments")
     op.drop_table("schema_versions")
+    op.drop_index("ix_resolutions_event_id", table_name="resolutions")
+    op.drop_index("ix_resolutions_market_id", table_name="resolutions")
     op.drop_index("ix_resolutions_block_number", table_name="resolutions")
     op.drop_table("resolutions")
     op.drop_index("ix_markets_event_id", table_name="markets")

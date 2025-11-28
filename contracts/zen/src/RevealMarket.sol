@@ -5,6 +5,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {IMarketFactoryRisk} from "./interfaces/IMarketFactoryRisk.sol";
 import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol";
@@ -57,6 +58,9 @@ contract RevealMarket is ReentrancyGuard {
         PayoutCurve payoutCurve;
         uint256 maxMarketSize;
         address pricingSigner;
+        uint256 minCommitmentSize;
+        uint256 maxTicketsPerUser;
+        uint256 maxCommitments;
     }
 
     struct SettlementSignals {
@@ -150,10 +154,18 @@ contract RevealMarket is ReentrancyGuard {
     error CommitmentNotFound();
     error InvalidQuote();
     error QuoteAlreadyUsed();
+    error InvalidExpectedInputs(uint256 provided, uint256 required);
+    error CommitmentTooSmall(uint256 minimum);
+    error CommitLimitReached();
+    error UserCommitLimitReached(uint256 limit);
+    error InvalidMaxCommitments();
 
     uint256 public constant WAD = 1e18;
     uint256 public constant MAX_PAYOUT_MULTIPLIER = 5e18; // 5x cap for odds to avoid extreme exposure.
     address public constant ZEN = address(0);
+    uint256 private constant EXPECTED_PUBLIC_INPUTS = 10;
+    uint256 private constant DEFAULT_MAX_COMMITMENTS = 4096;
+    uint256 private constant MIN_COMMITMENT_FLOOR = 0.01 ether;
 
     string public eventId;
     Phase public phase;
@@ -193,6 +205,11 @@ contract RevealMarket is ReentrancyGuard {
     uint256 public rakeBpsOverride;
     uint256 public floatReservedAtSettlement;
     address public pricingSigner;
+    uint256 public poolTotalYes;
+    uint256 public poolTotalNo;
+    uint256 public minCommitmentSize;
+    uint256 public maxTicketsPerUser;
+    uint256 public maxCommitments;
 
     PayoutCurve public payoutCurve;
     uint256 public payoutMultiplier;
@@ -203,6 +220,7 @@ contract RevealMarket is ReentrancyGuard {
     mapping(address => Ticket[]) public userTickets;
     bytes32[] private _commitments;
     mapping(bytes32 => bool) public usedQuoteIds;
+    uint256 public expectedVerifierInputs;
 
     modifier onlyPhase(Phase expected) {
         _onlyPhase(expected);
@@ -224,6 +242,8 @@ contract RevealMarket is ReentrancyGuard {
         _;
     }
 
+    uint256 private constant MAX_COMMITMENTS = 4096;
+
     /// @notice Initializes the market clone (ZEN-only collateral).
     function initialize(InitConfig calldata cfg) external {
         if (_initialized) revert AlreadyInitialized();
@@ -239,12 +259,33 @@ contract RevealMarket is ReentrancyGuard {
         if (cfg.commitDeadline <= block.timestamp) revert InvalidTimestamp();
         if (cfg.revealDeadline <= cfg.commitDeadline) revert InvalidTimestamp();
         if (cfg.rakeBpsOverride > IRakeManager(cfg.rakeManager).maxRakeBps()) revert InvalidRakeBps();
+        uint256 verifierInputs = IVerifier(cfg.verifier).expectedInputs();
+        if (verifierInputs != EXPECTED_PUBLIC_INPUTS) {
+            revert InvalidExpectedInputs(verifierInputs, EXPECTED_PUBLIC_INPUTS);
+        }
+        if (cfg.minCommitmentSize != 0 && cfg.minCommitmentSize < MIN_COMMITMENT_FLOOR) {
+            revert CommitmentTooSmall(MIN_COMMITMENT_FLOOR);
+        }
+        uint256 maxCommitConfig = cfg.maxCommitments;
+        if (maxCommitConfig == 0) {
+            maxCommitConfig = DEFAULT_MAX_COMMITMENTS;
+        }
+        if (maxCommitConfig > DEFAULT_MAX_COMMITMENTS) {
+            revert InvalidMaxCommitments();
+        }
+        if (cfg.minCommitmentSize > 0 && cfg.maxMarketSize > 0 && cfg.minCommitmentSize > cfg.maxMarketSize) {
+            revert InvalidAmount();
+        }
+        if (cfg.maxTicketsPerUser > 0 && cfg.maxTicketsPerUser > MAX_COMMITMENTS) {
+            revert CommitLimitReached();
+        }
 
         eventId = cfg.eventId;
         commitDeadline = cfg.commitDeadline;
         revealDeadline = cfg.revealDeadline;
         oracle = cfg.oracle;
         verifier = cfg.verifier;
+        expectedVerifierInputs = verifierInputs;
         rakeManager = cfg.rakeManager;
         treasury = cfg.treasury;
         factory = msg.sender;
@@ -256,6 +297,9 @@ contract RevealMarket is ReentrancyGuard {
         circuitHash = IVerifier(cfg.verifier).circuitHash();
         marketId = uint256(uint160(address(this)));
         pricingSigner = cfg.pricingSigner;
+        minCommitmentSize = cfg.minCommitmentSize;
+        maxTicketsPerUser = cfg.maxTicketsPerUser;
+        maxCommitments = maxCommitConfig;
 
         phase = Phase.Commit;
         _initialized = true;
@@ -294,9 +338,15 @@ contract RevealMarket is ReentrancyGuard {
     function _commitInternal(address user, uint256 outcomeId, uint256 amount, bytes32 salt) internal {
         if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
         if (amount == 0) revert InvalidAmount();
+        if (minCommitmentSize > 0 && amount < minCommitmentSize) revert CommitmentTooSmall(minCommitmentSize);
+        if (commitmentsCount >= maxCommitments) revert CommitLimitReached();
         if (_factoryCommitPaused()) revert CommitPaused();
         if (commitsPaused) revert CommitPaused();
         if (outcomeId > 1) revert InvalidOutcome();
+        uint256 userTicketLimit = maxTicketsPerUser;
+        if (userTicketLimit > 0 && userTickets[user].length + 1 > userTicketLimit) {
+            revert UserCommitLimitReached(userTicketLimit);
+        }
 
         uint256 potentialPayout = _estimatePayout(amount);
         (uint256 newLiability, uint256 newEscrow, uint256 coverage) =
@@ -308,6 +358,11 @@ contract RevealMarket is ReentrancyGuard {
         userEscrow = newEscrow;
         maxLiability = newLiability;
         commitmentsCount += 1;
+        if (outcomeId == 0) {
+            poolTotalYes += amount;
+        } else {
+            poolTotalNo += amount;
+        }
         emit MaxLiabilityUpdated(newLiability);
 
         bytes32 ticketHash = _hashCommit(user, outcomeId, amount, salt);
@@ -328,23 +383,22 @@ contract RevealMarket is ReentrancyGuard {
         if (quote.outcomeId != outcomeId) revert InvalidOutcome();
         if (quote.expectedUser == address(0) || quote.expectedUser != sender) revert NotAuthorized();
         if (quote.zenUsd == 0) revert InvalidQuote();
+        if (quote.quoteId == bytes32(0)) revert InvalidQuote();
         if (usedQuoteIds[quote.quoteId]) revert QuoteAlreadyUsed();
 
-        // Inline assembly keeps keccak lint happy while matching the ABI-packed digest.
-        bytes32 digest;
-        assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, 0x51554f54455f5631000000000000000000000000000000000000000000000000) // "QUOTE_V1"
-            mstore(add(ptr, 0x0b), chainid())
-            mstore(add(ptr, 0x2b), address())
-            mstore(add(ptr, 0x4b), calldataload(add(quote, 0x20))) // expectedUser
-            mstore(add(ptr, 0x6b), calldataload(add(quote, 0x40))) // outcomeId
-            mstore(add(ptr, 0x8b), calldataload(add(quote, 0x60))) // stakeZen
-            mstore(add(ptr, 0xab), calldataload(add(quote, 0x80))) // zenUsd
-            mstore(add(ptr, 0xcb), calldataload(add(quote, 0xa0))) // expiry
-            mstore(add(ptr, 0xeb), calldataload(quote)) // quoteId (bytes32 at offset 0)
-            digest := keccak256(ptr, 0x10b)
-        }
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "QUOTE_V1",
+                block.chainid,
+                address(this),
+                quote.expectedUser,
+                quote.outcomeId,
+                quote.stakeZen,
+                quote.zenUsd,
+                quote.expiry,
+                quote.quoteId
+            )
+        );
         bytes32 wrapped = MessageHashUtils.toEthSignedMessageHash(digest);
         address recovered = ECDSA.recover(wrapped, quote.signature);
         if (recovered != pricingSigner) revert NotAuthorized();
@@ -402,6 +456,8 @@ contract RevealMarket is ReentrancyGuard {
         uint256 expectedPool = signals.poolTotalYes + signals.poolTotalNo;
         if (expectedPool != signals.totalEscrow) revert ProofTotalsMismatch();
         if (signals.totalEscrow != userEscrow) revert ProofTotalsMismatch();
+        if (signals.poolTotalYes != poolTotalYes || signals.poolTotalNo != poolTotalNo) revert ProofTotalsMismatch();
+        if (poolTotalYes + poolTotalNo != userEscrow) revert ProofTotalsMismatch();
         uint256 appliedRake = appliedRakeBps();
         if (signals.rakeBps != appliedRake) revert InvalidRakeBps();
 
@@ -409,6 +465,9 @@ contract RevealMarket is ReentrancyGuard {
         uint256 netEscrow = signals.totalEscrow - expectedRakeAmount;
         uint256 netPool = netEscrow + houseFloat;
         if (signals.totalLiability > netPool) revert LiabilityExceedsCoverage(signals.totalLiability, netPool);
+        uint256 winningPoolSignal = signals.winningOutcomeId == 0 ? poolTotalYes : poolTotalNo;
+        uint256 expectedLiability = _estimatePayout(winningPoolSignal);
+        if (signals.totalLiability != expectedLiability) revert ProofTotalsMismatch();
 
         bool success = IVerifier(verifier).verifyProof(proof, pubSignals);
         emit ProofVerified(success);
@@ -425,7 +484,7 @@ contract RevealMarket is ReentrancyGuard {
 
         userEscrow = netEscrow;
         winningCommitmentsRoot = commitmentsRoot;
-        winningPool = signals.winningOutcomeId == 0 ? signals.poolTotalYes : signals.poolTotalNo;
+        winningPool = winningPoolSignal;
         totalLiability = signals.totalLiability;
         maxLiability = signals.totalLiability;
         floatReservedAtSettlement = 0;
@@ -529,7 +588,17 @@ contract RevealMarket is ReentrancyGuard {
 
     /// @notice Withdraws leftover float after all claims are satisfied.
     function withdrawFloat(address recipient, uint256 amount) external nonReentrant {
-        if (msg.sender != treasury && msg.sender != factory && msg.sender != guardian) revert NotAuthorized();
+        if (msg.sender != treasury && msg.sender != factory) {
+            bool isFactoryOwner;
+            if (factory.code.length > 0) {
+                try Ownable(factory).owner() returns (address owner) {
+                    isFactoryOwner = msg.sender == owner;
+                } catch {
+                    isFactoryOwner = false;
+                }
+            }
+            if (!isFactoryOwner) revert NotAuthorized();
+        }
         if (phase != Phase.Settled) revert InvalidPhase(Phase.Settled, phase);
         if (paidOut < totalLiability) revert OutstandingClaims();
         if (amount == 0 || amount > houseFloat) revert InvalidAmount();
@@ -655,6 +724,7 @@ contract RevealMarket is ReentrancyGuard {
         totalLiability = requiredLiability;
         maxLiability = requiredLiability;
         winningPool = declaredWinningPool;
+        winningCommitmentsRoot = commitmentsRoot;
         settledAt = block.timestamp;
         phase = Phase.Settled;
         _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);

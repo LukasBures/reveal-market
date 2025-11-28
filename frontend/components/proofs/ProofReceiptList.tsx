@@ -5,6 +5,8 @@ type Props = {
   receipts: ProofReceipt[];
 };
 
+const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz";
+
 export function ProofReceiptList({ receipts }: Props) {
   if (!receipts.length) {
     return (
@@ -48,15 +50,21 @@ function ProofReceiptCard({ receipt }: CardProps) {
       <dl className="mt-6 grid gap-4 text-sm text-slate-300 md:grid-cols-2">
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Market</dt>
-          <dd className="font-mono text-white">{shorten(receipt.marketAddress)}</dd>
+          <dd className="font-mono text-white">
+            <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress} />
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Verifier</dt>
-          <dd className="font-mono text-white">{shorten(receipt.verifier)}</dd>
+          <dd className="font-mono text-white">
+            <ExplorerLink href={hrefFor("address", receipt.verifier)} label={receipt.verifier} />
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Tx hash</dt>
-          <dd className="font-mono text-white">{shorten(receipt.transactionHash, 10)}</dd>
+          <dd className="font-mono text-white">
+            <ExplorerLink href={hrefFor("tx", receipt.transactionHash)} label={receipt.transactionHash} />
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Verified at</dt>
@@ -97,6 +105,21 @@ function Signal({ label, value }: SignalProps) {
   );
 }
 
+type ExplorerLinkProps = {
+  href?: string | null;
+  label: string;
+};
+
+function ExplorerLink({ href, label }: ExplorerLinkProps) {
+  const text = shorten(label, 10);
+  if (!href) return <span>{text}</span>;
+  return (
+    <a className="text-brand-200 hover:text-brand-100 underline-offset-4 hover:underline" href={href} target="_blank" rel="noreferrer">
+      {text}
+    </a>
+  );
+}
+
 function shorten(value: string, visible = 6): string {
   if (!value) {
     return "—";
@@ -120,4 +143,12 @@ function formatBigInt(value: string) {
   } catch {
     return value;
   }
+}
+
+function hrefFor(kind: "address" | "tx", value?: string) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const base = explorerBase.replace(/\/+$/, "");
+  return kind === "tx" ? `${base}/tx/${trimmed}` : `${base}/address/${trimmed}`;
 }

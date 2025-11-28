@@ -6,6 +6,9 @@ interface IVerifier {
     /// @notice Hash identifying the currently installed circuit/verifying key.
     function circuitHash() external view returns (bytes32);
 
+    /// @notice Number of public inputs the verifier expects (enforced by the IC vector).
+    function expectedInputs() external view returns (uint256);
+
     /// @notice Verifies a proof against public signals.
     /// @dev Public signals are ordered as:
     /// [merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)].

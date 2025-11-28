@@ -88,10 +88,12 @@ vi.mock("wagmi", () => {
   return {
     WagmiProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useAccount: () => ({ address: undefined, chain: undefined, status: "disconnected" }),
+    useChainId: () => 1,
     useConnect: () => ({ connect: noop, connectors: [], status: "idle", error: null }),
     useDisconnect: () => ({ disconnect: noop }),
     useSignMessage: () => ({ data: null, error: null, isPending: false, signMessageAsync: noop }),
     useSwitchChain: () => ({ chains: [], error: null, isPending: false, switchChain: noop }),
+    useWriteContract: () => ({ writeContractAsync: noop, isPending: false, error: null }),
     useConfig: () => ({}),
   };
 });

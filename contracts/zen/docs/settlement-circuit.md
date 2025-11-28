@@ -71,6 +71,7 @@ Use `snarkjs zkey export solidityverifier` (or Noir’s verifier generator) to e
 * The solidity verifier refuses to run without a verifying key (IC length mismatch reverts).
 * Field elements for public inputs are not truncated on-chain; the circuit must already enforce validity.
 * The stub verifier (`VerifierStub`) is preserved for local development but should never be deployed to production networks.
+* Markets store the verifier `expectedInputs` (10) during init and recompute `totalLiability` from the winning pool + payout multiplier on-chain, rejecting proofs that don't match those values.
 
 ## Current hashes (compiled on macOS with circom 2.2.3)
 

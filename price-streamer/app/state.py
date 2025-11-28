@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import AnyHttpUrl
@@ -18,6 +19,9 @@ from websockets.exceptions import InvalidStatusCode
 
 from .config import Settings, get_settings
 from .subscriptions import SubscriptionManager
+
+if TYPE_CHECKING:
+    from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.price_streamer")
 
@@ -43,7 +47,7 @@ class FxQuote:
 class StreamState:
     """Holds connections to Redis and FX cache."""
 
-    def __init__(self, settings: Settings | None = None):
+    def __init__(self, settings: Settings | None = None, metrics: StreamerMetrics | None = None):
         self.settings = settings or get_settings()
         self.redis: Redis | None = None
         self.fx_quote: FxQuote | None = None
@@ -64,6 +68,7 @@ class StreamState:
         self.rtds_symbols: set[str] = set()
         self.rtds_symbols_version: int = 0
         self.market_tokens: dict[str, list[str]] = {}
+        self.metrics = metrics
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
@@ -153,6 +158,9 @@ class StreamState:
         await self.redis.publish(channel, json.dumps(mapping))
         self.last_seen[market_id] = datetime.now(UTC)
         self.last_published[market_id] = datetime.now(UTC)
+        if self.metrics:
+            # Reset staleness gauge to fresh on publish.
+            self.metrics.market_staleness.labels(market_id=market_id).set(0)
         history_key = f"{self.settings.history_prefix}:{market_id}:{outcome}"
         await self.redis.lpush(history_key, json.dumps(mapping))
         await self.redis.ltrim(history_key, 0, self.settings.history_limit - 1)
@@ -203,6 +211,8 @@ class StreamState:
         return list(reversed(records))
 
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:
+        if self.metrics:
+            return self.metrics.record_staleness(self.last_seen, stale_after=stale_after_seconds)
         cutoff = datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
         return [mid for mid, ts in self.last_seen.items() if ts < cutoff]
 

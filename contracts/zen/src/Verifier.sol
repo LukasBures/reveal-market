@@ -116,6 +116,11 @@ contract Verifier is IVerifier, Ownable2Step {
         return _ic.length;
     }
 
+    /// @inheritdoc IVerifier
+    function expectedInputs() external view returns (uint256) {
+        return EXPECTED_INPUTS;
+    }
+
     struct Proof {
         Pairing.G1Point A;
         Pairing.G2Point B;

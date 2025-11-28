@@ -59,7 +59,7 @@ contract Deploy is ScriptBase {
             VerifierStub stub = new VerifierStub();
             verifierAddress = address(stub);
             circuitHash = bytes32(0);
-            expectedInputs = 12;
+            expectedInputs = stub.expectedInputs();
         } else {
             VerifyingKeyConfig memory vkConfig = _loadVerifyingKey(vkPath);
             Verifier verifier = new Verifier(

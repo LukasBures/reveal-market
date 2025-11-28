@@ -177,6 +177,8 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       es.onopen = () => {
         setState(conn, { connected: true, error: null });
         conn.backoff = 1_000;
+        conn.wsDisabled = false;
+        conn.wsAttempts = 0;
         // Attempt to upgrade back to WS after a short delay to keep WS-first.
         setTimeout(() => {
           if (!conn.cancelled && !conn.ws) {
@@ -231,6 +233,7 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       ws.onerror = () => {
         setState(conn, { connected: false, error: "Price stream disconnected" });
         ws.close();
+        conn.ws = null;
         conn.wsAttempts += 1;
         if (conn.wsAttempts >= 2) {
           conn.wsDisabled = true;
@@ -241,6 +244,7 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       };
       ws.onclose = () => {
         setState(conn, { connected: false, error: "Price stream disconnected" });
+        conn.ws = null;
         conn.wsAttempts += 1;
         if (conn.wsAttempts >= 2) {
           conn.wsDisabled = true;

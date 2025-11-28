@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)
+    public_base_url: AnyHttpUrl | None = Field(
+        default="https://stream.revealmarket.xyz",
+        description="Public HTTPS streamer host used by browsers.",
+        validation_alias=AliasChoices("NEXT_PUBLIC_PRICE_STREAMER_URL", "STREAMER_PUBLIC_URL"),
+    )
+    internal_base_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Internal streamer host used by server components.",
+        validation_alias=AliasChoices("STREAMER_INTERNAL_URL", "RM_STREAMER_INTERNAL_URL"),
+    )
 
     @property
     def total_monetisation(self) -> float:
@@ -129,6 +139,13 @@ class Settings(BaseSettings):
                 parsed.fragment,
             )
         )
+
+    @field_validator("public_base_url")
+    @classmethod
+    def _require_https(cls, value: AnyHttpUrl | None):
+        if value and value.scheme != "https":
+            raise ValueError("NEXT_PUBLIC_PRICE_STREAMER_URL must use https://")
+        return value
 
 
 def get_settings() -> Settings:

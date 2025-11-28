@@ -34,6 +34,7 @@ def test_prover_client_success():
         pool_totals=["70", "30"],
         total_escrow="100",
         total_liability="90",
+        payout_multiplier_wad="1000000000000000000",
         rake_bps=100,
         circuit_hash="0x1234",
         tickets=[
@@ -70,6 +71,7 @@ def test_prover_client_raises_on_error():
         pool_totals=["10", "0"],
         total_escrow="10",
         total_liability="10",
+        payout_multiplier_wad="1000000000000000000",
         rake_bps=0,
         circuit_hash="0x1234",
         tickets=[

@@ -20,6 +20,7 @@ class SettlementProofRequest:
     pool_totals: list[str]
     total_escrow: str
     total_liability: str
+    payout_multiplier_wad: str
     rake_bps: int
     circuit_hash: str
     tickets: list[dict[str, Any]]
@@ -33,6 +34,7 @@ class SettlementProofRequest:
             "poolTotals": self.pool_totals,
             "totalEscrow": self.total_escrow,
             "totalLiability": self.total_liability,
+            "payoutMultiplierWad": self.payout_multiplier_wad,
             "rakeBps": str(self.rake_bps),
             "circuitHash": self.circuit_hash,
             "tickets": self.tickets,

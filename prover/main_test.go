@@ -16,10 +16,11 @@ func TestValidateRequest(t *testing.T) {
 	valid := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x01",
-		WinningOutcome: "1",
+		WinningOutcome: "0",
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "5",
+		PayoutMulWad:   "500000000000000000",
 		RakeBps:        "100",
 		CircuitHash:    "0xdead",
 		Tickets: []ticketProof{{
@@ -46,7 +47,9 @@ func TestValidateRequest(t *testing.T) {
 		{"missing_outcome", func(req *settlementProofRequest) { req.WinningOutcome = "" }},
 		{"missing_total_escrow", func(req *settlementProofRequest) { req.TotalEscrow = "" }},
 		{"missing_total_liability", func(req *settlementProofRequest) { req.TotalLiability = "" }},
+		{"missing_payout_multiplier", func(req *settlementProofRequest) { req.PayoutMulWad = "" }},
 		{"missing_rake_bps", func(req *settlementProofRequest) { req.RakeBps = "" }},
+		{"bad_pool_length", func(req *settlementProofRequest) { req.PoolTotals = []string{"1"} }},
 		{"missing_tickets", func(req *settlementProofRequest) { req.Tickets = nil }},
 	}
 
@@ -65,10 +68,11 @@ func TestBuildWitnessInput(t *testing.T) {
 	req := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x20",
-		WinningOutcome: "2",
+		WinningOutcome: "0",
 		PoolTotals:     []string{"7", "3"},
 		TotalEscrow:    "10",
-		TotalLiability: "9",
+		TotalLiability: "14",
+		PayoutMulWad:   "2000000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0xbeef",
 		Tickets: []ticketProof{{
@@ -89,9 +93,9 @@ func TestBuildWitnessInput(t *testing.T) {
 	expected := map[string]string{
 		"merkleRoot":       "32",
 		"marketId":         "2748",
-		"winningOutcomeId": "2",
+		"winningOutcomeId": "0",
 		"totalEscrow":      "10",
-		"totalLiability":   "9",
+		"totalLiability":   "14",
 		"rakeBps":          "50",
 		"poolTotalYes":     "7",
 		"poolTotalNo":      "3",
@@ -113,6 +117,7 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 		PoolTotals:     []string{"2", "2"},
 		TotalEscrow:    "3",
 		TotalLiability: "10",
+		PayoutMulWad:   "2000000000000000000",
 		RakeBps:        "10",
 		CircuitHash:    "0x1",
 		Tickets: []ticketProof{{
@@ -128,6 +133,36 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 	}
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error when pool totals do not match total escrow")
+	}
+
+	req.WinningOutcome = "2"
+	if _, err := buildWitnessInput(req); err == nil {
+		t.Fatalf("expected error for invalid winning outcome")
+	}
+
+	req = settlementProofRequest{
+		MarketID:       "1",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"7", "3"},
+		TotalEscrow:    "10",
+		TotalLiability: "10", // wrong: winningPool (7) * 2e18 / 1e18 = 14
+		PayoutMulWad:   "2000000000000000000",
+		RakeBps:        "10",
+		CircuitHash:    "0x1",
+		Tickets: []ticketProof{{
+			User:        "0x1",
+			OutcomeID:   "1",
+			Amount:      "10",
+			Salt:        "0x1",
+			TicketHash:  "0x2",
+			Leaf:        "0x2",
+			MerklePath:  []string{},
+			MerkleIndex: 0,
+		}},
+	}
+	if _, err := buildWitnessInput(req); err == nil {
+		t.Fatalf("expected error when liability mismatches payout multiplier")
 	}
 }
 
@@ -147,10 +182,11 @@ func TestProofHandlerSuccess(t *testing.T) {
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
-		WinningOutcome: "1",
+		WinningOutcome: "0",
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "9",
+		PayoutMulWad:   "900000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0x1",
 		Tickets: []ticketProof{{
@@ -205,10 +241,11 @@ func TestProofHandlerProverError(t *testing.T) {
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
-		WinningOutcome: "1",
+		WinningOutcome: "0",
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "9",
+		PayoutMulWad:   "900000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0x1",
 		Tickets:        []ticketProof{{User: "0x1", OutcomeID: "1", Amount: "10", Salt: "0x1", TicketHash: "0x2", Leaf: "0x2", MerkleIndex: 0}},

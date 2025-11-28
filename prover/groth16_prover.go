@@ -459,11 +459,18 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
+	if winningOutcome.Cmp(big.NewInt(2)) >= 0 {
+		return nil, newValidationError("winning_outcome_id must be 0 or 1")
+	}
 	totalEscrow, err := parsePositiveDecimal(req.TotalEscrow, "total_escrow")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
 	totalLiability, err := parsePositiveDecimal(req.TotalLiability, "total_liability")
+	if err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	payoutMulWad, err := parsePositiveDecimal(req.PayoutMulWad, "payout_multiplier_wad")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
@@ -488,6 +495,15 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 	sumPools := new(big.Int).Add(poolYes, poolNo)
 	if sumPools.Cmp(totalEscrow) != 0 {
 		return nil, newValidationError("pool_totals must sum to total_escrow")
+	}
+	winningPool := poolNo
+	if winningOutcome.Cmp(big.NewInt(0)) == 0 {
+		winningPool = poolYes
+	}
+	expectedLiability := new(big.Int).Mul(winningPool, payoutMulWad)
+	expectedLiability = expectedLiability.Div(expectedLiability, big.NewInt(1e18))
+	if expectedLiability.Cmp(totalLiability) != 0 {
+		return nil, newValidationError("total_liability must equal winning_pool * payoutMultiplier / 1e18")
 	}
 	if len(req.Tickets) == 0 {
 		return nil, newValidationError("tickets must be > 0")

@@ -71,6 +71,8 @@ class Resolution(Base):
     __tablename__ = "resolutions"
 
     condition_id = Column(String(66), primary_key=True, nullable=False)
+    market_id = Column(Integer, nullable=True, index=True)
+    event_id = Column(String(128), nullable=True, index=True)
     source = Column(String(32), nullable=False, default="conditional_tokens")
     resolved = Column(Boolean, nullable=False, default=False)
     payouts = Column(JSON, nullable=False, default=list)
@@ -81,9 +83,15 @@ class Resolution(Base):
     transaction_hash = Column(String(66), nullable=True)
     block_number = Column(BigInteger, nullable=True)
     block_timestamp = Column(DateTime(timezone=True), nullable=True)
+    winning_outcome_id = Column(Integer, nullable=True)
+    rake_bps = Column(Integer, nullable=True)
+    request_id = Column(String(128), nullable=True)
     checked_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+Index("ix_resolutions_block_number", Resolution.block_number)
 
 
 class Commitment(Base):
@@ -163,3 +171,31 @@ class HedgerTreasurySnapshot(Base):
     zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
     usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class QuoteStatusEnum(str, Enum):
+    ISSUED = "issued"
+    CONSUMED = "consumed"
+    EXPIRED = "expired"
+
+
+class Quote(Base):
+    __tablename__ = "quotes"
+
+    quote_id = Column(String(66), primary_key=True, nullable=False)
+    status = Column(String(32), nullable=False, default=QuoteStatusEnum.ISSUED.value)
+    payload = Column(JSON, nullable=False)
+    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
+    stake_wei = Column(BigInteger, nullable=False)
+    fx_scaled = Column(BigInteger, nullable=False)
+    zen_usd = Column(Float, nullable=False)
+    market_id = Column(String(128), nullable=True, index=True)
+    market_address = Column(String(64), nullable=True)
+    user_id = Column(String(128), nullable=True, index=True)
+    wallet_address = Column(String(64), nullable=True)
+    outcome_id = Column(Integer, nullable=True)
+    chain_id = Column(BigInteger, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

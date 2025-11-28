@@ -23,6 +23,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from py_clob_client.client import ClobClient
 from redis import Redis
 from redis.exceptions import RedisError
+from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import category_cache_key, markets_list_cache_key, resolution_cache_key, suggest_cache_key
 from shared.categories import canonical_category_from_slug
@@ -30,12 +31,12 @@ from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
 from shared.onchain.client import load_account
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from web3 import Web3
 
 from app import crud, models, schemas
-from app.cache import get_redis_client
 from app.config import Settings, get_settings
 from app.database import get_session, run_migrations, session_scope
 from app.health import build_health_response
@@ -126,6 +127,21 @@ if cors_origins != ["*"] and settings.environment.lower() != "production":
         "http://stream.localhost",
     }
     cors_origins = list({*cors_origins, *local_origins})
+if cors_origins != ["*"]:
+    expected_frontend_origins = {
+        "http://localhost:3000",
+        "https://revealmarket.xyz",
+        "https://stream.revealmarket.xyz",
+    }
+    missing_cors = sorted(origin for origin in expected_frontend_origins if origin not in cors_origins)
+    if missing_cors:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cors.origins.missing",
+            message="RM_CORS_ALLOW_ORIGINS missing expected frontend origins",
+            missing=missing_cors,
+        )
 
 app.add_middleware(
     CORSMiddleware,
@@ -252,6 +268,77 @@ def _build_quote_digest(
             int(expiry_ts),
             quote_bytes,
         ],
+    )
+
+
+def _derive_winners_from_payouts(payouts: list[int] | None, outcomes: list[str] | None) -> list[dict[str, Any]]:
+    winners: list[dict[str, Any]] = []
+    if not payouts:
+        return winners
+    valid_payouts: list[tuple[int, int]] = []
+    for index, raw in enumerate(payouts):
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            logger.debug("Skipping payout that cannot be coerced to int", exc_info=True)
+            value = None
+        if value is None:
+            continue
+        valid_payouts.append((index, value))
+    if not valid_payouts:
+        return winners
+    max_value = max(value for _, value in valid_payouts)
+    if max_value <= 0:
+        return winners
+    labels = outcomes or []
+    for index, value in valid_payouts:
+        if value == max_value:
+            label = labels[index] if index < len(labels) else None
+            winners.append({"index": index, "label": label, "payout": value})
+    return winners
+
+
+def _build_resolution_summary_from_record(
+    record: models.Resolution,
+    market: models.Market | None = None,
+) -> schemas.ResolutionSummary:
+    outcomes = record.outcomes or (market.outcomes if market and market.outcomes else [])
+    payouts = record.payouts or []
+    winners = record.winners or _derive_winners_from_payouts(payouts, outcomes)
+    winning_outcome_id = record.winning_outcome_id
+    if winning_outcome_id is None and winners:
+        winning_outcome_id = winners[0].get("index")
+    checked_at = record.checked_at or record.created_at
+    return schemas.ResolutionSummary(
+        source=record.source,
+        condition_id=record.condition_id,
+        resolved=record.resolved,
+        outcomes=outcomes or [],
+        payouts=payouts or [],
+        winners=winners or [],
+        checked_at=checked_at,
+        market_id=getattr(record, "market_id", None),
+        event_id=record.event_id or (market.event_id if market else None),
+        title=market.title if market else None,
+        slug=market.slug if market else None,
+        oracle=record.oracle or (market.oracle if market else None),
+        question_id=record.question_id,
+        transaction_hash=record.transaction_hash,
+        block_number=record.block_number,
+        block_timestamp=record.block_timestamp,
+        winning_outcome_id=winning_outcome_id,
+        rake_bps=record.rake_bps if record.rake_bps is not None else getattr(market, "rake_bps", None),
+        request_id=record.request_id,
+        created_at=getattr(record, "created_at", None),
+        updated_at=getattr(record, "updated_at", None),
+    )
+
+
+def _build_market_caps() -> schemas.MarketCaps:
+    return schemas.MarketCaps(
+        max_stake_zen=settings.max_stake_zen,
+        max_user_stake_per_market_zen=settings.max_user_stake_per_market_zen,
+        max_market_stake_zen=settings.max_market_stake_zen,
     )
 
 
@@ -499,9 +586,9 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
     start_time = time.perf_counter()
     with session_scope() as session:
         records = crud.get_markets(session, limit=hydrated_limit, offset=0)
-    market_models = _filter_markets_for_visibility(
-        _augment_market_models([schemas.MarketResponse.model_validate(m) for m in records])
-    )
+        market_models = _filter_markets_for_visibility(
+            _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
+        )
     if not market_models:
         summary["reason"] = "no_markets"
         return summary
@@ -685,6 +772,7 @@ def _write_market_list_cache(cache: Redis | None, cache_key: str, markets: list[
         if not isinstance(event_id, str):
             continue
         event_ids.append(event_id)
+        condition_id = sanitized.get("condition_id")
         set_json(
             cache,
             _market_record_cache_key(event_id),
@@ -692,6 +780,8 @@ def _write_market_list_cache(cache: Redis | None, cache_key: str, markets: list[
             settings.market_record_cache_ttl_seconds,
         )
         add_tag(cache, f"market:{event_id}", _market_record_cache_key(event_id))
+        if isinstance(condition_id, str):
+            add_tag(cache, f"resolution:{condition_id.lower()}", _market_record_cache_key(event_id))
     if not event_ids:
         return
     payload = {
@@ -794,9 +884,66 @@ def _apply_market_metadata(market: schemas.MarketResponse) -> None:
         market.clob_token_ids = metadata["clob_token_ids"]
 
 
+def _apply_market_caps(market: schemas.MarketResponse) -> None:
+    if getattr(market, "caps", None) is None:
+        market.caps = _build_market_caps()
+
+
+def _attach_resolution_to_market(
+    market: schemas.MarketResponse,
+    resolution: models.Resolution | None = None,
+) -> None:
+    if resolution is None or market is None:
+        return
+    try:
+        market.resolution = _build_resolution_summary_from_record(resolution, market=market)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.resolution.hydrate_failed",
+            message="failed to attach resolution to market",
+            event_id=getattr(market, "event_id", None),
+            condition_id=getattr(resolution, "condition_id", None),
+            error=str(exc),
+        )
+        return
+
+
 def _augment_market_models(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
     for market in markets:
         _apply_market_metadata(market)
+        _apply_market_caps(market)
+    return markets
+
+
+def _load_resolution_records(session: Session, markets: list[schemas.MarketResponse]) -> dict[str, models.Resolution]:
+    condition_ids = []
+    for market in markets:
+        condition = getattr(market, "condition_id", None)
+        if isinstance(condition, str):
+            condition_ids.append(condition.lower())
+    if not condition_ids:
+        return {}
+    stmt = select(models.Resolution).where(models.Resolution.condition_id.in_(condition_ids))
+    records: dict[str, models.Resolution] = {}
+    for record in session.scalars(stmt):
+        if record.condition_id:
+            records[record.condition_id.lower()] = record
+    return records
+
+
+def _enrich_market_models(session: Session, markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
+    """Attach metadata, caps, and cached resolutions to market responses."""
+
+    _augment_market_models(markets)
+    resolution_map = _load_resolution_records(session, markets)
+    for market in markets:
+        condition = getattr(market, "condition_id", None)
+        if isinstance(condition, str):
+            resolution = resolution_map.get(condition.lower())
+            if resolution:
+                _attach_resolution_to_market(market, resolution)
     return markets
 
 
@@ -825,6 +972,7 @@ def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) 
             category_slug=normalized,
             fallback_count=len(matched),
         )
+        matched = _enrich_market_models(session, matched)
     return matched
 
 
@@ -837,7 +985,11 @@ async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid4())
     token = set_request_id(request_id)
     start_time = time.perf_counter()
-    request.state.cache_context = {"cache_hit": None, "cache_key": None, "cache_source": None}  # type: ignore[attr-defined]
+    request.state.cache_context = {
+        "cache_hit": None,
+        "cache_key": None,
+        "cache_source": None,
+    }  # type: ignore[attr-defined]
     log_event(
         logger,
         logging.DEBUG,
@@ -957,8 +1109,66 @@ def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
     )
 
 
+def _enforce_caps(
+    session: Session,
+    *,
+    stake_zen: float,
+    market_id: str | None,
+    user_id: str | None,
+    include_stake: bool = True,
+    exclude_quote: models.Quote | None = None,
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Apply per-bet/user/market caps using durable quote state."""
+
+    shared_repository.expire_stale_quotes(session)
+    window = settings.bet_cap_ttl_seconds
+    market_total = None
+    user_total = None
+    if market_id:
+        market_total = float(shared_repository.sum_quote_stakes(session, market_id=market_id, window_seconds=window))
+        if exclude_quote and exclude_quote.market_id == market_id:
+            market_total = max(0.0, market_total - float(exclude_quote.stake_zen))
+        if include_stake:
+            market_total += float(stake_zen)
+        if market_total > settings.max_market_stake_zen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Market stake cap exceeded ({settings.max_market_stake_zen} ZEN)",
+            )
+
+    if market_id and user_id:
+        user_total = float(
+            shared_repository.sum_quote_stakes(
+                session,
+                market_id=market_id,
+                user_id=user_id,
+                window_seconds=window,
+            )
+        )
+        if exclude_quote and exclude_quote.market_id == market_id and exclude_quote.user_id == user_id:
+            user_total = max(0.0, user_total - float(exclude_quote.stake_zen))
+        if include_stake:
+            user_total += float(stake_zen)
+        if user_total > settings.max_user_stake_per_market_zen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"User stake cap exceeded ({settings.max_user_stake_per_market_zen} ZEN)",
+            )
+
+    remaining_market = None
+    remaining_user = None
+    if market_total is not None:
+        remaining_market = settings.max_market_stake_zen - market_total
+    if user_total is not None:
+        remaining_user = settings.max_user_stake_per_market_zen - user_total
+    return market_total, user_total, remaining_market, remaining_user
+
+
 @app.post("/pricing/quote", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
-def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteResponse:
+def pricing_quote(
+    payload: schemas.PricingQuoteRequest,
+    session: Session = Depends(get_session),
+) -> schemas.PricingQuoteResponse:
     """Return a pricing quote for a ZEN stake, gating on FX availability."""
 
     if payload.stake_zen > settings.max_stake_zen:
@@ -985,48 +1195,18 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
 
-    # Enforce optional per-user and per-market caps using Redis counters.
-    redis_client = get_redis_client()
-    user_total = None
+    # Enforce durable per-user and per-market caps using persisted quotes.
     market_total = None
+    user_total = None
     user_remaining = None
     market_remaining = None
-
     if payload.market_id:
-        market_key = f"betcaps:market:{payload.market_id}:total"
-        try:
-            market_total = float(redis_client.get(market_key) or 0)
-        except Exception as exc:  # pragma: no cover - defensive logging only
-            log_event(
-                logger, logging.WARNING, event="betcaps.read.error", message="Failed to read market cap", error=str(exc)
-            )
-            market_total = 0
-        if market_total + payload.stake_zen > settings.max_market_stake_zen:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Market stake cap exceeded ({settings.max_market_stake_zen} ZEN)",
-            )
-        market_remaining = settings.max_market_stake_zen - (market_total + payload.stake_zen)
-
-        if payload.user_id:
-            user_key = f"betcaps:market:{payload.market_id}:user:{payload.user_id}"
-            try:
-                user_total = float(redis_client.get(user_key) or 0)
-            except Exception as exc:  # pragma: no cover
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="betcaps.read.error",
-                    message="Failed to read user cap",
-                    error=str(exc),
-                )
-                user_total = 0
-            if user_total + payload.stake_zen > settings.max_user_stake_per_market_zen:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"User stake cap exceeded ({settings.max_user_stake_per_market_zen} ZEN)",
-                )
-            user_remaining = settings.max_user_stake_per_market_zen - (user_total + payload.stake_zen)
+        market_total, user_total, market_remaining, user_remaining = _enforce_caps(
+            session,
+            stake_zen=float(payload.stake_zen),
+            market_id=payload.market_id,
+            user_id=payload.user_id,
+        )
 
     if zen_usd is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
@@ -1093,25 +1273,40 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
             "chain_id": settings.pricing_chain_id,
         }
     )
-
-    # Update cap counters after successful quote.
-    if payload.market_id:
-        pipeline = redis_client.pipeline()
-        market_key = f"betcaps:market:{payload.market_id}:total"
-        pipeline.set(market_key, (market_total or 0) + payload.stake_zen, ex=settings.bet_cap_ttl_seconds)
-        if payload.user_id:
-            user_key = f"betcaps:market:{payload.market_id}:user:{payload.user_id}"
-            pipeline.set(user_key, (user_total or 0) + payload.stake_zen, ex=settings.bet_cap_ttl_seconds)
-        try:
-            pipeline.execute()
-        except Exception as exc:  # pragma: no cover
-            log_event(
-                logger,
-                logging.WARNING,
-                event="betcaps.write.error",
-                message="Failed to persist bet caps",
-                error=str(exc),
-            )
+    quote_payload = quote.model_dump(mode="json")
+    try:
+        shared_repository.create_quote(
+            session,
+            {
+                "quote_id": quote_id,
+                "status": models.QuoteStatusEnum.ISSUED.value,
+                "payload": quote_payload,
+                "stake_zen": Decimal(str(quote.stake_zen)),
+                "stake_wei": stake_wei,
+                "fx_scaled": zen_usd_scaled,
+                "zen_usd": quote.zen_usd,
+                "market_id": payload.market_id,
+                "market_address": payload.market_address,
+                "user_id": payload.user_id,
+                "wallet_address": payload.wallet_address,
+                "outcome_id": quote.outcome_id,
+                "chain_id": settings.pricing_chain_id,
+                "expires_at": expires_at,
+            },
+        )
+        session.flush()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive log
+        log_event(
+            logger,
+            logging.ERROR,
+            event="pricing.quote.persist_failed",
+            message="failed to persist issued quote",
+            quote_id=quote_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Quote persistence failed") from exc
 
     log_event(
         logger,
@@ -1121,36 +1316,21 @@ def pricing_quote(payload: schemas.PricingQuoteRequest) -> schemas.PricingQuoteR
         stake_zen=payload.stake_zen,
         zen_usd=zen_usd,
         total_monetisation=str(quote.total_monetisation),
+        market_total=market_total,
+        user_total=user_total,
     )
-    # Persist issued quote for replay/audit (lightweight Redis).
-    try:
-        record = {
-            "status": "issued",
-            "issued_at": datetime.now(tz=UTC).isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "payload": quote.model_dump(mode="json"),
-        }
-        redis_client.set(f"quotes:issued:{quote_id}", json.dumps(record), ex=settings.quote_store_ttl_seconds, nx=True)
-    except Exception as exc:  # pragma: no cover - best effort
-        log_event(
-            logger,
-            logging.WARNING,
-            event="pricing.quote.store_failed",
-            message="failed to store issued quote",
-            error=str(exc),
-        )
-
     return quote
 
 
 @app.post("/pricing/submit", response_model=schemas.PricingSubmitResponse, tags=["pricing"])
-def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubmitResponse:
+def pricing_submit(
+    payload: schemas.PricingSubmitRequest,
+    session: Session = Depends(get_session),
+) -> schemas.PricingSubmitResponse:
     """Validate a signed pricing quote and optionally enforce FX drift bounds."""
 
     quote = payload.quote
     now = datetime.now(tz=UTC)
-    if quote.expires_at <= now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     if settings.pricing_chain_id is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
     if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
@@ -1166,6 +1346,29 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
     )
     if signer_account is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
+
+    db_quote = shared_repository.get_quote(session, quote.quote_id)
+    if db_quote is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
+    if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
+    if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or db_quote.expires_at <= now:
+        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
+        session.flush()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+    if quote.expires_at <= now:
+        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
+        session.flush()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+    if db_quote.wallet_address and quote.wallet_address:
+        if db_quote.wallet_address.lower() != quote.wallet_address.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote wallet mismatch")
+    if db_quote.market_address and quote.market_address:
+        if db_quote.market_address.lower() != quote.market_address.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market mismatch")
+    if db_quote.outcome_id is not None and quote.outcome_id is not None:
+        if db_quote.outcome_id != quote.outcome_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote outcome mismatch")
 
     expiry_ts = quote.expiry_ts or int(quote.expires_at.timestamp())
     stake_wei = quote.stake_wei
@@ -1191,6 +1394,8 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
     if recovered.lower() != signer_account.address.lower():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
+    if db_quote.stake_wei != stake_wei or db_quote.fx_scaled != zen_usd_scaled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote payload mismatch with ledger")
 
     # Enforce fresh FX vs quoted value if requested.
     current_fx = None
@@ -1216,49 +1421,38 @@ def pricing_submit(payload: schemas.PricingSubmitRequest) -> schemas.PricingSubm
         raise
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}") from exc
+    _enforce_caps(
+        session,
+        stake_zen=float(quote.stake_zen),
+        market_id=quote.market_id,
+        user_id=quote.user_id,
+        exclude_quote=db_quote,
+    )
 
-    # Ensure quote was issued and not reused beyond TTL.
-    try:
-        redis_client = get_redis_client()
-        if redis_client:
-            key = f"quotes:issued:{quote.quote_id}"
-            cached = redis_client.get(key)
-            if cached is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
-            try:
-                cached_record = json.loads(cached)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Malformed quote record: {exc}"
-                ) from exc
-            if cached_record.get("status") == "consumed":
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
-            # Mark consumed for audit/replay guard (best effort).
-            cached_record["status"] = "consumed"
-            cached_record["consumed_at"] = datetime.now(tz=UTC).isoformat()
-            cached_record["consumed_by"] = quote.signer
-            redis_client.set(
-                key,
-                json.dumps(cached_record),
-                ex=max(60, settings.quote_store_ttl_seconds),
-                xx=True,
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - best effort guard
-        log_event(
-            logger,
-            logging.WARNING,
-            event="pricing.submit.store_lookup_failed",
-            message="failed to lookup issued quote",
-            error=str(exc),
-        )
+    db_quote.payload = quote.model_dump(mode="json")
+    shared_repository.mark_quote_status(
+        session,
+        db_quote,
+        models.QuoteStatusEnum.CONSUMED,
+        consumed_at=now,
+    )
+    session.flush()
 
     return schemas.PricingSubmitResponse(
         quote=quote,
         current_fx=current_fx if current_fx is not None else quote.zen_usd,
         valid=True,
     )
+
+
+@app.get("/pricing/quotes/{quote_id}", response_model=schemas.QuoteRecord, tags=["pricing"])
+def pricing_quote_state(quote_id: str, session: Session = Depends(get_session)) -> schemas.QuoteRecord:
+    """Diagnostic endpoint to retrieve persisted quote state."""
+
+    record = shared_repository.get_quote(session, quote_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="quote_not_found")
+    return schemas.QuoteRecord.model_validate(record)
 
 
 @app.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])
@@ -1346,6 +1540,7 @@ def list_markets(
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
+            hydrated = _enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
             duration = (time.perf_counter() - start) * 1000
@@ -1365,7 +1560,7 @@ def list_markets(
                 offset=offset,
                 result_count=len(hydrated),
             )
-            cached_models = _filter_markets_for_visibility(_augment_market_models(hydrated))
+            cached_models = _filter_markets_for_visibility(hydrated)
             return cached_models
         MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*", category=category or "*").inc()
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:list")
@@ -1382,7 +1577,7 @@ def list_markets(
         limit=limit,
         offset=offset,
     )
-    market_models = _augment_market_models([schemas.MarketResponse.model_validate(m) for m in markets])
+    market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
     if not market_models:
         log_event(
@@ -1486,8 +1681,9 @@ def list_markets_by_category(
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
+            hydrated = _enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
-            models_from_cache = _filter_markets_for_visibility(_augment_market_models(hydrated))
+            models_from_cache = _filter_markets_for_visibility(hydrated)
             log_event(
                 logger,
                 logging.INFO,
@@ -1520,12 +1716,12 @@ def list_markets_by_category(
     else:
         markets = crud.get_markets(session, category=category_label, limit=limit, offset=offset)
     market_models = _filter_markets_for_visibility(
-        _augment_market_models([schemas.MarketResponse.model_validate(m) for m in markets])
+        _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     )
     if not market_models and not trending_category and offset == 0:
         fallback_matches = _fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
-            market_models = _filter_markets_for_visibility(_augment_market_models(fallback_matches))
+            market_models = _filter_markets_for_visibility(_enrich_market_models(session, fallback_matches))
     if not market_models:
         log_event(
             logger,
@@ -1672,7 +1868,7 @@ def suggest_markets(
     if cached is not None:
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:suggest")
         models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
-        _augment_market_models(models_from_cache)
+        _enrich_market_models(session, models_from_cache)
         log_event(
             logger,
             logging.INFO,
@@ -1687,7 +1883,7 @@ def suggest_markets(
 
     results = crud.search_markets(session, normalized_query, limit)
     market_models = [schemas.MarketResponse.model_validate(m) for m in results]
-    filtered = _filter_markets_for_visibility(_augment_market_models(market_models))
+    filtered = _filter_markets_for_visibility(_enrich_market_models(session, market_models))
     if not filtered:
         log_event(
             logger,
@@ -1763,22 +1959,12 @@ def read_resolution(
     market = crud.get_market_by_condition_id(session, normalized_condition)
     record = crud.get_resolution_by_condition_id(session, normalized_condition)
 
-    summary: dict[str, Any] | None = None
+    summary_model: schemas.ResolutionSummary | None = None
     if record is not None:
-        summary = {
-            "source": record.source,
-            "conditionId": record.condition_id,
-            "resolved": record.resolved,
-            "outcomes": record.outcomes or [],
-            "payouts": record.payouts or [],
-            "winners": record.winners or [],
-            "checkedAt": record.checked_at,
-            "oracle": record.oracle,
-            "questionId": record.question_id,
-            "transactionHash": record.transaction_hash,
-            "blockNumber": record.block_number,
-            "blockTimestamp": record.block_timestamp,
-        }
+        if market and (record.event_id is None or record.market_id is None):
+            record.event_id = market.event_id
+            record.market_id = market.id
+        summary_model = _build_resolution_summary_from_record(record, market)
     elif goldsky_client is not None:
         try:
             summary = goldsky_client.resolution_summary(
@@ -1797,6 +1983,12 @@ def read_resolution(
             )
         else:
             if summary:
+                if market:
+                    summary.setdefault("eventId", market.event_id)
+                    summary.setdefault("title", market.title)
+                    summary.setdefault("slug", market.slug)
+                    summary.setdefault("oracle", market.oracle)
+                    summary.setdefault("outcomes", market.outcomes or summary.get("outcomes", []))
                 log_event(
                     logger,
                     logging.INFO,
@@ -1805,7 +1997,48 @@ def read_resolution(
                     condition_id=normalized_condition,
                 )
 
-    if summary is None:
+                try:
+                    summary_model = schemas.ResolutionSummary.model_validate(summary)
+                    persisted_payload = {
+                        "condition_id": normalized_condition,
+                        "source": summary_model.source,
+                        "resolved": summary_model.resolved,
+                        "payouts": summary_model.payouts or [],
+                        "winners": [
+                            winner.model_dump() if hasattr(winner, "model_dump") else winner
+                            for winner in (summary_model.winners or [])
+                        ],
+                        "outcomes": summary_model.outcomes or [],
+                        "oracle": summary_model.oracle,
+                        "question_id": summary_model.question_id,
+                        "transaction_hash": summary_model.transaction_hash,
+                        "block_number": summary_model.block_number,
+                        "block_timestamp": summary_model.block_timestamp,
+                        "winning_outcome_id": summary_model.winning_outcome_id,
+                        "rake_bps": summary_model.rake_bps
+                        if summary_model.rake_bps is not None
+                        else getattr(market, "rake_bps", None),
+                        "request_id": summary_model.request_id,
+                        "checked_at": summary_model.checked_at or datetime.now(tz=UTC),
+                        "market_id": getattr(market, "id", None) if market else None,
+                        "event_id": getattr(market, "event_id", None) if market else None,
+                    }
+                    shared_repository.upsert_resolution(session, persisted_payload)
+                    session.flush()
+                except Exception as exc:  # pragma: no cover - defensive persistence
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="markets.resolution.persist_failed",
+                        message="failed to persist resolution from fallback",
+                        condition_id=normalized_condition,
+                        error=str(exc),
+                    )
+
+    if summary_model is None:
+        if record is not None:
+            summary_model = _build_resolution_summary_from_record(record, market)
+    if summary_model is None:
         log_event(
             logger,
             logging.WARNING,
@@ -1815,18 +2048,6 @@ def read_resolution(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
 
-    if market:
-        summary.update(
-            {
-                "marketId": market.id,
-                "eventId": market.event_id,
-                "title": market.title,
-                "slug": market.slug,
-                "outcomes": market.outcomes or summary.get("outcomes", []),
-            }
-        )
-
-    summary_model = schemas.ResolutionSummary.model_validate(summary)
     if cache_available:
         cache_payload = summary_model.model_dump(mode="json", by_alias=True)
         if summary_model.checked_at is not None:
@@ -1882,7 +2103,7 @@ def read_market(
     if cached is not None:
         duration = (time.perf_counter() - start) * 1000
         model = schemas.MarketResponse.model_validate(cached)
-        _apply_market_metadata(model)
+        _enrich_market_models(session, [model])
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:detail")
         log_event(
             logger,
@@ -1899,14 +2120,15 @@ def read_market(
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
-    response = schemas.MarketResponse.model_validate(market)
-    _apply_market_metadata(response)
+    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
     duration = (time.perf_counter() - start) * 1000
     if cache_available:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
         set_json(cache, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
         add_tag(cache, schema_tag, cache_key)
         add_tag(cache, f"market:{event_id}", cache_key)
+        if getattr(response, "condition_id", None):
+            add_tag(cache, f"resolution:{str(response.condition_id).lower()}", cache_key)
         log_event(
             logger,
             logging.INFO,

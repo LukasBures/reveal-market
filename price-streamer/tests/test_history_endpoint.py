@@ -20,7 +20,7 @@ class StubState(StreamState):
 @pytest.fixture()
 def history_client(monkeypatch):
     state = StubState()
-    monkeypatch.setattr("app.main.StreamState", lambda settings=None: state)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
 
     # Avoid spinning up real network streamer in tests.
     class DummyStreamer:

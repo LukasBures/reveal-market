@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from prometheus_client import REGISTRY, Counter, Gauge
@@ -15,6 +16,9 @@ from py_clob_client.clob_types import BookParams
 from .config import Settings
 from .rtds_client import PolymarketRTDSClient, RTDSMessage, RTDSRouter, Subscription
 from .state import FatalWebsocketError, StreamState, iter_ws
+
+if TYPE_CHECKING:
+    from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.price_streamer.streamer")
 
@@ -29,9 +33,10 @@ class PriceStreamer:
     _metric_ws_restarts_shared: Counter | None = None
     _metric_ticks_shared: Counter | None = None
 
-    def __init__(self, state: StreamState, settings: Settings):
+    def __init__(self, state: StreamState, settings: Settings, metrics: StreamerMetrics | None = None):
         self.state = state
         self.settings = settings
+        self.stream_metrics = metrics
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
         self._publish_cache: dict[str, dict] = {}
@@ -136,7 +141,11 @@ class PriceStreamer:
             if not self.state.subscriptions.assets:
                 logger.debug(
                     "CLOB ws idle; no subscriptions yet",
-                    extra={"event": "clob.ws.idle", "subscriptions": 0},
+                    extra={
+                        "event": "clob.ws.idle",
+                        "subscriptions": 0,
+                        "backoff_seconds": self.settings.ws_reconnect_seconds,
+                    },
                 )
                 await asyncio.sleep(self.settings.ws_reconnect_seconds)
                 continue
@@ -190,7 +199,14 @@ class PriceStreamer:
                             await self._handle_tick(payload, source="ws")
                         last_version = await self._refresh_clob_subscription(ws, last_version)
                 except Exception as exc:  # pragma: no cover - reconnect path
-                    logger.warning("CLOB ws loop error", extra={"event": "clob.ws.error", "error": str(exc)})
+                    logger.warning(
+                        "CLOB ws loop error",
+                        extra={
+                            "event": "clob.ws.error",
+                            "error": str(exc),
+                            "backoff_seconds": self.settings.ws_reconnect_seconds,
+                        },
+                    )
                     await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     async def _rest_poll_loop(self) -> None:
@@ -386,9 +402,18 @@ class PriceStreamer:
             if midpoints and len(midpoints) == len(coerced_token_ids):
                 prices = midpoints
         if not market_id or not prices or not isinstance(prices, (list, tuple)):
+            if self.stream_metrics:
+                reason = "missing_market" if not market_id else "missing_prices"
+                try:
+                    self.stream_metrics.record_drop("ingest", reason)
+                except Exception as exc:
+                    logger.debug("Failed to record drop metric", exc_info=exc)
             return
         # Record last seen timestamp for diagnostics.
         self.state.last_seen[str(market_id)] = datetime.now(UTC)
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.market_staleness.labels(market_id=str(market_id)).set(0)
         # Capture best bid/ask in both snake and camel variants.
         best_bid_raw = (
             raw.get("best_bid")
@@ -418,6 +443,9 @@ class PriceStreamer:
                 "Skipping publish due to stale FX",
                 extra={"event": "publish.skipped.fx_stale", "market_id": market_id, "fx_source": fx.source},
             )
+            if self.stream_metrics:
+                with suppress(Exception):
+                    self.stream_metrics.record_drop("ingest", "fx_stale")
             return
         ts = datetime.now(UTC).isoformat()
         for idx, price in enumerate(prices):
@@ -613,7 +641,14 @@ class PriceStreamer:
             except Exception as exc:  # pragma: no cover - reconnect path
                 self.state.fx_ws_connected = False
                 self.state.fx_last_error = str(exc)
-                logger.warning("FX ws loop error", extra={"event": "fx.ws.error", "error": str(exc)})
+                logger.warning(
+                    "FX ws loop error",
+                    extra={
+                        "event": "fx.ws.error",
+                        "error": str(exc),
+                        "backoff_seconds": self.settings.ws_reconnect_seconds,
+                    },
+                )
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     async def _handle_fx_ws(self, data: dict) -> None:

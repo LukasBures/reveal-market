@@ -11,7 +11,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
     | null;
-  const gamma = extraData?.gamma as Record<string, any> | undefined;
+  const prices = Array.isArray(market.outcomePrices) ? market.outcomePrices : [];
 
   return (
     <header className="rounded-3xl border border-slate-800 bg-slate-950 px-5 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:px-8 sm:py-8">
@@ -37,6 +37,23 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
               )}
             </div>
             <h1 className="text-2xl font-semibold text-white sm:text-3xl">{market.title}</h1>
+            {Array.isArray(market.outcomes) && market.outcomes.length > 0 && (
+              <div className="flex flex-wrap gap-2 text-sm text-white/90">
+                {market.outcomes.slice(0, 2).map((label, idx) => {
+                  const price = Number(prices[idx] ?? 0);
+                  const pct = Number.isFinite(price) ? Math.round(price * 100) : null;
+                  return (
+                    <a
+                      key={`${market.eventId}-cta-${idx}`}
+                      href={`#buy-${idx}`}
+                      className="rounded-full bg-brand-500/15 px-3 py-1 text-brand-50 transition hover:bg-brand-500/25"
+                    >
+                      Buy {label ?? `Outcome ${idx + 1}`}{pct !== null ? ` · ${pct}%` : ""}
+                    </a>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
