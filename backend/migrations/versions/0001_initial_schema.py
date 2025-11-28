@@ -104,6 +104,22 @@ def upgrade() -> None:
     op.create_index("ix_resolutions_event_id", "resolutions", ["event_id"])
 
     op.create_table(
+        "factory_events",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("factory_address", sa.String(length=64), nullable=False),
+        sa.Column("market_address", sa.String(length=64), nullable=True),
+        sa.Column("event", sa.String(length=64), nullable=False),
+        sa.Column("tx_hash", sa.String(length=66), nullable=True),
+        sa.Column("block_number", sa.BigInteger(), nullable=True),
+        sa.Column("block_timestamp", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("payload", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_factory_events_factory", "factory_events", ["factory_address"])
+    op.create_index("ix_factory_events_market", "factory_events", ["market_address"])
+    op.create_index("ix_factory_events_tx_hash", "factory_events", ["tx_hash"])
+
+    op.create_table(
         "quotes",
         sa.Column("quote_id", sa.String(length=66), primary_key=True, nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="issued"),
@@ -205,6 +221,23 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "settlement_receipts",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("market_id", sa.Integer(), nullable=False),
+        sa.Column("market_address", sa.String(length=64), nullable=True),
+        sa.Column("request_id", sa.String(length=128), nullable=False),
+        sa.Column("proof_hash", sa.String(length=66), nullable=True),
+        sa.Column("public_signals", sa.JSON(), nullable=True),
+        sa.Column("prover_version", sa.String(length=64), nullable=True),
+        sa.Column("circuit_hash", sa.String(length=66), nullable=True),
+        sa.Column("generated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_settlement_receipts_market_id", "settlement_receipts", ["market_id"])
+    op.create_index("ix_settlement_receipts_market_address", "settlement_receipts", ["market_address"])
+    op.create_index("ix_settlement_receipts_request_id", "settlement_receipts", ["request_id"])
+
+    op.create_table(
         "schema_versions",
         sa.Column("key", sa.String(length=64), primary_key=True, nullable=False),
         sa.Column("revision", sa.String(length=64), nullable=False),
@@ -213,11 +246,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_quotes_expires_at", table_name="quotes")
-    op.drop_index("ix_quotes_status", table_name="quotes")
-    op.drop_index("ix_quotes_user_id", table_name="quotes")
-    op.drop_index("ix_quotes_market_id", table_name="quotes")
-    op.drop_table("quotes")
+    op.drop_table("schema_versions")
+    op.drop_index("ix_settlement_receipts_request_id", table_name="settlement_receipts")
+    op.drop_index("ix_settlement_receipts_market_address", table_name="settlement_receipts")
+    op.drop_index("ix_settlement_receipts_market_id", table_name="settlement_receipts")
+    op.drop_table("settlement_receipts")
     op.drop_index("ix_hedger_treasury_snapshots_market_id", table_name="hedger_treasury_snapshots")
     op.drop_table("hedger_treasury_snapshots")
     op.drop_index("ix_settlements_proof_status", table_name="settlements")
@@ -228,7 +261,15 @@ def downgrade() -> None:
     op.drop_index("ix_commitments_market_user", table_name="commitments")
     op.drop_index("ix_commitments_market_id", table_name="commitments")
     op.drop_table("commitments")
-    op.drop_table("schema_versions")
+    op.drop_index("ix_quotes_expires_at", table_name="quotes")
+    op.drop_index("ix_quotes_status", table_name="quotes")
+    op.drop_index("ix_quotes_user_id", table_name="quotes")
+    op.drop_index("ix_quotes_market_id", table_name="quotes")
+    op.drop_table("quotes")
+    op.drop_index("ix_factory_events_tx_hash", table_name="factory_events")
+    op.drop_index("ix_factory_events_market", table_name="factory_events")
+    op.drop_index("ix_factory_events_factory", table_name="factory_events")
+    op.drop_table("factory_events")
     op.drop_index("ix_resolutions_event_id", table_name="resolutions")
     op.drop_index("ix_resolutions_market_id", table_name="resolutions")
     op.drop_index("ix_resolutions_block_number", table_name="resolutions")
