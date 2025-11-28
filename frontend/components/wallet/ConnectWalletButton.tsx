@@ -12,6 +12,7 @@ import {
   useSignMessage,
   useSwitchChain,
 } from "wagmi";
+import { defaultChain } from "@/lib/wagmi";
 
 type ConnectorOption = {
   id: string;
@@ -117,7 +118,7 @@ function formatSignature(signature?: string | null) {
 }
 
 export function ConnectWalletButton() {
-  const { address, chain, status: accountStatus } = useAccount();
+  const { address, chain, status: accountStatus, connector: activeConnector } = useAccount();
   const { connect, connectors, status: connectStatus, error: connectError } = useConnect();
   const { disconnect } = useDisconnect();
   const { data: signature, error: signError, isPending: isSigning, signMessageAsync } = useSignMessage();
@@ -126,6 +127,7 @@ export function ConnectWalletButton() {
     error: switchError,
     isPending: isSwitching,
     switchChain,
+    switchChainAsync,
   } = useSwitchChain();
 
   const [message, setMessage] = useState("gm from Reveal Market");
@@ -134,6 +136,10 @@ export function ConnectWalletButton() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const modalTitleId = "wallet-modal-title";
   const [isMounted, setIsMounted] = useState(false);
+  const [attemptedAutoSwitch, setAttemptedAutoSwitch] = useState(false);
+  const [autoCloseOnConnect, setAutoCloseOnConnect] = useState(false);
+  const isConnected = accountStatus === "connected" && Boolean(address);
+  const activeConnectorId = activeConnector?.id;
   const connectErrorMessage = formatErrorMessage(connectError);
   const signErrorMessage = formatErrorMessage(signError);
   const switchErrorMessage = formatErrorMessage(switchError);
@@ -155,9 +161,25 @@ export function ConnectWalletButton() {
     setIsMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!isConnected) {
+      setAttemptedAutoSwitch(false);
+      return;
+    }
+    const switchFn = switchChainAsync ?? switchChain;
+    if (chain?.id !== defaultChain.id && switchFn && !attemptedAutoSwitch) {
+      setAttemptedAutoSwitch(true);
+      Promise.resolve(switchFn({ chainId: defaultChain.id })).catch(() => setAttemptedAutoSwitch(false));
+    }
+  }, [attemptedAutoSwitch, chain?.id, isConnected, switchChain, switchChainAsync]);
+
   const connectorsById = useMemo<ConnectorMap>(() => {
     return connectors.reduce<ConnectorMap>((acc, connector) => {
       acc[connector.id] = connector;
+      const connectorType = (connector as any).type;
+      if (connectorType && !acc[connectorType]) {
+        acc[connectorType] = connector;
+      }
       return acc;
     }, {});
   }, [connectors]);
@@ -241,7 +263,6 @@ export function ConnectWalletButton() {
     }
   }, [availableOptions, selectedOption]);
 
-  const isConnected = accountStatus === "connected" && Boolean(address);
   const isConnecting = connectStatus === "pending";
 
   const handleConnect = (connector?: Connector) => {
@@ -249,6 +270,7 @@ export function ConnectWalletButton() {
       console.warn("Connector unavailable for selected wallet option.");
       return;
     }
+    setAutoCloseOnConnect(true);
     connect({ connector });
   };
 
@@ -263,23 +285,40 @@ export function ConnectWalletButton() {
     }
   };
 
-  const handleSwitchChain = (chainId: number) => {
+  const handleSwitchChain = () => {
     if (!switchChain) {
       return;
     }
-    switchChain({ chainId });
+    switchChain({ chainId: defaultChain.id });
   };
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelectedOption(null);
     setAcceptedTerms(false);
+    setAutoCloseOnConnect(false);
   }, []);
   const openModal = () => {
     setModalOpen(true);
     setSelectedOption(null);
     setAcceptedTerms(false);
+    setAutoCloseOnConnect(!isConnected);
   };
+
+  useEffect(() => {
+    if (isConnected && isModalOpen && autoCloseOnConnect) {
+      closeModal();
+    }
+  }, [autoCloseOnConnect, closeModal, isConnected, isModalOpen]);
+
+  useEffect(() => {
+    if (connectStatus === "success" && isModalOpen && autoCloseOnConnect) {
+      closeModal();
+    }
+    if (connectStatus === "error") {
+      setAutoCloseOnConnect(false);
+    }
+  }, [autoCloseOnConnect, closeModal, connectStatus, isModalOpen]);
 
   const buttonLabel = (() => {
     if (isConnecting) {
@@ -342,6 +381,12 @@ export function ConnectWalletButton() {
                       const connector = connectorsById[option.connectorId];
                       const disabled = !connector || isConnecting;
                       const isSelected = selectedOption?.id === option.id;
+                      const isActiveConnector = isConnected && activeConnectorId === connector?.id;
+                      const stateClass = isActiveConnector
+                        ? "border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-300/60"
+                        : isSelected
+                          ? "border-brand-400 bg-brand-500/20"
+                          : "border-white/15 bg-white/5";
                       return (
                         <button
                           key={option.id}
@@ -354,9 +399,7 @@ export function ConnectWalletButton() {
                             setSelectedOption(option);
                             setAcceptedTerms(false);
                           }}
-                          className={`group flex items-center gap-4 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
-                            isSelected ? "border-brand-400 bg-brand-500/20" : "border-white/15 bg-white/5"
-                          }`}
+                          className={`group flex items-center gap-4 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${stateClass}`}
                         >
                           <span className="flex h-16 w-16 flex-none items-center justify-center rounded-3xl bg-white/10 transition-transform duration-200 group-hover:scale-105">
                             <Image
@@ -370,6 +413,11 @@ export function ConnectWalletButton() {
                           <span>
                             {option.label}
                             <span className="block text-xs font-normal text-white/60">{option.description}</span>
+                            {isActiveConnector ? (
+                              <span className="mt-1 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                                Connected
+                              </span>
+                            ) : null}
                           </span>
                         </button>
                       );
@@ -449,63 +497,30 @@ export function ConnectWalletButton() {
                           <p className="font-mono text-sm">{formatAddress(address)}</p>
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => disconnect()}
-                          className="rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/80 transition hover:border-white hover:text-white"
-                        >
-                          Disconnect
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSwitchChain}
+                            disabled={!switchChain || isSwitching || chain?.id === defaultChain.id}
+                            className={
+                              "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition " +
+                              (chain?.id === defaultChain.id
+                                ? "border-brand-400 bg-brand-500/20 text-white"
+                                : "border-white/20 text-white/80 hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50")
+                            }
+                          >
+                            {chain?.id === defaultChain.id ? "On Horizen" : "Switch network"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => disconnect()}
+                            className="rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/80 transition hover:border-white hover:text-white"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Sign message (optional)</p>
-                    <div className="mt-2 flex flex-col gap-2">
-                      <input
-                        type="text"
-                        value={message}
-                        onChange={(event) => setMessage(event.target.value)}
-                        placeholder="Enter a message"
-                        className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white placeholder:text-white/40 focus:border-white/40 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSignMessage}
-                        disabled={isSigning || !message.trim()}
-                        className="rounded-xl bg-brand-500 px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.3em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isSigning ? "Signing…" : "Sign message"}
-                      </button>
-                      {signature ? (
-                        <p className="text-[11px] text-white/70">Signature: {formatSignature(signature)}</p>
-                      ) : null}
-                      {signErrorMessage ? <p className="text-[11px] text-rose-300">{signErrorMessage}</p> : null}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Switch network (optional)</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {chains.map((chainOption) => (
-                        <button
-                          key={chainOption.id}
-                          type="button"
-                          onClick={() => handleSwitchChain(chainOption.id)}
-                          disabled={!switchChain || isSwitching || chain?.id === chainOption.id}
-                          className={
-                            "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition " +
-                            (chain?.id === chainOption.id
-                              ? "border-brand-400 bg-brand-500/20 text-white"
-                              : "border-white/15 text-white/80 hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50")
-                          }
-                        >
-                          {chainOption.name}
-                        </button>
-                      ))}
-                    </div>
-                    {switchErrorMessage ? <p className="text-[11px] text-rose-300">{switchErrorMessage}</p> : null}
                   </div>
                 </>
               ) : null}

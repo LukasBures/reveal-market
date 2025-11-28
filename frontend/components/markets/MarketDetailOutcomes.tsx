@@ -9,7 +9,7 @@ import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
-import type { Address } from "viem";
+import { BaseError, type Address } from "viem";
 import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 
 type Props = {
@@ -104,7 +104,7 @@ export function MarketDetailOutcomes({ market }: Props) {
         .catch((err) => setError((err as Error).message))
         .finally(() => setLoading(false));
     },
-    [fx, fxStale, stakeZen, address, market.marketAddress, market.eventId, selectedOutcome, chainId],
+    [fx, fxStale, stakeZen, address, market.marketAddress, market.eventId, selectedOutcome],
   );
 
   useEffect(() => {
@@ -475,8 +475,13 @@ export function MarketDetailOutcomes({ market }: Props) {
         )}
         {(txError || wagmiError) && (
           <p className="mt-1 text-xs text-rose-300">
-            {txError ?? wagmiError?.shortMessage ?? wagmiError?.message ?? "Transaction failed"}. Ensure chain and quote
-            are valid.
+            {txError ??
+              (wagmiError instanceof BaseError
+                ? wagmiError.shortMessage
+                : wagmiError instanceof Error
+                  ? wagmiError.message
+                  : "Transaction failed")}
+            . Ensure chain and quote are valid.
           </p>
         )}
       </div>

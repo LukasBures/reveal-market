@@ -713,6 +713,4 @@ ____
   - You can leave createMarket unused; it won’t do anything unless the owner calls it with a payable float amount (if any).
   - If you want to prevent any future market creation entirely, you can optionally transfer ownership to a burn address or timelock with no proposer, but that also blocks updates to guardian/risk limits.
 
-› 
-
-  
+›

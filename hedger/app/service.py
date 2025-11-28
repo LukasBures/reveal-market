@@ -4,14 +4,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from redis.asyncio import Redis
 
 from .bet_processor_zen import BetProcessorZen
+from .bridge import BridgeClient
 from .config import Settings
 from .exposure import ExposureLedger
-from .bridge import BridgeClient
 from .fx import FxOracle
 from .hedger_usdc import HedgerUSDC
 from .local_logging import log_event
@@ -483,9 +483,13 @@ class HedgerService:
         slippage = slippage_bps if slippage_bps is not None else self.settings.max_slippage_bps
         idempotency = f"{direction}:{destination}:{amount}"
         if direction == "usdc_to_zen":
-            return await self.bridge_client.bridge_to_zen(amount, destination, slippage_bps=slippage, idempotency=idempotency)
+            return await self.bridge_client.bridge_to_zen(
+                amount, destination, slippage_bps=slippage, idempotency=idempotency
+            )
         if direction == "zen_to_usdc":
-            return await self.bridge_client.bridge_to_usdc(amount, destination, slippage_bps=slippage, idempotency=idempotency)
+            return await self.bridge_client.bridge_to_usdc(
+                amount, destination, slippage_bps=slippage, idempotency=idempotency
+            )
         raise ValueError("direction must be 'usdc_to_zen' or 'zen_to_usdc'")
 
     async def health(self) -> dict:
@@ -552,7 +556,16 @@ class HedgerService:
                 continue
             try:
                 return Decimal(str(value))
-            except Exception:
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="hedger.order.invalid_filled_size",
+                    message="unable to parse filled size from order payload",
+                    key=key,
+                    value=value,
+                    error=str(exc),
+                )
                 continue
         return requested
 

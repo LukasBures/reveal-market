@@ -182,9 +182,9 @@ def apply_market_summary(
 def upsert_settlement_snapshot(session: Session, market_id: int, data: Mapping[str, Any]) -> models.Settlement:
     """Insert or update a settlement snapshot for a market."""
 
-    settlement = (
-        session.execute(select(models.Settlement).where(models.Settlement.market_id == market_id)).scalar_one_or_none()
-    )
+    settlement = session.execute(
+        select(models.Settlement).where(models.Settlement.market_id == market_id)
+    ).scalar_one_or_none()
     payload = dict(data)
     if settlement is None:
         settlement = models.Settlement(market_id=market_id)
@@ -250,14 +250,12 @@ def record_factory_event(
     normalized_tx = tx_hash.lower() if isinstance(tx_hash, str) else None
     existing: models.FactoryEvent | None = None
     if normalized_tx:
-        existing = (
-            session.execute(
-                select(models.FactoryEvent).where(
-                    models.FactoryEvent.tx_hash == normalized_tx,
-                    models.FactoryEvent.event == event,
-                )
-            ).scalar_one_or_none()
-        )
+        existing = session.execute(
+            select(models.FactoryEvent).where(
+                models.FactoryEvent.tx_hash == normalized_tx,
+                models.FactoryEvent.event == event,
+            )
+        ).scalar_one_or_none()
     if existing:
         return existing
     record = models.FactoryEvent(
@@ -287,14 +285,12 @@ def record_settlement_receipt(
 ) -> models.SettlementReceipt:
     """Persist a prover receipt for downstream automation/audits."""
 
-    existing = (
-        session.execute(
-            select(models.SettlementReceipt).where(
-                models.SettlementReceipt.market_id == market_id,
-                models.SettlementReceipt.request_id == request_id,
-            )
-        ).scalar_one_or_none()
-    )
+    existing = session.execute(
+        select(models.SettlementReceipt).where(
+            models.SettlementReceipt.market_id == market_id,
+            models.SettlementReceipt.request_id == request_id,
+        )
+    ).scalar_one_or_none()
     if existing:
         return existing
     receipt = models.SettlementReceipt(

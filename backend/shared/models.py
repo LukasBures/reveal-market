@@ -7,6 +7,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
 Base = declarative_base()
+BigIntPk = BigInteger().with_variant(Integer, "sqlite")
 
 
 class MarketStatusEnum(str, Enum):
@@ -97,7 +98,7 @@ Index("ix_resolutions_block_number", Resolution.block_number)
 class Commitment(Base):
     __tablename__ = "commitments"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id = Column(BigIntPk, primary_key=True, index=True, autoincrement=True)
     market_id = Column(Integer, nullable=False, index=True)
     user_address = Column(String(64), nullable=False)
     outcome_id = Column(Integer, nullable=False)
@@ -112,7 +113,7 @@ class Commitment(Base):
 class CommitmentMerklePath(Base):
     __tablename__ = "commitment_merkle_paths"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id = Column(BigIntPk, primary_key=True, index=True, autoincrement=True)
     commitment_id = Column(BigInteger, nullable=False, index=True)
     level = Column(Integer, nullable=False)
     sibling_hash = Column(String(66), nullable=False)
@@ -198,12 +199,13 @@ class Quote(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     consumed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class FactoryEvent(Base):
     __tablename__ = "factory_events"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigIntPk, primary_key=True, autoincrement=True)
     factory_address = Column(String(64), nullable=False, index=True)
     market_address = Column(String(64), nullable=True, index=True)
     event = Column(String(64), nullable=False)
@@ -217,7 +219,7 @@ class FactoryEvent(Base):
 class SettlementReceipt(Base):
     __tablename__ = "settlement_receipts"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigIntPk, primary_key=True, autoincrement=True)
     market_id = Column(Integer, nullable=False, index=True)
     market_address = Column(String(64), nullable=True, index=True)
     request_id = Column(String(128), nullable=False, index=True)
