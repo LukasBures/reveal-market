@@ -80,7 +80,7 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
 
     if log_to_file:
         log_dir.mkdir(parents=True, exist_ok=True)
-        logfile = log_dir / f"{service_name}_{datetime.utcnow().date():%Y-%m-%d}.log"
+        logfile = log_dir / f"{service_name}_{datetime.now(UTC).date():%Y-%m-%d}.log"
         file_handler = RotatingFileHandler(logfile, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
         file_handler.setFormatter(formatter)
         handlers.append(file_handler)

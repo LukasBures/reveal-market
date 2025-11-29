@@ -20,7 +20,7 @@ Default testnet: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testn
 | `contracts/polygon` | Foundry workspace for the Polygon deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
 | `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
 | `hedger/` | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
-| `price-streamer/` | Polymarket price ingest + SSE fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
+| `streamer/` | Polymarket price ingest + SSE/WS fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
 | `backend/api` + `frontend` + `contracts/zen` | Signed pricing + on-chain enforcement. | API signs ABI-packed quotes (`QUOTE_V1`, chainid, market, wallet, outcome, stake_wei, fx_scaled, expiry, quoteId), frontend requests quotes with those fields and submits `commitWithQuote`, contracts enforce signatures/replay/expiry with `pricingSigner`. |
 
 Additional docs live in each directory’s README.
@@ -89,8 +89,8 @@ uv sync --project hedger --extra dev --no-install-project
 cd hedger && ./run_tests.sh
 
 # Price Streamer (WS/SSE service)
-uv sync --project price-streamer --extra dev --no-install-project
-cd price-streamer && ./run_tests.sh
+uv sync --project streamer --extra dev --no-install-project
+cd streamer && ./run_tests.sh
 # If calling /stream or /history from the browser, set STREAMER_CORS_ALLOW_ORIGINS to your frontend origin (e.g., http://localhost:3000).
 
 # Full docker stack (API, worker, frontend, Postgres, Redis, prover)

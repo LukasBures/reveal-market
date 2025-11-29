@@ -142,8 +142,8 @@ class Settings(BaseSettings):
         return value
 
     @property
-    def total_monetisation_percent(self) -> float:
-        """Return the combined monetisation percentage (haircut + worsen + rake)."""
+    def total_monetization_percent(self) -> float:
+        """Return the combined monetization percentage (haircut + worsen + rake)."""
 
         return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
 

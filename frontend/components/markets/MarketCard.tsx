@@ -28,6 +28,10 @@ export function MarketCard({ market }: Props) {
   const yesProbability = market.outcomePrices?.length ? Math.round((market.outcomePrices[0] ?? 0) * 100) : null;
   const outcomes = market.outcomes ?? [];
   const categoryLabel = market.category ?? "General";
+  const volumeUsd = market.volume24hUsd ?? market.liquidityUsd ?? 0;
+  const popularityScore = market.popularityScore ?? volumeUsd ?? 0;
+  const formatUsd = (value: number) =>
+    new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
   const extraImage =
     market.extraData && typeof market.extraData === "object"
       ? (market.extraData as Record<string, any>).image_url ??
@@ -59,6 +63,16 @@ export function MarketCard({ market }: Props) {
         <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
           <Image src="/brand/reveal-wolf-01.png" alt="" width={18} height={18} className="h-4 w-4 rounded-full object-cover" />
           ZK
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
+          <p className="uppercase tracking-[0.25em] text-slate-500">Popularity</p>
+          <p className="text-sm font-semibold text-white">{formatUsd(popularityScore)}</p>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
+          <p className="uppercase tracking-[0.25em] text-slate-500">24h Volume</p>
+          <p className="text-sm font-semibold text-white">{formatUsd(volumeUsd)}</p>
         </div>
       </div>
       {outcomes.length > 0 && (

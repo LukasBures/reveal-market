@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Market detail – multi outcome & yes/no</title>
+  <style>
+    :root {
+      --bg: #080b14;
+      --panel: #0f1628;
+      --panel-strong: #111a2f;
+      --text: #e8eef9;
+      --muted: #96a3c7;
+      --accent: #a2ff00;
+      --accent-soft: rgba(162, 255, 0, 0.12);
+      --danger: #ff5c8d;
+      --danger-soft: rgba(255, 92, 141, 0.1);
+      --border: rgba(255, 255, 255, 0.08);
+      --card-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+      --radius: 14px;
+      --font: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--text);
+      background: radial-gradient(circle at 20% 20%, rgba(162,255,0,0.06), transparent 30%),
+                  radial-gradient(circle at 80% 0%, rgba(255,92,141,0.05), transparent 25%),
+                  var(--bg);
+      padding: 28px;
+    }
+    .page {
+      max-width: 1080px;
+      margin: 0 auto 56px;
+      display: grid;
+      gap: 18px;
+    }
+    .card {
+      background: linear-gradient(135deg, var(--panel), var(--panel-strong));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--card-shadow);
+      padding: 20px;
+    }
+    h1, h2, h3, h4 { margin: 0; letter-spacing: -0.01em; }
+    p { margin: 6px 0 0; color: var(--muted); }
+    .hero {
+      display: grid;
+      gap: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pill.accent { border-color: rgba(162, 255, 0, 0.5); background: var(--accent-soft); color: #0f1a00; }
+    .pill.danger { border-color: rgba(255, 92, 141, 0.5); background: var(--danger-soft); color: #2c0c18; }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .stat {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .stat .label { color: var(--muted); font-size: 12px; }
+    .stat .value { font-size: 18px; font-weight: 700; }
+    .cta-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 150ms ease;
+    }
+    .btn:hover { transform: translateY(-1px); border-color: rgba(255, 255, 255, 0.24); }
+    .btn.accent { background: var(--accent); color: #0c1202; border-color: rgba(0,0,0,0.08); }
+    .btn.ghost { background: transparent; }
+    .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .section-heading small { color: var(--muted); }
+    .outcomes { display: grid; gap: 12px; }
+    details.outcome {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.02);
+      transition: border-color 140ms ease, transform 140ms ease;
+    }
+    details.outcome[open] { border-color: rgba(162, 255, 0, 0.5); transform: translateY(-1px); }
+    summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      display: grid;
+      gap: 6px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    .summary-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .outcome-name { font-weight: 700; font-size: 16px; color: var(--text); }
+    .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .outcome-body {
+      border-top: 1px solid var(--border);
+      padding: 14px 16px 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .split {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .side {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      display: grid;
+      gap: 10px;
+    }
+    .side-header { display: flex; justify-content: space-between; align-items: center; }
+    .side h4 { font-size: 14px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    input[type="number"], select {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    input[type="number"]:focus, select:focus { outline: 2px solid var(--accent-soft); }
+    .book {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .book h4 { font-size: 13px; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+    .book-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+    }
+    .book-list { display: grid; gap: 6px; }
+    .book-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+      font-size: 13px;
+    }
+    .book-row.yes { border-color: rgba(162, 255, 0, 0.4); }
+    .book-row.no { border-color: rgba(255, 92, 141, 0.3); }
+    .hint { font-size: 12px; color: var(--muted); }
+    @media (max-width: 640px) {
+      body { padding: 18px; }
+      .summary-top { flex-direction: column; align-items: flex-start; }
+      .book-row { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="card hero">
+      <div class="tags">
+        <span class="pill accent">ETH</span>
+        <span class="pill">Market detail</span>
+      </div>
+      <h1>Ethereum price on November 29?</h1>
+      <p>Compact, no-nonsense market view. Expand an outcome to see depth and place a buy or sell right away.</p>
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="label">Resolves</div>
+          <div class="value">Nov 29, 2025 • 12:00 ET</div>
+        </div>
+        <div class="stat">
+          <div class="label">24h volume</div>
+          <div class="value">$12,420</div>
+        </div>
+        <div class="stat">
+          <div class="label">Liquidity</div>
+          <div class="value">$88,500</div>
+        </div>
+        <div class="stat">
+          <div class="label">Spread (best Yes/No)</div>
+          <div class="value">0.6¢</div>
+        </div>
+      </div>
+      <div class="cta-row">
+        <button class="btn accent">Quick buy Yes @ 27¢</button>
+        <button class="btn ghost">Quick buy No @ 73¢</button>
+      </div>
+    </div>
+
+    <div class="card outcomes">
+      <div class="section-heading">
+        <h2>Outcomes</h2>
+        <small>Tap a row to open order entry and the book</small>
+      </div>
+
+      <details class="outcome" open>
+        <summary>
+          <div class="summary-top">
+            <span class="outcome-name">Less than $2,300</span>
+            <div class="tags">
+              <span class="pill accent">Yes 0.2¢</span>
+              <span class="pill">Est. 1% prob</span>
+              <span class="pill">Vol $6,395</span>
+            </div>
+          </div>
+        </summary>
+        <div class="outcome-body">
+          <div class="split">
+            <div class="side">
+              <div class="side-header">
+                <h4>Buy this outcome</h4>
+                <span class="pill accent">Long</span>
+              </div>
+              <div class="field">
+                <label>Price (¢)</label>
+                <input type="number" value="0.2" min="0.1" step="0.1">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="100" min="1" step="10">
+              </div>
+              <button class="btn accent">Review Yes order</button>
+              <span class="hint">Expected cost $0.20 • Max payout $1.00</span>
+            </div>
+            <div class="side">
+              <div class="side-header">
+                <h4>Sell/short</h4>
+                <span class="pill danger">Short</span>
+              </div>
+              <div class="field">
+                <label>Limit price (¢)</label>
+                <input type="number" value="99.8" min="0.1" max="99.9" step="0.1">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="50" min="1" step="10">
+              </div>
+              <button class="btn">Post No offer</button>
+              <span class="hint">You receive $0.50 now; liability $49.50.</span>
+            </div>
+          </div>
+
+          <div class="book">
+            <h4>Top of book</h4>
+            <div class="book-grid">
+              <div class="book-list">
+                <div class="book-row yes">
+                  <span>Yes 7.7¢</span><span>572 sh</span><span>$129.11</span>
+                </div>
+                <div class="book-row yes">
+                  <span>Yes 2.0¢</span><span>200 sh</span><span>$85.07</span>
+                </div>
+                <div class="book-row yes">
+                  <span>Yes 1.5¢</span><span>4,207 sh</span><span>$72.17</span>
+                </div>
+              </div>
+              <div class="book-list">
+                <div class="book-row no">
+                  <span>No 99.5¢</span><span>696 sh</span><span>$6,924.00</span>
+                </div>
+                <div class="book-row no">
+                  <span>No 98.8¢</span><span>210 sh</span><span>$1,893.00</span>
+                </div>
+                <div class="book-row no">
+                  <span>No 97.0¢</span><span>120 sh</span><span>$1,164.00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="outcome">
+        <summary>
+          <div class="summary-top">
+            <span class="outcome-name">$3,000 – $3,100</span>
+            <div class="tags">
+              <span class="pill accent">Yes 57¢</span>
+              <span class="pill">Est. 54% prob</span>
+              <span class="pill">Vol $5,834</span>
+            </div>
+          </div>
+        </summary>
+        <div class="outcome-body">
+          <div class="split">
+            <div class="side">
+              <div class="side-header">
+                <h4>Buy this range</h4>
+                <span class="pill accent">Yes</span>
+              </div>
+              <div class="field">
+                <label>Price (¢)</label>
+                <input type="number" value="57" min="1" max="99" step="0.5">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="200" min="1" step="10">
+              </div>
+              <button class="btn accent">Buy $114.00</button>
+              <span class="hint">Max payout $200.00</span>
+            </div>
+            <div class="side">
+              <div class="side-header">
+                <h4>Lay this range</h4>
+                <span class="pill danger">No</span>
+              </div>
+              <div class="field">
+                <label>Ask (¢)</label>
+                <input type="number" value="48" min="1" max="99" step="0.5">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="100" min="1" step="10">
+              </div>
+              <button class="btn">Offer to sell</button>
+              <span class="hint">Collect $48.00 now; liability $52.00</span>
+            </div>
+          </div>
+          <div class="book">
+            <h4>Depth snapshot</h4>
+            <div class="book-grid">
+              <div class="book-list">
+                <div class="book-row yes"><span>Yes 56.8¢</span><span>300 sh</span><span>$170.40</span></div>
+                <div class="book-row yes"><span>Yes 55.5¢</span><span>180 sh</span><span>$99.90</span></div>
+              </div>
+              <div class="book-list">
+                <div class="book-row no"><span>No 44.0¢</span><span>210 sh</span><span>$92.40</span></div>
+                <div class="book-row no"><span>No 43.2¢</span><span>120 sh</span><span>$51.84</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="outcome">
+        <summary>
+          <div class="summary-top">
+            <span class="outcome-name">Greater than $3,200</span>
+            <div class="tags">
+              <span class="pill accent">Yes 2.6¢</span>
+              <span class="pill">Est. 2% prob</span>
+              <span class="pill">Vol $782</span>
+            </div>
+          </div>
+        </summary>
+        <div class="outcome-body">
+          <div class="split">
+            <div class="side">
+              <div class="side-header">
+                <h4>Buy upside</h4>
+                <span class="pill accent">Long</span>
+              </div>
+              <div class="field">
+                <label>Price (¢)</label>
+                <input type="number" value="2.6" min="0.1" max="20" step="0.1">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="400" min="1" step="10">
+              </div>
+              <button class="btn accent">Spend $10.40</button>
+              <span class="hint">Max payout $400.00</span>
+            </div>
+            <div class="side">
+              <div class="side-header">
+                <h4>Sell upside</h4>
+                <span class="pill danger">Short</span>
+              </div>
+              <div class="field">
+                <label>Ask (¢)</label>
+                <input type="number" value="98.8" min="50" max="99.9" step="0.1">
+              </div>
+              <div class="field">
+                <label>Size (shares)</label>
+                <input type="number" value="80" min="1" step="10">
+              </div>
+              <button class="btn">Offer to sell</button>
+              <span class="hint">You receive $79.04; liability $0.96 per share.</span>
+            </div>
+          </div>
+          <div class="book">
+            <h4>Depth snapshot</h4>
+            <div class="book-grid">
+              <div class="book-list">
+                <div class="book-row yes"><span>Yes 2.4¢</span><span>120 sh</span><span>$2.88</span></div>
+                <div class="book-row yes"><span>Yes 1.9¢</span><span>200 sh</span><span>$3.80</span></div>
+              </div>
+              <div class="book-list">
+                <div class="book-row no"><span>No 97.3¢</span><span>75 sh</span><span>$73.00</span></div>
+                <div class="book-row no"><span>No 96.4¢</span><span>300 sh</span><span>$289.20</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <p class="hint">Keep it lean: details/summary elements handle expansion without extra JS. Swap the numbers for live data and wire the buttons into your trade flow.</p>
+    </div>
+  </div>
+</body>
+</html>

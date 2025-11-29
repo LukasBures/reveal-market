@@ -14,9 +14,9 @@ WORKDIR /app
 
 RUN --mount=type=cache,target=/var/cache/apk apk add --no-cache --virtual .build-deps build-base python3-dev libffi-dev openssl-dev
 
-COPY price-streamer/pyproject.toml /app/pyproject.toml
-COPY price-streamer/README.md /app/README.md
-COPY price-streamer/app /app/app
+COPY streamer/pyproject.toml /app/pyproject.toml
+COPY streamer/README.md /app/README.md
+COPY streamer/app /app/app
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --prefix /install hatchling "uvicorn[standard]" .
@@ -26,7 +26,7 @@ FROM base
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
-COPY price-streamer/app /app/app
+COPY streamer/app /app/app
 
 EXPOSE 8100
 

@@ -1,14 +1,14 @@
-# Reveal Market Price Streamer
+# Reveal Market Streamer
 
-FastAPI service that streams Polymarket prices via SSE with optional RTDS FX updates. It normalizes odds with worsen%, caches in Redis, and exposes lightweight endpoints for UI consumption.
+FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS. It keeps odds up to date via CLOB WS + RTDS, pulls FX from Binance (WS first, REST fallbacks), applies worsen%/haircut/rake, caches in Redis, and republishes to frontend clients.
 
 ## Features
-- Polymarket CLOB websocket ingestion with per-market subscriptions.
-- Binance ZEN/USDT websocket as primary FX (stale after 5s), with Coingecko REST fallback every 10s and jump-rejection/bounds (default 3–300 USD).
-- Optional RTDS crypto stream for additional FX; REST fallback with staleness flags.
-- SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis.
-- Worsen/haircut/rake applied server-side; payload signing optional.
-- Connection pooling: one WS per path is shared across subscribers, with periodic HTTP fallback to refresh stale data and auto-reconnect back to WS.
+- Polymarket CLOB websocket ingestion with per-market subscriptions and asset refcounts; unsubscribes upstream when the last client disconnects.
+- FX failover order (no RTDS for FX): Binance WS → Binance REST → CryptoCompare REST with jump/bounds guards and automatic WS reattempts.
+- RTDS only for market data (Polymarket `clob_market` topic); subscriptions mirror current asset IDs and keep a 5s ping cadence.
+- SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis and signed optionally.
+- Worsen/haircut/rake applied server-side; structured logs at INFO clearly state which data source is used (ws/rest) and why a fallback was chosen.
+- Connection pooling: one WS per path is shared across subscribers, with periodic HTTP refresh to rehydrate stale data and automatic reconnect to WS.
 - Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services.
 
 ## Requirements
@@ -18,17 +18,17 @@ FastAPI service that streams Polymarket prices via SSE with optional RTDS FX upd
   - `STREAMER_REDIS_URL`
   - `STREAMER_POLYMARKET_WS_URL` / `STREAMER_POLYMARKET_REST_URL`
   - `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
-  - `STREAMER_FX_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
+  - `STREAMER_FX_PRIMARY_WS_URL` (default Binance ZEN/USDT), `STREAMER_FX_PRIMARY_REST_URL` (Binance REST), `STREAMER_FX_SECONDARY_REST_URL` (CryptoCompare), `STREAMER_FX_REST_INTERVAL_SECONDS` (default 10), `STREAMER_FX_WS_STALE_TTL_SECONDS` (default 5), `STREAMER_FX_MAX_AGE_SECONDS` (default 60)
   - `STREAMER_API_HOST`, `STREAMER_API_PORT`
   - `STREAMER_PUBLIC_URL` / `NEXT_PUBLIC_PRICE_STREAMER_URL` (HTTPS for WSS upgrade) and `STREAMER_INTERNAL_URL` (SSR/server-to-server); keep hosts aligned so DNS/hosts entries map to the same streamer.
   - `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS` (align with your frontend origin, e.g., `https://revealmarket.xyz` even in dev with hosts/TLS)
-  - Optional: `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_CRYPTO_SYMBOLS`, `STREAMER_SIGNING_SECRET`
+  - Optional: `STREAMER_FX_SECONDARY_WS_URL` (alias `STREAMER_RTDS_WS_URL`), `STREAMER_SIGNING_SECRET`
 
 ## Local setup
 ```bash
-uv sync --project price-streamer --extra dev --no-install-project
+uv sync --project streamer --extra dev --no-install-project
 export STREAMER_REDIS_URL=redis://localhost:6379/0
-uv run --project price-streamer uvicorn app.main:app --reload --port 8100
+uv run --project streamer uvicorn app.main:app --reload --port 8100
 ```
 
 ## Endpoints
@@ -54,8 +54,8 @@ uv run --project price-streamer uvicorn app.main:app --reload --port 8100
 
 ## Docker
 ```bash
-docker compose build price-streamer
-docker compose up price-streamer
+docker compose build streamer
+docker compose up streamer
 ```
 
 ## Notes

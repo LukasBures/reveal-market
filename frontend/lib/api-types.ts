@@ -22,6 +22,8 @@ export type MarketSummary = {
   enableOrderBook?: boolean | null;
   clobTokenIds?: string[] | null;
   imageVariants?: string[] | null;
+  popularityScore?: number;
+  volume24hUsd?: number;
 };
 
 export type MarketDetail = MarketSummary & {
@@ -104,4 +106,5 @@ export type FetchFeaturedMarketsOptions = {
   category?: string;
   offset?: number;
   revalidate?: number;
+  status?: string;
 };

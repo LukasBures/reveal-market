@@ -25,13 +25,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'price-streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'streamer/uv.lock') }}
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
-          uv sync --project price-streamer --extra dev --no-install-project --frozen
+          uv sync --project streamer --extra dev --no-install-project --frozen
       - name: Pre-commit checks
         run: uv run pre-commit run --all-files
 
@@ -53,14 +53,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'price-streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'streamer/uv.lock') }}
 
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
-          uv sync --project price-streamer --extra dev --no-install-project --frozen
+          uv sync --project streamer --extra dev --no-install-project --frozen
 
       - name: Run backend tests
         env:
@@ -107,7 +107,7 @@ jobs:
         run: ./hedger/run_tests.sh
 
 
-  price-streamer:
+  streamer:
     needs: precommit
     runs-on: ubuntu-latest
     steps:
@@ -125,16 +125,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('price-streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('streamer/uv.lock') }}
 
-      - name: Sync price-streamer dependencies
+      - name: Sync streamer dependencies
         run: |
-          uv sync --project price-streamer --extra dev --no-install-project --frozen
+          uv sync --project streamer --extra dev --no-install-project --frozen
 
-      - name: Run price-streamer tests
+      - name: Run streamer tests
         env:
           PYTEST_WORKER_COUNT: 4
-        run: ./price-streamer/run_tests.sh
+        run: ./streamer/run_tests.sh
 
   contracts-polygon:
     needs: precommit
@@ -277,7 +277,7 @@ jobs:
     needs:
       - backend
       - hedger
-      - price-streamer
+      - streamer
       - contracts-polygon
       - contracts-zen
       - frontend

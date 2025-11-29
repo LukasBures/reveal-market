@@ -31,7 +31,7 @@ class DummyRedis:
 
 @pytest.mark.asyncio
 async def test_fx_refresh_fallback(monkeypatch):
-    state = StreamState(Settings(fx_feed_url="http://invalid", fx_timeout_seconds=0.1))
+    state = StreamState(Settings(fx_primary_rest_url="http://invalid", fx_timeout_seconds=0.1))
 
     async def fake_refresh():
         quote = FxQuote(zen_usd=Decimal("1.23"), fetched_at=datetime.now(UTC), stale=False, source="test")
@@ -53,37 +53,37 @@ async def test_cache_tick_uses_prefix(monkeypatch):
     assert dummy.published[0][0] == "ps:stream:m1"
 
 
-def test_register_fx_rejects_large_jump():
+def testregister_fx_rejects_large_jump():
     state = StreamState(Settings(fx_max_jump_percent=20.0, fx_jump_window_seconds=10))
     state._fx_prev_price = Decimal("1.0")
     state._fx_prev_price_ts = datetime.now(UTC)
-    quote = state._register_fx(Decimal("1.5"), source="binance_ws")  # 50% jump
+    quote = state.register_fx(Decimal("1.5"), source="binance_ws")  # 50% jump
     assert quote is None
     assert state.fx_quote is None
 
 
-def test_register_fx_accepts_small_jump():
+def testregister_fx_accepts_small_jump():
     state = StreamState(Settings(fx_max_jump_percent=20.0, fx_jump_window_seconds=10, fx_min_price=0.5, fx_max_price=5))
     state._fx_prev_price = Decimal("1.0")
     state._fx_prev_price_ts = datetime.now(UTC)
-    quote = state._register_fx(Decimal("1.1"), source="binance_ws")  # 10% jump
+    quote = state.register_fx(Decimal("1.1"), source="binance_ws")  # 10% jump
     assert quote is not None
     assert state.fx_quote is not None
 
 
-def test_register_fx_rejects_non_positive():
+def testregister_fx_rejects_non_positive():
     state = StreamState(Settings())
-    quote = state._register_fx(Decimal("0"), source="binance_ws")
+    quote = state.register_fx(Decimal("0"), source="binance_ws")
     assert quote is None
     assert state.fx_quote is None
 
 
-def test_register_fx_bounds_and_circuit_breaker():
+def testregister_fx_bounds_and_circuit_breaker():
     state = StreamState(Settings(fx_min_price=0.5, fx_max_price=2.0, fx_max_consecutive_rejections=2))
     # First out-of-bounds should increment rejection count.
-    assert state._register_fx(Decimal("10"), source="binance_ws") is None
+    assert state.register_fx(Decimal("10"), source="binance_ws") is None
     # Second rejection trips circuit breaker.
-    assert state._register_fx(Decimal("0.1"), source="binance_ws") is None
+    assert state.register_fx(Decimal("0.1"), source="binance_ws") is None
     assert state.fx_ws_connected is False
 
 

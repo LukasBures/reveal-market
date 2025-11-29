@@ -16,30 +16,35 @@ class Settings(BaseSettings):
         default="redis://redis:6379/0", validation_alias=AliasChoices("STREAMER_REDIS_URL", "RM_REDIS_URL")
     )
     clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/ws/market")
-    clob_rest_markets_url: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com/markets")
+    clob_rest_markets_url: AnyHttpUrl = Field(
+        default="https://gamma-api.polymarket.com/markets",
+        validation_alias=AliasChoices("STREAMER_CLOB_REST_MARKETS_URL"),
+    )
     clob_host: AnyHttpUrl | None = Field(
         default="https://clob.polymarket.com",
         validation_alias=AliasChoices("STREAMER_CLOB_HOST", "RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
     )
-    rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com")
-    rtds_crypto_symbols: str | None = Field(
-        default=None, description="Comma-separated symbols for crypto_prices (e.g., zenusdt,ethusdt)"
+    rtds_ws_url: str = Field(
+        default="wss://ws-live-data.polymarket.com",
+        description="Secondary WS (Polymarket RTDS market data)",
+        validation_alias=AliasChoices("STREAMER_RTDS_WS_URL", "STREAMER_FX_SECONDARY_WS_URL"),
     )
-    rtds_enabled: bool = Field(default=True)
     rtds_ping_seconds: int = Field(default=10, ge=3)
-    rtds_topic_crypto: str = Field(default="crypto_prices")
-    rtds_topic_chainlink: str = Field(default="crypto_prices_chainlink")
-    fx_feed_url: AnyHttpUrl = Field(
+    rtds_topic_clob: str = Field(default="clob_market")
+    fx_primary_rest_url: AnyHttpUrl = Field(
         default="https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT",
         description="Primary REST fallback for FX (Binance HTTP).",
+        validation_alias=AliasChoices("STREAMER_FX_PRIMARY_REST_URL", "STREAMER_FX_FEED_URL"),
     )
-    fx_feed_alt_url: AnyHttpUrl | None = Field(
+    fx_secondary_rest_url: AnyHttpUrl | None = Field(
         default="https://min-api.cryptocompare.com/data/price?fsym=ZEN&tsyms=USD",
         description="Secondary REST fallback for FX (CryptoCompare).",
+        validation_alias=AliasChoices("STREAMER_FX_SECONDARY_REST_URL", "STREAMER_FX_FEED_ALT_URL"),
     )
-    fx_ws_url: str | None = Field(
+    fx_primary_ws_url: str | None = Field(
         default="wss://stream.binance.com:9443/ws/zenusdt@ticker",
         description="Primary FX websocket (ZEN/USDT ticker).",
+        validation_alias=AliasChoices("STREAMER_FX_PRIMARY_WS_URL", "STREAMER_FX_WS_URL"),
     )
     fx_ws_stale_ttl_seconds: int = Field(default=5, ge=3)
     fx_max_age_seconds: int = Field(default=60, ge=5)
@@ -61,9 +66,9 @@ class Settings(BaseSettings):
     ws_reconnect_seconds: int = Field(default=5, ge=1)
     publish_throttle_ms: int = Field(default=300, ge=50)
     max_subscriptions: int = Field(default=200, ge=1)
-    cache_prefix: str = Field(default="price_streamer:latest")
-    pubsub_prefix: str = Field(default="price_streamer:stream")
-    history_prefix: str = Field(default="price_streamer:history")
+    cache_prefix: str = Field(default="streamer:latest")
+    pubsub_prefix: str = Field(default="streamer:stream")
+    history_prefix: str = Field(default="streamer:history")
     history_limit: int = Field(default=500, ge=10)
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 - intentional service binding inside docker
     api_port: int = Field(default=8100)
@@ -84,7 +89,7 @@ class Settings(BaseSettings):
     )
 
     @property
-    def total_monetisation(self) -> float:
+    def total_monetization(self) -> float:
         return self.worsen_percent + self.haircut_percent + self.rake_percent
 
     @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
@@ -94,7 +99,7 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @field_validator("fx_ws_url", mode="before")
+    @field_validator("fx_primary_ws_url", mode="before")
     @classmethod
     def _normalize_fx_ws(cls, value: str | None):
         if value is None:
@@ -103,10 +108,10 @@ class Settings(BaseSettings):
             return value
         parsed = urlparse(value)
         if parsed.scheme and parsed.scheme.lower() != "wss":
-            raise ValueError("STREAMER_FX_WS_URL must use wss://")
+            raise ValueError("STREAMER_FX_PRIMARY_WS_URL must use wss://")
         path = (parsed.path or "").lower()
         if not (path.startswith("/ws/") or path.startswith("/stream")):
-            raise ValueError("STREAMER_FX_WS_URL must include /ws/<stream> or /stream?streams=…")
+            raise ValueError("STREAMER_FX_PRIMARY_WS_URL must include /ws/<stream> or /stream?streams=…")
         normalized = urlunparse(
             (
                 "wss",

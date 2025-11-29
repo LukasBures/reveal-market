@@ -9,5 +9,6 @@ Focus only on the investor-facing gaps that keep the site from reflecting live r
 5. **CSP/CORS alignment** – Keep `NEXT_PUBLIC_PRICE_STREAMER_URL` + CSP connect-src in sync, and surface a warning in dev when streamer/API origins aren’t allowed.
 6. **Signed-quote TX flow** – Ensure the client always requests quotes with wallet + market address + outcome id, reuses a single FX WS connection, and submits `commitWithQuote` with the signed payload (refreshing on expiry/chain mismatch).
 7. **Chain defaults** – Keep walletconnect/wagmi envs aligned to Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`); surface a wrong-network prompt and fallback when envs are missing.
+8. **Positions dashboard** – Ship a personal dashboard that shows all user positions (stakes, PnL, potential winnings, volume, aggregated stats) and includes a single “claim winnings” action.
 
-Everything else can follow once these three experiences are live.
+Everything else can follow once these core experiences are live.

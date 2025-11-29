@@ -64,7 +64,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     )
 
 
-def _derive_overall_status(states: list[str]) -> str:
+def _derive_overall_status(states: list[str]) -> schemas.HealthState:
     if not states:
         return "ok"
     if "error" in states:

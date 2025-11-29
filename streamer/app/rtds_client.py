@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -48,7 +48,14 @@ class Subscription:
             "type": self.type,
         }
         if self.filters is not None:
-            payload["filters"] = self.filters
+            filters = self.filters
+            # RTDS expects filters as a JSON string; normalise iterables to JSON for compatibility.
+            if isinstance(filters, Iterable) and not isinstance(filters, (str, bytes)):
+                try:
+                    filters = json.dumps(list(filters))
+                except (TypeError, ValueError):
+                    filters = str(filters)
+            payload["filters"] = filters
         return payload
 
 
@@ -98,7 +105,7 @@ class RTDSRouter:
     def register(
         self,
         topic: str,
-        type: str,
+        message_type: str,
         handler: HandlerFn,
     ) -> None:
         """
@@ -111,14 +118,14 @@ class RTDSRouter:
           3. ("*", type)
           4. ("*", "*") catch-all
         """
-        if topic == "*" and type == "*":
+        if topic == "*" and message_type == "*":
             self._catch_all = handler
-        elif topic == "*" and type != "*":
-            self._wildcard_topic_handlers[type] = handler
-        elif topic != "*" and type == "*":
+        elif topic == "*" and message_type != "*":
+            self._wildcard_topic_handlers[message_type] = handler
+        elif topic != "*" and message_type == "*":
             self._wildcard_type_handlers[topic] = handler
         else:
-            self._handlers[(topic, type)] = handler
+            self._handlers[(topic, message_type)] = handler
 
     def dispatch(self, msg: RTDSMessage) -> None:
         """
@@ -220,7 +227,7 @@ class PolymarketRTDSClient:
         if self._ws is not None:
             try:
                 self._send_subscriptions([subscription])
-            except Exception:
+            except (TypeError, ValueError):
                 self._logger.exception("Failed to send subscription to RTDS")
 
     def add_subscriptions(self, subs: list[Subscription]) -> None:
@@ -237,7 +244,7 @@ class PolymarketRTDSClient:
         if self._ws is not None and to_send:
             try:
                 self._send_subscriptions(to_send)
-            except Exception:
+            except (TypeError, ValueError):
                 self._logger.exception("Failed to send subscriptions to RTDS")
 
     def start_in_thread(self, name: str = "PolymarketRTDSClient") -> None:
@@ -260,8 +267,8 @@ class PolymarketRTDSClient:
         if self._ws:
             try:
                 self._ws.close()
-            except Exception:
-                self._logger.exception("Error while closing WebSocket")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.exception("Error while closing WebSocket: %s", exc)
 
         if wait and self._thread:
             self._thread.join(timeout=5)
@@ -320,7 +327,7 @@ class PolymarketRTDSClient:
 
     # ---------------------------- WebSocket callbacks -----------------------
 
-    def _on_open(self, ws: websocket.WebSocketApp) -> None:
+    def _on_open(self, _ws: Any) -> None:
         self._logger.info("RTDS WebSocket connection opened")
 
         # Reset retry counters
@@ -334,17 +341,17 @@ class PolymarketRTDSClient:
             self._logger.info("Re-subscribing to %d RTDS subscriptions", len(subs_copy))
             try:
                 self._send_subscriptions(subs_copy)
-            except Exception:
+            except (TypeError, ValueError):
                 self._logger.exception("Failed to send initial subscriptions")
 
         # Fire on_connect callback
         if self.on_connect_cb:
             try:
                 self.on_connect_cb(self)
-            except Exception:
-                self._logger.exception("on_connect callback raised")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.exception("on_connect callback raised: %s", exc)
 
-    def _on_message(self, ws: websocket.WebSocketApp, message: str) -> None:
+    def _on_message(self, _ws: Any, message: str) -> None:
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
@@ -355,8 +362,8 @@ class PolymarketRTDSClient:
         if self.on_raw_message:
             try:
                 self.on_raw_message(data)
-            except Exception:
-                self._logger.exception("on_raw_message callback raised")
+            except Exception as exc:  # pragma: no cover - defensive callback guard
+                self._logger.exception("on_raw_message callback raised: %s", exc)
 
         topic = data.get("topic")
         type_ = data.get("type")
@@ -370,15 +377,15 @@ class PolymarketRTDSClient:
 
         try:
             self.router.dispatch(msg)
-        except Exception:
-            self._logger.exception("Error while dispatching RTDS message topic=%s type=%s", topic, type_)
+        except Exception as exc:  # pragma: no cover - defensive dispatch guard
+            self._logger.exception("Error while dispatching RTDS message topic=%s type=%s error=%s", topic, type_, exc)
 
-    def _on_error(self, ws: websocket.WebSocketApp, error: Any) -> None:
+    def _on_error(self, _ws: Any, error: Any) -> None:
         self._logger.error("RTDS WebSocket error: %s", error)
 
     def _on_close(
         self,
-        ws: websocket.WebSocketApp,
+        _ws: Any,
         close_status_code: int | None,
         close_msg: str | None,
     ) -> None:
@@ -386,8 +393,8 @@ class PolymarketRTDSClient:
         if self.on_disconnect_cb:
             try:
                 self.on_disconnect_cb(self)
-            except Exception:
-                self._logger.exception("on_disconnect callback raised")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.exception("on_disconnect callback raised: %s", exc)
 
     # ---------------------------- helpers -----------------------------------
 
@@ -407,6 +414,7 @@ class PolymarketRTDSClient:
             raise RuntimeError("WebSocket is not initialized")
 
         payload = {
+            "action": "subscribe",
             "subscriptions": [s.to_wire() for s in subs],
         }
         msg = json.dumps(payload)

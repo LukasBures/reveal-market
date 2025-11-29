@@ -23,7 +23,7 @@ from .subscriptions import SubscriptionManager
 if TYPE_CHECKING:
     from .metrics import StreamerMetrics
 
-logger = logging.getLogger("reveal_market.price_streamer")
+logger = logging.getLogger("reveal_market.streamer")
 
 
 class FatalWebsocketError(Exception):
@@ -47,6 +47,13 @@ class FxQuote:
 class StreamState:
     """Holds connections to Redis and FX cache."""
 
+    _SOURCE_PRIORITY: dict[str, int] = {
+        "binance_ws": 0,
+        "binance_rest": 1,
+        "cryptocompare_rest": 2,
+    }
+    _WS_SOURCES: set[str] = {"binance_ws"}
+
     def __init__(self, settings: Settings | None = None, metrics: StreamerMetrics | None = None):
         self.settings = settings or get_settings()
         self.redis: Redis | None = None
@@ -69,6 +76,8 @@ class StreamState:
         self.rtds_symbols_version: int = 0
         self.market_tokens: dict[str, list[str]] = {}
         self.metrics = metrics
+        self._asset_refcounts: dict[str, int] = {}
+        self._acquired_history: set[str] = set()
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
@@ -93,25 +102,26 @@ class StreamState:
             )
             if price is None:
                 return None
-            return self._register_fx(Decimal(str(price)), source=label, allow_jump=True)
+            return self.register_fx(Decimal(str(price)), source=label, allow_jump=True)
 
     async def refresh_fx(self, *, label: str = "rest") -> FxQuote:
         async with self._fx_lock:
             try:
                 # Avoid recursive self-calls if misconfigured to hit our own /fx endpoint.
-                if str(self.settings.fx_feed_url).startswith(
+                if str(self.settings.fx_primary_rest_url).startswith(
                     f"http://{self.settings.api_host}:{self.settings.api_port}"
                 ):
-                    raise ValueError("FX feed URL points to price-streamer itself; skipping")
-                quote = await self._fetch_fx_from_url(self.settings.fx_feed_url, label)
-                if not quote and self.settings.fx_feed_alt_url:
-                    quote = await self._fetch_fx_from_url(self.settings.fx_feed_alt_url, "rest_fallback")
+                    raise ValueError("FX feed URL points to streamer itself; skipping")
+                quote = await self._fetch_fx_from_url(self.settings.fx_primary_rest_url, label or "binance_rest")
+                if not quote and self.settings.fx_secondary_rest_url:
+                    quote = await self._fetch_fx_from_url(self.settings.fx_secondary_rest_url, "cryptocompare_rest")
                 if quote:
                     return quote
                 raise ValueError("FX quote rejected by sanity checks")
             except Exception as exc:  # pragma: no cover - network fallback
                 logger.warning(
-                    "FX refresh failed, falling back", extra={"event": "fx.refresh.failed", "error": str(exc)}
+                    "FX refresh failed, falling back",
+                    extra={"event": "fx.refresh.failed", "error": str(exc), "source": label},
                 )
                 fallback_price = Decimal(str(self.settings.fx_fallback_price))
                 fallback = FxQuote(
@@ -180,6 +190,11 @@ class StreamState:
         # If we previously subscribed using the market_id placeholder, swap to concrete token ids.
         if market_id in self.subscriptions.assets:
             self.subscriptions.replace_asset(market_id, deduped)
+        if market_id in self._asset_refcounts:
+            count = self._asset_refcounts.pop(market_id)
+            for tok in deduped:
+                self._asset_refcounts[tok] = self._asset_refcounts.get(tok, 0) + count
+                self.subscriptions.add_assets([tok])
 
     def add_rtds_symbols(self, symbols: Iterable[str]) -> None:
         changed = False
@@ -216,6 +231,28 @@ class StreamState:
         cutoff = datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
         return [mid for mid, ts in self.last_seen.items() if ts < cutoff]
 
+    def acquire_assets(self, assets: Iterable[str]) -> list[str]:
+        added: list[str] = []
+        for asset in assets:
+            key = str(asset)
+            prev = self._asset_refcounts.get(key, 0)
+            self._asset_refcounts[key] = prev + 1
+            if prev == 0:
+                added.append(key)
+                self.subscriptions.add_assets([key])
+                self._acquired_history.add(key)
+        return added
+
+    def release_assets(self, assets: Iterable[str]) -> None:
+        for asset in assets:
+            key = str(asset)
+            if key not in self._asset_refcounts:
+                continue
+            self._asset_refcounts[key] -= 1
+            if self._asset_refcounts[key] <= 0:
+                self._asset_refcounts.pop(key, None)
+                self.subscriptions.remove_asset(key)
+
     def _sign_payload(self, payload: dict) -> str:
         secret = self.settings.signing_secret
         if not secret:
@@ -224,7 +261,8 @@ class StreamState:
         digest = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
         return digest
 
-    def _update_fx(self, quote: FxQuote) -> None:
+    def _update_fx(self, quote: FxQuote, *, reason: str | None = None) -> None:
+        prev_source = self.fx_last_source or "unknown"
         self.fx_quote = quote
         self.fx_last_update = quote.fetched_at
         self.fx_last_source = quote.source
@@ -232,21 +270,47 @@ class StreamState:
             self._fx_prev_price = quote.raw_zen_usd or quote.zen_usd
             self._fx_prev_price_ts = quote.fetched_at
         self.fx_last_error = None
-        if quote.source == "binance_ws":
+        if quote.source in self._WS_SOURCES:
             self.fx_ws_connected = True
             self.fx_ws_last_update = quote.fetched_at
+        logger.info(
+            "FX source updated",
+            extra={
+                "event": "fx.source.update",
+                "source": quote.source,
+                "previous_source": prev_source,
+                "stale": quote.stale,
+                "raw_zen_usd": str(quote.raw_zen_usd or quote.zen_usd),
+                "zen_usd": str(quote.zen_usd),
+                "reason": reason or "update",
+            },
+        )
 
     def _apply_fx_worsen(self, price: Decimal) -> Decimal:
         """Apply worsen% to the raw FX price before exposing downstream."""
         worsened = price * (Decimal("1") - Decimal(str(self.settings.worsen_percent)))
         return worsened.quantize(Decimal("0.00000001"))
 
-    def _register_fx(self, price: Decimal, *, source: str, allow_jump: bool = False) -> FxQuote | None:
+    def register_fx(
+        self, price: Decimal, *, source: str, allow_jump: bool = False, reason: str | None = None
+    ) -> FxQuote | None:
         if price <= 0:
             self.fx_last_error = "price_non_positive"
             return None
         if self.fx_last_source == "fallback":
             allow_jump = True
+        now = datetime.now(UTC)
+        is_current_stale = False
+        if self.fx_last_update and (now - self.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds:
+            is_current_stale = True
+            if self.fx_quote:
+                self.fx_quote = FxQuote(
+                    zen_usd=self.fx_quote.zen_usd,
+                    raw_zen_usd=self.fx_quote.raw_zen_usd or self.fx_quote.zen_usd,
+                    fetched_at=self.fx_last_update,
+                    stale=True,
+                    source=self.fx_last_source or "unknown",
+                )
         if price < Decimal(str(self.settings.fx_min_price)) or price > Decimal(str(self.settings.fx_max_price)):
             self.fx_last_error = "price_out_of_bounds"
             self._fx_rejection_count += 1
@@ -263,7 +327,6 @@ class StreamState:
                 },
             )
             return None
-        now = datetime.now(UTC)
         if not allow_jump and self._fx_prev_price and self._fx_prev_price_ts:
             delta_seconds = (now - self._fx_prev_price_ts).total_seconds()
             if delta_seconds < self.settings.fx_jump_window_seconds:
@@ -284,8 +347,28 @@ class StreamState:
                     )
                     return None
         adjusted_price = self._apply_fx_worsen(price)
+        if source not in self._SOURCE_PRIORITY:
+            logger.debug(
+                "Ignoring FX update from unknown source",
+                extra={"event": "fx.update.ignored_source", "source": source, "reason": reason or "unknown"},
+            )
+            return None
+        last_source = self.fx_last_source if isinstance(self.fx_last_source, str) else ""
+        current_priority = self._SOURCE_PRIORITY.get(last_source, 99)
+        new_priority = self._SOURCE_PRIORITY.get(source, 99)
+        if self.fx_quote and not is_current_stale and not self.fx_quote.stale and current_priority <= new_priority:
+            logger.debug(
+                "Ignoring FX update due to priority",
+                extra={
+                    "event": "fx.update.ignored",
+                    "current_source": self.fx_last_source,
+                    "incoming_source": source,
+                    "reason": reason or "priority",
+                },
+            )
+            return None
         quote = FxQuote(zen_usd=adjusted_price, raw_zen_usd=price, fetched_at=now, stale=False, source=source)
-        self._update_fx(quote)
+        self._update_fx(quote, reason=reason)
         self._fx_rejection_count = 0
         return quote
 
@@ -296,7 +379,7 @@ async def iter_ws(ws_url: str, *, name: str = "ws", fatal_status: set[int] | Non
     fatal_status = fatal_status or set()
     while True:
         try:
-            async with connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
+            async with connect(ws_url, ping_interval=5, ping_timeout=20) as ws:
                 yield ws
         except InvalidStatusCode as exc:  # pragma: no cover - reconnection path
             logger.warning(

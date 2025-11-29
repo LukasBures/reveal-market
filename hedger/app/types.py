@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OutcomeSide(str, Enum):
@@ -119,6 +119,12 @@ class PricingQuote(BaseModel):
     worsen_percent: Decimal
     rake_percent: Decimal
     total_monetisation: Decimal
+
+    @computed_field(return_type=Decimal)  # type: ignore[misc]
+    @property
+    def total_monetization(self) -> Decimal:
+        """US spelling alias for downstream callers and JSON serialization."""
+        return self.total_monetisation
 
 
 class SettlementBreakdown(BaseModel):

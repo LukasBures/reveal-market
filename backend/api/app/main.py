@@ -1113,7 +1113,7 @@ def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
 def _enforce_caps(
     session: Session,
     *,
-    stake_zen: float,
+    stake_zen: Decimal,
     market_id: str | None,
     user_id: str | None,
     include_stake: bool = True,
@@ -1316,7 +1316,7 @@ def pricing_quote(
         message="pricing quote generated",
         stake_zen=payload.stake_zen,
         zen_usd=zen_usd,
-        total_monetisation=str(quote.total_monetisation),
+        total_monetisation=str(quote.total_monetization),
         market_total=market_total,
         user_total=user_total,
     )
@@ -1410,20 +1410,30 @@ def pricing_submit(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote payload mismatch with ledger")
 
     # Enforce fresh FX vs quoted value if requested.
-    current_fx = None
+    current_fx: Decimal | None = None
     try:
         fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
         fx.raise_for_status()
         data = fx.json()
-        current_fx = float(
+        raw_fx = (
             data.get("price")
             or data.get("zen_usd")
             or data.get("zenUSD")
             or data.get("fx_zen_usd")
             or data.get("fx", {}).get("zen_usd")
         )
+        if raw_fx is not None:
+            current_fx = Decimal(str(raw_fx))
         if payload.max_fx_diff_percent is not None:
-            fx_diff_percent = abs(current_fx - quote.zen_usd) / quote.zen_usd * 100 if quote.zen_usd else 0.0
+            fx_diff_percent = (
+                (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
+                if current_fx is not None and quote.zen_usd
+                else Decimal("0")
+            )
+            if current_fx is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX check failed: missing price"
+                )
             if fx_diff_percent > payload.max_fx_diff_percent:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,

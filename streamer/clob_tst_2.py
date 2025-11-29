@@ -15,7 +15,7 @@ try:
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import BookParams
 except Exception as exc:  # pragma: no cover - probe script
-    print("py_clob_client is missing; run with price-streamer/.venv active (pip install -e .[dev]).")
+    print("py_clob_client is missing; run with streamer/.venv active (pip install -e .[dev]).")
     raise SystemExit(exc) from exc
 
 try:

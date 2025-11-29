@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -44,7 +44,7 @@ def setup_logging(service_name: str) -> None:
 
     if log_to_file:
         log_dir.mkdir(parents=True, exist_ok=True)
-        logfile = log_dir / f"{service_name}_{datetime.utcnow().date():%Y-%m-%d}.log"
+        logfile = log_dir / f"{service_name}_{datetime.now(UTC).date():%Y-%m-%d}.log"
         file_handler = RotatingFileHandler(logfile, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
         file_handler.setFormatter(formatter)
         file_handler.addFilter(context_filter)

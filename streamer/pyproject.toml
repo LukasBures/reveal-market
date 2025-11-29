@@ -1,7 +1,7 @@
 [project]
-name = "reveal-market-price-streamer"
+name = "reveal-market-streamer"
 version = "0.1.0"
-description = "Polymarket price streamer with SSE fanout and FX integration."
+description = "Polymarket market/FX streamer with SSE/WS fanout and FX integration."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

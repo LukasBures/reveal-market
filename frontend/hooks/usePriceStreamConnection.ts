@@ -1,10 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import {
-  createMarketStream,
-  createMarketWebSocket,
-  priceStreamsDisabled,
-  shouldUseStreamerWs,
-} from "@/lib/pricing-client";
+import { createMarketWebSocket, priceStreamsDisabled, shouldUseStreamerWs } from "@/lib/pricing-client";
 
 export type PricePoint = {
   timestamp: string;
@@ -36,11 +31,10 @@ type StreamState = {
 type StreamConnection = {
   state: StreamState;
   subscribers: Set<() => void>;
-  es: EventSource | null;
   ws: WebSocket | null;
   backoff: number;
   cancelled: boolean;
-  transport: "ws" | "sse" | null;
+  transport: "ws" | null;
   wsAttempts: number;
   wsDisabled: boolean;
   idleCloseTimer: ReturnType<typeof setTimeout> | null;
@@ -102,7 +96,6 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
   const conn: StreamConnection = {
     state: { ...initialState },
     subscribers: new Set(),
-    es: null,
     ws: null,
     backoff: 1_000,
     cancelled: false,
@@ -110,6 +103,13 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     wsAttempts: 0,
     wsDisabled: !shouldUseStreamerWs(),
     idleCloseTimer: null,
+  };
+
+  const scheduleReconnect = () => {
+    if (conn.cancelled) return;
+    const delay = Math.min(conn.backoff, 30_000);
+    setTimeout(connectWs, delay);
+    conn.backoff = Math.min(conn.backoff * 2, 30_000);
   };
 
   const handlePayload = (raw: string) => {
@@ -135,9 +135,15 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       if (payloadType === "book") {
         const bestBid = payload.display_best_bid !== undefined ? Number(payload.display_best_bid) : undefined;
         const bestAsk = payload.display_best_ask !== undefined ? Number(payload.display_best_ask) : undefined;
+        const targetOutcome =
+          Number.isInteger(Number(payload.outcome)) && Number(payload.outcome) >= 0 ? Number(payload.outcome) : null;
         const totalOutcomes = Math.max(conn.state.outcomes.length || 0, normalizedTokens.length || 0, 2);
-        for (let i = 0; i < totalOutcomes; i += 1) {
-          updateOutcome(conn, i, (prev) => ({ ...prev, bestBid, bestAsk }));
+        if (targetOutcome !== null) {
+          updateOutcome(conn, targetOutcome, (prev) => ({ ...prev, bestBid, bestAsk }));
+        } else {
+          for (let i = 0; i < totalOutcomes; i += 1) {
+            updateOutcome(conn, i, (prev) => ({ ...prev, bestBid, bestAsk }));
+          }
         }
         return;
       }
@@ -168,51 +174,16 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     }
   };
 
-  const connectSse = () => {
-    if (conn.cancelled) return;
-    try {
-      const es = createMarketStream(marketId, normalizedTokens);
-      conn.es = es;
-      conn.transport = "sse";
-      es.onopen = () => {
-        setState(conn, { connected: true, error: null });
-        conn.backoff = 1_000;
-        conn.wsDisabled = false;
-        conn.wsAttempts = 0;
-        // Attempt to upgrade back to WS after a short delay to keep WS-first.
-        setTimeout(() => {
-          if (!conn.cancelled && !conn.ws) {
-            connectWs();
-          }
-        }, 15_000);
-      };
-      es.onmessage = (event: MessageEvent) => {
-        handlePayload(event.data);
-      };
-      es.onerror = () => {
-        setState(conn, { connected: false, error: "Price stream disconnected" });
-        es.close();
-        setTimeout(connectWs, Math.min(conn.backoff, 15_000));
-        conn.backoff = Math.min(conn.backoff * 2, 30_000);
-      };
-    } catch (err) {
-      setState(conn, { error: (err as Error).message, connected: false });
-      setTimeout(connectWs, Math.min(conn.backoff, 15_000));
-      conn.backoff = Math.min(conn.backoff * 2, 30_000);
-    }
-  };
-
   const connectWs = () => {
     if (conn.cancelled) return;
     if (conn.wsDisabled || !shouldUseStreamerWs()) {
-      connectSse();
+      setState(conn, { connected: false, error: "WebSocket disabled (mixed content or env flag)" });
       return;
     }
     try {
       const ws = createMarketWebSocket(marketId, normalizedTokens);
       if (!ws) {
-        // If WS can't be constructed (e.g., mixed content), fall back to SSE.
-        connectSse();
+        setState(conn, { connected: false, error: "WebSocket unavailable" });
         return;
       }
       conn.ws = ws;
@@ -221,10 +192,6 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         setState(conn, { connected: true, error: null });
         conn.backoff = 1_000;
         conn.wsAttempts = 0;
-        if (conn.es) {
-          conn.es.close();
-          conn.es = null;
-        }
       };
       ws.onmessage = (event: MessageEvent) => {
         const data = typeof event.data === "string" ? event.data : "";
@@ -235,36 +202,21 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         ws.close();
         conn.ws = null;
         conn.wsAttempts += 1;
-        if (conn.wsAttempts >= 2) {
-          conn.wsDisabled = true;
-          connectSse();
-          return;
-        }
-        connectSse();
+        scheduleReconnect();
       };
       ws.onclose = () => {
         setState(conn, { connected: false, error: "Price stream disconnected" });
         conn.ws = null;
         conn.wsAttempts += 1;
-        if (conn.wsAttempts >= 2) {
-          conn.wsDisabled = true;
-          connectSse();
-          return;
-        }
-        connectSse();
+        scheduleReconnect();
       };
     } catch (err) {
       setState(conn, { error: (err as Error).message, connected: false });
-      setTimeout(connectWs, Math.min(conn.backoff, 15_000));
-      conn.backoff = Math.min(conn.backoff * 2, 30_000);
+      scheduleReconnect();
     }
   };
 
-  if (shouldUseStreamerWs()) {
-    connectWs();
-  } else {
-    connectSse();
-  }
+  connectWs();
   connections.set(key, conn);
   return conn;
 }
@@ -280,19 +232,18 @@ function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
   conn.subscribers.add(onChange);
   return () => {
     conn.subscribers.delete(onChange);
-    if (conn.subscribers.size === 0) {
-      if (conn.idleCloseTimer) {
-        clearTimeout(conn.idleCloseTimer);
-      }
-      conn.idleCloseTimer = setTimeout(() => {
-        if (conn.subscribers.size > 0) return;
-        conn.cancelled = true;
-        if (conn.es) conn.es.close();
-        if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) conn.ws.close();
-        connections.delete(key);
-      }, 30_000);
-    }
-  };
+        if (conn.subscribers.size === 0) {
+          if (conn.idleCloseTimer) {
+            clearTimeout(conn.idleCloseTimer);
+          }
+          conn.idleCloseTimer = setTimeout(() => {
+            if (conn.subscribers.size > 0) return;
+            conn.cancelled = true;
+            if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) conn.ws.close();
+            connections.delete(key);
+          }, 30_000);
+        }
+      };
 }
 
 function snapshot(marketId: string, tokenIds: string[]): StreamState {
@@ -303,11 +254,11 @@ function snapshot(marketId: string, tokenIds: string[]): StreamState {
 }
 
 export function usePriceStreamStore(marketId: string, tokenIds: string[] = []): StreamState {
-  if (priceStreamsDisabled) {
-    return initialState;
-  }
-  const subscribeFn = (onStoreChange: () => void) => subscribe(marketId, tokenIds, onStoreChange);
-  const getSnapshot = () => snapshot(marketId, tokenIds);
+  const emptySubscribe = (_onStoreChange: () => void) => () => {};
+  const emptySnapshot = () => initialState;
+  const subscribeFn = (onStoreChange: () => void) =>
+    priceStreamsDisabled ? emptySubscribe(onStoreChange) : subscribe(marketId, tokenIds, onStoreChange);
+  const getSnapshot = () => (priceStreamsDisabled ? emptySnapshot() : snapshot(marketId, tokenIds));
   return useSyncExternalStore(subscribeFn, getSnapshot, getSnapshot);
 }
 

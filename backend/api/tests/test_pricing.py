@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 import pytest
 from app.config import Settings
@@ -58,7 +60,7 @@ async def test_fetch_fx_quote_handles_nested_coingecko(monkeypatch):
     payload = {"horizen": {"usd": 7.5}, "stale": False}
     monkeypatch.setattr("httpx.AsyncClient", lambda *args, **kwargs: _DummyClient(payload))
     result = await fetch_fx_quote(Settings(fx_feed_url="http://example.com"))
-    assert result.zen_usd == 7.5
+    assert result.zen_usd == Decimal("7.5")
     assert result.stale is False
 
 
@@ -67,7 +69,7 @@ async def test_fetch_fx_quote_propagates_stale_flag(monkeypatch):
     payload = {"price": "8.1", "fx_stale": True}
     monkeypatch.setattr("httpx.AsyncClient", lambda *args, **kwargs: _DummyClient(payload))
     result = await fetch_fx_quote(Settings(fx_feed_url="http://example.com"))
-    assert result.zen_usd == 8.1
+    assert result.zen_usd == Decimal("8.1")
     assert result.stale is True
 
 
@@ -77,8 +79,8 @@ async def test_fetch_fx_quote_uses_cache_on_error(monkeypatch):
     monkeypatch.setattr("httpx.AsyncClient", lambda *args, **kwargs: _DummyClient(payload))
     settings = Settings(fx_feed_url="http://example.com", fx_cache_ttl_seconds=30)
     first = await fetch_fx_quote(settings)
-    assert first.zen_usd == 9.0
+    assert first.zen_usd == Decimal("9.0")
     monkeypatch.setattr("httpx.AsyncClient", lambda *args, **kwargs: _FailingClient())
     cached = await fetch_fx_quote(settings)
-    assert cached.zen_usd == 9.0
+    assert cached.zen_usd == Decimal("9.0")
     assert cached.stale is True

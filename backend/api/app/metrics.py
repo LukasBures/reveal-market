@@ -26,6 +26,18 @@ class RequestMetrics:
     def __init__(self, slow_threshold_ms: float = 500.0):
         self._lock = Lock()
         self._slow_threshold_ms = slow_threshold_ms
+        self._last_updated = time.time()
+        self._max_latency_ms = 0.0
+        self._total_requests = 0
+        self._error_count = 0
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_unknown = 0
+        self._total_latency_ms = 0.0
+        self._bytes_sent_total = 0
+        self._slow_requests = 0
+        self._window_started = self._last_updated
+        self._latency_buckets: dict[str, int] = {}
         self._reset()
 
     def _reset(self) -> None:
@@ -62,7 +74,7 @@ class RequestMetrics:
                 self._bytes_sent_total += bytes_sent
             if status_code >= 500:
                 self._error_count += 1
-            if cache_hit is True:
+            if cache_hit:
                 self._cache_hits += 1
             elif cache_hit is False:
                 self._cache_misses += 1

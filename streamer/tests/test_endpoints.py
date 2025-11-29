@@ -39,6 +39,7 @@ def test_app(monkeypatch):
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
@@ -168,6 +169,7 @@ def test_subscriptions_endpoint(monkeypatch):
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
@@ -196,10 +198,10 @@ def test_stream_endpoint_connects(test_app):
     state.subscribe = fake_subscribe  # type: ignore[assignment]
     with client.stream("GET", "/stream", params={"market_id": "m1", "max_events": 1, "heartbeat": 1}) as resp:
         assert resp.status_code == 200
+        # Subscription should have been registered at least once.
+        assert "m1" in state._acquired_history
         for _ in resp.iter_lines():
             break
-    # Should auto-add the market to websocket subscriptions even without explicit assets_ids.
-    assert "m1" in state.subscriptions.assets
 
 
 def test_stream_websocket_sends_messages(test_app):

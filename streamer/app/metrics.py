@@ -12,30 +12,30 @@ class StreamerMetrics:
 
     def __init__(self) -> None:
         self.stream_deliveries = Counter(
-            "price_streamer_stream_deliveries_total",
+            "streamer_stream_deliveries_total",
             "Events delivered to clients",
             ["transport", "market_id", "source"],
             registry=REGISTRY,
         )
         self.stream_dropped = Counter(
-            "price_streamer_stream_dropped_total",
+            "streamer_stream_dropped_total",
             "Dropped/ignored stream events",
             ["transport", "reason"],
             registry=REGISTRY,
         )
         self.market_staleness = Gauge(
-            "price_streamer_market_staleness_seconds",
+            "streamer_market_staleness_seconds",
             "Seconds since last tick per market",
             ["market_id"],
             registry=REGISTRY,
         )
         self.stale_market_total = Gauge(
-            "price_streamer_stale_markets_total",
+            "streamer_stale_markets_total",
             "Count of markets considered stale",
             registry=REGISTRY,
         )
         self.assets_fallback = Counter(
-            "price_streamer_assets_fallback_total",
+            "streamer_assets_fallback_total",
             "Connections that fell back to market_id because assets_ids were missing",
             ["transport", "target"],
             registry=REGISTRY,
@@ -51,12 +51,12 @@ class StreamerMetrics:
         if isinstance(raw, bytes):
             try:
                 raw = raw.decode("utf-8")
-            except Exception:
+            except UnicodeDecodeError:
                 raw = str(raw)
         if isinstance(raw, str):
             try:
                 parsed = json.loads(raw)
-            except Exception:
+            except json.JSONDecodeError:
                 parsed = None
         elif isinstance(raw, dict):
             parsed = raw

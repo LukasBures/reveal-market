@@ -30,6 +30,7 @@ def test_fx_websocket_stream(monkeypatch):
         async def stop(self): ...
 
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
 
     app = create_app()
     with TestClient(app) as client:

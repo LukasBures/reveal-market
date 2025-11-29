@@ -45,8 +45,16 @@ export function FeaturedMarketsClient({
   const DEFAULT_BATCH = 40;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}`;
+  const sortByPopularity = (a: MarketSummary, b: MarketSummary) =>
+    (b.popularityScore ?? 0) - (a.popularityScore ?? 0);
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
+
+  const filterActive = (items: MarketSummary[]) =>
+    items.filter((m) => {
+      const status = (m.status ?? "").toLowerCase();
+      return status === "" || status === "active" || status === "open";
+    });
 
   const { data: refreshedMarkets } = useFeaturedMarkets({
     limit: pageSize,
@@ -57,7 +65,7 @@ export function FeaturedMarketsClient({
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
-    setMarkets(initialMarkets);
+    setMarkets(filterActive([...initialMarkets]).sort(sortByPopularity));
     setHasMore(initialMarkets.length >= pageSize);
     setAutoLoadCount(0);
   }, [initialMarkets, pageSize, filterSignature]);
@@ -76,9 +84,9 @@ export function FeaturedMarketsClient({
         seen.add(item.eventId);
         merged.push(item);
       };
-      refreshedMarkets.forEach(pushUnique);
-      prev.forEach(pushUnique);
-      return merged.slice(0, maxItems);
+      filterActive(refreshedMarkets || []).forEach(pushUnique);
+      filterActive(prev).forEach(pushUnique);
+      return merged.sort(sortByPopularity).slice(0, maxItems);
     });
   }, [refreshedMarkets, maxItems]);
 
@@ -93,20 +101,21 @@ export function FeaturedMarketsClient({
             category: normalizedCategory,
             offset: markets.length,
           });
-          if (additions.length === 0) {
+          const activeAdditions = filterActive(additions);
+          if (activeAdditions.length === 0) {
             setHasMore(false);
             return;
           }
           const seen = new Set(markets.map((m) => m.eventId));
           const filtered: MarketSummary[] = [];
-          for (const item of additions) {
+          for (const item of activeAdditions) {
             if (!item.eventId || seen.has(item.eventId)) continue;
             seen.add(item.eventId);
             filtered.push(item);
           }
           const allowed = Math.max(0, maxItems - markets.length);
           const nextItems = allowed > 0 ? filtered.slice(0, allowed) : [];
-          const merged = [...markets, ...nextItems];
+          const merged = [...markets, ...nextItems].sort(sortByPopularity);
           const computedHasMore =
             merged.length < maxItems && nextItems.length > 0 && additions.length === nextLimit;
           setMarkets(merged);

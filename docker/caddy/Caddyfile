@@ -75,7 +75,7 @@
 }
 
 (proxy_streamer) {
-  reverse_proxy price-streamer:8100 {
+  reverse_proxy streamer:8100 {
     trusted_proxies private_ranges
     transport http {
       versions 1.1

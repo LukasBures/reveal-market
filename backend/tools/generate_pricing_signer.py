@@ -23,7 +23,7 @@ except Exception as exc:  # pragma: no cover - import guard
 
 def main() -> None:
     root = pathlib.Path(__file__).resolve().parent
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
     out_path = root / f"pricing_signer_{ts}.txt"
 
     # Generate a fresh 32-byte key
@@ -34,7 +34,7 @@ def main() -> None:
 
     content = (
         "# Pricing signer key (do NOT commit)\n"
-        f"# Generated at {datetime.datetime.utcnow().isoformat()}Z\n"
+        f"# Generated at {datetime.datetime.now(datetime.UTC).isoformat()}Z\n"
         f"RM_PRICING_SIGNER_PRIVATE_KEY={priv_hex}\n"
         f"PRICING_SIGNER_ADDRESS={addr}\n"
     )

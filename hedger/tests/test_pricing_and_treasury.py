@@ -17,7 +17,7 @@ def test_pricing_quote_math():
     assert quote.rake_zen == Decimal("0.20000000")
     assert quote.refund_zen == Decimal("9.80000000")
     assert quote.hedge_usdc == Decimal("1.76000000")
-    assert quote.total_monetisation == Decimal("0.17")
+    assert quote.total_monetization == Decimal("0.17")
 
 
 def test_treasury_and_settlement_breakdown_win_flow():

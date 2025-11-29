@@ -36,7 +36,7 @@ Tech stack callouts:
 - **Tailwind (utility-first)** layered with custom glassmorphism helpers defined in `app/globals.css`.
 - **Vitest + Testing Library** for behavioral tests.
 - **ESLint + Typescript** enforced via `npm run lint`.
-- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `price-streamer` (via SSE and `/pricing/fx`). Market detail pages fetch `clobTokenIds` from the backend and include them in `assets_ids` when opening `/stream`/`/stream/ws`, so live prices/books/trades start immediately. A 100 ZEN per-bet UI cap mirrors backend limits.
+- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `streamer` (via SSE and `/pricing/fx`). Market detail pages fetch `clobTokenIds` from the backend and include them in `assets_ids` when opening `/stream`/`/stream/ws`, so live prices/books/trades start immediately. A 100 ZEN per-bet UI cap mirrors backend limits.
 - **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
 
 ---
@@ -49,8 +49,8 @@ Set these in the repo-root `.env` (copied from `.env.example`). The frontend rea
 | -------- | ------- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (stick to the TLS host, e.g., `https://api.revealmarket.xyz` with /etc/hosts + Cloudflare). |
-| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public price-streamer base (HTTPS so clients upgrade to WSS automatically). Defaults to `https://stream.revealmarket.xyz`. |
-| `STREAMER_INTERNAL_URL` | Base URL the server components should use to reach price-streamer; point at the same HTTPS host when developing locally. |
+| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public streamer base (HTTPS so clients upgrade to WSS automatically). Defaults to `https://stream.revealmarket.xyz`. |
+| `STREAMER_INTERNAL_URL` | Base URL the server components should use to reach streamer; point at the same HTTPS host when developing locally. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
 | `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_CHAIN_NAME` | Target chain for wagmi/viem (defaults: Horizen Testnet `2651420`, name `"Horizen Testnet"`). |
 | `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | RPC + explorer for the target chain (defaults: `https://horizen-testnet.rpc.caldera.xyz/http`, `https://horizen-testnet.explorer.caldera.xyz`). |
@@ -180,15 +180,15 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 ## Streaming & FX
 
-- **FX source** – Frontend consumes the price-streamer FX websocket at `/fx/zen-usdc` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
-- **Market prices** – Live odds stream from price-streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
+- **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usdc` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
+- **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
 - **WSS/TLS** – Set `NEXT_PUBLIC_PRICE_STREAMER_URL` to your HTTPS streamer host (e.g., `https://stream.revealmarket.xyz`). The client auto-switches to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
 - **Env summary** – `NEXT_PUBLIC_PRICE_STREAMER_URL`, `STREAMER_INTERNAL_URL` (SSR), `NEXT_PUBLIC_API_BASE_URL`, and streamer-side `STREAMER_WORSEN_PERCENT` (controls applied dampening) must be set consistently across frontend and streamer.
 
 ## Deployment / Runbook
 
 - **Env vars**: `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL` (HTTPS host for WSS), `STREAMER_INTERNAL_URL` (in-cluster), `NEXT_PUBLIC_SITE_URL` (canonical), wallet provider keys, and any analytics keys (ensure CSP allows them).
-- **TLS**: Terminate at Caddy/Nginx; price-streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
+- **TLS**: Terminate at Caddy/Nginx; streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
 - **Health**: API `/healthz`, streamer `/healthz`; frontend relies on a reachable API (build/tests fail fast if `/health` is down).
 - **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
 - **Smoke**: Run `npm run lint && npm run test && npm run build`; for live pricing, confirm `MainNav` shows FX and a market detail page receives live price ticks.

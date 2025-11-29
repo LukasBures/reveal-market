@@ -18,7 +18,7 @@ fi
 import sys
 major, minor = sys.version_info[:2]
 if (major, minor) != (3, 12):
-    raise SystemExit(f"price-streamer requires Python 3.12, found {major}.{minor}")
+    raise SystemExit(f"streamer requires Python 3.12, found {major}.{minor}")
 PY
 
 # Install dev dependencies if missing.

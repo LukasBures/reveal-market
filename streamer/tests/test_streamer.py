@@ -7,8 +7,9 @@ from decimal import Decimal
 
 import pytest
 from app.config import Settings
+from app.data_streamer import DataStreamer
+from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
-from app.streamer import PriceStreamer
 
 
 class StubState(StreamState):
@@ -30,7 +31,7 @@ class StubState(StreamState):
 @pytest.mark.asyncio
 async def test_normalize_and_publish_handles_prices():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     data = {"id": "m1", "outcomePrices": [0.5, 0.25]}
     await streamer._normalize_and_publish(data, source="rest")
     assert len(state.cached) == 2
@@ -39,7 +40,7 @@ async def test_normalize_and_publish_handles_prices():
 @pytest.mark.asyncio
 async def test_refresh_clob_subscription_sends_on_version_change():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     state.subscriptions.add_assets(["a1"])
 
     class DummyWS:
@@ -65,12 +66,12 @@ async def test_refresh_clob_subscription_sends_on_version_change():
 @pytest.mark.asyncio
 async def test_refresh_rtds_subscription_sends_on_version_change():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     state.add_rtds_symbols(["zenusdt"])
 
     # _build_rtds_subscriptions should reflect current symbols.
     subs = streamer._build_rtds_subscriptions()
-    assert subs and subs[0].filters == "zenusdt"
+    assert subs and subs[0].filters == ["zenusdt"]
 
     class DummyClient:
         def __init__(self):
@@ -92,7 +93,7 @@ async def test_refresh_rtds_subscription_sends_on_version_change():
 @pytest.mark.asyncio
 async def test_throttled_publish_deduplicates():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     await streamer._throttled_publish("m1", "0", {"price": "0.5"})
     await streamer._throttled_publish("m1", "0", {"price": "0.5"})
     assert len(streamer._publish_cache) == 1
@@ -107,7 +108,7 @@ async def test_normalize_skips_when_fx_stale(monkeypatch):
         return stale_quote
 
     state.get_fx = stale_fx  # type: ignore[assignment]
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     data = {"id": "m1", "outcomePrices": [0.5, 0.25]}
     await streamer._normalize_and_publish(data, source="rest")
     assert not state.cached
@@ -119,6 +120,8 @@ async def test_fx_ws_rejects_jump(monkeypatch):
     state = StreamState(settings)
     state._fx_prev_price = Decimal("1.0")
     state._fx_prev_price_ts = datetime.now(UTC)
+    from app.price_streamer import PriceStreamer
+
     streamer = PriceStreamer(state, settings)
     await streamer._handle_fx_ws({"s": "ZENUSDT", "b": "2", "a": "2"})
     assert state.fx_quote is None
@@ -128,6 +131,8 @@ async def test_fx_ws_rejects_jump(monkeypatch):
 async def test_metrics_update_on_fx_refresh():
     settings = Settings(fx_rest_interval_seconds=5, fx_max_age_seconds=5, fx_ws_stale_ttl_seconds=5)
     state = StreamState(settings)
+    from app.price_streamer import PriceStreamer
+
     streamer = PriceStreamer(state, settings)
     await state.refresh_fx(label="coingecko_rest")
     streamer.metric_ws_connected.set(1 if state.fx_ws_connected else 0)
@@ -138,6 +143,8 @@ async def test_metrics_update_on_fx_refresh():
 @pytest.mark.asyncio
 async def test_metrics_mark_stale_without_fx():
     state = StreamState(Settings())
+    from app.price_streamer import PriceStreamer
+
     streamer = PriceStreamer(state, state.settings)
     streamer._update_fx_metrics()
     assert streamer.metric_fx_stale._value.get() == 1
@@ -146,7 +153,7 @@ async def test_metrics_mark_stale_without_fx():
 @pytest.mark.asyncio
 async def test_normalize_payload_contains_fx():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     data = {"id": "m1", "outcomePrices": [0.5]}
     await streamer._normalize_and_publish(data, source="rest")
     _, _, payload = state.cached[0]
@@ -156,7 +163,7 @@ async def test_normalize_payload_contains_fx():
 @pytest.mark.asyncio
 async def test_normalize_prefers_clob_midpoints(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
 
     async def fake_midpoints(token_ids):
         return [Decimal("0.7"), Decimal("0.3")]
@@ -172,7 +179,7 @@ async def test_normalize_prefers_clob_midpoints(monkeypatch):
 @pytest.mark.asyncio
 async def test_normalize_uses_raw_prices_when_midpoints_missing(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
 
     async def none_midpoints(token_ids):
         return None
@@ -188,7 +195,7 @@ async def test_normalize_uses_raw_prices_when_midpoints_missing(monkeypatch):
 @pytest.mark.asyncio
 async def test_normalize_parses_stringified_arrays(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     seen_tokens = None
 
     async def fake_midpoints(token_ids):
@@ -212,7 +219,7 @@ async def test_normalize_parses_stringified_arrays(monkeypatch):
 @pytest.mark.asyncio
 async def test_normalize_registers_clob_tokens():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     data = {"id": "m5", "outcomePrices": [0.2, 0.8], "clobTokenIds": ["tok1", "tok2"]}
     await streamer._normalize_and_publish(data, source="rest")
     assert state.market_tokens["m5"] == ["tok1", "tok2"]
@@ -221,7 +228,7 @@ async def test_normalize_registers_clob_tokens():
 @pytest.mark.asyncio
 async def test_normalize_handles_camel_best_bid():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     data = {"id": "m6", "outcomePrices": [0.2], "bestBid": "0.33", "bestAsk": "0.44"}
     await streamer._normalize_and_publish(data, source="rest")
     assert state.cached
@@ -242,7 +249,7 @@ async def test_register_clob_tokens_replaces_placeholder_subscription():
 @pytest.mark.asyncio
 async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     state.subscriptions.add_assets(["123"])
 
     async def fake_client_get(url):
@@ -267,7 +274,7 @@ async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_midpoints_parses_dict_payload(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
 
     class StubClob:
         def get_midpoints(self, params):
@@ -286,7 +293,7 @@ async def test_fetch_midpoints_parses_dict_payload(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_midpoints_returns_none_when_no_params(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     streamer.clob_client = object()  # ensure client exists
     mids = await streamer._fetch_midpoints([])
     assert mids is None
@@ -295,7 +302,7 @@ async def test_fetch_midpoints_returns_none_when_no_params(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_midpoints_handles_client_failure(monkeypatch):
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
 
     class StubClob:
         def get_midpoints(self, params):
@@ -314,7 +321,7 @@ async def test_fetch_midpoints_handles_client_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_market_event_trade_caches_payload():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     await streamer._handle_market_event(
         {"event_type": "last_trade_price", "market": "m1", "price": "0.42", "size": "10", "side": "BUY"},
         source="ws",
@@ -331,7 +338,7 @@ async def test_handle_market_event_trade_caches_payload():
 async def test_handle_market_event_book_applies_worsen():
     settings = Settings(worsen_percent=0.1)
     state = StubState()
-    streamer = PriceStreamer(state, settings)
+    streamer = DataStreamer(state, settings)
     await streamer._handle_market_event(
         {
             "event_type": "book",
@@ -351,7 +358,7 @@ async def test_handle_market_event_book_applies_worsen():
 @pytest.mark.asyncio
 async def test_handle_market_event_tick_size():
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     await streamer._handle_market_event(
         {"event_type": "tick_size_change", "market": "m3", "new_tick_size": "0.01"}, source="ws"
     )
@@ -381,14 +388,14 @@ async def test_fx_ws_then_rest_fallback_metrics(monkeypatch):
 
     # Force staleness and replace refresh_fx
     async def fake_refresh_fx(label: str = "coingecko_rest"):
-        return state._register_fx(Decimal("12"), source=label, allow_jump=True)
+        return state.register_fx(Decimal("12"), source=label, allow_jump=True)
 
     monkeypatch.setattr(state, "refresh_fx", fake_refresh_fx)
     state.fx_ws_last_update = datetime.now(UTC) - timedelta(seconds=6)
     state.fx_last_update = state.fx_ws_last_update
     await streamer._fx_refresh_once()
     assert streamer.metric_ws_connected._value.get() == 0
-    assert streamer.metric_fx_source.labels(source="coingecko_rest")._value.get() == 1
+    assert streamer.metric_fx_source.labels(source="binance_rest")._value.get() == 1
 
 
 @pytest.mark.asyncio
@@ -396,7 +403,7 @@ async def test_price_history_seed_and_stream_pooling(monkeypatch):
     """Ensure we reuse a single connection per market and seed history is retained."""
 
     state = StubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     # No tasks in tests: _normalize_and_publish bypasses throttled cache path.
     await streamer._normalize_and_publish({"id": "m1", "outcomePrices": [0.5]}, source="rest")
     await streamer._normalize_and_publish({"id": "m1", "outcomePrices": [0.6]}, source="rest")
@@ -440,7 +447,7 @@ async def test_streamer_publishes_book_and_price_over_pubsub():
     """Mock Polymarket feeds and ensure ticks reach the pubsub stream."""
 
     state = PubSubState()
-    streamer = PriceStreamer(state, state.settings)
+    streamer = DataStreamer(state, state.settings)
     await streamer._handle_market_event(
         {"event_type": "book", "market": "live-1", "bids": [{"price": "0.4"}], "asks": [{"price": "0.6"}]},
         source="ws",
@@ -467,13 +474,13 @@ async def test_fx_ws_rest_retry_flow(monkeypatch):
 
     async def fake_refresh_fx(label: str = "coingecko_rest"):
         calls.append(label)
-        return state._register_fx(Decimal("11"), source=label, allow_jump=True)
+        return state.register_fx(Decimal("11"), source=label, allow_jump=True)
 
     monkeypatch.setattr(state, "refresh_fx", fake_refresh_fx)
     state.fx_ws_last_update = datetime.now(UTC) - timedelta(seconds=8)
     await streamer._fx_refresh_once()
-    assert calls == ["coingecko_rest"]
-    assert state.fx_quote and state.fx_quote.source == "coingecko_rest"
+    assert calls == ["binance_rest"]
+    assert state.fx_quote and state.fx_quote.source == "binance_rest"
 
     await streamer._handle_fx_ws({"s": "ZENUSDT", "b": "9.5", "a": "9.5"})
     assert state.fx_quote and state.fx_quote.source == "binance_ws"

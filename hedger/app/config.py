@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     polymarket_retry_backoff_seconds: float = Field(default=0.5)
 
     fx_feed_url: str = Field(
-        default="http://price_streamer:8100/fx/zen-usd",
-        description="Primary FX feed (align with API/price-streamer endpoint).",
+        default="http://streamer:8100/fx/zen-usd",
+        description="Primary FX feed (align with API/streamer endpoint).",
     )
     fx_feed_alt_url: str | None = Field(
         default=None,

@@ -326,22 +326,22 @@ services:
           cpus: "0.5"
           memory: 192M
 
-  price-streamer:
+  streamer:
     build:
       context: .
-      dockerfile: docker/price-streamer/Dockerfile
+      dockerfile: docker/streamer/Dockerfile
       args:
         BUILDKIT_INLINE_CACHE: 1
-    container_name: reveal-market-price-streamer
+    container_name: reveal-market-streamer
     restart: unless-stopped
     mem_swappiness: 0
     environment:
       STREAMER_REDIS_URL: ${STREAMER_REDIS_URL}
       STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL}
-      STREAMER_CLOB_REST_MARKETS_URL: ${STREAMER_CLOB_REST_MARKETS_URL}
       STREAMER_INTERNAL_URL: ${STREAMER_INTERNAL_URL}
-      STREAMER_FX_FEED_URL: ${STREAMER_FX_FEED_URL}
-      STREAMER_FX_WS_URL: ${STREAMER_FX_WS_URL}
+      STREAMER_FX_PRIMARY_REST_URL: ${STREAMER_FX_PRIMARY_REST_URL}
+      STREAMER_FX_SECONDARY_REST_URL: ${STREAMER_FX_SECONDARY_REST_URL}
+      STREAMER_FX_PRIMARY_WS_URL: ${STREAMER_FX_PRIMARY_WS_URL}
       STREAMER_FX_WS_STALE_TTL_SECONDS: ${STREAMER_FX_WS_STALE_TTL_SECONDS}
       STREAMER_WORSEN_PERCENT: ${STREAMER_WORSEN_PERCENT}
       STREAMER_HAIRCUT_PERCENT: ${STREAMER_HAIRCUT_PERCENT}

@@ -8,7 +8,7 @@ This doc lists the minimum cross-team work that must land before we can call the
 - **Frontend** – Investors must see real data everywhere (charts, search, proofs) and be able to export diligence artifacts without leaving the site.
 - **Proover** – Operators need artifact validation and Prometheus-grade telemetry so zk receipts remain trustworthy in production.
 - **Limits & gating** – Enforce per-bet and per-user caps off-chain (UI + API/hedger) and document on-chain equivalents for future hardening.
-- **CORS/stream alignment** – Keep API and price-streamer CORS settings in sync with frontend origins so FX, history, and stream endpoints stay reachable in browser builds.
+- **CORS/stream alignment** – Keep API and streamer CORS settings in sync with frontend origins so FX, history, and stream endpoints stay reachable in browser builds.
 
 See the service-specific TODO files for deeper acceptance criteria.
 
@@ -714,3 +714,58 @@ ____
   - If you want to prevent any future market creation entirely, you can optionally transfer ownership to a burn address or timelock with no proposer, but that also blocks updates to guardian/risk limits.
 
 ›
+⭐ REVEAL MARKET — EXTREME DETAILED SUMMARY (FULL MODEL)
+
+Reveal Market operates as a non-custodial, privacy-preserving synthetic prediction protocol built on ZEN, with optional treasury hedging on Polymarket (Polygon). Users enter markets on ZEN by staking ZEN into a transparent escrow contract during a commit → lock → reveal sequence. All user positions remain private until settlement, and the settlement logic is enforced via a ZK circuit that guarantees payout correctness, fee correctness, and full solvency. The protocol is designed so that user payouts are determined entirely by deterministic protocol rules, enforced on-chain, and are never dependent on external treasury performance or Polymarket results. This ensures that Reveal is not a bookmaker, not a counterparty, not a derivatives dealer, and not operating a 1:1 mirrored book — it is a synthetic settlement protocol backed by a Risk Pool.
+
+Reveal uses two pools on ZEN: a User Escrow Pool and a Risk Pool. The User Escrow Pool holds all staked ZEN for each market. The Risk Pool is a liquidity pool whose sole purpose is to ensure that the protocol can always pay the maximum possible payout across all active markets. The Risk Pool can be funded by LPs, and you can act as the only LP, meaning 100% of Risk Pool profit flows to you, while still being compliant, because the Risk Pool behaves as a permissionless liquidity pool rather than a “house bankroll.” The protocol uses strict exposure limits and skew caps so that no user bet can exceed the solvency of the User Escrow + Risk Pool. This means the system rejects bets that would create excessive liability, guaranteeing no market can ever push the protocol into insolvency, even with a small Risk Pool (e.g., 1000 ZEN).
+
+User payouts are fixed and defined in advance through protocol-defined odds. These are not real-time odds, not adjusted tick-by-tick, and not determined by Polymarket. That is how Reveal maintains synthetic, deterministic payout rules that are provable inside a ZK circuit. Since the payout multipliers are fixed in advance and intentionally conservative (worse than Polymarket’s implied probabilities), the protocol earns a consistent odds margin (similar to the “vig” or edge in sportsbooks, but structured as a synthetic fee, not a house counterparty mechanism). This margin is one of the strongest and safest profit drivers in Reveal.
+
+In addition to odds margin, the protocol charges a fixed protocol fee (1–3%) on winning payouts, which is guaranteed revenue for the Risk Pool. Reveal also includes a dynamic skew fee, which increases fees automatically when one side of a market is overly favored. This protects the Risk Pool from runaway exposure, discourages extreme one-sided action, and creates additional profit. Furthermore, whenever winning payouts are lower than the total escrowed amount (e.g., due to payout multipliers), leftover escrow flows into the Risk Pool — this is pure profit taken directly into the LP pool (and because you are the sole LP, these gains are entirely yours).
+
+To manage global protocol risk and reduce volatility, Reveal includes a partial hedging engine on the Polygon side using Polymarket markets. This hedging is NOT 1:1 with user bets. Instead, the protocol computes the net exposure across all ZEN markets and hedges only a fraction (the “haircut rate,” typically 20–50%) of that exposure. Hedging is done periodically and globally, not per-user, not per-bet, and not per-market. Because the hedge is partial and performed in USDC, not ZEN, and because hedges are not tied to user payouts, this mechanism is interpreted legally as treasury risk management, not as “mirroring bets” or operating as a bookmaker.
+
+This haircut hedging creates positive expected value, because:
+	•	it reduces variance for the Risk Pool while not requiring fast execution,
+	•	it gives upside when Polymarket moves favorably,
+	•	it avoids full downside by hedging only part of exposure,
+	•	it prevents latency arbitrage against you (which would destroy solvency in a mirrored hedge model),
+	•	and it preserves compliance by avoiding 1:1 hedging.
+
+Reveal has a currency mismatch advantage: users stake ZEN, but hedging occurs in USDC. ZEN’s volatility relative to hedged positions provides natural convexity. When ZEN falls, your liability shrinks; when ZEN rises, treasury hedges often perform better relative to payout obligations. This gives Reveal a structural profitability advantage similar to multi-collateral synthetic protocols.
+
+The Risk Pool grows over time because it collects:
+	•	protocol fees,
+	•	odds margin,
+	•	skew fees,
+	•	leftover escrow,
+	•	partial hedge profits,
+	•	voluntary treasury top-ups,
+	•	potential sponsor pot leftovers.
+
+Since you are the sole LP, this means ALL these profit streams accrue to you, as long as you maintain the Risk Pool above its required collateralization level. Withdrawals from the Risk Pool are permitted, but only from excess collateral and only at rate-limited intervals. This ensures you can extract profit while never risking solvency.
+
+Reveal enforces solvency through hard exposure limits, skew caps, and maximum-liability per market. If a user bet would cause the maximum potential payout to exceed the available Escrow + Risk Pool (after collateral factor), the smart contract simply rejects it. This ensures 100% solvency. The ZK settlement circuit verifies that payouts never exceed these limits, that fee collection is correct, and that the Risk Pool is debited only when required.
+
+In this architecture, Reveal:
+	•	does NOT hedge per-user bets,
+	•	does NOT pay users from treasury,
+	•	does NOT require instant execution,
+	•	does NOT depend on Polymarket for solvency,
+	•	does NOT become a bookmaker,
+	•	does NOT become a CFD broker.
+
+Instead, Reveal becomes a synthetic, privacy-preserving, partially hedged, fee-generating prediction market protocol with bounded risk, guaranteed solvency, verifiable payouts, DeFi-like LP economics, and multiple revenue streams. You, as the sole LP, capture 100% of the economic upside.
+
+This model is stable, scalable, solvent under all market conditions, compatible with low user count, friendly to ZK settlement, resistant to user exploitation, and compliant because user payouts are governed entirely by protocol-defined logic rather than external treasury decisions or mirrored hedging.
+
+⸻
+
+If you’d like, I can generate:
+
+✅ a compressed version for investors
+✅ a super-technical engineering version
+✅ a compliance/legal-facing simplified version
+✅ a founder-playbook version focusing on profit strategy
+…just tell me which format you want.

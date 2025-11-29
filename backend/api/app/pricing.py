@@ -9,7 +9,7 @@ from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
-_FX_CACHE: dict[str, float | bool] = {}
+_FX_CACHE: dict[str, Decimal | bool | float] = {}
 
 
 class PricingEngine:
@@ -21,7 +21,7 @@ class PricingEngine:
         self.worsen_percent = self._validate_percent(settings.worsen_percent, "worsen_percent")
 
     @property
-    def total_monetisation(self) -> Decimal:
+    def total_monetization(self) -> Decimal:
         return self.rake_percent + self.haircut_percent + self.worsen_percent
 
     def quote(self, stake_zen: Decimal, zen_usd: Decimal) -> PricingQuoteResponse:
@@ -46,10 +46,11 @@ class PricingEngine:
             haircut_percent=self.haircut_percent,
             worsen_percent=self.worsen_percent,
             rake_percent=self.rake_percent,
-            total_monetisation=self.total_monetisation,
+            total_monetization=self.total_monetization,
         )
 
-    def _validate_percent(self, value: float, label: str) -> Decimal:
+    @staticmethod
+    def _validate_percent(value: float, label: str) -> Decimal:
         try:
             pct = Decimal(str(value))
         except InvalidOperation as exc:
@@ -59,27 +60,27 @@ class PricingEngine:
         return pct
 
 
-def _coerce_float(value) -> float | None:
+def _coerce_decimal(value) -> Decimal | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        return Decimal(str(value))
+    except (TypeError, ValueError, InvalidOperation):
         return None
 
 
-def _extract_fx_price(payload: dict) -> float | None:
+def _extract_fx_price(payload: dict) -> Decimal | None:
     """Extract a USD price from common FX payload shapes."""
     if not isinstance(payload, dict):
         return None
 
     # Direct keys from common feeds.
     for key in ("price", "zen_usd", "zenUSD", "fx_zen_usd"):
-        price = _coerce_float(payload.get(key))
+        price = _coerce_decimal(payload.get(key))
         if price is not None:
             return price
 
     fx_block = payload.get("fx")
     if isinstance(fx_block, dict):
-        price = _coerce_float(fx_block.get("zen_usd"))
+        price = _coerce_decimal(fx_block.get("zen_usd"))
         if price is not None:
             return price
 
@@ -87,7 +88,7 @@ def _extract_fx_price(payload: dict) -> float | None:
     for value in payload.values():
         if isinstance(value, dict):
             for nested_key in ("usd", "price", "zen_usd", "zenUSD"):
-                price = _coerce_float(value.get(nested_key))
+                price = _coerce_decimal(value.get(nested_key))
                 if price is not None:
                     return price
     return None
@@ -108,17 +109,17 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
             raw = _extract_fx_price(data)
             if raw is None:
                 raise ValueError("FX feed response missing zen_usd/price")
-            zen_usd = float(raw)
+            zen_usd = raw
             _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
             return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
-        except Exception:
+        except (httpx.HTTPError, ValueError, InvalidOperation, TypeError):
             if use_cache_on_error and "zen_usd" in _FX_CACHE:
                 _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
                 fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-                return FxQuoteResponse(zen_usd=float(_FX_CACHE["zen_usd"]), stale=True)
+                return FxQuoteResponse(zen_usd=Decimal(str(_FX_CACHE["zen_usd"])), stale=True)
 
             _FX_CACHE.update(
-                {"zen_usd": float(settings.fx_fallback_price), "stale": True, "expires_at": now + cache_ttl}
+                {"zen_usd": Decimal(str(settings.fx_fallback_price)), "stale": True, "expires_at": now + cache_ttl}
             )
             fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-            return FxQuoteResponse(zen_usd=float(settings.fx_fallback_price), stale=True)
+            return FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)

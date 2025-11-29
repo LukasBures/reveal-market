@@ -69,6 +69,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
+    params.set("status", "active");
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
     }
@@ -354,6 +355,19 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     }
     const payload = await response.json();
     const resolutionSource = payload.extra_data?.resolution;
+    const normalizeClobTokenIds = (value: any): string[] | undefined => {
+      if (Array.isArray(value)) return value.map((v) => String(v));
+      if (typeof value === "string") {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed.map((v) => String(v));
+        } catch {
+          const parts = value.split(",").map((v) => v.trim()).filter(Boolean);
+          if (parts.length) return parts;
+        }
+      }
+      return undefined;
+    };
     const detail: MarketDetail = {
       eventId: payload.event_id ?? eventId,
       title: payload.title ?? "Untitled market",
@@ -385,7 +399,12 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       priceTickSize: payload.price_tick_size ?? undefined,
       enableOrderBook:
         typeof payload.enable_order_book === "boolean" ? payload.enable_order_book : undefined,
-      clobTokenIds: payload.clob_token_ids ?? undefined,
+      clobTokenIds:
+        normalizeClobTokenIds(payload.clob_token_ids) ??
+        normalizeClobTokenIds(payload.clobTokenIds) ??
+        normalizeClobTokenIds(payload.extra_data?.gamma?.clob_token_ids) ??
+        normalizeClobTokenIds(payload.extra_data?.gamma?.clobTokenIds) ??
+        undefined,
       imageVariants: payload.image_variants ?? undefined,
       resolution: resolutionSource
         ? {

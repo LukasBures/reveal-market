@@ -1,7 +1,7 @@
 PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 INFRA_SERVICES ?= postgres redis
-ALL_SERVICES := postgres redis api worker hedger frontend caddy prover price-streamer
+ALL_SERVICES := postgres redis api worker hedger frontend caddy prover streamer
 
 .PHONY: api worker hedger frontend caddy prover streamer all stack down test fmt local prod
 
@@ -27,7 +27,7 @@ prover:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build prover
 
 streamer:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build price-streamer
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build streamer
 
 all:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(ALL_SERVICES)

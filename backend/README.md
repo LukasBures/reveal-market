@@ -8,7 +8,7 @@ The backend is the heartbeat of Reveal Market’s investable ecosystem. It trans
 | --- | --- |
 | **Market API** | Surfaces curated markets, stats, and settlements through a high-availability FastAPI layer backed by Redis caching, structured logging, and Prometheus metrics. Investors see the same latency and transparency they expect from Tier-1 exchanges. |
 | **Ingestion & On-Chain Worker** | Continuously ingests Polymarket and Conditional Tokens data, reconciles it with our PostgreSQL source of truth, and sends heartbeats so ops can verify freshness. |
-| **Price Streamer** | Separate FastAPI service (see `price-streamer/`) that handles live Polymarket CLOB + FX streaming via SSE/WS. The frontend calls `/stream`/`/stream/ws` with explicit `assets_ids` (clobTokenIds) from the market-detail API for the fastest live books/trades; no auto-discovery is used. |
+| **Price Streamer** | Separate FastAPI service (see `streamer/`) that handles live Polymarket CLOB + FX streaming via SSE/WS. The frontend calls `/stream`/`/stream/ws` with explicit `assets_ids` (clobTokenIds) from the market-detail API for the fastest live books/trades; no auto-discovery is used. |
 
 Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 HealthState = Literal["ok", "degraded", "error"]
 
@@ -65,8 +65,8 @@ class MarketBase(BaseModel):
     orders_opened_at: datetime | None = None
     resolution_source: str | None = None
     market_maker: str | None = None
-    order_min_size: float | None = None
-    price_tick_size: float | None = None
+    order_min_size: Decimal | None = None
+    price_tick_size: Decimal | None = None
     enable_order_book: bool | None = None
     clob_token_ids: list[str] | None = None
     image_variants: list[str] | None = None
@@ -102,8 +102,8 @@ class MarketUpdate(BaseModel):
     orders_opened_at: datetime | None = None
     resolution_source: str | None = None
     market_maker: str | None = None
-    order_min_size: float | None = None
-    price_tick_size: float | None = None
+    order_min_size: Decimal | None = None
+    price_tick_size: Decimal | None = None
     enable_order_book: bool | None = None
     clob_token_ids: list[str] | None = None
     image_variants: list[str] | None = None
@@ -130,11 +130,21 @@ class MarketStatusBreakdown(BaseModel):
 
 
 class MarketCaps(BaseModel):
-    max_stake_zen: float
-    max_user_stake_per_market_zen: float
-    max_market_stake_zen: float
-    remaining_user_stake_zen: float | None = None
-    remaining_market_stake_zen: float | None = None
+    max_stake_zen: Decimal
+    max_user_stake_per_market_zen: Decimal
+    max_market_stake_zen: Decimal
+    remaining_user_stake_zen: Decimal | None = None
+    remaining_market_stake_zen: Decimal | None = None
+
+    @field_serializer(
+        "max_stake_zen",
+        "max_user_stake_per_market_zen",
+        "max_market_stake_zen",
+        "remaining_user_stake_zen",
+        "remaining_market_stake_zen",
+    )
+    def _serialize_caps(self, value: Decimal | None) -> float | None:
+        return float(value) if value is not None else None
 
 
 class ResolutionWinner(BaseModel):
@@ -170,7 +180,7 @@ class ResolutionSummary(BaseModel):
 
 
 class PricingQuoteRequest(BaseModel):
-    stake_zen: float = Field(..., gt=0)
+    stake_zen: Decimal = Field(..., gt=0)
     market_id: str | None = Field(default=None, description="Market ID for cap tracking")
     user_id: str | None = Field(default=None, description="User identifier for per-market caps")
     wallet_address: str | None = Field(default=None, description="User wallet to bind quote to")
@@ -179,24 +189,24 @@ class PricingQuoteRequest(BaseModel):
 
 
 class PricingQuoteResponse(BaseModel):
-    stake_zen: float
+    stake_zen: Decimal
     stake_wei: int = 0
-    zen_usd: float
+    zen_usd: Decimal
     zen_usd_scaled: int = 0
-    displayed_odds_multiplier: float
-    rake_zen: float
-    refund_zen: float
-    hedge_usdc: float
-    haircut_percent: float
-    worsen_percent: float
-    rake_percent: float
-    total_monetisation: float
+    displayed_odds_multiplier: Decimal
+    rake_zen: Decimal
+    refund_zen: Decimal
+    hedge_usdc: Decimal
+    haircut_percent: Decimal
+    worsen_percent: Decimal
+    rake_percent: Decimal
+    total_monetization: Decimal
     chain_id: int = 0
-    max_stake_zen: float | None = None
-    max_user_stake_per_market_zen: float | None = None
-    max_market_stake_zen: float | None = None
-    remaining_user_stake_zen: float | None = None
-    remaining_market_stake_zen: float | None = None
+    max_stake_zen: Decimal | None = None
+    max_user_stake_per_market_zen: Decimal | None = None
+    max_market_stake_zen: Decimal | None = None
+    remaining_user_stake_zen: Decimal | None = None
+    remaining_market_stake_zen: Decimal | None = None
     quote_id: str | None = None
     expires_at: datetime | None = None
     expiry_ts: int = 0
@@ -208,30 +218,54 @@ class PricingQuoteResponse(BaseModel):
     outcome_id: int | None = None
     market_address: str | None = None
 
+    @field_serializer(
+        "stake_zen",
+        "zen_usd",
+        "displayed_odds_multiplier",
+        "rake_zen",
+        "refund_zen",
+        "hedge_usdc",
+        "haircut_percent",
+        "worsen_percent",
+        "rake_percent",
+        "total_monetization",
+        "max_stake_zen",
+        "max_user_stake_per_market_zen",
+        "max_market_stake_zen",
+        "remaining_user_stake_zen",
+        "remaining_market_stake_zen",
+    )
+    def _serialize_decimal(self, value: Decimal | None) -> float | None:
+        return float(value) if value is not None else None
+
 
 class FxQuoteResponse(BaseModel):
-    zen_usd: float
+    zen_usd: Decimal
     stale: bool = False
+
+    @field_serializer("zen_usd")
+    def _serialize_fx(self, value: Decimal) -> float:
+        return float(value)
 
 
 class PricingSubmitRequest(BaseModel):
     quote: PricingQuoteResponse
-    max_fx_diff_percent: float | None = Field(default=None, ge=0, description="Optional max FX drift percent vs live")
+    max_fx_diff_percent: Decimal | None = Field(default=None, ge=0, description="Optional max FX drift percent vs live")
 
 
 class PricingSubmitResponse(BaseModel):
     quote: PricingQuoteResponse
-    current_fx: float
+    current_fx: Decimal
     valid: bool = True
 
 
 class QuoteRecord(BaseModel):
     quote_id: str = Field(alias="quoteId")
     status: str
-    stake_zen: float = Field(alias="stakeZen")
+    stake_zen: Decimal = Field(alias="stakeZen")
     stake_wei: int = Field(alias="stakeWei")
     fx_scaled: int = Field(alias="fxScaled")
-    zen_usd: float = Field(alias="zenUsd")
+    zen_usd: Decimal = Field(alias="zenUsd")
     market_id: str | None = Field(default=None, alias="marketId")
     market_address: str | None = Field(default=None, alias="marketAddress")
     user_id: str | None = Field(default=None, alias="userId")
@@ -313,7 +347,7 @@ class ClobOrderBookResponse(BaseModel):
             return None
         try:
             return Decimal(str(value))
-        except Exception:
+        except (ArithmeticError, ValueError, TypeError, InvalidOperation):
             return None
 
 
@@ -321,16 +355,31 @@ class TreasurySnapshot(BaseModel):
     id: int
     market_id: str
     outcome: str
-    stake_zen: float
-    refund_zen: float
-    rake_zen: float
-    payout_profit_usdc: float
-    borrowed_usdc: float
-    lp_share_usdc: float
-    repay_amount_usdc: float
-    platform_usdc_revenue: float
-    zen_balance: float
-    usdc_balance: float
+    stake_zen: Decimal
+    refund_zen: Decimal
+    rake_zen: Decimal
+    payout_profit_usdc: Decimal
+    borrowed_usdc: Decimal
+    lp_share_usdc: Decimal
+    repay_amount_usdc: Decimal
+    platform_usdc_revenue: Decimal
+    zen_balance: Decimal
+    usdc_balance: Decimal
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer(
+        "stake_zen",
+        "refund_zen",
+        "rake_zen",
+        "payout_profit_usdc",
+        "borrowed_usdc",
+        "lp_share_usdc",
+        "repay_amount_usdc",
+        "platform_usdc_revenue",
+        "zen_balance",
+        "usdc_balance",
+    )
+    def _serialize_treasury_decimal(self, value: Decimal) -> float:
+        return float(value)

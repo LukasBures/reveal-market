@@ -13,7 +13,7 @@ export default function FAQPage() {
           <dt className="font-semibold text-white">What is Reveal Market?</dt>
           <dd className="text-slate-300">
             Reveal Market is a zk commit-and-reveal prediction market stack with a FastAPI backend, Foundry contracts,
-            and a price streamer that keeps markets and search in sync.
+            and a streamer service that keeps markets and search in sync.
           </dd>
         </div>
         <div>
