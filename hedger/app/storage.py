@@ -6,8 +6,10 @@ from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     DateTime,
+    Index,
     Integer,
     Numeric,
     String,
@@ -24,6 +26,7 @@ Base = declarative_base()
 
 class CommitRecord(Base):
     __tablename__ = "hedger_commits"
+    __table_args__ = (CheckConstraint("direction IN ('yes','no')", name="ck_hedger_commits_direction"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String, nullable=False, index=True)
@@ -32,7 +35,7 @@ class CommitRecord(Base):
     stake_usd = Column(Numeric(precision=32, scale=8), nullable=False)
     committed_at = Column(DateTime(timezone=True), nullable=False)
     tx_hash = Column(String, nullable=True)
-    idempotency_key = Column(String, nullable=True, index=True)
+    idempotency_key = Column(String, nullable=True)
     account = Column(String, nullable=True)
     request_id = Column(String, nullable=True)
     metadata_source = Column(String, nullable=True)
@@ -41,6 +44,13 @@ class CommitRecord(Base):
 
 class HedgeActionRecord(Base):
     __tablename__ = "hedger_hedge_actions"
+    __table_args__ = (
+        CheckConstraint("action IN ('buy','sell','hold')", name="ck_hedger_hedge_actions_action"),
+        CheckConstraint(
+            "status IN ('planned','submitted','sent','executed','failed','cancelled')",
+            name="ck_hedger_hedge_actions_status",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String, nullable=False, index=True)
@@ -101,6 +111,15 @@ class TreasurySnapshotRecord(Base):
     zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
     usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+
+
+Index(
+    "ux_hedger_commits_idempotency_key",
+    CommitRecord.idempotency_key,
+    unique=True,
+    postgresql_where=CommitRecord.idempotency_key.isnot(None),
+    sqlite_where=CommitRecord.idempotency_key.isnot(None),
+)
 
 
 class HedgerRepository:

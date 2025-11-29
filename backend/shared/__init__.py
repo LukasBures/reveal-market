@@ -3,7 +3,7 @@
 from importlib import import_module
 from typing import Any
 
-__all__ = ["cache", "categories", "logging", "models", "onchain", "repository"]
+__all__ = ["cache", "categories", "logging", "metrics", "models", "onchain", "repository"]
 
 
 def __getattr__(name: str) -> Any:

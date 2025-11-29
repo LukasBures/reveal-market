@@ -40,6 +40,12 @@ class StreamerMetrics:
             ["transport", "target"],
             registry=REGISTRY,
         )
+        self.ingest_dropped = Counter(
+            "streamer_ingest_dropped_total",
+            "Dropped/ignored ingest events",
+            ["source", "reason"],
+            registry=REGISTRY,
+        )
 
     def record_delivery(self, transport: str, payload: Any) -> None:
         """Increment delivery counter with parsed labels."""
@@ -73,6 +79,9 @@ class StreamerMetrics:
 
     def record_drop(self, transport: str, reason: str) -> None:
         self.stream_dropped.labels(transport=transport, reason=reason).inc()
+
+    def record_ingest_drop(self, source: str, reason: str) -> None:
+        self.ingest_dropped.labels(source=source, reason=reason).inc()
 
     def record_staleness(self, last_seen: dict[str, datetime], *, stale_after: int) -> list[str]:
         """Update staleness gauges and return stale market ids."""

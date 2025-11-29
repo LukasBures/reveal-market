@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+from pydantic import SecretStr
 
 
 class _AsyncClientSuccess:
@@ -62,3 +63,46 @@ def test_pricing_fx_falls_back_on_http_error(client, monkeypatch):
     data = resp.json()
     assert data["stale"] is True
     assert data["zen_usd"] == settings.fx_fallback_price
+
+
+def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
+    # Force deterministic FX and signer env.
+    from app.config import get_settings
+    from eth_account import Account
+
+    signer = Account.create()
+    user = Account.create()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False))
+
+    class DummySyncResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"price": 10, "stale": False}
+
+    monkeypatch.setattr("app.main.httpx.get", lambda *a, **k: DummySyncResponse())
+
+    quote_payload = {
+        "stake_zen": 10,
+        "wallet_address": user.address,
+        "market_address": "0x1111111111111111111111111111111111111111",
+        "outcome_id": 1,
+        "market_id": "mkt-1",
+        "user_id": "user-1",
+    }
+    quote_resp = client.post("/pricing/quote", json=quote_payload)
+    assert quote_resp.status_code == 200
+    quote = quote_resp.json()
+    assert quote["signature"]
+    assert quote["chain_id"] == 2651420
+
+    submit_resp = client.post("/pricing/submit", json={"quote": quote})
+    assert submit_resp.status_code == 200
+    submit_body = submit_resp.json()
+    assert submit_body["valid"] is True
+    assert submit_body["quote"]["quote_id"] == quote["quote_id"]

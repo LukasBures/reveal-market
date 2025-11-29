@@ -210,3 +210,17 @@ def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["api"]["status"] == "degraded"
+
+
+def test_readiness_and_liveness_endpoints(client, monkeypatch):
+    settings = _configure_signer(get_settings())
+    monkeypatch.setattr("app.health.get_settings", lambda: settings)
+    monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
+
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json()["service"] == settings.app_name
+
+    live = client.get("/live")
+    assert live.status_code == 200
+    assert live.json()["status"] == "ok"

@@ -1,4 +1,4 @@
-from shared.env_presets import PRESETS, get_preset, resolve_mode
+from shared.env_presets import get_preset, resolve_mode
 
 
 def test_local_preset_contains_docker_hosts(monkeypatch):
@@ -12,7 +12,7 @@ def test_local_preset_contains_docker_hosts(monkeypatch):
 def test_prod_preset_defaults(monkeypatch):
     monkeypatch.setenv("MODE", "prod")
     preset = get_preset()
-    assert preset["api_host"] == "0.0.0.0"
+    assert preset["api_host"] == "0.0.0.0"  # noqa: S104
     assert "https://stream.revealmarket.xyz" in preset["streamer_public"]
 
 

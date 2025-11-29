@@ -84,7 +84,7 @@ class SummaryClient:
     def _render_prompt(self, job: SummaryJob) -> str:
         template = self.settings.summary_prompt_template
         description = job.description.strip()
-        extra_context = job.metadata.get("extra_data") or job.metadata
+        extra_context = job.metadata.get("gamma_metadata") or job.metadata
         tags = ", ".join(job.tags) if job.tags else "none"
         return template.format(
             title=job.title,

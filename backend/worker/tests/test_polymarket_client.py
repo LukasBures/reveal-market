@@ -70,7 +70,7 @@ def test_polymarket_client_handles_pagination():
     assert second.closed is True
     assert second.outcomes == ["Option A", "Option B", "Option C"]
     assert second.outcome_prices == [0.2, 0.3, 0.5]
-    assert second.extra_data["gamma"]["slug"] == "market-two"
+    assert second.gamma_metadata["slug"] == "market-two"
 
 
 def test_polymarket_client_parses_stringified_arrays():
@@ -325,7 +325,7 @@ def test_merge_clob_markets_enriches_payload():
     assert merged.order_min_size == 5
     assert merged.price_tick_size == 0.001
     assert merged.enable_order_book is True
-    assert merged.extra_data and "clob" in merged.extra_data
+    assert merged.gamma_metadata is None
 
 
 def test_merge_clob_matches_by_slug():

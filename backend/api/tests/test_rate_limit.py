@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import app.main as api_main
+from app.rate_limit import RATE_LIMIT_COUNTER
 
 
 def enable_rate_limit(monkeypatch, *, limit: int = 2, window: int = 60, whitelist: list[str] | None = None) -> None:
@@ -45,3 +46,21 @@ def test_rate_limit_disabled_does_not_block(client, monkeypatch):
 
     responses = [client.get("/markets") for _ in range(3)]
     assert all(response.status_code == 200 for response in responses)
+
+
+def test_rate_limit_metrics_increment(client, monkeypatch):
+    enable_rate_limit(monkeypatch, limit=1, window=60)
+    allowed_before = RATE_LIMIT_COUNTER.labels(outcome="allowed")._value.get()
+    blocked_before = RATE_LIMIT_COUNTER.labels(outcome="blocked")._value.get()
+
+    first = client.get("/markets")
+    second = client.get("/markets")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+    allowed_after = RATE_LIMIT_COUNTER.labels(outcome="allowed")._value.get()
+    blocked_after = RATE_LIMIT_COUNTER.labels(outcome="blocked")._value.get()
+
+    assert allowed_after - allowed_before == 1
+    assert blocked_after - blocked_before == 1

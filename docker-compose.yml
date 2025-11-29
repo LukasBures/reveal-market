@@ -49,12 +49,19 @@ services:
     restart: unless-stopped
     # mem_swappiness: 0
     # Acts as cache + heartbeat store. Port binding lives in docker-compose.override.yml for local-only access.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in your env file}
     volumes:
       - redis_data:/data
       - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --requirepass
+      - ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -96,8 +103,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8000"
+      - "prometheus.path=/metrics"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://api:8000/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://api:8000/live')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -127,7 +138,6 @@ services:
       RM_POLYMARKET_CLOSED_FILTER: "false"
       RM_POLL_INTERVAL_SECONDS: 60
       RM_POLYMARKET_TIMEOUT_SECONDS: 10
-      RM_API_BASE_URL: ${RM_API_BASE_URL}
       RM_MARKETS_CACHE_LIMIT: 18
       RM_PROVER_ENABLED: ${RM_PROVER_ENABLED}
       RM_PROVER_BASE_URL: ${RM_PROVER_BASE_URL}
@@ -327,7 +337,6 @@ services:
     environment:
       STREAMER_REDIS_URL: ${STREAMER_REDIS_URL}
       STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL}
-      STREAMER_INTERNAL_BASE_URL: ${STREAMER_INTERNAL_BASE_URL}
       STREAMER_FX_PRIMARY_REST_URL: ${STREAMER_FX_PRIMARY_REST_URL}
       STREAMER_FX_SECONDARY_REST_URL: ${STREAMER_FX_SECONDARY_REST_URL}
       STREAMER_FX_PRIMARY_WS_URL: ${STREAMER_FX_PRIMARY_WS_URL}

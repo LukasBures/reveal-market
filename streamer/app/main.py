@@ -6,16 +6,17 @@ import os
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from time import time
 from typing import Any, cast
-from urllib.parse import urlparse
 
-from fastapi import FastAPI, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .config import get_settings
 from .data_streamer import DataStreamer
+from .env_presets import PRESETS, get_preset, resolve_mode
 from .logging_utils import setup_logging, start_heartbeat
 from .metrics import get_metrics
 from .price_streamer import PriceStreamer
@@ -23,6 +24,21 @@ from .state import StreamState
 
 logger = logging.getLogger("reveal_market.streamer")
 logger.setLevel(logging.INFO)
+
+
+def _compute_cors_host_warnings(
+    settings, cors_allow_origins: list[str], env_streamer_url: str | None = None
+) -> list[dict]:
+    """Return a list of host/CORS mismatches for logging and tests."""
+
+    warnings: list[dict] = []
+    resolved_public = str(settings.public_base_url).rstrip("/") if settings.public_base_url else ""
+    env_url = (env_streamer_url or os.getenv("NEXT_PUBLIC_PRICE_STREAMER_URL") or "").rstrip("/")
+    if resolved_public and cors_allow_origins != ["*"] and resolved_public not in cors_allow_origins:
+        warnings.append({"reason": "public_not_in_cors", "public": resolved_public, "cors": cors_allow_origins})
+    if env_url and resolved_public and env_url != resolved_public:
+        warnings.append({"reason": "env_mismatch", "expected": resolved_public, "env": env_url})
+    return warnings
 
 
 async def _sse_events(
@@ -66,63 +82,49 @@ async def _sse_events(
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    mode_env = resolve_mode()
+    preset = get_preset()
+    # Force preset URLs and environment label so we do not rely on ad-hoc env vars and avoid host mismatches.
+    settings = settings.model_copy(
+        update={
+            "environment": mode_env,
+            "public_base_url": preset.get("streamer_public"),
+            "internal_base_url": preset.get("streamer_internal"),
+            "cors_allow_origins": preset.get("api_cors_origins", []),
+        },
+        deep=True,
+    )
     setup_logging("reveal_market.streamer", settings.log_level)
 
-    mode_env = os.getenv("MODE", "").lower()
-    is_production = settings.environment.lower() == "prod" or mode_env in {"prod", "production"}
-    local_origins = {
-        "http://localhost",
-        "http://localhost:3000",
-        "http://localhost:8100",
-    }
-    prod_origins = {
-        "https://revealmarket.xyz",
-        "https://stream.revealmarket.xyz",
-    }
+    # Union of preset CORS origins so local + prod both work without extra env tweaks.
+    cors_allow_origins = sorted(
+        {
+            origin.rstrip("/")
+            for preset_entry in PRESETS.values()
+            for origin in preset_entry.get("api_cors_origins", []) or []
+        }
+    )
+    if mode_env == "prod" and ("*" in cors_allow_origins):
+        cors_allow_origins = sorted([o for o in (preset.get("api_cors_origins", []) or []) if o != "*"])
+        logger.warning(
+            "wildcard CORS overridden in prod",
+            extra={"event": "cors.overridden", "origins": cors_allow_origins},
+        )
+        if not cors_allow_origins:
+            raise ValueError("CORS origins must be set in prod mode")
 
     metrics = get_metrics()
     state = StreamState(settings, metrics=metrics)
     data_streamer = DataStreamer(state, settings, metrics=metrics)
     price_streamer = PriceStreamer(state, settings)
     heartbeat_stop = start_heartbeat(logger, "streamer", interval_seconds=60)
-    cors_allow_origins = settings.cors_allow_origins_resolved
-    if not cors_allow_origins or cors_allow_origins == ["*"]:
-        cors_allow_origins = list(prod_origins if is_production else local_origins)
     sanitized_config = {
         k: v
         for k, v in settings.model_dump().items()
-        if not any(secret in k for secret in ["key", "private", "secret", "password"])
+        if not any(secret in k for secret in ["key", "private", "secret", "password", "token"])
     }
     sanitized_config["cors_allow_origins_resolved"] = cors_allow_origins
     logger.info("service configuration", extra={"event": "service.config", "config": sanitized_config})
-    public_host = urlparse(str(settings.public_base_url)).hostname if settings.public_base_url else None
-    internal_host = urlparse(str(settings.internal_base_url)).hostname if settings.internal_base_url else None
-    if public_host and internal_host and public_host != internal_host:
-        logger.warning(
-            "streamer host mismatch between public/internal URLs",
-            extra={
-                "event": "streamer.host.mismatch",
-                "public_host": public_host,
-                "internal_host": internal_host,
-            },
-        )
-    expected_origins = prod_origins if is_production else local_origins
-    if not cors_allow_origins or cors_allow_origins == ["*"]:
-        logger.warning(
-            "streamer CORS allow_origins is wildcard; set explicit origins for browser clients",
-            extra={"event": "cors.unbounded", "scope": "streamer"},
-        )
-    else:
-        missing_origins = sorted(origin for origin in expected_origins if origin not in cors_allow_origins)
-        if missing_origins:
-            logger.warning(
-                "streamer CORS origins missing expected entries",
-                extra={
-                    "event": "cors.origins.missing",
-                    "scope": "streamer",
-                    "missing": missing_origins,
-                },
-            )
     if os.getenv("NEXT_PUBLIC_DISABLE_STREAMER_WS", "").lower() == "true":
         logger.warning(
             "NEXT_PUBLIC_DISABLE_STREAMER_WS is enabled; websocket upgrades will be skipped",
@@ -145,6 +147,35 @@ def create_app() -> FastAPI:
                 await state.shutdown()
 
     app_instance = FastAPI(title="Reveal Price Streamer", version="0.1.0", lifespan=lifespan)
+    app_instance.state.cors_origins = cors_allow_origins
+
+    def _acquire_connection() -> None:
+        state.active_connections += 1
+        if state.active_connections > settings.max_active_connections:
+            state.active_connections -= 1
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many connections")
+
+    def _release_connection() -> None:
+        state.active_connections = max(0, state.active_connections - 1)
+
+    def _require_access_token(token: str | None):
+        if settings.access_token and token != settings.access_token:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid access token")
+
+    rl_buckets: dict[str, list[float]] = {}
+
+    def _rate_limit(identifier: str):
+        if settings.rate_limit_per_minute <= 0:
+            return
+        now = time()
+        bucket = rl_buckets.setdefault(identifier, [])
+        # drop entries older than 60s
+        rl_buckets[identifier] = [ts for ts in bucket if now - ts < 60]
+        bucket = rl_buckets[identifier]
+        if len(bucket) >= settings.rate_limit_per_minute:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate limit exceeded")
+        bucket.append(now)
+
     app_instance.add_middleware(
         cast(Any, CORSMiddleware),
         allow_origins=cors_allow_origins,
@@ -152,6 +183,8 @@ def create_app() -> FastAPI:
         allow_headers=settings.cors_allow_headers,
         allow_credentials=settings.cors_allow_credentials,
     )
+    for warning in _compute_cors_host_warnings(settings, cors_allow_origins):
+        logger.warning("streamer host/CORS mismatch", extra={"event": "streamer.host.mismatch", **warning})
 
     async def _health_payload() -> dict:
         fx = await state.get_fx()
@@ -264,8 +297,13 @@ def create_app() -> FastAPI:
     async def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+    def _require_control_token(control_header: str | None) -> None:
+        if settings.control_token and control_header != settings.control_token:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid control token")
+
     @app_instance.get("/stream")
     async def stream(
+        request: Request,
         market_id: str = Query(..., description="Market ID to stream"),
         heartbeat: int = Query(15, ge=1),
         max_events: int | None = Query(default=None, ge=1, description="Optional cap on events (for testing)"),
@@ -273,7 +311,11 @@ def create_app() -> FastAPI:
             default=None, description="Comma-separated asset IDs to subscribe to (CLOB market stream)"
         ),
         symbols: str | None = Query(default=None, description="Comma-separated crypto symbols to subscribe (RTDS)"),
+        access_token: str | None = Header(default=None, alias="x-access-token"),
     ):
+        _require_access_token(access_token)
+        client_id = request.client.host if request and request.client else "unknown"
+        _rate_limit(client_id)
         # Allow on-demand subscription scoping.
         assets: list[str] = []
         assets_supplied = bool(assets_ids)
@@ -299,6 +341,7 @@ def create_app() -> FastAPI:
         acquired = state.acquire_assets(assets) if assets else []
         if symbols:
             state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
+        _acquire_connection()
         pubsub = await state.subscribe(market_id)
         return StreamingResponse(
             _sse_events(
@@ -306,7 +349,7 @@ def create_app() -> FastAPI:
                 heartbeat_seconds=heartbeat,
                 max_events=max_events,
                 metrics=metrics,
-                on_close=lambda: state.release_assets(acquired),
+                on_close=lambda: (state.release_assets(acquired), _release_connection()),
             ),
             media_type="text/event-stream",
         )
@@ -319,6 +362,9 @@ def create_app() -> FastAPI:
         assets_ids: str | None = None,
         symbols: str | None = None,
     ):
+        _require_access_token(websocket.headers.get("x-access-token"))
+        client_id = websocket.client.host if websocket.client else "unknown"
+        _rate_limit(client_id)
         assets: list[str] = []
         assets_supplied = bool(assets_ids)
         if assets_ids:
@@ -344,6 +390,7 @@ def create_app() -> FastAPI:
             state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
         pubsub = await state.subscribe(market_id)
         await websocket.accept()
+        _acquire_connection()
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat)
@@ -369,6 +416,7 @@ def create_app() -> FastAPI:
                 await websocket.close()
             with suppress(Exception):
                 state.release_assets(acquired)
+            _release_connection()
 
     @app_instance.get("/history")
     async def history(
@@ -405,6 +453,81 @@ def create_app() -> FastAPI:
             "stale_markets": stale_markets,
             "last_seen": state.snapshot_last_seen(),
             "last_published": last_published,
+        }
+
+    @app_instance.get("/control/subscriptions")
+    async def control_subscriptions(
+        request: Request,
+        control_token: str | None = Header(default=None, alias="x-control-token"),
+    ):
+        _require_control_token(control_token)
+        if request.client:
+            _rate_limit(request.client.host)
+        stale = state.stale_markets(settings.market_stale_seconds)
+        return {
+            "assets": sorted(state.subscriptions.assets),
+            "symbols": sorted(state.rtds_symbols),
+            "count": len(state.subscriptions.assets),
+            "max": settings.max_subscriptions,
+            "stale_markets": stale,
+            "last_seen": state.snapshot_last_seen(),
+            "last_published": {k: v.isoformat() for k, v in state.last_published.items()},
+        }
+
+    @app_instance.post("/control/subscriptions")
+    async def control_add_subscriptions(
+        assets_ids: list[str] = Query(default_factory=list),
+        symbols: list[str] = Query(default_factory=list),
+        control_token: str | None = Header(default=None, alias="x-control-token"),
+    ):
+        _require_control_token(control_token)
+        # rate limit by control caller if available
+        _rate_limit("control")
+        added_assets = state.acquire_assets(assets_ids or [])
+        if symbols:
+            state.add_rtds_symbols(symbols)
+        logger.info(
+            "control add subscriptions",
+            extra={
+                "event": "control.subscriptions.add",
+                "assets_added": added_assets,
+                "symbols_added": symbols or [],
+                "count": len(state.subscriptions.assets),
+            },
+        )
+        return {
+            "added_assets": added_assets,
+            "assets": sorted(state.subscriptions.assets),
+            "symbols": sorted(state.rtds_symbols),
+            "count": len(state.subscriptions.assets),
+        }
+
+    @app_instance.delete("/control/subscriptions")
+    async def control_remove_subscriptions(
+        assets_ids: list[str] = Query(default_factory=list),
+        symbols: list[str] = Query(default_factory=list),
+        control_token: str | None = Header(default=None, alias="x-control-token"),
+    ):
+        _require_control_token(control_token)
+        _rate_limit("control")
+        if assets_ids:
+            state.force_remove_assets(assets_ids)
+        if symbols:
+            for sym in symbols:
+                state.rtds_symbols.discard(sym)
+        logger.info(
+            "control remove subscriptions",
+            extra={
+                "event": "control.subscriptions.remove",
+                "assets_removed": assets_ids or [],
+                "symbols_removed": symbols or [],
+                "count": len(state.subscriptions.assets),
+            },
+        )
+        return {
+            "assets": sorted(state.subscriptions.assets),
+            "symbols": sorted(state.rtds_symbols),
+            "count": len(state.subscriptions.assets),
         }
 
     return app_instance

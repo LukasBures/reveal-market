@@ -26,13 +26,17 @@ def upsert_market(
 ) -> models.Market:
     """Insert or update a market row based on the provided field mapping."""
     payload = dict(data)
+    # Drop legacy/normalized-only fields that are no longer columns on markets
+    for legacy in ("outcomes", "outcome_prices", "tags", "clob_token_ids", "extra_data"):
+        payload.pop(legacy, None)
     market = existing or get_market_by_event_id(session, payload["event_id"])
     if market is None:
         market = models.Market(**payload)
         session.add(market)
     else:
         for field, value in payload.items():
-            setattr(market, field, value)
+            if hasattr(market, field):
+                setattr(market, field, value)
     return market
 
 
@@ -45,6 +49,7 @@ def get_resolution_by_condition_id(session: Session, condition_id: str) -> model
 def upsert_resolution(session: Session, data: Mapping[str, Any]) -> models.Resolution:
     """Insert or update a resolution record."""
     payload = dict(data)
+    payload.pop("outcomes", None)
     condition_id = payload["condition_id"]
     record = get_resolution_by_condition_id(session, condition_id)
     if record is None:

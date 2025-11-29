@@ -8,7 +8,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 | Domain | Duties |
 | --- | --- |
-| Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. |
+| Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. Normalized tables (`market_outcomes`, `market_tags`, `market_clob_tokens`, `market_gamma_metadata/events`, `gamma_raw`) replace legacy JSON columns. |
 | Resolution tracking | Prefer Goldsky subgraph data (fallback to Conditional Tokens RPC) to persist payout vectors in Postgres + Redis and update market status (`settled`). |
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, and Prometheus counters (`worker.*`). |
@@ -24,6 +24,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ## Operational Notes
 
+- Startup validates required env vars in prod-like environments (DB/Redis URLs always, Polymarket base URL, and feature-specific secrets for summaries/prover/on-chain). Ensure the corresponding `RM_` envs are set before booting containers; defaults are for local only.
 - Resolution sync stays lean: unused change flags were removed while keeping the persisted payload + cache content identical, so heartbeats and invalidations still reflect real state changes without extra bookkeeping.
 - Redis remains optional for background work; when it is unavailable the worker keeps writing to Postgres and simply skips cache writes/invalidations instead of failing the sync loop.
 - Pricing quotes and signatures are handled by the API/contract path (`commitWithQuote`); the worker does not touch quote issuance or verification—keep API + streamer healthy for trading flows.
@@ -79,6 +80,7 @@ All environment variables begin with `RM_`. Notable groups:
 | Variable | Description |
 | --- | --- |
 | `RM_DATABASE_URL` | Postgres DSN (same DB as the API). |
+| `RM_DATABASE_POOL_SIZE`, `RM_DATABASE_MAX_OVERFLOW`, `RM_DATABASE_POOL_TIMEOUT` | SQLAlchemy pool sizing/tuning for the worker. |
 | `RM_REDIS_URL` | Redis URI used for cache invalidation, schema tags, heartbeat storage. |
 | `RM_POLL_INTERVAL_SECONDS` | How often to pull Polymarket (default 60s). |
 | `RM_RUN_MIGRATIONS_ON_STARTUP` | If true, apply Alembic migrations before syncing. |
@@ -115,6 +117,7 @@ All environment variables begin with `RM_`. Notable groups:
 | --- | --- |
 | `RM_RESOLVED_RETENTION_SECONDS` | Age threshold before deleting settled markets. |
 | `RM_RESOLVED_RETENTION_DRY_RUN` | If true, log eligible rows but do not delete. |
+| `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky/Conditional Tokens resolution fetches. |
 
 ### On-chain automation (manual only)
 
@@ -223,7 +226,7 @@ uv run --project . --extra dev ruff check backend/worker
 | --- | --- |
 | Logging | `logging_config.setup_logging("reveal_market.worker")` emits `timestamp | LEVEL | logger | file:line | event | request_id`. Key events: `worker.fetch.*`, `worker.persist.*`, `worker.heartbeat.*`, `worker.cache.*`, `worker.schema.*`. Use `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES` to tune output. |
 | Metrics | `RETENTION_*`, `CACHE_INVALIDATION_COUNTER`, `worker_polymarket_fetch_total`, `worker_polymarket_retry_total`, plus Prometheus counters exported by the API (worker updates hit those indirectly). If you need direct worker metrics, wrap the loop with `prometheus_client` exposition. |
-| Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency. API `/health` uses this to flag worker outages. |
+| Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency, market_errors, and a `polymarket_ok` flag. API `/health` uses this to flag worker outages. Alert when the key is stale past `RM_HEARTBEAT_TTL_SECONDS`. |
 | Batch stats | Stored at `RM_BATCH_STATS_KEY` with TTL; use `redis-cli GET reveal_market_worker:batch_stats | jq` for quick diagnostics. |
 | Summary queue | `worker.summary.*` logs trace queue depth, requeue/dead-letter activity, and successful enrichments. |
 
@@ -248,7 +251,18 @@ uv run --project . --extra dev ruff check backend/worker
 
 ---
 
-## 9. Troubleshooting
+## 9. Runbooks (Prod)
+
+- **Required env vars (prod)**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_POLYMARKET_API_BASE`, `RM_HEARTBEAT_KEY`, `RM_SCHEMA_VERSION_KEY`. Feature flags: `RM_PROVER_ENABLED` + `RM_AUTO_SETTLEMENT_ENABLED` (proofs), `RM_SUMMARY_ENABLED` + `RM_SUMMARY_API_KEY` (AI), `RM_AUTO_CREATE_ONCHAIN_MARKETS` (manual on-chain). Tuning: `RM_POLYMARKET_*` (fetch/retry/rate limit), `RM_RESOLUTION_FETCH_*`, `RM_MARKETS_CACHE_*`, `RM_HEARTBEAT_*`, DB pool knobs `RM_DATABASE_POOL_SIZE`/`RM_DATABASE_MAX_OVERFLOW`/`RM_DATABASE_POOL_TIMEOUT`.
+- **Startup (local)**: `cd backend/worker && uv sync --extra dev --no-install-project`; set `SETTINGS_FILE=.env.worker`; `LOG_LEVEL=DEBUG uv run --project . python run.py`; summaries: `uv run --project . python -m app.summary_worker`. In Docker: `docker compose up worker` (or full stack via `./run_local.sh`).
+- **Feature flags**: Proofs (`RM_PROVER_ENABLED=true` + `RM_AUTO_SETTLEMENT_ENABLED=true`), Summaries (`RM_SUMMARY_ENABLED=true` + `RM_SUMMARY_API_KEY` or fallback), Cache priming (`RM_PRIME_MARKETS_CACHE_ENABLED=true`, featured categories/queries lists).
+- **Release strategy**: Prefer canary/blue-green. Ensure migrations are backward-compatible; keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker applies them once then publishes schema tags. Rollback by redeploying prior image; migrations should have downgrade paths if reversal is needed.
+- **Rollback**: Redeploy previous image/config; clear schema tag cache if needed (`DEL RM_SCHEMA_VERSION_KEY`); invalidate schema-tagged caches (`schema:*`) if you reverted a migration.
+- **Health/alerts**: Alert on heartbeat staleness (`RM_HEARTBEAT_KEY` TTL), `worker.fetch.error`, `worker.cache.prime_failed/featured_failed`, `worker.resolution.gaps`, `worker.proof.failed`, summary DLQ growth (`worker.summary.dead_letter`). Heartbeat payload contains `polymarket_ok`, `redis_available`, `markets_changed`, `resolutions_changed`, `latency_ms`, `market_errors`.
+
+---
+
+## 10. Troubleshooting
 
 | Issue | Diagnosis steps | Resolution |
 | --- | --- | --- |

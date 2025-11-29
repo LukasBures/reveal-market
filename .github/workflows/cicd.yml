@@ -73,6 +73,12 @@ jobs:
           PYTEST_WORKER_COUNT: 4
         run: uv run --project backend/api -- python -m pytest -n "${PYTEST_WORKER_COUNT}" backend/shared/tests
 
+      - name: Type check (mypy)
+        run: uv run --project backend/api -- mypy --config-file backend/api/pyproject.toml backend/api/app backend/shared
+
+      - name: OpenAPI snapshot check
+        run: uv run --project backend/api -- pytest backend/api/tests/test_openapi_snapshot.py
+
 
   hedger:
     needs: precommit

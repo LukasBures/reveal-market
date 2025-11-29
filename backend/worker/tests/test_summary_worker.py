@@ -39,6 +39,9 @@ class DummyRedis:
         queue = self.queues.setdefault(key, [])
         queue.insert(0, value)
 
+    def llen(self, key: str) -> int:
+        return len(self.queues.get(key, []))
+
 
 def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
     test_session_factory = _setup_session(monkeypatch)

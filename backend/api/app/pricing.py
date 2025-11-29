@@ -4,12 +4,22 @@ from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 import httpx
+from tenacity import AsyncRetrying, Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
 _FX_CACHE: dict[str, Decimal | bool | float] = {}
+
+# FX source is pinned to the streamer; override in code if the streamer host changes.
+STREAMER_FX_URL = "http://streamer:8100/fx/zen-usd"
+
+
+def _resolved_fx_url(settings: Settings) -> str:
+    """Use the streamer FX endpoint as the single source of truth."""
+
+    return STREAMER_FX_URL
 
 
 class PricingEngine:
@@ -99,27 +109,73 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
 
     now = monotonic()
     cache_ttl = float(settings.fx_cache_ttl_seconds)
+    url = _resolved_fx_url(settings)
 
-    async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
-        try:
-            response = await client.get(str(settings.fx_feed_url))
-            response.raise_for_status()
-            data = response.json()
-            stale = bool(data.get("fx_stale") or data.get("stale"))
-            raw = _extract_fx_price(data)
-            if raw is None:
-                raise ValueError("FX feed response missing zen_usd/price")
-            zen_usd = raw
-            _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
-            return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
-        except (httpx.HTTPError, ValueError, InvalidOperation, TypeError):
-            if use_cache_on_error and "zen_usd" in _FX_CACHE:
-                _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
-                fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-                return FxQuoteResponse(zen_usd=Decimal(str(_FX_CACHE["zen_usd"])), stale=True)
+    async def _request() -> dict:
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(3),
+            wait=wait_random_exponential(multiplier=0.2, max=2.0),
+            retry=retry_if_exception_type(httpx.HTTPError),
+            reraise=True,
+        ):
+            with attempt:
+                async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    return response.json()
 
-            _FX_CACHE.update(
-                {"zen_usd": Decimal(str(settings.fx_fallback_price)), "stale": True, "expires_at": now + cache_ttl}
-            )
+    try:
+        data = await _request()
+        stale = bool(data.get("fx_stale") or data.get("stale"))
+        raw = _extract_fx_price(data)
+        if raw is None:
+            raise ValueError("FX feed response missing zen_usd/price")
+        zen_usd = raw
+        _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
+        return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
+    except (httpx.HTTPError, ValueError, InvalidOperation, TypeError):
+        if use_cache_on_error and "zen_usd" in _FX_CACHE:
+            _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
             fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-            return FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)
+            return FxQuoteResponse(zen_usd=Decimal(str(_FX_CACHE["zen_usd"])), stale=True)
+
+        _FX_CACHE.update(
+            {"zen_usd": Decimal(str(settings.fx_fallback_price)), "stale": True, "expires_at": now + cache_ttl}
+        )
+        fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
+        return FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)
+
+
+def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool]:
+    """Synchronous FX fetch with bounded retries and stale flag."""
+
+    now = monotonic()
+    url = _resolved_fx_url(settings)
+    expires_at = _FX_CACHE.get("expires_at")
+    if expires_at and expires_at > now and "zen_usd" in _FX_CACHE:
+        price = _FX_CACHE.get("zen_usd")
+        stale = bool(_FX_CACHE.get("stale"))
+        return (Decimal(str(price)) if price is not None else None, stale)
+
+    retryer = Retrying(
+        stop=stop_after_attempt(3),
+        wait=wait_random_exponential(multiplier=0.2, max=2.0),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+
+    with httpx.Client(timeout=settings.fx_timeout_seconds) as client:
+        for attempt in retryer:
+            with attempt:
+                response = client.get(url)
+                response.raise_for_status()
+                data = response.json()
+                stale = bool(data.get("fx_stale") or data.get("stale"))
+                raw = _extract_fx_price(data)
+                if raw is None:
+                    raise ValueError("FX feed response missing zen_usd/price")
+                _FX_CACHE.update(
+                    {"zen_usd": raw, "stale": stale, "expires_at": now + float(settings.fx_cache_ttl_seconds)}
+                )
+                return raw, stale
+    return None, True

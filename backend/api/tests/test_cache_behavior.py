@@ -5,7 +5,9 @@ import time
 
 import app.main as api_main
 from app import crud, models
+from shared import models as shared_models
 from shared.cache_keys import markets_list_cache_key
+from sqlalchemy import select
 
 
 def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
@@ -42,9 +44,13 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
         category="sports",
         oracle="0xabc",
         status="commit",
-        extra_data={"gamma": {"id": "evt-cache-trim"}, "description": "Lightweight"},
     )
     db_session.add(market)
+    db_session.flush()
+    market_id = db_session.execute(
+        select(models.Market.id).where(models.Market.event_id == "evt-cache-trim")
+    ).scalar_one()
+    db_session.add(shared_models.MarketGammaMetadata(market_id=market_id, description="Lightweight"))
     db_session.commit()
 
     response = client.get("/markets", params={"limit": 5})
@@ -59,7 +65,7 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     assert record_key in cache_store
     record = json.loads(cache_store[record_key])
     assert record["event_id"] == "evt-cache-trim"
-    assert record["extra_data"] == {"description": "Lightweight"}
+    assert record["description"] == "Lightweight"
 
 
 def test_market_detail_cached(client, db_session, monkeypatch):

@@ -8,6 +8,8 @@ from decimal import Decimal
 import pytest
 from app.config import Settings
 from app.data_streamer import DataStreamer
+from app.main import _sse_events
+from app.metrics import get_metrics
 from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
 
@@ -486,3 +488,71 @@ async def test_fx_ws_rest_retry_flow(monkeypatch):
     assert state.fx_quote and state.fx_quote.source == "binance_ws"
     assert state.fx_ws_connected is True
     assert streamer.metric_ws_connected._value.get() == 1
+
+
+@pytest.mark.asyncio
+async def test_clob_ws_loop_reconnects_and_sends_subscribe(monkeypatch):
+    settings = Settings(ws_reconnect_seconds=0.01)
+    state = StreamState(settings)
+    state.subscriptions.add_assets(["tok-a"])
+    streamer = DataStreamer(state, settings)
+    ws_instances: list = []
+
+    class DummyWS:
+        def __init__(self, name):
+            self.name = name
+            self.sent: list[str] = []
+            self.recv_count = 0
+
+        async def send(self, payload):
+            self.sent.append(payload)
+
+        async def recv(self):
+            self.recv_count += 1
+            raise TimeoutError
+
+    async def fake_iter_ws(url, name="ws", fatal_status=None):
+        ws1 = DummyWS("first")
+        ws_instances.append(ws1)
+        yield ws1
+        ws2 = DummyWS("second")
+        ws_instances.append(ws2)
+        yield ws2
+        streamer._stop.set()
+
+    monkeypatch.setattr("app.data_streamer.iter_ws", fake_iter_ws)
+    await asyncio.wait_for(streamer._ws_loop(), timeout=1)
+    assert ws_instances
+    assert any('"tok-a"' in payload for ws in ws_instances for payload in ws.sent)
+    assert streamer._stop.is_set()
+
+
+@pytest.mark.asyncio
+async def test_sse_heartbeat_records_drop():
+    metrics = get_metrics()
+    counter = metrics.stream_dropped.labels(transport="sse", reason="heartbeat")
+    start = counter._value.get()
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            return None
+
+        async def close(self):
+            return
+
+    chunks: list[str] = []
+    async for chunk in _sse_events(DummyPubSub(), heartbeat_seconds=0.01, max_events=1, metrics=metrics):
+        chunks.append(chunk)
+    assert any("event: ping" in c for c in chunks)
+    assert counter._value.get() == start + 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_drop_metric_records_missing_market(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    metrics = get_metrics()
+    streamer = DataStreamer(state, settings, metrics=metrics)
+    start = metrics.ingest_dropped.labels(source="ws", reason="missing_market_or_prices")._value.get()
+    await streamer._handle_tick({}, source="ws")
+    assert metrics.ingest_dropped.labels(source="ws", reason="missing_market_or_prices")._value.get() == start + 1

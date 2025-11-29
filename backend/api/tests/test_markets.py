@@ -7,6 +7,7 @@ import app.main as api_main
 from app import crud, models
 from prometheus_client import REGISTRY
 from shared.cache_keys import category_cache_key, markets_list_cache_key, suggest_cache_key
+from sqlalchemy import select
 
 
 def _make_market(
@@ -138,7 +139,7 @@ def test_patch_market_and_stats(client, db_session):
         "title": "Patched Title",
         "status": "settled",
         "closed": True,
-        "extra_data": {"note": "updated"},
+        "tags": ["patched"],
     }
 
     patch_response = client.patch(f"/markets/{market.event_id}", json=patch_payload)
@@ -146,7 +147,7 @@ def test_patch_market_and_stats(client, db_session):
     patched = patch_response.json()
     assert patched["title"] == "Patched Title"
     assert patched["status"] == "settled"
-    assert patched["extra_data"] == {"note": "updated"}
+    assert patched["tags"] == ["patched"]
     assert patched["rake_bps"] is None
 
     stats_response = client.get("/markets/stats")
@@ -193,9 +194,15 @@ def test_resolution_endpoint_returns_summary(client, db_session):
     )
     market.condition_id = "0x1111111111111111111111111111111111111111111111111111111111111111"
     market.condition_id = market.condition_id.lower()
-    market.outcomes = ["Yes", "No"]
-    market.outcome_prices = [0.45, 0.55]
     db_session.add(market)
+    db_session.flush()
+    mid = db_session.execute(select(models.Market.id).where(models.Market.event_id == "evt-300")).scalar_one()
+    db_session.add_all(
+        [
+            models.MarketOutcome(market_id=mid, outcome_id=0, label="Yes", price=0.45),
+            models.MarketOutcome(market_id=mid, outcome_id=1, label="No", price=0.55),
+        ]
+    )
     db_session.commit()
 
     checked_at = datetime.now(UTC)
@@ -205,7 +212,6 @@ def test_resolution_endpoint_returns_summary(client, db_session):
         resolved=True,
         payouts=[0, 1],
         winners=[{"index": 1, "label": "No", "payout": 1}],
-        outcomes=["Yes", "No"],
         oracle="0xfeed",
         question_id="0x" + "f" * 64,
         transaction_hash="0x" + "1" * 64,
@@ -232,8 +238,15 @@ def test_resolution_endpoint_uses_goldsky_fallback(client, db_session, monkeypat
     )
     market.condition_id = "0x2222222222222222222222222222222222222222222222222222222222222222"
     market.condition_id = market.condition_id.lower()
-    market.outcomes = ["Up", "Down"]
     db_session.add(market)
+    db_session.flush()
+    mid = db_session.execute(select(models.Market.id).where(models.Market.event_id == "evt-301")).scalar_one()
+    db_session.add_all(
+        [
+            models.MarketOutcome(market_id=mid, outcome_id=0, label="Up", price=0.6),
+            models.MarketOutcome(market_id=mid, outcome_id=1, label="Down", price=0.4),
+        ]
+    )
     db_session.commit()
 
     class DummyGoldsky:

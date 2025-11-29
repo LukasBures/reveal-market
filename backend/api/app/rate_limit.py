@@ -10,11 +10,13 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from redis import Redis
 from shared.logging import log_event
+from shared.metrics import Counter as RM_Counter
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.config import Settings
 
 logger = logging.getLogger("reveal_market.api.rate_limit")
+RATE_LIMIT_COUNTER = RM_Counter("rate_limit_events_total", "Rate limit decisions", ["outcome"])
 
 
 @dataclass
@@ -145,6 +147,7 @@ class RateLimitMiddleware:
                 limit=result.limit,
                 remaining=result.remaining,
             )
+            RATE_LIMIT_COUNTER.labels(outcome="blocked").inc()
             headers["Retry-After"] = str(result.retry_after_seconds)
             response = JSONResponse(
                 {"detail": "rate_limit_exceeded"}, status_code=HTTP_429_TOO_MANY_REQUESTS, headers=headers
@@ -152,6 +155,7 @@ class RateLimitMiddleware:
             await response(scope, receive, send)
             return
 
+        RATE_LIMIT_COUNTER.labels(outcome="allowed").inc()
         await self._call_with_headers(scope, receive, send, headers)
 
     def _extract_identifier(self, request: Request) -> str | None:

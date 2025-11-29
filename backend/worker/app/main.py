@@ -36,7 +36,7 @@ from shared.onchain.conditional_tokens import _derive_winners
 from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .config import get_settings, reload_settings
+from .config import MissingSettingsError, get_settings, reload_settings, sanitize_settings, validate_required_settings
 from .logging_config import setup_logging
 from .polymarket import MarketPayload, PolymarketClient, merge_clob_markets
 from .proof_builder import SettlementDataMissingError, build_prover_payload
@@ -113,15 +113,25 @@ POLYMARKET_EMPTY_PAGE_COUNTER = _safe_counter(
     ["outcome"],
 )
 
+SUMMARY_DLQ_COUNTER = _safe_counter(
+    "worker_summary_dead_letter_total",
+    "Summary jobs sent to dead letter queue",
+    ["outcome"],
+)
+
 setup_logging("reveal_market.worker")
 logger = logging.getLogger("reveal_market.worker")
 
 settings = get_settings()
-_sanitized_config = {
-    k: v
-    for k, v in settings.model_dump().items()
-    if not any(secret in k for secret in ["key", "private", "secret", "password"])
-}
+try:
+    validate_required_settings(settings)
+except MissingSettingsError as exc:
+    logger.error(
+        "required environment variables missing",
+        extra={"event": "service.config_error", "error": str(exc)},
+    )
+    raise
+_sanitized_config = sanitize_settings(settings)
 logger.info("service configuration", extra={"event": "service.config", "config": _sanitized_config})
 PROVER_CLIENT: ProverClient | None = None
 
@@ -179,6 +189,7 @@ class SyncSummary:
     summaries_enqueued: int = 0
     proofs_generated: int = 0
     resolutions_backfilled: int = 0
+    failed_markets: int = 0
 
     def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
         return {
@@ -194,6 +205,7 @@ class SyncSummary:
             "proofs_generated": self.proofs_generated,
             "cache_invalidations": cache_invalidations,
             "resolutions_backfilled": self.resolutions_backfilled,
+            "market_errors": self.failed_markets,
         }
 
 
@@ -229,6 +241,9 @@ engine = create_engine(
     settings.database_url,
     future=True,
     pool_pre_ping=True,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    pool_timeout=settings.database_pool_timeout,
 )
 SessionLocal = sessionmaker(
     bind=engine,
@@ -476,7 +491,19 @@ PROVER_CLIENT = _build_prover_client()
 
 def _reload_worker_settings(signum=None, frame=None) -> None:  # pragma: no cover - signal handler
     global settings, polymarket_client, clob_client, conditional_tokens_client, goldsky_client, PROVER_CLIENT
-    settings = reload_settings()
+    new_settings = reload_settings()
+    try:
+        validate_required_settings(new_settings)
+    except MissingSettingsError as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.config.invalid",
+            message="configuration reload failed validation",
+            error=str(exc),
+        )
+        return
+    settings = new_settings
     polymarket_client = _build_polymarket_client()
     clob_client = _build_clob_client()
     goldsky_client = _build_goldsky_client()
@@ -575,34 +602,55 @@ def _fetch_resolution_snapshot(
 ) -> dict[str, Any] | None:
     """Return the best-effort resolution summary from Goldsky or fallback RPC."""
     outcomes = market.outcomes or []
-    if goldsky_client is not None:
+    attempts = settings.resolution_fetch_max_attempts
+    backoff = settings.resolution_fetch_backoff_seconds
+    backoff_max = settings.resolution_fetch_backoff_max_seconds
+
+    def _with_retry(action: Callable[[], dict[str, Any] | None], source: str) -> dict[str, Any] | None:
+        def _log_retry(attempt: int, exc: BaseException | None) -> None:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.retry",
+                message="retrying resolution fetch",
+                source=source,
+                attempt=attempt,
+                max_attempts=attempts,
+                error=str(exc) if exc else None,
+            )
+
         try:
-            summary = goldsky_client.resolution_summary(condition_id, outcomes, outcome_count_hint)
-            if summary:
-                return summary
+            return _run_with_retries(
+                action,
+                attempts,
+                backoff,
+                backoff_max,
+                on_retry=_log_retry if attempts > 1 else None,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
                 logging.WARNING,
-                event="worker.resolution.goldsky_failed",
-                message="failed to load resolution from goldsky",
+                event=f"worker.resolution.{source}_failed",
+                message="failed to load resolution",
                 condition_id=condition_id,
                 error=str(exc),
             )
+            return None
+
+    if goldsky_client is not None:
+        summary = _with_retry(
+            lambda: goldsky_client.resolution_summary(condition_id, outcomes, outcome_count_hint),
+            "goldsky",
+        )
+        if summary:
+            return summary
     if conditional_tokens_client is None:
         return None
-    try:
-        return conditional_tokens_client.resolution_summary(condition_id, outcomes, outcome_count_hint)
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.resolution.fetch_failed",
-            message="failed to read conditional tokens resolution",
-            condition_id=condition_id,
-            error=str(exc),
-        )
-        return None
+    return _with_retry(
+        lambda: conditional_tokens_client.resolution_summary(condition_id, outcomes, outcome_count_hint),
+        "conditional_tokens",
+    )
 
 
 def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
@@ -710,17 +758,79 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
     return markets, latency_ms
 
 
-def _merge_extra_data(existing: dict | None, update: dict) -> dict:
-    merged = dict(existing) if isinstance(existing, dict) else {}
-    merged.update(update)
-    return merged
-
-
 def _slugify_token(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or None
+
+
+def _persist_normalized_market_data(
+    session: Session,
+    *,
+    market_id: int,
+    outcomes: list[str] | None,
+    outcome_prices: list[float] | None,
+    tags: list[str] | None,
+    clob_token_ids: list[str] | None,
+    gamma_metadata: dict | None,
+    gamma_events: list[dict[str, Any]] | None,
+) -> None:
+    """Replace normalized tables for a market with the latest payload."""
+
+    # Outcomes
+    session.query(shared_models.MarketOutcome).filter_by(market_id=market_id).delete()
+    if outcomes:
+        for idx, label in enumerate(outcomes):
+            price = None
+            if isinstance(outcome_prices, list) and idx < len(outcome_prices):
+                try:
+                    price = float(outcome_prices[idx])
+                except (TypeError, ValueError):
+                    price = None
+            session.add(
+                shared_models.MarketOutcome(
+                    market_id=market_id,
+                    outcome_id=idx,
+                    label=str(label),
+                    price=price,
+                )
+            )
+
+    # Tags
+    session.query(shared_models.MarketTag).filter_by(market_id=market_id).delete()
+    if tags:
+        seen = set()
+        for tag in tags:
+            tag_str = str(tag).strip()
+            if not tag_str or tag_str in seen:
+                continue
+            seen.add(tag_str)
+            session.add(shared_models.MarketTag(market_id=market_id, tag=tag_str))
+
+    # Clob tokens
+    session.query(shared_models.MarketClobToken).filter_by(market_id=market_id).delete()
+    if clob_token_ids:
+        for idx, token in enumerate(clob_token_ids):
+            side = None
+            if idx == 0:
+                side = "yes"
+            elif idx == 1:
+                side = "no"
+            session.add(shared_models.MarketClobToken(market_id=market_id, token_id=str(token), side=side))
+
+    # Gamma metadata
+    session.query(shared_models.MarketGammaMetadata).filter_by(market_id=market_id).delete()
+    if gamma_metadata:
+        session.add(shared_models.MarketGammaMetadata(market_id=market_id, **gamma_metadata))
+
+    # Gamma events
+    session.query(shared_models.MarketGammaEvent).filter_by(market_id=market_id).delete()
+    if gamma_events:
+        for raw in gamma_events:
+            if not isinstance(raw, dict):
+                continue
+            session.add(shared_models.MarketGammaEvent(market_id=market_id, **raw))
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -838,8 +948,20 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
                 processed=index,
                 total=total_markets,
             )
-        prefetched = existing_records.get(market.event_id)
-        db_market, outcome = sync_market(session, market, existing_market=prefetched)
+        try:
+            prefetched = existing_records.get(market.event_id)
+            db_market, outcome = sync_market(session, market, existing_market=prefetched)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.persist.market_failed",
+                message="failed to synchronise single market",
+                event_id=getattr(market, "event_id", None),
+                error=str(exc),
+            )
+            summary.failed_markets += 1
+            continue
         if db_market and isinstance(db_market.event_id, str):
             existing_records[db_market.event_id] = db_market
         if outcome.market_changed and db_market and db_market.event_id:
@@ -857,7 +979,12 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
             summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
         if maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
             summary.summaries_enqueued += 1
-        if settings.prover_enabled and PROVER_CLIENT is not None and db_market is not None:
+        if (
+            settings.prover_enabled
+            and settings.auto_settlement_enabled
+            and PROVER_CLIENT is not None
+            and db_market is not None
+        ):
             summary.proof_jobs.append(
                 (
                     _snapshot_market_record(db_market),
@@ -869,6 +996,20 @@ def _collect_market_changes(session: Session, markets: list[MarketPayload], redi
 
 
 def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
+    outcomes = [row.label for row in record.outcomes_rel] if hasattr(record, "outcomes_rel") else None
+    prices = None
+    if hasattr(record, "outcomes_rel"):
+        prices = []
+        any_price = False
+        for row in record.outcomes_rel:
+            prices.append(float(row.price) if row.price is not None else None)
+            any_price = any_price or row.price is not None
+        if not any_price:
+            prices = None
+    tags = [row.tag for row in record.tags_rel] if hasattr(record, "tags_rel") else None
+    clob_ids = [row.token_id for row in record.clob_tokens_rel] if hasattr(record, "clob_tokens_rel") else None
+    gamma_meta = record.gamma_metadata_rel if hasattr(record, "gamma_metadata_rel") else None
+
     return MarketPayload(
         event_id=record.event_id,
         title=record.title or record.event_id or "Market",
@@ -879,10 +1020,18 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         factory=record.factory,
         market_address=record.market_address,
         status=record.status or MarketStatusEnum.COMMIT.value,
-        outcomes=record.outcomes,
-        outcome_prices=record.outcome_prices,
-        tags=record.tags,
-        extra_data=record.extra_data,
+        outcomes=outcomes,
+        outcome_prices=prices,
+        tags=tags,
+        gamma_raw=record.gamma_raw,
+        clob_token_ids=clob_ids,
+        gamma_metadata={k: v for k, v in vars(gamma_meta).items() if not k.startswith("_")} if gamma_meta else None,
+        gamma_events=[
+            {k: v for k, v in vars(row).items() if not k.startswith("_")}
+            for row in getattr(record, "gamma_events_rel", [])
+            if hasattr(record, "gamma_events_rel")
+        ]
+        or None,
         rake_bps=record.rake_bps,
         condition_id=record.condition_id,
         question_id=record.question_id,
@@ -898,7 +1047,6 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         order_min_size=record.order_min_size,
         price_tick_size=record.price_tick_size,
         enable_order_book=record.enable_order_book,
-        clob_token_ids=record.clob_token_ids,
         image_variants=record.image_variants,
         closes_at=record.closes_at,
     )
@@ -1002,8 +1150,18 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
         return report
 
     def _invalidate(tag: str) -> None:
-        removed = shared_cache.invalidate_tag(redis_client, tag)
-        report.record(tag, removed)
+        try:
+            removed = shared_cache.invalidate_tag(redis_client, tag)
+            report.record(tag, removed)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.cache.invalidate_failed",
+                message="failed to invalidate cache tag",
+                tag=tag,
+                error=str(exc),
+            )
 
     if summary.changed_events or summary.changed_categories:
         _invalidate("markets:list")
@@ -1027,16 +1185,34 @@ def _persist_resolution_cache_updates(redis_client: Redis | None, summary: SyncS
     if redis_client is None or not summary.resolution_cache_updates:
         return
     for condition_id, payload in summary.resolution_cache_updates:
-        shared_cache.set_json(
-            redis_client,
-            resolution_cache_key(condition_id),
-            payload,
-            settings.markets_cache_ttl_seconds,
-        )
+        try:
+            shared_cache.set_json(
+                redis_client,
+                resolution_cache_key(condition_id),
+                payload,
+                settings.markets_cache_ttl_seconds,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.cache.resolution_write_failed",
+                message="failed to persist resolution cache payload",
+                condition_id=condition_id,
+                error=str(exc),
+            )
 
 
 def _run_prover_jobs(summary: SyncSummary, redis_client: Redis | None) -> int:
-    if not settings.auto_settlement_enabled:
+    if not settings.prover_enabled or not settings.auto_settlement_enabled or PROVER_CLIENT is None:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.proof.disabled",
+            message="skipping proof generation (disabled or client unavailable)",
+            prover_enabled=settings.prover_enabled,
+            auto_settlement_enabled=settings.auto_settlement_enabled,
+        )
         return 0
     proofs_generated = 0
     for snapshot, payload, condition in summary.proof_jobs:
@@ -1137,17 +1313,6 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
         block_number=record_payload["block_number"],
     )
 
-    db_market.extra_data = _merge_extra_data(
-        db_market.extra_data,
-        {
-            "resolution": {
-                "source": record_payload["source"],
-                "checkedAt": checked_at_dt.isoformat(),
-                "resolved": record_payload["resolved"],
-            }
-        },
-    )
-
     if record_payload["resolved"]:
         db_market.status = "settled"
         if getattr(db_market, "closed", None) is not True:
@@ -1215,6 +1380,15 @@ def sync_market(
     incoming_updated_at = getattr(market, "source_updated_at", None)
     incoming_hash = getattr(market, "content_hash", None)
 
+    # Extract normalized fields before upsert
+    outcomes = payload.pop("outcomes", None)
+    outcome_prices = payload.pop("outcome_prices", None)
+    tags = payload.pop("tags", None)
+    clob_token_ids = payload.pop("clob_token_ids", None)
+    gamma_raw = payload.pop("gamma_raw", None)
+    gamma_metadata = payload.pop("gamma_metadata", None)
+    gamma_events = payload.pop("gamma_events", None)
+
     if existing is None:
         db_market = shared_repository.upsert_market(session, payload, existing)
         market_changed = True
@@ -1259,6 +1433,23 @@ def sync_market(
 
     if market.rake_bps is not None and db_market is not None:
         db_market.rake_bps = market.rake_bps
+    if db_market is not None:
+        db_market.gamma_raw = gamma_raw
+
+    if db_market is not None:
+        if db_market.id is None:
+            # Ensure we have a primary key before persisting normalized tables
+            session.flush()
+        _persist_normalized_market_data(
+            session,
+            market_id=db_market.id,
+            outcomes=outcomes,
+            outcome_prices=outcome_prices,
+            tags=tags,
+            clob_token_ids=clob_token_ids,
+            gamma_metadata=gamma_metadata,
+            gamma_events=gamma_events,
+        )
     _record_factory_state(session, db_market, market)
     resolution_outcome = _apply_resolution(session, db_market, market)
     session.flush()
@@ -1415,13 +1606,14 @@ def _propagate_schema_revision(redis_client: Redis | None, state: SchemaSyncResu
         )
         return
 
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.schema.version_cached",
-        message="published schema revision for cache tagging",
-        revision=state.current_revision,
-    )
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.schema.version_cached",
+            message="published schema revision for cache tagging",
+            revision=state.current_revision,
+            changed=state.changed,
+        )
 
     if state.changed:
         previous_tag = f"schema:{state.previous_revision}" if state.previous_revision else None
@@ -1461,6 +1653,9 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
         "proofs_generated": stats.get("proofs_generated"),
         "cache_invalidations": stats.get("cache_invalidations"),
         "resolution_gaps": stats.get("resolution_gaps"),
+        "market_errors": stats.get("market_errors"),
+        "polymarket_ok": bool(stats.get("polymarket_ok", False)),
+        "redis_available": True,
     }
 
     def _publish() -> bool:
@@ -1559,6 +1754,9 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
         "cache_invalidations": 0,
         "resolution_gaps": 0,
         "resolutions_backfilled": 0,
+        "market_errors": 0,
+        "polymarket_ok": False,
+        "redis_available": False,
     }
 
 
@@ -1601,6 +1799,8 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
             message="skipping market sync due to upstream failure",
             error=str(exc),
         )
+        stats["polymarket_ok"] = False
+        stats["redis_available"] = redis_client is not None
         publish_heartbeat(redis_client, stats)
         _propagate_schema_revision(redis_client, schema_state)
         return stats
@@ -1636,6 +1836,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
             extra={"event": "worker.persist.error", "error": str(exc)},
         )
         stats = _empty_sync_stats(round(latency_ms, 2))
+        stats["redis_available"] = redis_client is not None
         publish_heartbeat(redis_client, stats)
         _propagate_schema_revision(redis_client, schema_state)
         return stats
@@ -1644,6 +1845,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
     cache_report = _invalidate_cache_tags(redis_client, summary)
     stats = summary.to_stats(len(markets), latency_ms, cache_report.total)
     stats["resolution_gaps"] = gap_count
+    stats["polymarket_ok"] = True
 
     log_event(
         logger,
@@ -1660,10 +1862,12 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int]:
         proofs=summary.proofs_generated,
         latency_ms=round(latency_ms, 2),
         cache_invalidations=cache_report.total,
+        market_errors=summary.failed_markets,
     )
     # INFO-level summary above mirrors the start-of-tick log so operators always see
     # a single before/after line even when DEBUG logs are disabled.
 
+    stats["redis_available"] = redis_client is not None
     publish_heartbeat(redis_client, stats)
     _propagate_schema_revision(redis_client, schema_state)
     _persist_resolution_cache_updates(redis_client, summary)
@@ -1679,13 +1883,14 @@ def maybe_generate_settlement_proof(
 ) -> bool:
     """Call the prover service when settlements change so downstream services can audit proofs."""
 
-    if not settings.prover_enabled or PROVER_CLIENT is None:
+    if not settings.prover_enabled or not settings.auto_settlement_enabled or PROVER_CLIENT is None:
         log_event(
             logger,
             logging.DEBUG,
             event="worker.proof.disabled",
             message="settlement proof generation is disabled or client unavailable",
             prover_enabled=settings.prover_enabled,
+            auto_settlement_enabled=settings.auto_settlement_enabled,
         )
         return False
     market_id = market_snapshot.get("id") or market_snapshot.get("market_id")
@@ -1857,35 +2062,6 @@ def _build_snapshot_payload(
     }
 
 
-def _derive_total_pool_value(market_payload: MarketPayload) -> str:
-    prices = market_payload.outcome_prices or []
-    numeric_prices = [price for price in prices if isinstance(price, (int, float))]
-    if numeric_prices:
-        total = sum(numeric_prices)
-        scaled = max(int(total * 1_000_000), 1)
-        return str(scaled)
-    outcomes = market_payload.outcomes or []
-    return str(max(len(outcomes), 1))
-
-
-def _derive_winning_pool_value(market_payload: MarketPayload) -> str:
-    prices = market_payload.outcome_prices or []
-    numeric_prices = [price for price in prices if isinstance(price, (int, float))]
-    if numeric_prices:
-        winning = max(numeric_prices)
-        scaled = max(int(winning * 1_000_000), 1)
-        return str(scaled)
-    return "1"
-
-
-def _normalize_market_address(address: str | None) -> str:
-    if not address:
-        return "0x" + "0" * 40
-    normalized = address.lower().replace("0x", "")
-    padded = normalized.rjust(40, "0")
-    return f"0x{padded}"
-
-
 def _build_proof_metadata(market_payload: MarketPayload) -> dict[str, str]:
     metadata: dict[str, str] = {}
     if market_payload.status:
@@ -1974,6 +2150,18 @@ def prime_markets_cache(
             "result_count": result_count,
         }
     )
+    # cache write best-effort; errors logged but do not fail the loop
+    try:
+        shared_cache.set_json(redis_client, cache_key, payload, settings.markets_cache_ttl_seconds)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.cache.prime_write_failed",
+            message="failed to store primed homepage cache",
+            cache_key=cache_key,
+            error=str(exc),
+        )
     return summary
 
 
@@ -2011,7 +2199,18 @@ def prime_featured_views(
                 if response.is_success:
                     summary["suggestions_primed"] += 1
                     key = suggest_cache_key(query, settings.suggest_cache_limit)
-                    ttl = redis_client.ttl(key)
+                    try:
+                        ttl = redis_client.ttl(key)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            event="worker.cache.suggest_ttl_failed",
+                            message="failed to read suggestion cache ttl",
+                            query=query,
+                            error=str(exc),
+                        )
+                        ttl = settings.markets_cache_ttl_seconds
                     if ttl is None or ttl < 0:
                         ttl = settings.markets_cache_ttl_seconds
                     summary["suggestion_ttls"][query] = ttl
@@ -2057,18 +2256,27 @@ def record_batch_stats(
         "latency_ms": sync_stats.get("latency_ms"),
         "prime": prime_stats,
     }
-    shared_cache.set_json(redis_client, settings.batch_stats_key, payload, settings.batch_stats_ttl_seconds)
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.batch_stats.published",
-        message="recorded worker batch stats",
-        markets_processed=payload["markets_processed"],
-        markets_changed=payload["markets_changed"],
-        categories_changed=payload["categories_changed"],
-        cache_prime_status=prime_stats.get("status"),
-        cache_key=prime_stats.get("cache_key"),
-    )
+    try:
+        shared_cache.set_json(redis_client, settings.batch_stats_key, payload, settings.batch_stats_ttl_seconds)
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.batch_stats.published",
+            message="recorded worker batch stats",
+            markets_processed=payload["markets_processed"],
+            markets_changed=payload["markets_changed"],
+            categories_changed=payload["categories_changed"],
+            cache_prime_status=prime_stats.get("status"),
+            cache_key=prime_stats.get("cache_key"),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.batch_stats.write_failed",
+            message="failed to write worker batch stats to cache",
+            error=str(exc),
+        )
 
 
 def main() -> None:  # pragma: no cover - CLI bootstrap

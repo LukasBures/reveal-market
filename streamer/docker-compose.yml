@@ -1,0 +1,31 @@
+version: "3.9"
+services:
+  streamer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reveal-market-streamer:latest
+    environment:
+      STREAMER_REDIS_URL: redis://redis:6379/0
+      STREAMER_PUBLIC_BASE_URL: https://stream.revealmarket.xyz
+      STREAMER_INTERNAL_BASE_URL: http://streamer:8100
+      STREAMER_CORS_ALLOW_ORIGINS: http://localhost:3000,https://revealmarket.xyz
+    ports:
+      - "8100:8100"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]

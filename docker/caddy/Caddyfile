@@ -3,6 +3,13 @@
   grace_period 5s
   email infra@revealmarket.xyz
   acme_ca https://acme-v02.api.letsencrypt.org/directory
+  servers {
+    trusted_proxies static private_ranges 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+    trusted_proxies static 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+    trusted_proxies static 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 172.64.0.0/13 131.0.72.0/22
+    trusted_proxies static 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+    client_ip_headers CF-Connecting-IP X-Forwarded-For X-Real-IP
+  }
 }
 
 # ======================================================================
@@ -22,9 +29,28 @@
     Referrer-Policy "strict-origin-when-cross-origin"
     Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     Expect-CT "max-age=86400, enforce"
-    Cache-Control "public, max-age=60"
     -Server
   }
+}
+
+(cache_frontend) {
+  header {
+    Cache-Control "public, max-age=60"
+  }
+}
+
+(cache_no_store) {
+  header {
+    Cache-Control "no-store"
+  }
+}
+
+(trusted_proxies_cf) {
+  trusted_proxies static private_ranges
+  trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+  trusted_proxies static 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+  trusted_proxies static 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 172.64.0.0/13 131.0.72.0/22
+  trusted_proxies static 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
 }
 
 (log_common) {
@@ -37,9 +63,23 @@
   }
 }
 
+(access_log_json) {
+  log {
+    output stdout
+    format filter {
+      wrap json
+    }
+  }
+}
+
 (proxy_frontend) {
   reverse_proxy frontend:3000 {
-    trusted_proxies private_ranges
+    import trusted_proxies_cf
+    health_uri /healthz
+    health_interval 10s
+    health_timeout 3s
+    max_fails 2
+    fail_duration 30s
     transport http {
       versions 1.1
       dial_timeout 5s
@@ -53,7 +93,12 @@
 
 (proxy_api) {
   reverse_proxy api:8000 {
-    trusted_proxies private_ranges
+    import trusted_proxies_cf
+    health_uri /healthz
+    health_interval 10s
+    health_timeout 3s
+    max_fails 2
+    fail_duration 30s
     transport http {
       versions 1.1
       keepalive_idle_conns 64
@@ -64,7 +109,12 @@
 
 (proxy_streamer) {
   reverse_proxy streamer:8100 {
-    trusted_proxies private_ranges
+    import trusted_proxies_cf
+    health_uri /healthz
+    health_interval 10s
+    health_timeout 3s
+    max_fails 2
+    fail_duration 30s
     transport http {
       versions 1.1
       keepalive_idle_conns 64
@@ -98,6 +148,7 @@ revealmarket.xyz {
   import tls_dns
   import health_common
   import header_common
+  import cache_frontend
   import log_common
   import proxy_frontend
 }
@@ -110,7 +161,8 @@ stream.revealmarket.xyz {
   import tls_dns
   import health_common
   import header_common
-  import log_common
+  import cache_no_store
+  import access_log_json
   import proxy_streamer
 }
 
@@ -122,7 +174,8 @@ api.revealmarket.xyz {
   import tls_dns
   import health_common
   import header_common
-  import log_common
+  import cache_no_store
+  import access_log_json
   import proxy_api
   rate_limit {
     zone api {

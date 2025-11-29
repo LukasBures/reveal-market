@@ -239,6 +239,9 @@ class DataStreamer:
             return
         market = data.get("market") or data.get("marketId") or data.get("id")
         if not market:
+            if self.stream_metrics:
+                with suppress(Exception):
+                    self.stream_metrics.record_ingest_drop(source, "missing_market_or_prices")
             return
         await self._normalize_and_publish(data, source=source)
 
@@ -246,6 +249,9 @@ class DataStreamer:
         event_type = (data.get("event_type") or data.get("type") or "").lower()
         market = data.get("market") or data.get("marketId") or data.get("id")
         if not market:
+            if self.stream_metrics:
+                with suppress(Exception):
+                    self.stream_metrics.record_ingest_drop(source, "missing_market_or_prices")
             return
         if event_type == "last_trade_price":
             await self._publish_trade_event(market, data, source)
@@ -339,6 +345,7 @@ class DataStreamer:
                 reason = "missing_market" if not market_id else "missing_prices"
                 try:
                     self.stream_metrics.record_drop("ingest", reason)
+                    self.stream_metrics.record_ingest_drop(source, reason)
                 except Exception as exc:
                     logger.info("Failed to record drop metric", exc_info=exc)
             logger.info(

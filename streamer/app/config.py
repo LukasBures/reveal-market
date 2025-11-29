@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="STREAMER_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="STREAMER_", env_file=".env", extra="ignore", env_ignore_empty=True)
 
     environment: str = Field(default="prod", description="Deployment environment label")
     log_level: str = Field(default="INFO", description="Python logging level")
@@ -58,16 +58,32 @@ class Settings(BaseSettings):
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")
     sse_heartbeat_seconds: int = Field(default=15, ge=1, description="SSE heartbeat interval")
     rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
-    ws_reconnect_seconds: int = Field(default=5, ge=1, description="Backoff between WS reconnect attempts")
+    ws_reconnect_seconds: float = Field(default=5.0, ge=0.01, description="Backoff between WS reconnect attempts")
     publish_throttle_ms: int = Field(default=300, ge=50, description="Throttle for publishing ticks to Redis (ms)")
     max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
     cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")
     pubsub_prefix: str = Field(default="streamer:stream", description="Redis pubsub channel prefix for streams")
     history_prefix: str = Field(default="streamer:history", description="Redis key prefix for tick history")
     history_limit: int = Field(default=500, ge=10, description="Max history entries per outcome")
+    history_ttl_seconds: int = Field(
+        default=86400, ge=0, description="Optional TTL for per-outcome history keys (0 disables expiration)"
+    )
+    history_debounce_seconds: float = Field(
+        default=0.0, ge=0.0, description="Minimum seconds between history entries for the same market/outcome"
+    )
     api_host: str = Field(default="0.0.0.0", description="Host binding for FastAPI app")  # noqa: S104 - intentional
     api_port: int = Field(default=8100, description="Port for FastAPI app")
     signing_secret: str | None = Field(default=None, description="Optional HMAC secret to sign payloads")
+    control_token: str | None = Field(
+        default=None, description="Optional token required for control/ops endpoints (set to enable mutations)"
+    )
+    access_token: str | None = Field(default=None, description="Optional token required for SSE/WS client access")
+    max_active_connections: int = Field(
+        default=1000, ge=1, description="Maximum concurrent SSE/WS connections (process-local guard)"
+    )
+    rate_limit_per_minute: int = Field(
+        default=0, ge=0, description="Optional per-client request/connection cap per minute (0 disables)"
+    )
     cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-origins list")
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-methods list")
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-headers list")

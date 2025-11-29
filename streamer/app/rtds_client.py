@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import websocket  # type: ignore[import-not-found]  # pip install websocket-client
+from websocket import _logging as ws_logging  # type: ignore[attr-defined]
 
 """
 Polymarket Real-Time Data Streaming (RTDS) client.
@@ -192,6 +193,14 @@ class PolymarketRTDSClient:
         backoff_max: float = 30.0,
         logger: logging.Logger | None = None,
     ) -> None:
+        # websocket-client installs its own StreamHandler; replace with a null handler
+        # so background threads do not emit to closed test captures or stderr.
+        ws_logger = ws_logging._logger
+        ws_logger.handlers.clear()
+        ws_logger.addHandler(logging.NullHandler())
+        ws_logger.propagate = False
+        ws_logger.setLevel(logging.ERROR)
+
         self.url = url
         self.router = router or RTDSRouter()
         self.on_raw_message = on_raw_message

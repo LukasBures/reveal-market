@@ -93,7 +93,20 @@ def _handle_failure(redis_client: Redis, job: SummaryJob, reason: str) -> None:
             job_id=job.job_id,
             attempts=job.attempts,
             reason=reason,
+            dlq_depth=redis_client.llen(settings.summary_dead_letter_key),
         )
+        try:
+            from app.main import SUMMARY_DLQ_COUNTER
+
+            SUMMARY_DLQ_COUNTER.labels(outcome="dead_letter").inc()
+        except Exception as exc:  # pragma: no cover - metrics guard
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.summary.dlq_metric_failed",
+                message="failed to increment DLQ metric",
+                error=str(exc),
+            )
     else:
         redis_client.rpush(settings.summary_queue_key, job.to_json())
         log_event(
@@ -109,6 +122,14 @@ def _handle_failure(redis_client: Redis, job: SummaryJob, reason: str) -> None:
 
 
 def run_summary_worker() -> None:
+    if not settings.summary_enabled:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.summary.disabled",
+            message="summary worker disabled via configuration",
+        )
+        return
     redis_client = _get_redis_client()
     client = SummaryClient()
     log_event(
@@ -127,6 +148,17 @@ def run_summary_worker() -> None:
 
 def process_job(job: SummaryJob, redis_client: Redis, client: SummaryClient) -> bool:
     """Process a single summary job; return True on success."""
+
+    if not settings.summary_enabled:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.summary.skip_disabled",
+            message="skipping summary job because summaries are disabled",
+            job_id=job.job_id,
+            event_id=job.event_id,
+        )
+        return False
 
     log_event(
         logger,

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import re
 
-MARKETS_LIST_PREFIX = "markets:list"
-CATEGORY_PREFIX = "markets:category"
-SUGGEST_PREFIX = "markets:suggest"
-RESOLUTION_PREFIX = "markets:resolution"
-PROOF_PREFIX = "proofs:receipt"
+CACHE_VERSION = "v1"
+MARKETS_LIST_PREFIX = f"{CACHE_VERSION}:markets:list"
+CATEGORY_PREFIX = f"{CACHE_VERSION}:markets:category"
+SUGGEST_PREFIX = f"{CACHE_VERSION}:markets:suggest"
+RESOLUTION_PREFIX = f"{CACHE_VERSION}:markets:resolution"
+PROOF_PREFIX = f"{CACHE_VERSION}:proofs:receipt"
 
 
 def markets_list_cache_key(

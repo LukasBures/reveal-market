@@ -86,7 +86,10 @@ def maybe_enqueue_summary_job(
         )
         return False
 
-    description = _extract_description(market_payload.extra_data or {})
+    description = _extract_description(
+        getattr(market_payload, "description", None),
+        market_payload.gamma_metadata,
+    )
     if not description:
         log_event(
             logger,
@@ -166,28 +169,17 @@ def _request_inflight(market_record, now: datetime) -> tuple[bool, float | None]
     return age < settings.summary_requested_ttl_seconds, age
 
 
-def _extract_description(extra_data: Mapping[str, Any]) -> str | None:
-    if not isinstance(extra_data, Mapping):
-        return None
-    gamma = extra_data.get("gamma")
-    description = extra_data.get("description")
-    if not description and isinstance(gamma, Mapping):
-        description = gamma.get("description") or gamma.get("longDescription")
-        if not description and isinstance(gamma.get("events"), list):
-            for event in gamma["events"]:
-                if isinstance(event, Mapping) and event.get("description"):
-                    description = event["description"]
-                    break
-    if isinstance(description, str):
-        cleaned = description.strip()
-        return cleaned or None
-    return None
+def _extract_description(description: str | None, gamma_metadata: Mapping[str, Any] | None) -> str | None:
+    candidate = description or (gamma_metadata.get("description") if isinstance(gamma_metadata, Mapping) else None)
+    if isinstance(candidate, str):
+        candidate = candidate.strip()
+    return candidate or None
 
 
 def _build_metadata(market_payload: MarketPayload) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    if market_payload.extra_data:
-        metadata["extra_data"] = market_payload.extra_data
+    if market_payload.gamma_metadata:
+        metadata["gamma_metadata"] = market_payload.gamma_metadata
     if market_payload.outcomes:
         metadata["outcomes"] = market_payload.outcomes
     if market_payload.tags:

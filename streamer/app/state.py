@@ -78,9 +78,17 @@ class StreamState:
         self.metrics = metrics
         self._asset_refcounts: dict[str, int] = {}
         self._acquired_history: set[str] = set()
+        self._history_last_ts: dict[str, datetime] = {}
+        self.active_connections: int = 0
 
     async def startup(self) -> None:
-        self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
+        self.redis = Redis.from_url(
+            self.settings.redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5
+        )
+        try:
+            await self.redis.ping()
+        except Exception as exc:
+            raise RuntimeError(f"Redis unavailable: {exc}") from exc
         await self.refresh_fx()
 
     async def shutdown(self) -> None:
@@ -179,6 +187,7 @@ class StreamState:
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
         if not self.redis:
             return
+        now = datetime.now(UTC)
         key = f"{self.settings.cache_prefix}:{market_id}:{outcome}"
         channel = f"{self.settings.pubsub_prefix}:{market_id}"
         mapping = {k: str(v) for k, v in payload.items()}
@@ -186,14 +195,24 @@ class StreamState:
             mapping["sig"] = self._sign_payload(mapping)
         await self.redis.hset(key, mapping=mapping)
         await self.redis.publish(channel, json.dumps(mapping))
-        self.last_seen[market_id] = datetime.now(UTC)
-        self.last_published[market_id] = datetime.now(UTC)
+        self.last_seen[market_id] = now
+        self.last_published[market_id] = now
         if self.metrics:
             # Reset staleness gauge to fresh on publish.
             self.metrics.market_staleness.labels(market_id=market_id).set(0)
         history_key = f"{self.settings.history_prefix}:{market_id}:{outcome}"
-        await self.redis.lpush(history_key, json.dumps(mapping))
-        await self.redis.ltrim(history_key, 0, self.settings.history_limit - 1)
+        record_history = True
+        if self.settings.history_debounce_seconds > 0:
+            last_ts = self._history_last_ts.get(history_key)
+            if last_ts and (now - last_ts).total_seconds() < self.settings.history_debounce_seconds:
+                record_history = False
+            else:
+                self._history_last_ts[history_key] = now
+        if record_history:
+            await self.redis.lpush(history_key, json.dumps(mapping))
+            await self.redis.ltrim(history_key, 0, self.settings.history_limit - 1)
+            if self.settings.history_ttl_seconds > 0:
+                await self.redis.expire(history_key, self.settings.history_ttl_seconds)
 
     async def subscribe(self, market_id: str):
         if not self.redis:
@@ -255,6 +274,20 @@ class StreamState:
         added: list[str] = []
         for asset in assets:
             key = str(asset)
+            if (
+                key not in self.subscriptions.assets
+                and len(self.subscriptions.assets) >= self.settings.max_subscriptions
+            ):
+                logger.warning(
+                    "subscription cap reached; ignoring asset",
+                    extra={
+                        "event": "stream.assets.cap",
+                        "asset": key,
+                        "count": len(self.subscriptions.assets),
+                        "max": self.settings.max_subscriptions,
+                    },
+                )
+                continue
             prev = self._asset_refcounts.get(key, 0)
             self._asset_refcounts[key] = prev + 1
             if prev == 0:
@@ -262,6 +295,15 @@ class StreamState:
                 self.subscriptions.add_assets([key])
                 self._acquired_history.add(key)
         return added
+
+    def force_remove_assets(self, assets: Iterable[str]) -> None:
+        """Remove assets from subscriptions regardless of refcount (ops-only)."""
+
+        for asset in assets:
+            key = str(asset)
+            self._asset_refcounts.pop(key, None)
+            if key in self.subscriptions.assets:
+                self.subscriptions.remove_asset(key)
 
     def release_assets(self, assets: Iterable[str]) -> None:
         for asset in assets:

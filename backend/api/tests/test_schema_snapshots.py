@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import pytest
+from app import schemas
+from app.main import _build_quote_digest
+
+EXPECTED_SCHEMAS = {
+    "MarketResponse": {
+        "required": ["event_id", "title", "oracle", "id", "created_at", "updated_at"],
+        "properties": [
+            "caps",
+            "category",
+            "clob_pair_id",
+            "clob_token_ids",
+            "closed",
+            "closes_at",
+            "condition_id",
+            "created_at",
+            "description",
+            "enable_order_book",
+            "event_id",
+            "factory",
+            "id",
+            "image_url",
+            "image_variants",
+            "market_address",
+            "market_maker",
+            "metadata_uri",
+            "oracle",
+            "order_min_size",
+            "orders_opened_at",
+            "outcome_prices",
+            "outcomes",
+            "price_tick_size",
+            "question_id",
+            "rake_bps",
+            "resolution",
+            "resolution_source",
+            "slug",
+            "starts_at",
+            "status",
+            "summary",
+            "summary_checked_at",
+            "summary_metadata",
+            "summary_model",
+            "summary_source",
+            "tags",
+            "title",
+            "uma_resolution_status",
+            "updated_at",
+        ],
+    },
+    "ResolutionSummary": {
+        "required": ["source", "conditionId", "resolved", "checkedAt"],
+        "properties": [
+            "blockNumber",
+            "blockTimestamp",
+            "checkedAt",
+            "conditionId",
+            "createdAt",
+            "eventId",
+            "marketId",
+            "oracle",
+            "outcomes",
+            "payouts",
+            "questionId",
+            "rakeBps",
+            "requestId",
+            "resolved",
+            "slug",
+            "source",
+            "title",
+            "transactionHash",
+            "updatedAt",
+            "winners",
+            "winningOutcomeId",
+        ],
+    },
+    "PricingQuoteResponse": {
+        "required": [
+            "stake_zen",
+            "zen_usd",
+            "displayed_odds_multiplier",
+            "rake_zen",
+            "refund_zen",
+            "hedge_usdc",
+            "haircut_percent",
+            "worsen_percent",
+            "rake_percent",
+            "total_monetization",
+        ],
+        "properties": [
+            "chain_id",
+            "displayed_odds_multiplier",
+            "expires_at",
+            "expiry_ts",
+            "haircut_percent",
+            "hedge_usdc",
+            "market_address",
+            "market_id",
+            "max_market_stake_zen",
+            "max_stake_zen",
+            "max_user_stake_per_market_zen",
+            "outcome_id",
+            "quote_id",
+            "rake_percent",
+            "rake_zen",
+            "refund_zen",
+            "remaining_market_stake_zen",
+            "remaining_user_stake_zen",
+            "signature",
+            "signer",
+            "stake_wei",
+            "stake_zen",
+            "total_monetization",
+            "user_id",
+            "wallet_address",
+            "worsen_percent",
+            "zen_usd",
+            "zen_usd_scaled",
+        ],
+    },
+    "PricingSubmitResponse": {
+        "required": ["quote", "current_fx"],
+        "properties": ["current_fx", "quote", "valid"],
+    },
+    "HealthResponse": {
+        "required": ["status", "service", "version", "timestamp", "components"],
+        "properties": ["cache_stats", "components", "service", "status", "timestamp", "version"],
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        (schemas.MarketResponse, EXPECTED_SCHEMAS["MarketResponse"]),
+        (schemas.ResolutionSummary, EXPECTED_SCHEMAS["ResolutionSummary"]),
+        (schemas.PricingQuoteResponse, EXPECTED_SCHEMAS["PricingQuoteResponse"]),
+        (schemas.PricingSubmitResponse, EXPECTED_SCHEMAS["PricingSubmitResponse"]),
+        (schemas.HealthResponse, EXPECTED_SCHEMAS["HealthResponse"]),
+    ],
+)
+def test_model_schema_shape_is_stable(model, expected):
+    schema = model.model_json_schema()
+    properties = sorted(schema.get("properties", {}).keys())
+    required = sorted(schema.get("required", []))
+    assert properties == sorted(expected["properties"])
+    assert required == sorted(expected["required"])
+
+
+def test_quote_digest_constant():
+    digest = _build_quote_digest(
+        chain_id=2651420,
+        market_address="0x1111111111111111111111111111111111111111",
+        wallet_address="0x2222222222222222222222222222222222222222",
+        outcome_id=1,
+        stake_wei=123456789,
+        zen_usd_scaled=987654321,
+        expiry_ts=1700000000,
+        quote_id_hex="0x" + "ab" * 32,
+    ).hex()
+    assert digest == "127c094def20e39c2dc4622be68f84baba236a55f915d49669482d0569508226"

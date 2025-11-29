@@ -44,7 +44,6 @@ def test_sync_market_inserts_and_updates():
             status="commit",
             outcomes=["YES", "NO"],
             outcome_prices=[0.5, 0.5],
-            extra_data={"gamma": {"id": "evt-1"}},
         )
 
         with session_factory() as session:
@@ -56,7 +55,8 @@ def test_sync_market_inserts_and_updates():
             stored = session.execute(select(Market).where(Market.event_id == "evt-1")).scalar_one()
             assert stored.title == "First Market"
             assert stored.status == "commit"
-            assert stored.outcomes == ["YES", "NO"]
+            labels = [row.label for row in stored.outcomes_rel]
+            assert labels == ["YES", "NO"]
             assert stored.rake_bps is None
 
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
@@ -88,7 +88,7 @@ def test_sync_market_reuses_prefetched_instance(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.5, 0.5],
-            extra_data={"gamma": {"id": "evt-prefetch"}},
+            gamma_raw={"id": "evt-prefetch"},
         )
 
         with session_factory() as session:
@@ -148,7 +148,7 @@ def test_sync_market_persists_resolution(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.6, 0.4],
-            extra_data={"gamma": {"id": "evt-resolution"}},
+            gamma_raw={"id": "evt-resolution"},
             condition_id="0x" + "3" * 64,
         )
 
@@ -203,7 +203,7 @@ def test_sync_market_uses_goldsky_when_available(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.6, 0.4],
-            extra_data={"gamma": {"id": "evt-goldsky"}},
+            gamma_raw={"id": "evt-goldsky"},
             condition_id="0x" + "6" * 64,
         )
 
@@ -237,7 +237,7 @@ def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.45, 0.55],
-            extra_data={"gamma": {"id": "evt-skip"}},
+            gamma_raw={"id": "evt-skip"},
             source_updated_at=updated_at,
             content_hash="hash-1",
         )

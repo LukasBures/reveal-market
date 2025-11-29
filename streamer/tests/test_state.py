@@ -13,6 +13,7 @@ class DummyRedis:
         self.data = {}
         self.published = []
         self.history = {}
+        self.expires = {}
 
     async def hset(self, key: str, mapping: dict):
         self.data[key] = mapping
@@ -27,6 +28,9 @@ class DummyRedis:
         if key not in self.history:
             return
         self.history[key] = self.history[key][start : end + 1]
+
+    async def expire(self, key: str, seconds: int):
+        self.expires[key] = seconds
 
 
 @pytest.mark.asyncio

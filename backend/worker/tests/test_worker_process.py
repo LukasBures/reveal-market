@@ -15,6 +15,7 @@ from app.main import (
     prime_featured_views,
     prime_markets_cache,
     process_once,
+    publish_heartbeat,
     record_batch_stats,
 )
 from app.main import (
@@ -24,7 +25,7 @@ from app.polymarket import MarketPayload, PolymarketClient
 from app.prover_client import SettlementProofResponse
 from prometheus_client import REGISTRY
 from shared import cache as shared_cache
-from shared.cache_keys import suggest_cache_key
+from shared.cache_keys import markets_list_cache_key, suggest_cache_key
 from shared.models import Base, Market
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -162,7 +163,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.4, 0.6],
-            extra_data={"gamma": {"id": "evt-1"}},
+            gamma_raw={"id": "evt-1"},
         ),
         MarketPayload(
             event_id="evt-2",
@@ -174,7 +175,7 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
             status="commit",
             outcomes=["Up", "Down"],
             outcome_prices=[0.55, 0.45],
-            extra_data={"gamma": {"id": "evt-2"}},
+            gamma_raw={"id": "evt-2"},
         ),
     ]
 
@@ -328,8 +329,11 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     summary = prime_markets_cache(dummy, transport=transport)
     assert summary["status"] == "primed"
     assert summary["result_count"] == len(payload)
-    # priming now relies on the API to populate caches, so redis writes are not expected here.
-    assert dummy.store == {}
+    cache_key = markets_list_cache_key(None, None, None, None, 7, 0)
+    assert cache_key in dummy.store
+    assert dummy._ttls[cache_key] == 45
+    cached = json.loads(dummy.store[cache_key])
+    assert cached == payload
 
 
 def test_record_batch_stats_publishes_metrics(monkeypatch):
@@ -358,6 +362,34 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
     assert payload["prime"] == prime_stats
 
 
+def test_publish_heartbeat_includes_flags():
+    dummy = DummyRedis()
+    stats = {
+        "markets_processed": 2,
+        "markets_changed": 1,
+        "resolutions_changed": 1,
+        "latency_ms": 12.3,
+        "markets_created": 1,
+        "markets_updated": 1,
+        "markets_deleted": 0,
+        "summaries_enqueued": 0,
+        "proofs_generated": 0,
+        "cache_invalidations": 0,
+        "resolution_gaps": 0,
+        "market_errors": 0,
+        "polymarket_ok": True,
+        "redis_available": True,
+    }
+
+    publish_heartbeat(dummy, stats)
+
+    assert dummy.last_set is not None
+    payload = json.loads(dummy.last_set["value"])
+    assert payload["polymarket_ok"] is True
+    assert payload["redis_available"] is True
+    assert payload["markets_processed"] == 2
+
+
 def test_cleanup_resolved_markets_removes_expired(monkeypatch):
     engine, session_factory = create_in_memory_db()
     try:
@@ -368,7 +400,6 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             oracle="0xold",
             status="settled",
             resolved_at=datetime.now(UTC) - timedelta(days=2),
-            tags=["Gov"],
         )
         recent = Market(
             event_id="evt-new",
@@ -377,7 +408,6 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             oracle="0xnew",
             status="settled",
             resolved_at=datetime.now(UTC),
-            tags=["Crypto"],
         )
         with session_factory() as session:
             session.add_all([expired, recent])
@@ -441,7 +471,7 @@ def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         category="sports",
         oracle="polymarket",
         status="commit",
-        extra_data={"gamma": {"id": "evt-success"}},
+        gamma_raw={"id": "evt-success"},
     )
 
     monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
@@ -473,7 +503,7 @@ def test_fetch_markets_from_polymarket_retries(monkeypatch):
         category="sports",
         oracle="polymarket",
         status="commit",
-        extra_data={"gamma": {"id": "evt-retry"}},
+        gamma_raw={"id": "evt-retry"},
     )
 
     attempts = {"count": 0}
@@ -552,7 +582,6 @@ def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
             oracle="0xdry",
             status="settled",
             resolved_at=datetime.now(UTC) - timedelta(days=2),
-            tags=["btc"],
         )
         with session_factory() as session:
             session.add(market)
@@ -627,6 +656,7 @@ def test_maybe_generate_settlement_proof(monkeypatch):
     fake_prover = FakeProver()
     monkeypatch.setattr(app.main, "PROVER_CLIENT", fake_prover, raising=False)
     monkeypatch.setattr(worker_settings, "prover_enabled", True, raising=False)
+    monkeypatch.setattr(worker_settings, "auto_settlement_enabled", True, raising=False)
 
     redis_client = DummyRedis()
     market_payload = MarketPayload(

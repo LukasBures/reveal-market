@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from shared import repository as shared_repository
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from . import models, schemas
 
@@ -17,7 +17,12 @@ def get_markets(
     limit: int = 100,
     offset: int = 0,
 ) -> list[models.Market]:
-    stmt = select(models.Market)
+    stmt = select(models.Market).options(
+        selectinload(models.Market.outcomes_rel),
+        selectinload(models.Market.tags_rel),
+        selectinload(models.Market.clob_tokens_rel),
+        selectinload(models.Market.gamma_metadata_rel),
+    )
     if status == "active":
         stmt = stmt.where(models.Market.closed.is_(False))
     elif status:
@@ -27,8 +32,10 @@ def get_markets(
     if oracle:
         stmt = stmt.where(models.Market.oracle == oracle)
     stmt = _apply_text_search(session, stmt, search)
+    stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)
-    return list(session.scalars(stmt))
+    rows = session.execute(stmt).unique().scalars().all()
+    return rows
 
 
 def get_market_stats(session: Session) -> list[schemas.MarketStatusBreakdown]:
@@ -67,9 +74,30 @@ def create_or_update_market(session: Session, market_in: schemas.MarketCreate) -
     return shared_repository.upsert_market(session, market_in.model_dump())
 
 
+def _replace_tags(market: models.Market, tags: list[str] | None) -> None:
+    if tags is None:
+        market.tags_rel = []
+        return
+    deduped: list[str] = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        if tag in deduped:
+            continue
+        deduped.append(tag)
+    market.tags_rel = [models.MarketTag(tag=tag) for tag in deduped]
+
+
 def patch_market(session: Session, market: models.Market, update: schemas.MarketUpdate) -> models.Market:
+    legacy_fields = {"outcomes", "outcome_prices", "clob_token_ids"}
     for field, value in update.model_dump(exclude_unset=True).items():
-        setattr(market, field, value)
+        if field in legacy_fields:
+            continue
+        if field == "tags":
+            _replace_tags(market, value)
+            continue
+        if hasattr(market, field):
+            setattr(market, field, value)
     return market
 
 

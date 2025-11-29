@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 from functools import lru_cache
+from typing import Any
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     app_name: str = Field(default="Reveal Market Worker")
     environment: str = Field(default="development")
     database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
+    database_pool_size: int = Field(default=5, ge=1)
+    database_max_overflow: int = Field(default=10, ge=0)
+    database_pool_timeout: float = Field(default=10.0, gt=0)
     redis_url: str = Field(default="redis://redis:6379/0")
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
@@ -86,6 +90,9 @@ class Settings(BaseSettings):
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
     max_web3_retries: int = Field(default=3, ge=1)
     resolution_refresh_interval_seconds: int = Field(default=300, ge=60)
+    resolution_fetch_max_attempts: int = Field(default=2, ge=1)
+    resolution_fetch_backoff_seconds: float = Field(default=0.5, ge=0)
+    resolution_fetch_backoff_max_seconds: float = Field(default=4.0, ge=0)
     resolution_backfill_limit: int = Field(default=50, ge=0)
     resolution_gap_warn_threshold: int = Field(default=5, ge=0)
     resolution_gap_warn_seconds: int = Field(default=1800, ge=0)
@@ -166,3 +173,72 @@ def reload_settings() -> Settings:
 
     get_settings.cache_clear()
     return get_settings()
+
+
+class MissingSettingsError(RuntimeError):
+    """Raised when required configuration is absent."""
+
+
+def _env_present(name: str) -> bool:
+    value = os.getenv(name)
+    return value is not None and value != ""
+
+
+def validate_required_settings(settings: Settings) -> None:
+    """Fail fast when required env vars are missing for the current mode."""
+
+    prod_like = settings.environment.lower() not in {"dev", "development", "local", "test", "testing"}
+    missing: list[str] = []
+
+    def require(env_name: str, *, when: bool = True) -> None:
+        if when and not _env_present(env_name):
+            missing.append(env_name)
+
+    # Always required in prod-like deployments (defaults acceptable locally)
+    require("RM_DATABASE_URL", when=prod_like)
+    require("RM_REDIS_URL", when=prod_like)
+
+    # External dependencies
+    if prod_like:
+        require("RM_POLYMARKET_API_BASE")
+
+    # Feature-gated requirements
+    require("RM_SUMMARY_API_KEY", when=settings.summary_enabled and not settings.summary_fallback_enabled)
+    require(
+        "RM_PROVER_BASE_URL",
+        when=settings.prover_enabled and (settings.auto_settlement_enabled or settings.prover_enabled),
+    )
+    require("RM_WALLET_PRIVATE_KEY", when=settings.auto_create_onchain_markets)
+    require("RM_FACTORY_ADDRESS", when=settings.auto_create_onchain_markets)
+    require(
+        "RM_RPC_URL",
+        when=settings.auto_create_onchain_markets and not _env_present("RM_POLYGON_RPC_URL"),
+    )
+    require("RM_POLYGON_RPC_URL", when=settings.auto_create_onchain_markets and not _env_present("RM_RPC_URL"))
+
+    if missing:
+        unique = sorted(set(missing))
+        raise MissingSettingsError(f"Missing required environment variables: {', '.join(unique)}")
+
+
+def sanitize_settings(settings: Settings) -> dict[str, Any]:
+    """Return a redacted settings payload safe for logs."""
+
+    sensitive_keys = {
+        "database_url",
+        "redis_url",
+        "wallet_private_key",
+        "summary_api_key",
+        "rpc_url",
+        "polygon_rpc_url",
+        "prover_base_url",
+    }
+    redacted: dict[str, Any] = {}
+    for key, value in settings.model_dump().items():
+        lower = key.lower()
+        if lower in sensitive_keys or any(
+            token in lower for token in ["key", "secret", "password", "token", "private"]
+        ):
+            continue
+        redacted[key] = value
+    return redacted

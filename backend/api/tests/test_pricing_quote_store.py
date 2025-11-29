@@ -6,6 +6,10 @@ from pydantic import SecretStr
 
 
 def _mock_fx(monkeypatch, price: float = 2.5):
+    from app import pricing as pricing_module
+
+    pricing_module._FX_CACHE.clear()
+
     class DummyResponse:
         def raise_for_status(self):
             return None
@@ -13,7 +17,19 @@ def _mock_fx(monkeypatch, price: float = 2.5):
         def json(self):
             return {"price": price}
 
+    class DummyClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, *args, **kwargs):
+            return DummyResponse()
+
     monkeypatch.setattr("app.main.httpx.get", lambda *args, **kwargs: DummyResponse())
+    monkeypatch.setattr("app.main.httpx.Client", lambda *args, **kwargs: DummyClient())
+    monkeypatch.setattr("app.pricing.httpx.Client", lambda *args, **kwargs: DummyClient())
 
 
 def _configure_signer():
@@ -38,7 +54,7 @@ def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     }
 
     response = client.post("/pricing/quote", json=payload)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     quote = response.json()
     quote_id = quote["quote_id"]
 

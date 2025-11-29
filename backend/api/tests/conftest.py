@@ -19,8 +19,12 @@ class InMemoryCache:
     def get(self, key: str):
         return self.store.get(key)
 
-    def set(self, key: str, value: Any, ex: int | None = None):
+    def set(self, key: str, value: Any, ex: int | None = None, nx: bool | None = None):
+        if nx:
+            if key in self.store:
+                return False
         self.store[key] = value
+        return True
 
     def delete(self, *keys: str) -> None:
         for key in keys:
@@ -116,6 +120,10 @@ def client(test_database):
     new_cache = InMemoryCache()
     app.cache_client = new_cache
     api_main.cache_client = new_cache
+    api_main._cache_refresh_stop_event = None
+    api_main._quote_sweeper_stop_event = None
+    api_main._metrics_stop_event = None
+    api_main.instrumentator = api_main.instrumentator  # ensure metrics setup stays bound
     if hasattr(api_main, "_resolution_client"):
         api_main._resolution_client = None
 

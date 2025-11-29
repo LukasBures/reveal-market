@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     max_market_stake_zen: float = Field(default=1000.0, gt=0, description="Total stake cap per market in ZEN")
     bet_cap_ttl_seconds: int = Field(default=86400, ge=60, description="TTL for bet cap counters in Redis")
     quote_store_ttl_seconds: int = Field(default=900, ge=60, description="TTL for issued quotes (replay guard)")
+    quote_expiry_sweep_interval_seconds: int = Field(
+        default=60, ge=15, description="Interval for sweeping expired quotes from the ledger"
+    )
 
     polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: float = Field(default=5.0)
@@ -129,6 +132,19 @@ class Settings(BaseSettings):
     def _coerce_csv(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return _split_csv(value)
+        return value
+
+    @field_validator("rate_limit_enabled", mode="before")
+    @classmethod
+    def _default_rate_limit(cls, value):
+        """Enable rate limiting by default in non-dev environments unless explicitly disabled."""
+
+        env_value = os.getenv("RM_RATE_LIMIT_ENABLED")
+        if env_value is not None:
+            return value
+        env = (os.getenv("RM_ENVIRONMENT") or os.getenv("ENVIRONMENT") or "development").lower()
+        if env not in {"dev", "development", "local", "test", "testing"}:
+            return True
         return value
 
     @property

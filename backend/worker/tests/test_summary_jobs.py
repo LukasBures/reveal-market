@@ -25,7 +25,7 @@ def build_payload(description: str = "Example description"):
         metadata_uri=None,
         oracle="polymarket",
         status="commit",
-        extra_data={"description": description},
+        gamma_metadata={"description": description},
     )
 
 
@@ -54,7 +54,7 @@ def test_summary_job_enqueued_when_missing_summary(monkeypatch):
     assert key == summary_jobs.settings.summary_queue_key
     job = SummaryJob.from_json(payload_json)
     assert job.event_id == market_record.event_id
-    assert job.description == payload.extra_data["description"]
+    assert job.description == payload.gamma_metadata["description"]
     assert market_record.summary_requested_at is not None
 
 

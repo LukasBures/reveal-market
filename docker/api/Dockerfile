@@ -6,6 +6,7 @@ ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim
 ARG SERVICE_DIR=backend/api
 ARG SHARED_DIR=backend/shared
 ARG MIGRATIONS_DIR=backend/migrations
+ARG APP_USER=appuser
 
 # =============================================================================
 # Stage 1: Builder — install runtime deps with uv (no dev extras)
@@ -71,13 +72,14 @@ RUN apt-get update -qq \
     ca-certificates \
     curl \
     libpq5 \
+    tini \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 COPY --from=builder /app/.venv ./.venv
 
-RUN useradd --create-home appuser
-USER appuser
+RUN useradd --create-home ${APP_USER}
+USER ${APP_USER}
 
 COPY --chown=appuser:appuser ${SHARED_DIR} ./shared
 COPY --chown=appuser:appuser ${SERVICE_DIR}/app ./app
@@ -89,4 +91,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:8000/healthz || exit 1
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "run.py"]

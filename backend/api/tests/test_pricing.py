@@ -5,7 +5,7 @@ from decimal import Decimal
 import httpx
 import pytest
 from app.config import Settings
-from app.pricing import _FX_CACHE, fetch_fx_quote
+from app.pricing import _FX_CACHE, fetch_fx_price_sync, fetch_fx_quote
 
 
 class _DummyResponse:
@@ -84,3 +84,48 @@ async def test_fetch_fx_quote_uses_cache_on_error(monkeypatch):
     cached = await fetch_fx_quote(settings)
     assert cached.zen_usd == Decimal("9.0")
     assert cached.stale is True
+
+
+class _SyncResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _SyncClient:
+    def __init__(self, results):
+        self._results = list(results)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def get(self, *_args, **_kwargs):
+        if not self._results:
+            raise RuntimeError("no more results")
+        result = self._results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return _SyncResponse(result)
+
+
+def test_fetch_fx_price_sync_retries_and_caches(monkeypatch):
+    error = httpx.RequestError("fail", request=httpx.Request("GET", "http://example.com"))
+    payload = {"price": "5.0"}
+    monkeypatch.setattr("httpx.Client", lambda *a, **k: _SyncClient([error, payload]))
+    settings = Settings(fx_feed_url="http://example.com", fx_cache_ttl_seconds=10)
+    price, stale = fetch_fx_price_sync(settings)
+    assert price == Decimal("5.0")
+    assert stale is False
+    # cached path should hit without HTTP call when ttl active
+    monkeypatch.setattr("httpx.Client", lambda *a, **k: _SyncClient([error]))
+    cached_price, cached_stale = fetch_fx_price_sync(settings)
+    assert cached_price == Decimal("5.0")
+    assert cached_stale is False

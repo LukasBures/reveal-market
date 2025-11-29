@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -118,11 +117,3 @@ class ProverClient:
             raise ProverError("failed to generate proof") from exc
         data = response.json()
         return SettlementProofResponse.from_payload(data)
-
-
-def compute_outcome_hash(event_id: str, condition_id: str, outcomes: list[str] | None) -> str:
-    """Derive a deterministic hash tying the market to outcome strings."""
-
-    basis = "|".join(outcomes or [])
-    digest = hashlib.sha512(f"{event_id.lower()}|{condition_id.lower()}|{basis}".encode()).hexdigest()
-    return f"0x{digest}"

@@ -21,6 +21,7 @@ class StubState(StreamState):
 def history_client(monkeypatch):
     state = StubState()
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: state.settings)
 
     # Avoid spinning up real network streamer in tests.
     class DummyStreamer:
@@ -28,7 +29,14 @@ def history_client(monkeypatch):
 
         async def stop(self): ...
 
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
         yield client

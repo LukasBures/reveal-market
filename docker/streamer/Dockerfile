@@ -27,6 +27,7 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 COPY streamer/app /app/app
+COPY backend/shared /app/shared
 
 EXPOSE 8100
 

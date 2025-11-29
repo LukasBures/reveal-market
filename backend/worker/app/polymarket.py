@@ -34,10 +34,13 @@ class MarketPayload(BaseModel):
     factory: str | None = None
     market_address: str | None = None
     status: str = Field(default="commit")
-    outcomes: list[str] | None = None
-    outcome_prices: list[float] | None = None
-    tags: list[str] | None = None
-    extra_data: dict[str, Any] | None = None
+    outcomes: list[str] | None = None  # transient; persisted into market_outcomes
+    outcome_prices: list[float] | None = None  # transient; persisted into market_outcomes
+    tags: list[str] | None = None  # transient; persisted into market_tags
+    clob_token_ids: list[str] | None = None  # transient; persisted into market_clob_tokens
+    gamma_raw: dict[str, Any] | None = None
+    gamma_metadata: dict[str, Any] | None = None
+    gamma_events: list[dict[str, Any]] | None = None
     rake_bps: int | None = None
     condition_id: str | None = None
     question_id: str | None = None
@@ -53,7 +56,6 @@ class MarketPayload(BaseModel):
     order_min_size: float | None = None
     price_tick_size: float | None = None
     enable_order_book: bool | None = None
-    clob_token_ids: list[str] | None = None
     image_variants: list[str] | None = None
     closes_at: datetime | None = None
 
@@ -99,7 +101,27 @@ class MarketPayload(BaseModel):
         clob_token_ids = _extract_clob_ids(raw.get("clobTokenIds"))
         image_variants = _collect_images(raw)
 
-        extra_data: dict[str, Any] = {"gamma": raw}
+        gamma_metadata = {
+            "gamma_id": str(event_id),
+            "question": raw.get("question"),
+            "slug": slug,
+            "resolution_source": resolution_source,
+            "end_date": _extract_timestamp_candidate(raw.get("endDate")),
+            "start_date": starts_at,
+            "image": image_url,
+            "icon": raw.get("icon"),
+            "description": raw.get("description"),
+            "enable_order_book": enable_order_book,
+            "order_price_min_tick_size": price_tick_size,
+            "order_min_size": order_min_size,
+            "clob_token_id_yes": (clob_token_ids or [None, None])[0] if clob_token_ids else None,
+            "clob_token_id_no": (clob_token_ids or [None, None])[1] if clob_token_ids else None,
+        }
+        gamma_events = []
+        for event in raw.get("events") or []:
+            if isinstance(event, dict):
+                gamma_events.append(event)
+
         hash_payload = {
             "event_id": str(event_id),
             "title": str(title),
@@ -139,7 +161,9 @@ class MarketPayload(BaseModel):
             tags=tags,
             outcomes=outcomes,
             outcome_prices=outcome_prices,
-            extra_data=extra_data,
+            gamma_raw=raw,
+            gamma_metadata=gamma_metadata,
+            gamma_events=gamma_events or None,
             rake_bps=None,
             condition_id=str(condition_id) if condition_id is not None else None,
             question_id=str(question_id) if question_id is not None else None,
@@ -772,11 +796,7 @@ def _apply_clob_overlay(target: MarketPayload, raw: dict[str, Any]) -> None:
     closes_at = _extract_timestamp_candidate(raw.get("end_date_iso") or raw.get("endDate") or raw.get("end_date"))
     if closes_at and target.closes_at is None:
         target.closes_at = closes_at
-    extra = raw if isinstance(raw, dict) else {"clob": raw}
-    existing_extra = target.extra_data if isinstance(target.extra_data, dict) else {}
-    merged_extra = dict(existing_extra) if isinstance(existing_extra, dict) else {}
-    merged_extra["clob"] = extra
-    target.extra_data = merged_extra
+    # No extra_data mutation; normalized fields only
 
 
 def merge_clob_markets(

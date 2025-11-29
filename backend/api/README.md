@@ -26,7 +26,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 3. **Routing**:
    - Read endpoints hit Redis first (`shared.cache.get_json`). Cache keys are tagged (schema tag, logical tags like `markets:list`) for precise invalidation.
    - On cache miss the handler calls `app.crud`, which wraps SQLAlchemy queries around `shared.models`.
-4. **Response shaping**: `schemas.MarketResponse` is augmented with metadata extracted from Polymarket’s `extra_data` block and filtered via category allow-lists.
+4. **Response shaping**: `schemas.MarketResponse` is built from normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns (`outcomes`, `outcome_prices`, `tags`, `clob_token_ids`, `extra_data`) were removed.
 5. **Cache writes**: payloads are dumped to Redis JSON, TTL’d via `RM_CACHE_TTL_SECONDS`, and tagged for invalidation by the worker.
 6. **Hydration cycle**: On startup (and every `RM_CACHE_REFRESH_INTERVAL_SECONDS` thereafter) the API queries Postgres for the newest `RM_CACHE_HYDRATE_LIMIT` markets and rewrites the homepage cache. That keeps Redis warm even before the first client request and ensures any worker-led Postgres updates are reflected in cache within seconds.
 
@@ -74,7 +74,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
 | `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 100 ZEN max; quotes above this return 400). |
-| `RM_FX_FEED_URL` / `RM_FX_TIMEOUT_SECONDS` | FX source for pricing (defaults to Binance-derived feed via streamer). Quotes reject when FX is stale/unavailable. |
+| FX feed | Hardcoded to the streamer `/fx/zen-usd`; env vars no longer switch FX sources. Quotes reject when FX is stale/unavailable. |
 | `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. API signs the ABI-packed digest used by `RevealMarket.commitWithQuote`, bound to chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId. |
 
 ### How the pipeline stays fresh
@@ -100,6 +100,34 @@ Use `.env` or `SETTINGS_FILE` to load a dedicated config file (see `app.config.g
 - `/pricing/quote` now requires `wallet_address`, `market_address`, and `outcome_id` and ignores any client-supplied FX. It signs an ABI-packed digest matching `RevealMarket.commitWithQuote` (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
 - `/pricing/submit` verifies the same digest, enforces expiry, and optionally checks FX drift vs the live feed. Quotes are cached in Redis for replay/audit with a short TTL.
 - Set `RM_PRICING_CHAIN_ID` to the chain where markets live; keep the signer key private and expose `PRICING_SIGNER_ADDRESS` to contracts/deployment scripts.
+ - Liveness probe: `/live` (no deps). Readiness probe: `/ready` or `/healthz` (checks DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS). Metrics: `/metrics`.
+
+#### QUOTE_V1 digest (do not change without on-chain coordination)
+
+The signed pricing payload is bound to the on-chain verifier via a fixed digest:
+
+```
+keccak256(
+  "QUOTE_V1",
+  chainid,
+  market,          // address
+  expectedUser,    // wallet address
+  outcomeId,       // uint256
+  stakeWei,        // uint256
+  fxScaled1e8,     // uint256
+  expiry,          // uint256 unix timestamp
+  quoteId          // bytes32
+)
+```
+
+`app.main._build_quote_digest` (and the test suite) enforce this shape. Changing it requires a deliberate contract + backend dual upgrade.
+
+### Operations & runbook (API)
+
+- Probes: `/live` (liveness) and `/ready`/`/healthz` (readiness: DB, Redis, worker heartbeat, Polymarket, signer, CORS). Metrics at `/metrics`.
+- Cache strategy: versioned keys (`v1:`) with tag invalidation; startup and jittered refresh hydrators; hydrate lock prevents stampedes; clean bypass when Redis is unavailable.
+- Pricing quotes: FX fetched server-side with retry/backoff + cache; per-user/per-market caps enforced via the quote ledger; quote expiry sweeper runs in the background (interval configurable via `RM_QUOTE_EXPIRY_SWEEP_INTERVAL_SECONDS`).
+- Clearing caches: bumping cache version or flushing Redis keys with prefix `v1:` invalidates prior entries. Tags (`cache:tag:*`) group list/detail/resolution keys; hydrators will repopulate hot paths.
 
 ---
 

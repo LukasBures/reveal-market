@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import time
 from contextlib import asynccontextmanager
@@ -19,7 +20,7 @@ from eth_account.messages import encode_defunct
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from py_clob_client.client import ClobClient
 from redis import Redis
@@ -45,7 +46,7 @@ from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
-from app.pricing import PricingEngine, fetch_fx_quote
+from app.pricing import PricingEngine, _resolved_fx_url, fetch_fx_price_sync, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
 
@@ -83,22 +84,45 @@ _cache_lock = Lock()
 _heartbeat_stop_event: Event | None = None
 _metrics_stop_event: Event | None = None
 _cache_refresh_stop_event: Event | None = None
+_quote_sweeper_stop_event: Event | None = None
 request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
 goldsky_client: GoldskyClient | None = None
 
-MARKETS_STATS_KEY = "markets:stats"
-MARKET_DETAIL_PREFIX = "markets:detail"
+REQUEST_LATENCY = Histogram(
+    "api_request_latency_seconds",
+    "Latency of HTTP requests",
+    ["method", "path", "status_code"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+)
+
+MARKETS_STATS_KEY = "v1:markets:stats"
+MARKET_DETAIL_PREFIX = "v1:markets:detail"
 
 MARKETS_CACHE_COUNTER = Counter(
     "markets_cache_requests_total",
     "Cache hits and misses for /markets",
     ["outcome", "status", "category"],
 )
+PRICING_COUNTER = Counter(
+    "pricing_quote_events_total",
+    "Pricing quote lifecycle events",
+    ["event", "result"],
+)
+MARKET_DETAIL_CACHE_COUNTER = Counter(
+    "markets_detail_cache_requests_total",
+    "Cache hits and misses for /markets/{event_id}",
+    ["outcome"],
+)
+RESOLUTION_CACHE_COUNTER = Counter(
+    "markets_resolution_cache_requests_total",
+    "Cache hits and misses for /resolution/{condition_id}",
+    ["outcome"],
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _heartbeat_stop_event, _metrics_stop_event, _cache_refresh_stop_event
+    global _heartbeat_stop_event, _metrics_stop_event, _cache_refresh_stop_event, _quote_sweeper_stop_event
     run_migrations()
     _heartbeat_stop_event = start_heartbeat_logger(
         logger,
@@ -112,6 +136,8 @@ async def lifespan(app: FastAPI):
         hydrate_markets_cache(source="startup", limit=settings.cache_hydrate_limit)
     if _cache_refresh_stop_event is None:
         _cache_refresh_stop_event = _start_cache_refresh_worker()
+    if _quote_sweeper_stop_event is None:
+        _quote_sweeper_stop_event = _start_quote_sweeper()
     yield
     if _heartbeat_stop_event is not None:
         _heartbeat_stop_event.set()
@@ -122,6 +148,9 @@ async def lifespan(app: FastAPI):
     if _cache_refresh_stop_event is not None:
         _cache_refresh_stop_event.set()
         _cache_refresh_stop_event = None
+    if _quote_sweeper_stop_event is not None:
+        _quote_sweeper_stop_event.set()
+        _quote_sweeper_stop_event = None
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
@@ -313,8 +342,9 @@ def _derive_winners_from_payouts(payouts: list[int] | None, outcomes: list[str] 
 def _build_resolution_summary_from_record(
     record: models.Resolution,
     market: models.Market | None = None,
+    market_outcomes: list[str] | None = None,
 ) -> schemas.ResolutionSummary:
-    outcomes = record.outcomes or (market.outcomes if market and market.outcomes else [])
+    outcomes = market_outcomes or []
     payouts = record.payouts or []
     winners = record.winners or _derive_winners_from_payouts(payouts, outcomes)
     winning_outcome_id = record.winning_outcome_id
@@ -596,12 +626,26 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
         settings.max_page_size,
     )
     start_time = time.perf_counter()
+    lock_key = "lock:markets_cache:hydrate"
+    lock_acquired = False
+    lock_ttl = max(30, settings.cache_ttl_seconds)
+    if cache is not None:
+        try:
+            lock_acquired = bool(cache.set(lock_key, "1", ex=lock_ttl, nx=True))
+        except RedisError:
+            lock_acquired = False
+    if cache is not None and not lock_acquired:
+        summary["status"] = "skipped"
+        summary["reason"] = "hydrate_in_progress"
+        return summary
     with session_scope() as session:
         records = crud.get_markets(session, limit=hydrated_limit, offset=0)
         market_models = _filter_markets_for_visibility(
             _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
         )
     if not market_models:
+        if cache is not None and lock_acquired:
+            cache.delete(lock_key)
         summary["reason"] = "no_markets"
         return summary
     cache_key = markets_list_cache_key(None, None, None, None, hydrated_limit, 0)
@@ -630,6 +674,11 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
             "duration_ms": duration_ms,
         }
     )
+    if cache is not None and lock_acquired:
+        try:
+            cache.delete(lock_key)
+        except RedisError:
+            pass
     return summary
 
 
@@ -663,7 +712,53 @@ def _cache_refresh_loop(stop_event: Event) -> None:
                 message="failed to refresh markets cache",
                 error=str(exc),
             )
+        jitter = min(interval * 0.2, 30)
+        wait_seconds = interval + _RNG.uniform(-jitter, jitter)
+        stop_event.wait(max(1, wait_seconds))
+
+
+def _quote_sweeper_loop(stop_event: Event, *, run_once: bool = False) -> None:
+    interval = max(15, settings.quote_expiry_sweep_interval_seconds)
+    while not stop_event.is_set():
+        try:
+            with session_scope() as session:
+                expired = shared_repository.expire_stale_quotes(session)
+                session.flush()
+                if expired:
+                    PRICING_COUNTER.labels(event="sweep", result="expired").inc(expired)
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="pricing.quote.sweep",
+                        message="expired stale quotes",
+                        expired=expired,
+                        ttl_seconds=settings.quote_store_ttl_seconds,
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="pricing.quote.sweep_error",
+                message="quote expiry sweep failed",
+                error=str(exc),
+            )
+        if run_once:
+            break
         stop_event.wait(interval)
+
+
+def _start_quote_sweeper() -> Event:
+    stop_event = Event()
+    thread = Thread(target=_quote_sweeper_loop, args=(stop_event,), daemon=True)
+    thread.start()
+    log_event(
+        logger,
+        logging.INFO,
+        event="pricing.quote.sweep.start",
+        message="started quote expiry sweeper",
+        interval_seconds=settings.quote_expiry_sweep_interval_seconds,
+    )
+    return stop_event
 
 
 rate_limiter = RateLimiter(_current_settings, get_cache_client)
@@ -736,6 +831,24 @@ def _market_record_cache_key(event_id: str) -> str:
     return f"market:{event_id}"
 
 
+def _resolved_cache_ttl(status: str | None, resolved_at: datetime | None) -> int:
+    """Compute cache TTL; resolved markets expire 12 hours after resolution."""
+
+    resolved = resolved_at
+    if isinstance(resolved_at, str):
+        try:
+            resolved = datetime.fromisoformat(resolved_at.replace("Z", "+00:00"))
+        except ValueError:
+            resolved = None
+    if status and status.lower() in {"settled", "cancelled"} and isinstance(resolved, datetime):
+        delta = (resolved - datetime.now(tz=UTC)) + timedelta(hours=12)
+        seconds = int(delta.total_seconds())
+        if seconds <= 0:
+            return 0
+        return min(seconds, settings.market_record_cache_ttl_seconds)
+    return settings.market_record_cache_ttl_seconds
+
+
 def _should_cache_market_list(limit: int, offset: int, search_query: str | None) -> bool:
     if offset != 0:
         return False
@@ -746,10 +859,7 @@ def _should_cache_market_list(limit: int, offset: int, search_query: str | None)
 
 def _sanitize_market_response(market: schemas.MarketResponse) -> dict[str, Any]:
     payload = market.model_dump(mode="json")
-    extra = payload.get("extra_data")
-    if isinstance(extra, dict):
-        trimmed = {k: v for k, v in extra.items() if k.lower() != "gamma"}
-        payload["extra_data"] = trimmed or None
+    # `extra_data` removed; payload is already normalized
     return payload
 
 
@@ -785,15 +895,13 @@ def _write_market_list_cache(cache: Redis | None, cache_key: str, markets: list[
             continue
         event_ids.append(event_id)
         condition_id = sanitized.get("condition_id")
-        set_json(
-            cache,
-            _market_record_cache_key(event_id),
-            sanitized,
-            settings.market_record_cache_ttl_seconds,
-        )
-        add_tag(cache, f"market:{event_id}", _market_record_cache_key(event_id))
-        if isinstance(condition_id, str):
-            add_tag(cache, f"resolution:{condition_id.lower()}", _market_record_cache_key(event_id))
+        record_key = _market_record_cache_key(event_id)
+        ttl_seconds = _resolved_cache_ttl(sanitized.get("status"), sanitized.get("resolved_at"))
+        if ttl_seconds > 0:
+            set_json(cache, record_key, sanitized, ttl_seconds)
+            add_tag(cache, f"market:{event_id}", record_key)
+            if isinstance(condition_id, str):
+                add_tag(cache, f"resolution:{condition_id.lower()}", record_key)
     if not event_ids:
         return
     payload = {
@@ -811,94 +919,90 @@ def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
-def _coerce_list_of_strings(value: Any) -> list[str] | None:
-    candidate = value
-    if isinstance(candidate, str):
-        parsed: Any = None
-        try:
-            parsed = json.loads(candidate)
-        except ValueError:
-            parsed = [item.strip() for item in candidate.split(",") if item.strip()]
-        candidate = parsed
-    if isinstance(candidate, list):
-        result = [str(item) for item in candidate if item not in (None, "")]
-        return result or None
-    return None
-
-
-def _coerce_mapping(value: Any) -> dict[str, Any] | None:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            return None
-        if isinstance(parsed, dict):
-            return parsed
-    return None
-
-
-def _extract_market_metadata(extra_data: Any) -> dict[str, Any]:
-    extra = _coerce_mapping(extra_data)
-    if not extra:
-        return {}
-    gamma = _coerce_mapping(extra.get("gamma"))
-    metadata: dict[str, Any] = {}
-
-    def from_gamma(*keys: str) -> Any | None:
-        if not gamma:
-            return None
-        for key in keys:
-            if key in gamma and gamma[key]:
-                return gamma[key]
-        return None
-
-    description = extra.get("description") or from_gamma("description")
-    if description:
-        metadata["description"] = description
-
-    resolution_source = (
-        extra.get("resolution_source") or extra.get("resolutionSource") or from_gamma("resolutionSource")
-    )
-    if not resolution_source and gamma and isinstance(gamma.get("events"), list):
-        for event in gamma["events"]:
-            data = _coerce_mapping(event)
-            if data and data.get("resolutionSource"):
-                resolution_source = data["resolutionSource"]
-                break
-    if resolution_source:
-        metadata["resolution_source"] = resolution_source
-
-    clob_pair_id = extra.get("clob_pair_id") or extra.get("clobPairId") or from_gamma("clobPairId", "pairId")
-    if clob_pair_id:
-        metadata["clob_pair_id"] = str(clob_pair_id)
-
-    token_source = extra.get("clob_token_ids") or extra.get("clobTokenIds") or from_gamma("clobTokenIds", "tokenIds")
-    token_ids = _coerce_list_of_strings(token_source)
-    if token_ids:
-        metadata["clob_token_ids"] = token_ids
-
-    return metadata
-
-
-def _apply_market_metadata(market: schemas.MarketResponse) -> None:
-    metadata = _extract_market_metadata(market.extra_data)
-    if not metadata:
-        return
-    if "description" in metadata:
-        market.description = metadata["description"]
-    if "resolution_source" in metadata:
-        market.resolution_source = metadata["resolution_source"]
-    if "clob_pair_id" in metadata:
-        market.clob_pair_id = metadata["clob_pair_id"]
-    if "clob_token_ids" in metadata:
-        market.clob_token_ids = metadata["clob_token_ids"]
-
-
 def _apply_market_caps(market: schemas.MarketResponse) -> None:
     if getattr(market, "caps", None) is None:
         market.caps = _build_market_caps()
+
+
+def _load_normalized_fields(session: Session, markets: list[schemas.MarketResponse]) -> None:
+    """Populate outcomes, prices, tags, clob tokens, and gamma metadata onto market models."""
+
+    id_map: dict[int, schemas.MarketResponse] = {}
+    for market in markets:
+        mid = getattr(market, "id", None)
+        if isinstance(mid, int):
+            id_map[mid] = market
+    if not id_map:
+        return
+    market_ids = list(id_map.keys())
+
+    # Outcomes
+    outcome_rows = session.execute(
+        select(models.MarketOutcome)
+        .where(models.MarketOutcome.market_id.in_(market_ids))
+        .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+    ).scalars()
+    outcome_map: dict[int, list[models.MarketOutcome]] = {}
+    for row in outcome_rows:
+        outcome_map.setdefault(row.market_id, []).append(row)
+    for mid, target in id_map.items():
+        outcomes = outcome_map.get(mid, [])
+        labels = [row.label for row in outcomes]
+        prices = [float(row.price) if row.price is not None else None for row in outcomes]
+        target.outcomes = labels or None
+        target.outcome_prices = prices if any(p is not None for p in prices) else None
+
+    # Tags
+    tag_rows = session.execute(
+        select(models.MarketTag).where(models.MarketTag.market_id.in_(market_ids)).order_by(models.MarketTag.tag)
+    ).scalars()
+    tag_map: dict[int, list[str]] = {}
+    for row in tag_rows:
+        tag_map.setdefault(row.market_id, []).append(row.tag)
+    for mid, target in id_map.items():
+        target.tags = tag_map.get(mid) or None
+
+    # Clob tokens
+    token_rows = session.execute(
+        select(models.MarketClobToken)
+        .where(models.MarketClobToken.market_id.in_(market_ids))
+        .order_by(models.MarketClobToken.id)
+    ).scalars()
+    token_map: dict[int, list[models.MarketClobToken]] = {}
+    for row in token_rows:
+        token_map.setdefault(row.market_id, []).append(row)
+    for mid, target in id_map.items():
+        tokens = token_map.get(mid, [])
+        ids = [t.token_id for t in tokens if t.token_id]
+        target.clob_token_ids = ids or None
+
+    # Gamma metadata
+    meta_rows = session.execute(
+        select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(market_ids))
+    ).scalars()
+    meta_map = {row.market_id: row for row in meta_rows}
+    for mid, target in id_map.items():
+        meta = meta_map.get(mid)
+        if not meta:
+            continue
+        if meta.description:
+            target.description = meta.description
+        if meta.resolution_source:
+            target.resolution_source = meta.resolution_source
+        # Prefer explicit yes/no ids, otherwise fall back to tokens list
+        ids: list[str] = []
+        if meta.clob_token_id_yes:
+            ids.append(meta.clob_token_id_yes)
+        if meta.clob_token_id_no:
+            ids.append(meta.clob_token_id_no)
+        if ids:
+            target.clob_token_ids = ids
+        if meta.order_price_min_tick_size is not None:
+            target.price_tick_size = Decimal(str(meta.order_price_min_tick_size))
+        if meta.order_min_size is not None:
+            target.order_min_size = Decimal(str(meta.order_min_size))
+        if meta.enable_order_book is not None:
+            target.enable_order_book = meta.enable_order_book
 
 
 def _attach_resolution_to_market(
@@ -924,7 +1028,6 @@ def _attach_resolution_to_market(
 
 def _augment_market_models(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
     for market in markets:
-        _apply_market_metadata(market)
         _apply_market_caps(market)
     return markets
 
@@ -945,9 +1048,24 @@ def _load_resolution_records(session: Session, markets: list[schemas.MarketRespo
     return records
 
 
+def _load_outcomes_for_market(session: Session, market: models.Market | schemas.MarketResponse | None) -> list[str]:
+    if market is None:
+        return []
+    mid = getattr(market, "id", None)
+    if not isinstance(mid, int):
+        return []
+    rows = session.execute(
+        select(models.MarketOutcome.label)
+        .where(models.MarketOutcome.market_id == mid)
+        .order_by(models.MarketOutcome.outcome_id)
+    ).scalars()
+    return list(rows)
+
+
 def _enrich_market_models(session: Session, markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
     """Attach metadata, caps, and cached resolutions to market responses."""
 
+    _load_normalized_fields(session, markets)
     _augment_market_models(markets)
     resolution_map = _load_resolution_records(session, markets)
     for market in markets:
@@ -1016,6 +1134,18 @@ async def request_context_middleware(request: Request, call_next):
     except HTTPException as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
         cache_meta = _extract_cache_metadata(request)
+        try:
+            REQUEST_LATENCY.labels(
+                method=request.method, path=request.url.path, status_code=str(exc.status_code)
+            ).observe(duration_ms / 1000.0)
+        except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="metrics.emit.failed",
+                message="failed to emit request latency metric",
+                error=str(metric_exc),
+            )
         log_event(
             logger,
             logging.WARNING if 400 <= exc.status_code < 500 else logging.ERROR,
@@ -1041,6 +1171,18 @@ async def request_context_middleware(request: Request, call_next):
     except Exception:
         duration_ms = (time.perf_counter() - start_time) * 1000
         cache_meta = _extract_cache_metadata(request)
+        try:
+            REQUEST_LATENCY.labels(method=request.method, path=request.url.path, status_code="500").observe(
+                duration_ms / 1000.0
+            )
+        except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="metrics.emit.failed",
+                message="failed to emit request latency metric",
+                error=str(metric_exc),
+            )
         log_event(
             logger,
             logging.ERROR,
@@ -1068,6 +1210,18 @@ async def request_context_middleware(request: Request, call_next):
     cache_meta = _extract_cache_metadata(request)
     bytes_sent = _estimate_response_bytes(response)
     latency_bucket = classify_latency_bucket(duration_ms)
+    try:
+        REQUEST_LATENCY.labels(
+            method=request.method, path=request.url.path, status_code=str(response.status_code)
+        ).observe(duration_ms / 1000.0)
+    except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="metrics.emit.failed",
+            message="failed to emit request latency metric",
+            error=str(metric_exc),
+        )
     log_event(
         logger,
         logging.INFO,
@@ -1106,6 +1260,16 @@ def read_root() -> dict[str, str]:
 @app.get("/healthz", response_model=schemas.HealthResponse, tags=["health"])
 async def health_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
     return await build_health_response(session)
+
+
+@app.get("/ready", response_model=schemas.HealthResponse, tags=["health"])
+async def readiness_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
+    return await build_health_response(session)
+
+
+@app.get("/live", tags=["health"])
+def liveness_check() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get("/healthz/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
@@ -1190,18 +1354,10 @@ def pricing_quote(
         )
     # Always source FX server-side; ignore client-provided zen_usd.
     try:
-        fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
-        fx.raise_for_status()
-        data = fx.json()
-        if data.get("fx_stale") or data.get("stale"):
+        zen_usd_raw, stale = fetch_fx_price_sync(settings)
+        if stale:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price stale")
-        zen_usd = float(
-            data.get("price")
-            or data.get("zen_usd")
-            or data.get("zenUSD")
-            or data.get("fx_zen_usd")
-            or data.get("fx", {}).get("zen_usd")
-        )
+        zen_usd = float(zen_usd_raw) if zen_usd_raw is not None else None
     except HTTPException:
         raise
     except Exception as exc:
@@ -1246,7 +1402,12 @@ def pricing_quote(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable", headers=None
         )
-    signer_account = load_account(settings.pricing_signer_private_key.get_secret_value())
+    signer_key = (
+        settings.pricing_signer_private_key.get_secret_value()
+        if hasattr(settings.pricing_signer_private_key, "get_secret_value")
+        else settings.pricing_signer_private_key
+    )
+    signer_account = load_account(signer_key)
     try:
         # Sign the same digest the contract verifies to prevent client tampering.
         digest = _build_quote_digest(
@@ -1330,7 +1491,11 @@ def pricing_quote(
         total_monetisation=str(quote.total_monetization),
         market_total=market_total,
         user_total=user_total,
+        quote_id=quote_id,
+        market_id=payload.market_id,
+        user_id=payload.user_id,
     )
+    PRICING_COUNTER.labels(event="issue", result="ok").inc()
     return quote
 
 
@@ -1359,16 +1524,18 @@ def pricing_submit(
             detail="wallet_address, market_address, and outcome_id are required for signed quotes",
         )
 
-    signer_account = (
-        load_account(settings.pricing_signer_private_key.get_secret_value())
-        if settings.pricing_signer_private_key
-        else None
+    signer_key = (
+        settings.pricing_signer_private_key.get_secret_value()
+        if hasattr(settings.pricing_signer_private_key, "get_secret_value")
+        else settings.pricing_signer_private_key
     )
+    signer_account = load_account(signer_key) if signer_key else None
     if signer_account is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
 
     db_quote = shared_repository.get_quote(session, quote.quote_id)
     if db_quote is None:
+        PRICING_COUNTER.labels(event="submit", result="missing").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
     if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
@@ -1376,20 +1543,25 @@ def pricing_submit(
     if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
+        PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     quote_expires_at = _as_aware(quote.expires_at)
     if quote_expires_at and quote_expires_at <= now:
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
+        PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     if db_quote.wallet_address and quote.wallet_address:
         if db_quote.wallet_address.lower() != quote.wallet_address.lower():
+            PRICING_COUNTER.labels(event="submit", result="wallet_mismatch").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote wallet mismatch")
     if db_quote.market_address and quote.market_address:
         if db_quote.market_address.lower() != quote.market_address.lower():
+            PRICING_COUNTER.labels(event="submit", result="market_mismatch").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market mismatch")
     if db_quote.outcome_id is not None and quote.outcome_id is not None:
         if db_quote.outcome_id != quote.outcome_id:
+            PRICING_COUNTER.labels(event="submit", result="outcome_mismatch").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote outcome mismatch")
 
     expiry_reference = quote_expires_at or db_expires_at or now
@@ -1400,6 +1572,7 @@ def pricing_submit(
     recalculated_fx = _scale_fx_value(quote.zen_usd)
     if recalculated_stake != stake_wei or recalculated_fx != zen_usd_scaled:
         # Protect against client-side mutation: the numeric fields must match our scaled copies.
+        PRICING_COUNTER.labels(event="submit", result="scaled_mismatch").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote fields do not match scaled values")
     try:
         digest = _build_quote_digest(
@@ -1414,46 +1587,56 @@ def pricing_submit(
         )
         recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote.signature)
     except Exception as exc:
+        PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
     if recovered.lower() != signer_account.address.lower():
+        PRICING_COUNTER.labels(event="submit", result="signer_mismatch").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
     if db_quote.stake_wei != stake_wei or db_quote.fx_scaled != zen_usd_scaled:
+        PRICING_COUNTER.labels(event="submit", result="payload_mismatch").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote payload mismatch with ledger")
 
     # Enforce fresh FX vs quoted value if requested.
     current_fx: Decimal | None = None
-    try:
-        fx = httpx.get(settings.fx_feed_url, timeout=settings.fx_timeout_seconds)
-        fx.raise_for_status()
-        data = fx.json()
-        raw_fx = (
-            data.get("price")
-            or data.get("zen_usd")
-            or data.get("zenUSD")
-            or data.get("fx_zen_usd")
-            or data.get("fx", {}).get("zen_usd")
-        )
-        if raw_fx is not None:
-            current_fx = Decimal(str(raw_fx))
-        if payload.max_fx_diff_percent is not None:
+    if payload.max_fx_diff_percent is not None:
+        try:
+            fx = httpx.get(_resolved_fx_url(settings), timeout=settings.fx_timeout_seconds)
+            fx.raise_for_status()
+            data = fx.json()
+            raw_fx = (
+                data.get("price")
+                or data.get("zen_usd")
+                or data.get("zenUSD")
+                or data.get("fx_zen_usd")
+                or data.get("fx", {}).get("zen_usd")
+            )
+            if raw_fx is not None:
+                current_fx = Decimal(str(raw_fx))
             fx_diff_percent = (
                 (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
                 if current_fx is not None and quote.zen_usd
                 else Decimal("0")
             )
             if current_fx is None:
+                PRICING_COUNTER.labels(event="submit", result="fx_missing").inc()
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX check failed: missing price"
                 )
             if fx_diff_percent > payload.max_fx_diff_percent:
+                PRICING_COUNTER.labels(event="submit", result="fx_drift").inc()
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"FX drift {fx_diff_percent:.4f}% exceeds bound {payload.max_fx_diff_percent}%",
                 )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            PRICING_COUNTER.labels(event="submit", result="fx_error").inc()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}"
+            ) from exc
+    else:
+        current_fx = quote.zen_usd
     _enforce_caps(
         session,
         stake_zen=float(quote.stake_zen),
@@ -1470,6 +1653,19 @@ def pricing_submit(
         consumed_at=now,
     )
     session.flush()
+    PRICING_COUNTER.labels(event="submit", result="ok").inc()
+    log_event(
+        logger,
+        logging.INFO,
+        event="pricing.submit",
+        message="pricing quote submitted",
+        quote_id=quote.quote_id,
+        market_id=quote.market_id,
+        user_id=quote.user_id,
+        outcome_id=quote.outcome_id,
+        stake_zen=float(quote.stake_zen),
+        zen_usd=float(quote.zen_usd),
+    )
 
     return schemas.PricingSubmitResponse(
         quote=quote,
@@ -1977,6 +2173,7 @@ def read_resolution(
     cache_key = resolution_cache_key(normalized_condition)
     cached = get_json(cache, cache_key)
     if cached is not None:
+        RESOLUTION_CACHE_COUNTER.labels(outcome="hit").inc()
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:resolution")
         summary = schemas.ResolutionSummary.model_validate(cached)
         log_event(
@@ -1991,19 +2188,24 @@ def read_resolution(
 
     market = crud.get_market_by_condition_id(session, normalized_condition)
     record = crud.get_resolution_by_condition_id(session, normalized_condition)
+    market_outcomes = _load_outcomes_for_market(session, market)
 
     summary_model: schemas.ResolutionSummary | None = None
     if record is not None:
         if market and (record.event_id is None or record.market_id is None):
             record.event_id = market.event_id
             record.market_id = market.id
-        summary_model = _build_resolution_summary_from_record(record, market)
+        summary_model = _build_resolution_summary_from_record(
+            record,
+            market,
+            market_outcomes=market_outcomes,
+        )
     elif goldsky_client is not None:
         try:
             summary = goldsky_client.resolution_summary(
                 normalized_condition,
-                market.outcomes if market and market.outcomes else None,
-                len(market.outcomes) if market and market.outcomes else None,
+                market_outcomes or None,
+                len(market_outcomes) if market_outcomes else None,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -2022,7 +2224,7 @@ def read_resolution(
                     summary.setdefault("title", market.title)
                     summary.setdefault("slug", market.slug)
                     summary.setdefault("oracle", market.oracle)
-                    summary.setdefault("outcomes", market.outcomes or summary.get("outcomes", []))
+                    summary.setdefault("outcomes", market_outcomes or summary.get("outcomes", []))
                 log_event(
                     logger,
                     logging.INFO,
@@ -2071,8 +2273,13 @@ def read_resolution(
 
     if summary_model is None:
         if record is not None:
-            summary_model = _build_resolution_summary_from_record(record, market)
+            summary_model = _build_resolution_summary_from_record(
+                record,
+                market,
+                market_outcomes=market_outcomes,
+            )
     if summary_model is None:
+        RESOLUTION_CACHE_COUNTER.labels(outcome="miss").inc()
         log_event(
             logger,
             logging.WARNING,
@@ -2109,6 +2316,10 @@ def read_resolution(
             condition_id=normalized_condition,
             duration_ms=round((time.perf_counter() - start) * 1000, 2),
         )
+    if cache_available:
+        RESOLUTION_CACHE_COUNTER.labels(outcome="miss").inc()
+    else:
+        RESOLUTION_CACHE_COUNTER.labels(outcome="bypass").inc()
     update_cache_context(
         request, cache_key=cache_key if cache_available else None, hit=False, source="markets:resolution"
     )
@@ -2139,6 +2350,7 @@ def read_market(
         model = schemas.MarketResponse.model_validate(cached)
         _enrich_market_models(session, [model])
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:detail")
+        MARKET_DETAIL_CACHE_COUNTER.labels(outcome="hit").inc()
         log_event(
             logger,
             logging.INFO,
@@ -2153,26 +2365,31 @@ def read_market(
 
     market = crud.get_market_by_event_id(session, event_id)
     if not market:
+        MARKET_DETAIL_CACHE_COUNTER.labels(outcome="miss").inc()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
     duration = (time.perf_counter() - start) * 1000
     if cache_available:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
-        set_json(cache, cache_key, response.model_dump(mode="json"), settings.cache_ttl_seconds)
-        add_tag(cache, schema_tag, cache_key)
-        add_tag(cache, f"market:{event_id}", cache_key)
-        if getattr(response, "condition_id", None):
-            add_tag(cache, f"resolution:{str(response.condition_id).lower()}", cache_key)
-        log_event(
-            logger,
-            logging.INFO,
-            event="markets.detail.cache_miss",
-            message="cached fresh market detail",
-            cache_hit=False,
-            duration_ms=round(duration, 2),
-            event_id=event_id,
-            result_count=1,
+        ttl_seconds = _resolved_cache_ttl(
+            response.status, response.resolved_at if hasattr(response, "resolved_at") else None
         )
+        if ttl_seconds > 0:
+            set_json(cache, cache_key, response.model_dump(mode="json"), ttl_seconds)
+            add_tag(cache, schema_tag, cache_key)
+            add_tag(cache, f"market:{event_id}", cache_key)
+            if getattr(response, "condition_id", None):
+                add_tag(cache, f"resolution:{str(response.condition_id).lower()}", cache_key)
+            log_event(
+                logger,
+                logging.INFO,
+                event="markets.detail.cache_miss",
+                message="cached fresh market detail",
+                cache_hit=False,
+                duration_ms=round(duration, 2),
+                event_id=event_id,
+                result_count=1,
+            )
     else:
         log_event(
             logger,
@@ -2184,6 +2401,10 @@ def read_market(
             event_id=event_id,
             result_count=1,
         )
+    if cache_available:
+        MARKET_DETAIL_CACHE_COUNTER.labels(outcome="miss").inc()
+    else:
+        MARKET_DETAIL_CACHE_COUNTER.labels(outcome="bypass").inc()
     update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:detail")
     return response
 
@@ -2227,7 +2448,10 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
         category=market_in.category,
         oracle=market_in.oracle,
     )
-    market = crud.create_or_update_market(session, market_in)
+    payload = market_in.model_dump()
+    for legacy in ("outcomes", "outcome_prices", "tags", "clob_token_ids"):
+        payload.pop(legacy, None)
+    market = crud.create_or_update_market(session, schemas.MarketCreate(**payload))
     session.flush()
     _invalidate_market_cache(market.event_id, getattr(market, "condition_id", None))
     duration = (time.perf_counter() - start) * 1000
@@ -2240,8 +2464,7 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
         category=market.category,
         duration_ms=round(duration, 2),
     )
-    response = schemas.MarketResponse.model_validate(market)
-    _apply_market_metadata(response)
+    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
     return response
 
 
@@ -2273,8 +2496,7 @@ def update_market(
         event_id=event_id,
         duration_ms=round(duration, 2),
     )
-    response = schemas.MarketResponse.model_validate(market)
-    _apply_market_metadata(response)
+    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
     return response
 
 
@@ -2301,3 +2523,6 @@ def _invalidate_market_cache(event_id: str | None = None, condition_id: str | No
         invalidate_tag(cache, f"market:{event_id}")
     if condition_id:
         invalidate_tag(cache, f"resolution:{condition_id.lower()}")
+
+
+_RNG = random.SystemRandom()

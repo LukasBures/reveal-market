@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import app.main as api_main
 from app import models
+from shared import models as shared_models
 from shared.cache_keys import resolution_cache_key
+from sqlalchemy import select
 
 
 def _make_market(event_id: str, title: str, **extra) -> models.Market:
@@ -21,19 +24,37 @@ def _make_market(event_id: str, title: str, **extra) -> models.Market:
 
 
 def test_market_metadata_enrichment_applies_description_and_tokens(client, db_session):
-    extra_data = {
-        "description": "Detailed narrative from Polymarket.",
-        "resolution_source": "https://example.com/source",
-        "clob_pair_id": "123",
-        "clob_token_ids": ["A", "B"],
-    }
     db_session.add(
         _make_market(
             "evt-meta",
             "Metadata Market",
             category="crypto",
-            extra_data=extra_data,
-            tags=["btc"],
+        )
+    )
+    db_session.flush()
+    market_id = db_session.execute(select(models.Market.id).where(models.Market.event_id == "evt-meta")).scalar_one()
+    db_session.add_all(
+        [
+            shared_models.MarketOutcome(market_id=market_id, outcome_id=0, label="Yes", price=0.4),
+            shared_models.MarketOutcome(market_id=market_id, outcome_id=1, label="No", price=0.6),
+        ]
+    )
+    db_session.add(shared_models.MarketTag(market_id=market_id, tag="btc"))
+    db_session.add_all(
+        [
+            shared_models.MarketClobToken(market_id=market_id, token_id="A", side="yes"),  # noqa: S106
+            shared_models.MarketClobToken(market_id=market_id, token_id="B", side="no"),  # noqa: S106
+        ]
+    )
+    db_session.add(
+        shared_models.MarketGammaMetadata(
+            market_id=market_id,
+            description="Detailed narrative from Polymarket.",
+            resolution_source="https://example.com/source",
+            clob_token_id_yes="A",  # noqa: S106
+            clob_token_id_no="B",  # noqa: S106
+            order_price_min_tick_size=Decimal("0.001"),
+            order_min_size=Decimal("5"),
         )
     )
     db_session.commit()
@@ -44,7 +65,6 @@ def test_market_metadata_enrichment_applies_description_and_tokens(client, db_se
     enriched = payload["evt-meta"]
     assert enriched["description"] == "Detailed narrative from Polymarket."
     assert enriched["resolution_source"] == "https://example.com/source"
-    assert enriched["clob_pair_id"] == "123"
     assert enriched["clob_token_ids"] == ["A", "B"]
 
 
@@ -84,7 +104,6 @@ def test_resolution_endpoint_returns_cached_isoformat(client, db_session):
         resolved=True,
         payouts=[0, 1],
         winners=[{"index": 1, "label": "Yes", "payout": 1}],
-        outcomes=["No", "Yes"],
         oracle="0xfeed",
         question_id="0x" + "b" * 64,
         transaction_hash="0x" + "c" * 64,
@@ -96,9 +115,18 @@ def test_resolution_endpoint_returns_cached_isoformat(client, db_session):
         "evt-resolution",
         "Resolution Market",
         condition_id=condition_id.lower(),
-        outcomes=["No", "Yes"],
     )
     db_session.add_all([resolution, market])
+    db_session.flush()
+    market_id = db_session.execute(
+        select(models.Market.id).where(models.Market.event_id == "evt-resolution")
+    ).scalar_one()
+    db_session.add_all(
+        [
+            shared_models.MarketOutcome(market_id=market_id, outcome_id=0, label="No", price=0.4),
+            shared_models.MarketOutcome(market_id=market_id, outcome_id=1, label="Yes", price=0.6),
+        ]
+    )
     db_session.commit()
 
     first = client.get(f"/resolution/{condition_id}")

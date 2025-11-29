@@ -50,13 +50,12 @@ class MarketBase(BaseModel):
     factory: str | None = None
     market_address: str | None = None
     status: str = Field(default="commit")
-    outcomes: Any | None = None
+    outcomes: list[str] | None = None
+    outcome_prices: list[float] | None = None
     tags: list[str] | None = None
-    extra_data: Any | None = None
     rake_bps: int | None = None
     condition_id: str | None = None
     question_id: str | None = None
-    outcome_prices: Any | None = None
     image_url: str | None = None
     closed: bool | None = None
     uma_resolution_status: str | None = None
@@ -86,14 +85,13 @@ class MarketUpdate(BaseModel):
     category: str | None = None
     metadata_uri: str | None = None
     status: str | None = None
-    outcomes: Any | None = None
+    outcomes: list[str] | None = None
     tags: list[str] | None = None
-    extra_data: Any | None = None
     rake_bps: int | None = None
     slug: str | None = None
     condition_id: str | None = None
     question_id: str | None = None
-    outcome_prices: Any | None = None
+    outcome_prices: list[float] | None = None
     image_url: str | None = None
     closed: bool | None = None
     uma_resolution_status: str | None = None
