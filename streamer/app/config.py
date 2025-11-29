@@ -2,90 +2,81 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
-from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator
+from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STREAMER_", env_file=".env", extra="ignore")
 
-    environment: str = Field(default="prod", validation_alias=AliasChoices("MODE", "ENVIRONMENT"))
-    log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
+    environment: str = Field(default="prod", description="Deployment environment label")
+    log_level: str = Field(default="INFO", description="Python logging level")
 
-    redis_url: str = Field(
-        default="redis://redis:6379/0", validation_alias=AliasChoices("STREAMER_REDIS_URL", "RM_REDIS_URL")
+    redis_url: str = Field(default="redis://redis:6379/0", description="Redis connection string for caching/pubsup")
+    clob_ws_url: str = Field(
+        default="wss://ws-subscriptions-clob.polymarket.com/ws/market", description="Polymarket CLOB websocket URL"
     )
-    clob_ws_url: str = Field(default="wss://ws-subscriptions-clob.polymarket.com/ws/market")
     clob_rest_markets_url: AnyHttpUrl = Field(
         default="https://gamma-api.polymarket.com/markets",
-        validation_alias=AliasChoices("STREAMER_CLOB_REST_MARKETS_URL"),
+        description="Polymarket Gamma REST markets endpoint (for seeding token IDs)",
     )
     clob_host: AnyHttpUrl | None = Field(
         default="https://clob.polymarket.com",
-        validation_alias=AliasChoices("STREAMER_CLOB_HOST", "RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
+        description="Optional Polymarket CLOB host used by py_clob_client for midpoint fetches",
     )
-    rtds_ws_url: str = Field(
-        default="wss://ws-live-data.polymarket.com",
-        description="Secondary WS (Polymarket RTDS market data)",
-        validation_alias=AliasChoices("STREAMER_RTDS_WS_URL", "STREAMER_FX_SECONDARY_WS_URL"),
-    )
-    rtds_ping_seconds: int = Field(default=10, ge=3)
-    rtds_topic_clob: str = Field(default="clob_market")
+    rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com", description="Secondary WS (RTDS market data)")
+    rtds_ping_seconds: int = Field(default=10, ge=3, description="RTDS ping interval in seconds")
+    rtds_topic_clob: str = Field(default="clob_market", description="RTDS topic for orderbook data")
     fx_primary_rest_url: AnyHttpUrl = Field(
         default="https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT",
         description="Primary REST fallback for FX (Binance HTTP).",
-        validation_alias=AliasChoices("STREAMER_FX_PRIMARY_REST_URL", "STREAMER_FX_FEED_URL"),
     )
     fx_secondary_rest_url: AnyHttpUrl | None = Field(
         default="https://min-api.cryptocompare.com/data/price?fsym=ZEN&tsyms=USD",
         description="Secondary REST fallback for FX (CryptoCompare).",
-        validation_alias=AliasChoices("STREAMER_FX_SECONDARY_REST_URL", "STREAMER_FX_FEED_ALT_URL"),
     )
     fx_primary_ws_url: str | None = Field(
         default="wss://stream.binance.com:9443/ws/zenusdt@ticker",
         description="Primary FX websocket (ZEN/USDT ticker).",
-        validation_alias=AliasChoices("STREAMER_FX_PRIMARY_WS_URL", "STREAMER_FX_WS_URL"),
     )
-    fx_ws_stale_ttl_seconds: int = Field(default=5, ge=3)
-    fx_max_age_seconds: int = Field(default=60, ge=5)
-    fx_max_jump_percent: float = Field(default=20.0, ge=0)
-    fx_jump_window_seconds: int = Field(default=10, ge=1)
-    fx_min_price: float = Field(default=3.0, gt=0)
-    fx_max_price: float = Field(default=300.0, gt=0)
-    fx_max_consecutive_rejections: int = Field(default=3, ge=1)
-    fx_rest_enabled: bool = Field(default=True)
-    fx_rest_interval_seconds: int = Field(default=10, ge=5)
-    fx_timeout_seconds: float = Field(default=5.0, gt=0)
-    fx_fallback_price: float = Field(default=0.0, ge=0)
-    market_stale_seconds: int = Field(default=60, ge=10)
-    worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
-    haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
-    rake_percent: float = Field(default=0.02, ge=0, lt=0.25)
-    sse_heartbeat_seconds: int = Field(default=15, ge=1)
-    rest_poll_seconds: int = Field(default=30, ge=5)
-    ws_reconnect_seconds: int = Field(default=5, ge=1)
-    publish_throttle_ms: int = Field(default=300, ge=50)
-    max_subscriptions: int = Field(default=200, ge=1)
-    cache_prefix: str = Field(default="streamer:latest")
-    pubsub_prefix: str = Field(default="streamer:stream")
-    history_prefix: str = Field(default="streamer:history")
-    history_limit: int = Field(default=500, ge=10)
-    api_host: str = Field(default="0.0.0.0")  # noqa: S104 - intentional service binding inside docker
-    api_port: int = Field(default=8100)
+    fx_ws_stale_ttl_seconds: int = Field(default=5, ge=3, description="Seconds before FX WS is considered stale")
+    fx_max_age_seconds: int = Field(default=60, ge=5, description="Max acceptable age for FX quote before refresh")
+    fx_max_jump_percent: float = Field(default=20.0, ge=0, description="Max allowed FX price jump percent")
+    fx_jump_window_seconds: int = Field(default=10, ge=1, description="Window in seconds for FX jump detection")
+    fx_min_price: float = Field(default=3.0, gt=0, description="Minimum sane FX price")
+    fx_max_price: float = Field(default=300.0, gt=0, description="Maximum sane FX price")
+    fx_max_consecutive_rejections: int = Field(
+        default=3, ge=1, description="Disable WS after this many consecutive FX rejections"
+    )
+    fx_rest_enabled: bool = Field(default=True, description="Enable REST fallback when WS is stale")
+    fx_rest_interval_seconds: int = Field(default=10, ge=5, description="Interval between FX REST refresh attempts")
+    fx_timeout_seconds: float = Field(default=5.0, gt=0, description="HTTP timeout for FX REST requests")
+    fx_fallback_price: float = Field(default=0.0, ge=0, description="Hard fallback FX price when all sources fail")
+    market_stale_seconds: int = Field(default=60, ge=10, description="Threshold to consider market data stale")
+    worsen_percent: float = Field(default=0.03, ge=0, lt=0.25, description="Percent worsen applied to displayed odds")
+    haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")
+    rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")
+    sse_heartbeat_seconds: int = Field(default=15, ge=1, description="SSE heartbeat interval")
+    rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
+    ws_reconnect_seconds: int = Field(default=5, ge=1, description="Backoff between WS reconnect attempts")
+    publish_throttle_ms: int = Field(default=300, ge=50, description="Throttle for publishing ticks to Redis (ms)")
+    max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
+    cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")
+    pubsub_prefix: str = Field(default="streamer:stream", description="Redis pubsub channel prefix for streams")
+    history_prefix: str = Field(default="streamer:history", description="Redis key prefix for tick history")
+    history_limit: int = Field(default=500, ge=10, description="Max history entries per outcome")
+    api_host: str = Field(default="0.0.0.0", description="Host binding for FastAPI app")  # noqa: S104 - intentional
+    api_port: int = Field(default=8100, description="Port for FastAPI app")
     signing_secret: str | None = Field(default=None, description="Optional HMAC secret to sign payloads")
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
-    cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
-    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
-    cors_allow_credentials: bool = Field(default=False)
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-origins list")
+    cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-methods list")
+    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-headers list")
+    cors_allow_credentials: bool = Field(default=False, description="CORS allow-credentials flag")
     public_base_url: AnyHttpUrl | None = Field(
-        default="https://stream.revealmarket.xyz",
-        description="Public HTTPS streamer host used by browsers.",
-        validation_alias=AliasChoices("NEXT_PUBLIC_PRICE_STREAMER_URL", "STREAMER_PUBLIC_URL"),
+        default="https://stream.revealmarket.xyz", description="Public HTTPS streamer host used by browsers."
     )
     internal_base_url: AnyHttpUrl | None = Field(
-        default=None,
-        description="Internal streamer host used by server components.",
-        validation_alias=AliasChoices("STREAMER_INTERNAL_URL", "RM_STREAMER_INTERNAL_URL"),
+        default="http://streamer:8100", description="Internal streamer host used by server components."
     )
 
     @property
@@ -149,7 +140,7 @@ class Settings(BaseSettings):
     @classmethod
     def _require_https(cls, value: AnyHttpUrl | None):
         if value and value.scheme != "https":
-            raise ValueError("NEXT_PUBLIC_PRICE_STREAMER_URL must use https://")
+            raise ValueError("STREAMER_PUBLIC_BASE_URL must use https://")
         return value
 
     @property
