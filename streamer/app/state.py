@@ -117,6 +117,26 @@ class StreamState:
                     quote = await self._fetch_fx_from_url(self.settings.fx_secondary_rest_url, "cryptocompare_rest")
                 if quote:
                     return quote
+                logger.info(
+                    "REST FX rejected by sanity checks",
+                    extra={
+                        "event": "fx.refresh.rejected",
+                        "source": label or "binance_rest",
+                        "last_error": self.fx_last_error,
+                    },
+                )
+                # If we already have a usable quote, keep it instead of zeroing out to fallback.
+                if self.fx_quote:
+                    logger.info(
+                        "Reusing existing FX quote after refresh rejection",
+                        extra={
+                            "event": "fx.refresh.reuse_existing",
+                            "source": self.fx_last_source or "unknown",
+                            "stale": self.fx_quote.stale,
+                            "last_error": self.fx_last_error,
+                        },
+                    )
+                    return self.fx_quote
                 raise ValueError("FX quote rejected by sanity checks")
             except Exception as exc:  # pragma: no cover - network fallback
                 logger.warning(
@@ -296,9 +316,15 @@ class StreamState:
     ) -> FxQuote | None:
         if price <= 0:
             self.fx_last_error = "price_non_positive"
+            logger.warning(
+                "Rejecting FX non-positive price",
+                extra={"event": "fx.reject.non_positive", "price": str(price), "source": source},
+            )
             return None
         if self.fx_last_source == "fallback":
             allow_jump = True
+        if self._fx_prev_price is None:
+            allow_jump = True  # Seed quote should not be blocked by jump checks.
         now = datetime.now(UTC)
         is_current_stale = False
         if self.fx_last_update and (now - self.fx_last_update).total_seconds() > self.settings.fx_max_age_seconds:
@@ -324,6 +350,7 @@ class StreamState:
                     "min": self.settings.fx_min_price,
                     "max": self.settings.fx_max_price,
                     "rejections": self._fx_rejection_count,
+                    "source": source,
                 },
             )
             return None
@@ -343,6 +370,10 @@ class StreamState:
                             "change_pct": float(change_pct),
                             "window_seconds": delta_seconds,
                             "rejections": self._fx_rejection_count,
+                            "price": str(price),
+                            "prev_price": str(self._fx_prev_price),
+                            "source": source,
+                            "allow_jump": allow_jump,
                         },
                     )
                     return None

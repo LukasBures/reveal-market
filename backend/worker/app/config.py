@@ -6,7 +6,7 @@ import csv
 import os
 from functools import lru_cache
 
-from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     polymarket_closed_filter: bool | None = Field(default=None)
     polymarket_active_filter: bool | None = Field(default=None)
     polymarket_archived_filter: bool | None = Field(default=None)
-    polymarket_network: str | None = Field(default=None)
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)
@@ -71,18 +70,9 @@ class Settings(BaseSettings):
     rake_manager_address: str | None = Field(default=None)
     verifier_address: str | None = Field(default=None)
     rpc_url: AnyUrl | None = Field(default=None)
-    polygon_rpc_url: AnyUrl | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),
-    )
-    conditional_tokens_address: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYGON_CTF_ADDRESS", "POLYGON_CTF_ADDRESS"),
-    )
-    clob_host: AnyHttpUrl | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
-    )
+    polygon_rpc_url: AnyUrl | None = Field(default=None)
+    conditional_tokens_address: str | None = Field(default=None)
+    clob_host: AnyHttpUrl | None = Field(default=None)
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
     gas_price_gwei: float | None = Field(default=None, ge=0)

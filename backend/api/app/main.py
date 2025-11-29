@@ -28,6 +28,7 @@ from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import category_cache_key, markets_list_cache_key, resolution_cache_key, suggest_cache_key
 from shared.categories import canonical_category_from_slug
+from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
@@ -58,6 +59,18 @@ _sanitized_config = {
 }
 logger = logging.getLogger("reveal_market.api")
 logger.info("service configuration", extra={"event": "service.config", "config": _sanitized_config})
+mode_env = resolve_mode()
+is_production = mode_env == "prod" or settings.environment.lower() == "production"
+preset = get_preset()
+logger.info(
+    "service environment resolved",
+    extra={
+        "event": "service.env",
+        "settings_environment": settings.environment,
+        "mode_env": mode_env or None,
+        "is_production": is_production,
+    },
+)
 
 
 def _current_settings() -> Settings:
@@ -112,29 +125,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
-if settings.allowed_hosts and settings.allowed_hosts != ["*"]:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+allowed_hosts = list(settings.allowed_hosts)
+if not allowed_hosts:
+    allowed_hosts = list(preset["api_allowed_hosts"])
+elif allowed_hosts != ["*"] and not is_production:
+    allowed_hosts = list({*allowed_hosts, *preset["api_allowed_hosts"]})
+if allowed_hosts and allowed_hosts != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 # Expand CORS origins in non-production environments to include local dev hosts
 # so browser clients hitting api.localhost/http://localhost work without manual overrides.
 cors_origins = list(settings.cors_allow_origins)
-if cors_origins != ["*"] and settings.environment.lower() != "production":
-    local_origins = {
-        "http://localhost",
-        "http://localhost:3000",
-        "http://127.0.0.1",
-        "http://127.0.0.1:3000",
-        "http://api.localhost",
-        "http://stream.localhost",
-    }
+expected_prod_origins = set(preset["api_cors_origins"])
+local_origins = set(preset["api_cors_origins"]) if not is_production else set()
+if not cors_origins:
+    cors_origins = list(expected_prod_origins if is_production else preset["api_cors_origins"])
+elif not is_production:
     cors_origins = list({*cors_origins, *local_origins})
-if cors_origins != ["*"]:
-    expected_frontend_origins = {
-        "http://localhost:3000",
-        "https://revealmarket.xyz",
-        "https://stream.revealmarket.xyz",
-    }
-    missing_cors = sorted(origin for origin in expected_frontend_origins if origin not in cors_origins)
+else:
+    cors_origins = list({*cors_origins, *expected_prod_origins})
+if cors_origins and cors_origins != ["*"] and is_production:
+    missing_cors = sorted(origin for origin in expected_prod_origins if origin not in cors_origins)
     if missing_cors:
         log_event(
             logger,

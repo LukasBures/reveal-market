@@ -111,7 +111,7 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 
 ### Live market ingestion
 
-- Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com`, `RM_POLYMARKET_NETWORK=137`, `RM_POLYMARKET_ACTIVE_FILTER=true`, `RM_POLYMARKET_ARCHIVED_FILTER=false`, and `RM_POLYMARKET_CLOSED_FILTER=false` so the worker ingests only active Polygon markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` empty until you want to curate narratives.
+- Set `RM_POLYMARKET_API_BASE=https://gamma-api.polymarket.com`, `RM_POLYMARKET_ACTIVE_FILTER=true`, `RM_POLYMARKET_ARCHIVED_FILTER=false`, and `RM_POLYMARKET_CLOSED_FILTER=false` so the worker ingests only active markets. Leave `RM_MARKET_CATEGORY_ALLOWLIST` empty until you want to curate narratives.
 - Tune Gamma rate limiting via `RM_POLYMARKET_RATE_LIMIT_REQUESTS` / `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` when running multiple workers so you stay under Polymarket’s quotas.
 - The worker automatically retries failed Polymarket syncs with exponential backoff (configure `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, and `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` if you need longer windows during outages).
 - Keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker auto-applies schema updates (e.g., the `markets.tags` column) before syncing.

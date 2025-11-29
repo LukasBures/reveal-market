@@ -95,7 +95,6 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_MAX_PAGES` | Pagination controls. |
 | `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_CLOSED_FILTER` | Sorting/filtering toggles. |
 | `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER` | Additional Gamma filters recommended by Polymarket; defaults to active-only, non-archived markets. |
-| `RM_POLYMARKET_NETWORK` | Network identifier (e.g., `137` for Polygon). |
 | `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
 | `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` | Exponential backoff applied when the entire fetch loop fails before a sync cycle completes. |
 | `RM_POLYMARKET_RATE_LIMIT_REQUESTS`, `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` | Sliding-window rate limiter applied before each Gamma request. |

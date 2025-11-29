@@ -64,10 +64,10 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 1G
+          memory: 3G
         reservations:
           cpus: "0.25"
-          memory: 512M
+          memory: 1G
 
   api:
     build:
@@ -86,12 +86,6 @@ services:
       UVICORN_WORKERS: 2
       PYTHONUNBUFFERED: 1
       HOST: 0.0.0.0
-      # Surface CORS/host controls from env files into the API container.
-      RM_ALLOWED_HOSTS: ${RM_ALLOWED_HOSTS}
-      RM_CORS_ALLOW_ORIGINS: ${RM_CORS_ALLOW_ORIGINS}
-      RM_CORS_ALLOW_METHODS: ${RM_CORS_ALLOW_METHODS}
-      RM_CORS_ALLOW_HEADERS: ${RM_CORS_ALLOW_HEADERS}
-      RM_CORS_ALLOW_CREDENTIALS: ${RM_CORS_ALLOW_CREDENTIALS}
     depends_on:
       postgres:
         condition: service_healthy
@@ -224,9 +218,9 @@ services:
       dockerfile: docker/frontend/Dockerfile
       args:
         BUILDKIT_INLINE_CACHE: 1
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
-        NEXT_PUBLIC_PRICE_STREAMER_URL: ${NEXT_PUBLIC_PRICE_STREAMER_URL}
-        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_PRICE_STREAMER_URL: ${NEXT_PUBLIC_PRICE_STREAMER_URL:-http://localhost:8100}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
         NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
         NEXT_PUBLIC_WALLET_CHAINS: ${NEXT_PUBLIC_WALLET_CHAINS}
     container_name: reveal-market-frontend
@@ -236,13 +230,8 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       NODE_OPTIONS: --max-old-space-size=256
-      # These are mostly for server-side code (if you use them there),
-      # NOT for client-side code. Client uses the build-time values above.
-      RM_API_BASE_URL: ${RM_API_BASE_URL}
-      RM_OFFLINE_API_BASE_URL: ${RM_OFFLINE_API_BASE_URL}
-      SITEMAP_API_BASE_URL: ${SITEMAP_API_BASE_URL}
+      RUNNING_IN_DOCKER: "true"
       LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE}
-      STREAMER_INTERNAL_BASE_URL: ${STREAMER_INTERNAL_BASE_URL}
     depends_on:
       api:
         condition: service_healthy
@@ -349,10 +338,6 @@ services:
       STREAMER_API_HOST: 0.0.0.0
       STREAMER_API_PORT: 8100
       LOG_LEVEL: ${STREAMER_LOG_LEVEL}
-      STREAMER_CORS_ALLOW_ORIGINS: ${STREAMER_CORS_ALLOW_ORIGINS}
-      STREAMER_CORS_ALLOW_METHODS: ${STREAMER_CORS_ALLOW_METHODS}
-      STREAMER_CORS_ALLOW_HEADERS: ${STREAMER_CORS_ALLOW_HEADERS}
-      STREAMER_CORS_ALLOW_CREDENTIALS: ${STREAMER_CORS_ALLOW_CREDENTIALS}
       APP_WORKERS: ${APP_WORKERS:-2}
       UVICORN_WORKERS: 2
       PYTHONUNBUFFERED: 1

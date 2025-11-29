@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
+import { resolveUrlConfig } from "@/lib/env-presets";
 
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
+const BASE_URL = resolveUrlConfig().siteUrl;
 
 export default function robots(): MetadataRoute.Robots {
   return {

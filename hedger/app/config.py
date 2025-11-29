@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,25 +11,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="HEDGER_", env_file=".env", extra="ignore")
 
-    environment: str = Field(
-        default="prod",
-        validation_alias=AliasChoices("HEDGER_ENVIRONMENT", "MODE", "ENVIRONMENT"),
-    )
-    log_level: str = Field(
-        default="INFO",
-        validation_alias=AliasChoices("HEDGER_LOG_LEVEL", "LOG_LEVEL"),
-    )
+    environment: str = Field(default="prod")
+    log_level: str = Field(default="INFO")
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 - service must bind for docker/compose
     api_port: int = Field(default=8090)
 
     database_url: str = Field(
         default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market",
-        validation_alias=AliasChoices("HEDGER_DATABASE_URL", "RM_DATABASE_URL"),
     )
-    redis_url: str = Field(
-        default="redis://redis:6379/0",
-        validation_alias=AliasChoices("HEDGER_REDIS_URL", "RM_REDIS_URL"),
-    )
+    redis_url: str = Field(default="redis://redis:6379/0")
 
     polymarket_api_base: str = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: int = Field(default=10)
@@ -68,30 +58,10 @@ class Settings(BaseSettings):
         ge=Decimal("0"),
         description="Per-commit stake limit in ZEN",
     )
-    rake_percent: Decimal = Field(
-        default=Decimal("0.02"),
-        ge=Decimal("0"),
-        lt=Decimal("0.25"),
-        validation_alias=AliasChoices("HEDGER_RAKE_PERCENT", "RM_RAKE_PERCENT"),
-    )
-    haircut_percent: Decimal = Field(
-        default=Decimal("0.12"),
-        ge=Decimal("0"),
-        lt=Decimal("0.25"),
-        validation_alias=AliasChoices("HEDGER_HAIRCUT_PERCENT", "RM_HAIRCUT_PERCENT"),
-    )
-    worsen_percent: Decimal = Field(
-        default=Decimal("0.03"),
-        ge=Decimal("0"),
-        lt=Decimal("0.25"),
-        validation_alias=AliasChoices("HEDGER_WORSEN_PERCENT", "RM_WORSEN_PERCENT"),
-    )
-    lp_share_percent: Decimal = Field(
-        default=Decimal("0.18"),
-        ge=Decimal("0"),
-        lt=Decimal("0.5"),
-        validation_alias=AliasChoices("HEDGER_LP_SHARE_PERCENT", "RM_LP_SHARE_PERCENT"),
-    )
+    rake_percent: Decimal = Field(default=Decimal("0.02"), ge=Decimal("0"), lt=Decimal("0.25"))
+    haircut_percent: Decimal = Field(default=Decimal("0.12"), ge=Decimal("0"), lt=Decimal("0.25"))
+    worsen_percent: Decimal = Field(default=Decimal("0.03"), ge=Decimal("0"), lt=Decimal("0.25"))
+    lp_share_percent: Decimal = Field(default=Decimal("0.18"), ge=Decimal("0"), lt=Decimal("0.5"))
     vault_rpc_url: str | None = Field(default="http://localhost:8545")
     vault_private_key: str | None = Field(default="0x" + "00" * 31 + "01")
     vault_sender_address: str | None = Field(default="0x" + "00" * 19 + "01")

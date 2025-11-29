@@ -620,7 +620,6 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         closed=settings.polymarket_closed_filter,
         active=settings.polymarket_active_filter,
         archived=settings.polymarket_archived_filter,
-        network=settings.polymarket_network,
     )
 
     def _log_fetch_retry(attempt: int, exc: BaseException | None) -> None:
@@ -640,8 +639,6 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             params["active"] = str(settings.polymarket_active_filter).lower()
         if settings.polymarket_archived_filter is not None:
             params["archived"] = str(settings.polymarket_archived_filter).lower()
-        if settings.polymarket_network:
-            params["network"] = settings.polymarket_network
         return params
 
     extra_params = _build_filters()

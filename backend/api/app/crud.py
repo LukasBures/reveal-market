@@ -18,7 +18,9 @@ def get_markets(
     offset: int = 0,
 ) -> list[models.Market]:
     stmt = select(models.Market)
-    if status:
+    if status == "active":
+        stmt = stmt.where(models.Market.closed.is_(False))
+    elif status:
         stmt = stmt.where(models.Market.status == status)
     if category:
         stmt = stmt.where(func.lower(models.Market.category) == category.lower())

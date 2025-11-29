@@ -46,7 +46,6 @@ def test_health_endpoint_reports_ok(client, monkeypatch):
             return b'{"markets_processed": 10}'
 
     settings = _configure_signer(get_settings())
-    settings.polymarket_network = "137"
     settings.cors_allow_origins = ["https://example.com"]
 
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())

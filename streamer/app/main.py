@@ -68,12 +68,26 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging("reveal_market.streamer", settings.log_level)
 
+    mode_env = os.getenv("MODE", "").lower()
+    is_production = settings.environment.lower() == "prod" or mode_env in {"prod", "production"}
+    local_origins = {
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8100",
+    }
+    prod_origins = {
+        "https://revealmarket.xyz",
+        "https://stream.revealmarket.xyz",
+    }
+
     metrics = get_metrics()
     state = StreamState(settings, metrics=metrics)
     data_streamer = DataStreamer(state, settings, metrics=metrics)
     price_streamer = PriceStreamer(state, settings)
     heartbeat_stop = start_heartbeat(logger, "streamer", interval_seconds=60)
     cors_allow_origins = settings.cors_allow_origins_resolved
+    if not cors_allow_origins or cors_allow_origins == ["*"]:
+        cors_allow_origins = list(prod_origins if is_production else local_origins)
     sanitized_config = {
         k: v
         for k, v in settings.model_dump().items()
@@ -92,11 +106,7 @@ def create_app() -> FastAPI:
                 "internal_host": internal_host,
             },
         )
-    expected_origins = {
-        "http://localhost:3000",
-        "https://revealmarket.xyz",
-        "https://stream.revealmarket.xyz",
-    }
+    expected_origins = prod_origins if is_production else local_origins
     if not cors_allow_origins or cors_allow_origins == ["*"]:
         logger.warning(
             "streamer CORS allow_origins is wildcard; set explicit origins for browser clients",

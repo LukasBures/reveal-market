@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://revealmarket.xyz";
+import { resolveUrlConfig } from "@/lib/env-presets";
+
+const { siteUrl: SITE_URL } = resolveUrlConfig();
 const DEFAULT_IMAGE = "/opengraph-image";
 
 export const absoluteUrl = (path = "/"): string => {

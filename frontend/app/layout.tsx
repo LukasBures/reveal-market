@@ -34,6 +34,8 @@ const displayFont = localFont({
 
 const SITE_URL = absoluteUrl("/");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
 const isBrowserResolvableHost = (hostname: string) => {
   const normalized = hostname.toLowerCase();
   // Treat dotted domains or IPv6 literals as routable; skip bare Docker hostnames like "api".
@@ -163,10 +165,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <LandingGate />
           )}
         </AppProviders>
-        {IS_PRODUCTION ? (
+        {SHOULD_LOAD_GA ? (
           <>
             <Script
-              src="https://www.googletagmanager.com/gtag/js?id=G-MXPV8T1V5K"
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
               strategy="afterInteractive"
             />
             <Script id="gtag-init" strategy="afterInteractive">
@@ -174,7 +176,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 window.dataLayer = window.dataLayer || [];
                 function gtag(){dataLayer.push(arguments);}
                 gtag('js', new Date());
-                gtag('config', 'G-MXPV8T1V5K');
+                gtag('config', '${GA_MEASUREMENT_ID}');
               `}
             </Script>
           </>

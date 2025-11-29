@@ -126,7 +126,6 @@ def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     monkeypatch.setattr(app.main.settings, "polymarket_closed_filter", False, raising=False)
     monkeypatch.setattr(app.main.settings, "polymarket_active_filter", True, raising=False)
     monkeypatch.setattr(app.main.settings, "polymarket_archived_filter", False, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_network", "137", raising=False)
 
     markets, latency = app.main.fetch_markets_from_polymarket()
 
@@ -140,7 +139,6 @@ def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     extra = captured["extra_params"]
     assert extra["active"] == "true"
     assert extra["archived"] == "false"
-    assert extra["network"] == "137"
 
 
 def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path, caplog):

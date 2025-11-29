@@ -43,20 +43,15 @@ Tech stack callouts:
 
 ## Environment Variables
 
-Set these in the repo-root `.env` (copied from `.env.example`). The frontend reads from the same file as the backend/Docker stack, so there’s no `.env.local` split to maintain:
+Defaults are derived from `MODE` (`local` → localhost:3000/8000/8100, `prod` → revealmarket.xyz/api/stream). You only need to set overrides when deviating from those presets. Common knobs:
 
 | Variable | Purpose |
 | -------- | ------- |
-| `NEXT_PUBLIC_SITE_URL` | Canonical URL for SEO helpers, JSON-LD schema, sitemap entries. |
-| `NEXT_PUBLIC_API_BASE_URL` | Base URL the browser should use (stick to the TLS host, e.g., `https://api.revealmarket.xyz` with /etc/hosts + Cloudflare). |
-| `NEXT_PUBLIC_PRICE_STREAMER_URL` | Public streamer base (HTTPS so clients upgrade to WSS automatically). Defaults to `https://stream.revealmarket.xyz`. |
-| `STREAMER_INTERNAL_URL` | Base URL the server components should use to reach streamer; point at the same HTTPS host when developing locally. |
+| `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
 | `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_CHAIN_NAME` | Target chain for wagmi/viem (defaults: Horizen Testnet `2651420`, name `"Horizen Testnet"`). |
 | `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | RPC + explorer for the target chain (defaults: `https://horizen-testnet.rpc.caldera.xyz/http`, `https://horizen-testnet.explorer.caldera.xyz`). |
-| `RM_API_BASE_URL` | Internal base URL for server-side fetches. Use the same TLS host when running the frontend outside Docker. |
-| `SITEMAP_API_BASE_URL` | Optional override for sitemap’s market fetches. Point this at your TLS API host so metadata stays consistent. |
-| `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Google Analytics (empty to disable). |
 
 When deploying, ensure these values align with the CDN or reverse proxy domain so CSP/HSTS headers reference the correct origin.
 

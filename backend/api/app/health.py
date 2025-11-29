@@ -20,7 +20,6 @@ from .cache import get_redis_client
 from .config import get_settings
 
 ComponentMap = dict[str, schemas.HealthComponent]
-_POLYMARKET_NETWORK_WARNED = False
 health_logger = logging.getLogger("reveal_market.api.health")
 
 
@@ -134,15 +133,6 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
             }
             if settings.polymarket_closed_filter is not None:
                 params["closed"] = str(settings.polymarket_closed_filter).lower()
-            if settings.polymarket_network:
-                params["network"] = settings.polymarket_network
-            else:
-                global _POLYMARKET_NETWORK_WARNED
-                if not _POLYMARKET_NETWORK_WARNED:
-                    health_logger.warning(
-                        "polymarket network parameter not configured; defaulting to upstream defaults"
-                    )
-                    _POLYMARKET_NETWORK_WARNED = True
             response = await client.get(
                 markets_url,
                 params=params,

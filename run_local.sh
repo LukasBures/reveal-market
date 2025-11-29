@@ -209,6 +209,10 @@ while [[ $# -gt 0 ]]; do
       DETACH_MODE="true"
       shift
       ;;
+    --no-cache|--without-cache)
+      BUILD_FLAG="--no-cache"
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -219,8 +223,9 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      UP_ARGS+=("$1")
-      shift
+      log_warn "Unknown flag: $1"
+      usage
+      exit 1
       ;;
   esac
 done
@@ -318,14 +323,14 @@ REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
 
 cat <<EOF
 ------------------------------------------------------------
-Stack ready. Useful URLs (via Caddy):
+Stack ready. Useful URLs:
 
   • Frontend:               http://localhost
-  • API docs:               http://api.localhost/docs
-  • API health:             http://api.localhost/healthz
-  • API heartbeats:         http://api.localhost/health/heartbeats
-  • Streamer health:        http://stream.localhost/healthz
-  • Streamer history:       http://stream.localhost/history?market_id=...&outcome=0
+  • API docs:               http://localhost:8000/docs
+  • API health:             http://localhost:8000/healthz
+  • API heartbeats:         http://localhost:8000/health/heartbeats
+  • Streamer health:        http://localhost:8100/healthz
+  • Streamer history:       http://localhost:8100/history?market_id=...&outcome=0
 
 Internal service ports (for debugging):
 

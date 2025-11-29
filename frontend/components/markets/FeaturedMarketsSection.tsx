@@ -1,4 +1,6 @@
 import { fetchFeaturedMarkets } from "@/lib/api";
+import { logger } from "@/lib/logging";
+import { serverEnv } from "@/lib/serverEnv";
 import { FeaturedMarketsClient } from "./FeaturedMarketsClient";
 import { DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./constants";
 import { MarketGridSkeleton } from "./MarketGridSkeleton";
@@ -23,6 +25,23 @@ export async function FeaturedMarketsSection({
     searchQuery,
     category: categoryFilter,
   });
+
+  if (initialMarkets.length === 0) {
+    logger.info("featuredMarkets:empty", {
+      pageSize,
+      categoryFilter,
+      searchQuery,
+      apiBase: serverEnv.apiBaseUrl,
+      envApiBase: process.env.NEXT_PUBLIC_API_BASE_URL,
+    });
+  } else {
+    logger.debug("featuredMarkets:loaded", {
+      count: initialMarkets.length,
+      pageSize,
+      categoryFilter,
+      searchQuery,
+    });
+  }
 
   return (
     <FeaturedMarketsClient

@@ -4,7 +4,7 @@ import csv
 import os
 from functools import lru_cache
 
-from pydantic import AliasChoices, AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,27 +81,17 @@ class Settings(BaseSettings):
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_closed_filter: bool | None = Field(default=False)
-    polymarket_network: str | None = Field(default=None)
-    polygon_rpc_url: AnyUrl | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYGON_RPC_URL", "POLYGON_RPC_URL"),
-    )
-    conditional_tokens_address: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYGON_CTF_ADDRESS", "POLYGON_CTF_ADDRESS"),
-    )
-    clob_host: AnyHttpUrl | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RM_POLYMARKET_CLOB_HOST", "POLYMARKET_CLOB_HOST"),
-    )
+    polygon_rpc_url: AnyUrl | None = Field(default=None)
+    conditional_tokens_address: str | None = Field(default=None)
+    clob_host: AnyHttpUrl | None = Field(default=None)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=5.0, gt=0)
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)
-    allowed_hosts: list[str] = Field(default_factory=lambda: ["*"])
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    allowed_hosts: list[str] = Field(default_factory=list)
+    cors_allow_origins: list[str] = Field(default_factory=list)
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS"])
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)

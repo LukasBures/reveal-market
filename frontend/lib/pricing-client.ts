@@ -35,11 +35,13 @@ export type FxQuote = {
   stale: boolean;
 };
 
-const rawApiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.RM_API_BASE_URL ?? "https://api.revealmarket.xyz";
-const apiBase = rawApiBase.replace(/\/$/, "");
-const streamerBasePublic = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
-const streamerBaseInternal = (process.env.STREAMER_INTERNAL_URL || "").replace(/\/$/, "");
-const offlineApiBase = (process.env.RM_OFFLINE_API_BASE_URL || "").replace(/\/$/, "");
+import { resolveUrlConfig } from "@/lib/env-presets";
+
+const urls = resolveUrlConfig();
+const apiBase = urls.apiBaseInternal || urls.apiBaseUrl;
+const streamerBasePublic = urls.streamerPublic;
+const streamerBaseInternal = urls.streamerInternal;
+const offlineApiBase = "";
 
 const isServer = typeof window === "undefined";
 const isBrowser = !isServer;

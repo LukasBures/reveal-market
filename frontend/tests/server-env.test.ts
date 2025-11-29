@@ -50,10 +50,7 @@ describe("serverEnv", () => {
     delete process.env.RM_API_BASE_URL;
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
     const module = await import("@/lib/serverEnv");
-    expect(module.getServerEnv().apiBaseUrl).toBe("https://api.revealmarket.xyz");
-    expect(loggerMock.warn).toHaveBeenCalledWith("serverEnv:missing_base_url", {
-      fallback: "https://api.revealmarket.xyz",
-    });
+    expect(module.getServerEnv().apiBaseUrl).toBe("http://localhost:8000");
   });
 
   it("throws when a malformed URL is configured in production", async () => {

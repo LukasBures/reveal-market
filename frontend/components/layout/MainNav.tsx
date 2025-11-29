@@ -7,6 +7,7 @@ import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { useFxStream } from "@/hooks/useFxStream";
 import { PriceBanner } from "@/components/layout/PriceBanner";
+import { resolveUrlConfig } from "@/lib/env-presets";
 
 const navLinks = [
   { href: "/markets/search", label: "Search" },
@@ -15,7 +16,7 @@ const navLinks = [
   { href: "/contact", label: "Contact" },
 ] as const;
 
-const rawHomeLink = (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
+const rawHomeLink = (resolveUrlConfig().siteUrl ?? "").trim();
 const fallbackHomeRoute: Route = "/";
 const internalHomeHref: Route = rawHomeLink && rawHomeLink.startsWith("/")
   ? (rawHomeLink as Route)
