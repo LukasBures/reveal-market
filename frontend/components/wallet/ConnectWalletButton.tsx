@@ -291,6 +291,7 @@ export function ConnectWalletButton() {
     }
     switchChain({ chainId: defaultChain.id });
   };
+  const messageDisabled = !message.trim();
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
@@ -490,11 +491,11 @@ export function ConnectWalletButton() {
               {isConnected ? (
                 <>
                   <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                    <div className="flex flex-col gap-2">
-                      <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Connected</p>
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-mono text-sm">{formatAddress(address)}</p>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Connected</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-sm">{formatAddress(address)}</p>
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -509,7 +510,9 @@ export function ConnectWalletButton() {
                                 : "border-white/20 text-white/80 hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50")
                             }
                           >
-                            {chain?.id === defaultChain.id ? "On Horizen" : "Switch network"}
+                            {chain?.id === defaultChain.id
+                              ? `On ${defaultChain.name}`
+                              : `Switch to ${defaultChain.name}`}
                           </button>
                           <button
                             type="button"
@@ -519,6 +522,34 @@ export function ConnectWalletButton() {
                             Disconnect
                           </button>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label className="w-full text-[11px] uppercase tracking-[0.25em] text-slate-400 md:w-auto">
+                        Sign a message
+                        <input
+                          type="text"
+                          value={message}
+                          onChange={(event) => setMessage(event.target.value)}
+                          placeholder="Enter a message"
+                          className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
+                        />
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSignMessage}
+                          disabled={messageDisabled || isSigning}
+                          className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isSigning ? "Signing…" : "Sign message"}
+                        </button>
+                        {signature && (
+                          <span className="text-xs text-emerald-200">Signed {formatSignature(signature)}</span>
+                        )}
+                        {signErrorMessage && <span className="text-xs text-rose-300">{signErrorMessage}</span>}
                       </div>
                     </div>
                   </div>

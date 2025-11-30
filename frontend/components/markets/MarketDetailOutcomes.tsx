@@ -389,8 +389,8 @@ export function MarketDetailOutcomes({ market }: Props) {
                     Price {formatZen(price)}
                   </span>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
-                    Implied {probability}
-                    <span className="sr-only">{probability}</span>
+                    <span className="text-white/60">Implied</span>{" "}
+                    <span className="font-semibold text-white">{probability}</span>
                   </span>
                   <a
                     href="#trade-panel"
@@ -425,7 +425,6 @@ export function MarketDetailOutcomes({ market }: Props) {
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
                         <StatTile label="Live price (ZEN)" value={formatZen(price)} />
-                        <StatTile label="Implied probability" value={probability} />
                         <StatTile label="Best bid" value={bestBid ? `${bestBid.toFixed(3)} ZEN` : "—"} />
                         <StatTile label="Best ask" value={bestAsk ? `${bestAsk.toFixed(3)} ZEN` : "—"} />
                         <StatTile label="Spread" value={spread} />

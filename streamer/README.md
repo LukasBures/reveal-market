@@ -61,6 +61,7 @@ uv run --project streamer uvicorn app.main:app --reload --port 8100
 - Activity (trades): `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn`
 - Open Interest/TVL: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/oi-subgraph/0.0.6/gn`
 - PnL: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn`
+- Upstream schemas/repo: https://github.com/Polymarket/polymarket-subgraph
 
 These Goldsky URLs are now wired in as defaults via `STREAMER_SUBGRAPH_*` env vars (override them or set to `None` to disable). Schema definitions live in the upstream Polymarket GitHub subgraph repo (`schema.graphql`).
 
