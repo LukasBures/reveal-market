@@ -12,7 +12,6 @@ from .config import Settings
 from .state import FatalWebsocketError, StreamState, iter_ws
 
 logger = logging.getLogger("reveal_market.streamer.fx")
-logger.setLevel(logging.INFO)
 
 
 class PriceStreamer:

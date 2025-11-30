@@ -47,11 +47,19 @@ ENV NODE_ENV=production
 ENV PORT=3000
 # Force Next to bind on all interfaces instead of the container hostname.
 ENV HOSTNAME=0.0.0.0
+ENV LOG_LEVEL=INFO
 
 # Copy only what the standalone server needs: server bundle, static assets, public assets.
 COPY --from=builder /app/frontend/.next/standalone ./
 COPY --from=builder /app/frontend/.next/static ./.next/static
 COPY --from=builder /app/frontend/public ./public
+
+# Drop privileges to a dedicated runtime user.
+ARG APP_USER=nextjs
+ARG APP_GROUP=nextjs
+RUN id -u "${APP_USER}" >/dev/null 2>&1 || (addgroup -S "${APP_GROUP}" && adduser -S -G "${APP_GROUP}" "${APP_USER}")
+RUN chown -R "${APP_USER}:${APP_GROUP}" /app
+USER ${APP_USER}
 
 EXPOSE 3000
 

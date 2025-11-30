@@ -25,9 +25,16 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from py_clob_client.client import ClobClient
 from redis import Redis
 from redis.exceptions import RedisError
+from shared import models as shared_models
 from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
-from shared.cache_keys import category_cache_key, markets_list_cache_key, resolution_cache_key, suggest_cache_key
+from shared.cache_keys import (
+    category_cache_key,
+    markets_list_cache_key,
+    proof_receipt_cache_key,
+    resolution_cache_key,
+    suggest_cache_key,
+)
 from shared.categories import canonical_category_from_slug
 from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import GoldskyClient
@@ -1077,6 +1084,207 @@ def _enrich_market_models(session: Session, markets: list[schemas.MarketResponse
     return markets
 
 
+def _normalize_bigint(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, Decimal):
+            return str(int(value))
+        return str(int(value))
+    except Exception:
+        try:
+            return str(value)
+        except Exception:
+            return None
+
+
+def _parse_public_signals(signals: list[Any] | None) -> dict[str, str | None]:
+    parsed: dict[str, str | None] = {
+        "merkle_root": None,
+        "market_id": None,
+        "winning_outcome_id": None,
+        "total_escrow": None,
+        "total_liability": None,
+        "rake_bps": None,
+        "pool_total_yes": None,
+        "pool_total_no": None,
+        "circuit_hash": None,
+    }
+    if not signals:
+        return parsed
+    try:
+        normalized = [str(entry) for entry in signals]
+    except Exception:
+        return parsed
+    fields = [
+        "merkle_root",
+        "market_id",
+        "winning_outcome_id",
+        "total_escrow",
+        "total_liability",
+        "rake_bps",
+        "pool_total_yes",
+        "pool_total_no",
+        "circuit_hash",
+    ]
+    for index, key in enumerate(fields):
+        if index < len(normalized):
+            parsed[key] = normalized[index]
+    return parsed
+
+
+def _cached_value(cached: dict[str, Any] | None, *keys: str) -> Any:
+    if not isinstance(cached, dict):
+        return None
+    for key in keys:
+        if key in cached:
+            return cached[key]
+    return None
+
+
+def _cached_public_signals(cached: dict[str, Any] | None) -> list[str] | None:
+    signals = _cached_value(cached, "public_signals", "publicSignals")
+    if isinstance(signals, list):
+        try:
+            return [str(entry) for entry in signals]
+        except Exception:
+            return None
+    return None
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _build_proof_receipt_model(
+    receipt: shared_models.SettlementReceipt,
+    settlement: shared_models.Settlement | None,
+    market: shared_models.Market | None,
+    cached: dict[str, Any] | None,
+) -> schemas.ProofReceipt:
+    cached_signals = _cached_public_signals(cached)
+    signals = receipt.public_signals or cached_signals or []
+    parsed_signals = _parse_public_signals(signals)
+
+    merkle_root = _coalesce(
+        getattr(settlement, "merkle_root", None) if settlement is not None else None,
+        _cached_value(cached, "merkleRoot"),
+        parsed_signals.get("merkle_root"),
+    )
+    pool_total_yes = _normalize_bigint(
+        _coalesce(
+            getattr(settlement, "pool_total_yes", None) if settlement is not None else None,
+            parsed_signals.get("pool_total_yes"),
+            _cached_value(cached, "poolTotalYes"),
+        )
+    )
+    pool_total_no = _normalize_bigint(
+        _coalesce(
+            getattr(settlement, "pool_total_no", None) if settlement is not None else None,
+            parsed_signals.get("pool_total_no"),
+            _cached_value(cached, "poolTotalNo"),
+        )
+    )
+    total_escrow = _normalize_bigint(
+        _coalesce(
+            getattr(settlement, "total_escrow", None) if settlement is not None else None,
+            parsed_signals.get("total_escrow"),
+            _cached_value(cached, "totalEscrow"),
+        )
+    )
+    total_liability = _normalize_bigint(
+        _coalesce(
+            getattr(settlement, "total_liability", None) if settlement is not None else None,
+            parsed_signals.get("total_liability"),
+            _cached_value(cached, "totalLiability"),
+        )
+    )
+
+    winning_outcome_raw = _coalesce(
+        getattr(settlement, "winning_outcome_id", None) if settlement is not None else None,
+        parsed_signals.get("winning_outcome_id"),
+        _cached_value(cached, "winningOutcomeId"),
+    )
+    try:
+        winning_outcome_id = int(winning_outcome_raw) if winning_outcome_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        winning_outcome_id = None
+
+    rake_bps_raw = _coalesce(
+        getattr(settlement, "rake_bps", None) if settlement is not None else None,
+        parsed_signals.get("rake_bps"),
+        _cached_value(cached, "rakeBps"),
+    )
+    try:
+        rake_bps = int(rake_bps_raw) if rake_bps_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        rake_bps = None
+
+    circuit_hash = _coalesce(
+        receipt.circuit_hash,
+        settlement.circuit_hash if settlement is not None else None,
+        parsed_signals.get("circuit_hash"),
+        _cached_value(cached, "circuit_hash", "circuitHash"),
+    )
+    proof_hash = _coalesce(receipt.proof_hash, _cached_value(cached, "proof_hash", "proofHash"))
+    proof_value = _cached_value(cached, "proof")
+    generated_at = _coalesce(receipt.generated_at, _cached_value(cached, "generated_at", "generatedAt"))
+    condition_id = _coalesce(
+        getattr(market, "condition_id", None) if market is not None else None,
+        _cached_value(cached, "conditionId"),
+    )
+    if isinstance(condition_id, str):
+        condition_id = condition_id.lower()
+    market_address = _coalesce(
+        receipt.market_address, getattr(market, "market_address", None) if market is not None else None
+    ) or _cached_value(cached, "marketAddress")
+    market_id_value = _coalesce(
+        receipt.market_id,
+        parsed_signals.get("market_id"),
+        _cached_value(cached, "marketId"),
+    )
+    try:
+        market_id_int = int(market_id_value) if market_id_value is not None else None
+    except (TypeError, ValueError):
+        market_id_int = receipt.market_id
+
+    winning_pool = None
+    if winning_outcome_id in (0, 1):
+        winning_pool = pool_total_yes if winning_outcome_id == 0 else pool_total_no
+    total_pool = total_escrow
+    if total_pool is None and pool_total_yes is not None and pool_total_no is not None:
+        try:
+            total_pool = str(int(pool_total_yes) + int(pool_total_no))
+        except Exception:
+            total_pool = None
+
+    return schemas.ProofReceipt(
+        request_id=receipt.request_id,
+        market_id=market_id_int,
+        event_id=getattr(market, "event_id", None),
+        condition_id=condition_id,
+        market_address=market_address,
+        proof_hash=proof_hash,
+        prover_version=receipt.prover_version or _cached_value(cached, "prover_version", "proverVersion"),
+        circuit_hash=circuit_hash,
+        generated_at=generated_at,
+        proof=proof_value,
+        public_signals=[str(value) for value in (signals or [])],
+        merkle_root=merkle_root,
+        total_escrow=total_escrow,
+        total_liability=total_liability,
+        rake_bps=rake_bps,
+        winning_outcome_id=winning_outcome_id,
+        pool_total_yes=pool_total_yes,
+        pool_total_no=pool_total_no,
+        winning_pool=winning_pool,
+        total_pool=total_pool,
+    )
+
+
 def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) -> list[schemas.MarketResponse]:
     """Fetch markets when canonical category labels fail by matching on slugified category."""
 
@@ -1112,7 +1320,7 @@ def _canonical_category_lookup(raw: str) -> tuple[str, str] | None:
 
 @app.middleware("http")
 async def request_context_middleware(request: Request, call_next):
-    request_id = request.headers.get("x-request-id") or str(uuid4())
+    request_id = request.headers.get("x-request-id") or request.headers.get("traceparent") or str(uuid4())
     token = set_request_id(request_id)
     start_time = time.perf_counter()
     request.state.cache_context = {
@@ -2151,6 +2359,78 @@ def suggest_markets(
         )
     update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:suggest")
     return filtered
+
+
+@app.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"])
+def list_proof_receipts(
+    request: Request,
+    limit: Annotated[
+        int, Query(ge=1, le=settings.max_page_size, description="Maximum number of proof receipts to return")
+    ] = settings.default_page_size,
+    offset: Annotated[int, Query(ge=0, description="Offset into the receipts list")] = 0,
+    session: Session = Depends(get_session),
+) -> list[schemas.ProofReceipt]:
+    start = time.perf_counter()
+    cache = get_cache_client()
+    cache_available = cache is not None
+    bounded_limit = min(limit, settings.max_page_size)
+    bounded_offset = max(0, offset)
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="proofs.list.request",
+        message="fetching proof receipts",
+        limit=bounded_limit,
+        offset=bounded_offset,
+    )
+    stmt = (
+        select(
+            shared_models.SettlementReceipt,
+            shared_models.Settlement,
+            shared_models.Market,
+        )
+        .join(
+            shared_models.Settlement,
+            shared_models.Settlement.market_id == shared_models.SettlementReceipt.market_id,
+            isouter=True,
+        )
+        .join(
+            shared_models.Market,
+            shared_models.Market.id == shared_models.SettlementReceipt.market_id,
+            isouter=True,
+        )
+        .order_by(
+            shared_models.SettlementReceipt.generated_at.desc(),
+            shared_models.SettlementReceipt.created_at.desc(),
+        )
+        .offset(bounded_offset)
+        .limit(bounded_limit)
+    )
+    rows = session.execute(stmt).all()
+    receipts: list[schemas.ProofReceipt] = []
+    cache_hits = 0
+    for receipt_row, settlement_row, market_row in rows:
+        cached_payload = None
+        condition_value = getattr(market_row, "condition_id", None) if market_row is not None else None
+        if cache_available and condition_value:
+            cached_payload = get_json(cache, proof_receipt_cache_key(str(condition_value)))
+            if cached_payload is not None:
+                cache_hits += 1
+        receipts.append(_build_proof_receipt_model(receipt_row, settlement_row, market_row, cached_payload))
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    log_event(
+        logger,
+        logging.INFO,
+        event="proofs.list.response",
+        message="served proof receipts",
+        limit=bounded_limit,
+        offset=bounded_offset,
+        result_count=len(receipts),
+        cache_hits=cache_hits,
+        duration_ms=duration_ms,
+    )
+    update_cache_context(request, cache_key=None, hit=cache_hits > 0, source="proofs")
+    return receipts
 
 
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])

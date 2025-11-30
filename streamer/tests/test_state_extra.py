@@ -60,7 +60,7 @@ def test_data_streamer_rtds_subscription_filters_are_json():
 
 @pytest.mark.asyncio
 async def test_history_debounce_and_ttl(monkeypatch):
-    settings = Settings(history_debounce_seconds=5, history_ttl_seconds=60, history_limit=5)
+    settings = Settings(history_debounce_seconds=5, history_ttl_seconds=60, history_limit=10)
     state = StreamState(settings)
     dummy = type("DummyRedis", (), {})()
     dummy.data = {}

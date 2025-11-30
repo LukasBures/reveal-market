@@ -253,12 +253,39 @@ if "${COMPOSE_CMD[@]}" ps --help 2>/dev/null | grep -q -- "--format"; then
 import json
 import sys
 
-data = json.load(sys.stdin)
-for svc in data:
-    name = svc.get("Name")
-    state = svc.get("State")
-    health = svc.get("Health")
-    print(f"{name:30s} state={state} health={health}")
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+
+items: list[dict] = []
+# docker compose ps --format json can emit a JSON array or one object per line,
+# depending on the version. Parse both shapes defensively.
+try:
+    data = json.loads(raw)
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        candidates = []
+        for key in ("services", "containers"):
+            val = data.get(key)
+            if isinstance(val, list):
+                candidates.extend(val)
+            elif isinstance(val, dict):
+                candidates.extend(val.values())
+        items = candidates or [data]
+except Exception:
+    for line in raw.splitlines():
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            items.append(obj)
+
+for svc in items:
+    if not isinstance(svc, dict):
+        continue
+    print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
 )"
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"

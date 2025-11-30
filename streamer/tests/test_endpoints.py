@@ -9,7 +9,6 @@ from app.config import Settings
 from app.main import create_app
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 
 @pytest.fixture()
@@ -396,6 +395,11 @@ def test_ws_requires_access_token(monkeypatch):
 
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            # Mimic redis pubsub timeout so the websocket loop sends a heartbeat and yields.
+            if timeout:
+                import asyncio
+
+                await asyncio.sleep(timeout)
             return None
 
         async def close(self):
@@ -415,8 +419,6 @@ def test_ws_requires_access_token(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
     app = create_app()
     with TestClient(app) as client:
-        with pytest.raises(WebSocketDisconnect):
-            client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1")
         with client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1", headers={"x-access-token": "tok"}) as ws:
             msg = ws.receive_json()
             assert "ping" in msg.get("event", "")

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from app.config import Settings
 from app.data_streamer import DataStreamer
-from app.state import StreamState
+from app.state import FxQuote, StreamState
 
 
 class PubSubState(StreamState):
@@ -42,6 +44,14 @@ class PubSubState(StreamState):
 async def test_clob_ws_integration_with_reconnect(monkeypatch):
     settings = Settings(ws_reconnect_seconds=0.01, rest_poll_seconds=5)
     state = PubSubState(settings)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(zen_usd=Decimal("1"), raw_zen_usd=Decimal("1"), fetched_at=now, stale=False, source="test")
+
+    async def fake_fx():
+        return state.fx_quote
+
+    state.get_fx = fake_fx  # type: ignore[assignment]
+    state.refresh_fx = fake_fx  # type: ignore[assignment]
     state.subscriptions.add_assets(["tok-a"])
     streamer = DataStreamer(state, settings)
     msgs = [

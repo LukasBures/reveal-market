@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.streamer.data")
-logger.setLevel(logging.INFO)
 
 
 class DataStreamer:
@@ -83,8 +82,9 @@ class DataStreamer:
             asyncio.create_task(self._ws_loop(), name="ws-loop"),
             asyncio.create_task(self._rest_poll_loop(), name="rest-poll"),
             asyncio.create_task(self._flush_loop(), name="flush-loop"),
-            asyncio.create_task(self._rtds_loop(), name="rtds-loop"),
         ]
+        if self.settings.rtds_enabled:
+            self._tasks.append(asyncio.create_task(self._rtds_loop(), name="rtds-loop"))
 
     async def stop(self) -> None:
         self._stop.set()
@@ -445,6 +445,8 @@ class DataStreamer:
         self._publish_cache[key] = payload
 
     async def _rtds_loop(self) -> None:
+        if not self.settings.rtds_enabled:
+            return
         self._ensure_rtds_client()
         while not self._stop.is_set():
             try:
@@ -455,6 +457,8 @@ class DataStreamer:
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     def _ensure_rtds_client(self) -> None:
+        if not self.settings.rtds_enabled:
+            return
         if self.rtds_client:
             return
         router = RTDSRouter(logger=logger)

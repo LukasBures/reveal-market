@@ -14,11 +14,13 @@ export async function GET(request: Request) {
   const offset = Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : undefined;
   const searchQuery = params.get("search") ?? undefined;
   const category = params.get("category") ?? undefined;
+  const status = params.get("status") ?? undefined;
 
   const markets = await fetchFeaturedMarkets(limit, {
     searchQuery,
     category,
     offset,
+    status,
   });
 
   return NextResponse.json(markets);

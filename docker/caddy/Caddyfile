@@ -3,18 +3,7 @@
   grace_period 5s
   email infra@revealmarket.xyz
   acme_ca https://acme-v02.api.letsencrypt.org/directory
-  servers {
-    trusted_proxies static private_ranges 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
-    trusted_proxies static 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
-    trusted_proxies static 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 172.64.0.0/13 131.0.72.0/22
-    trusted_proxies static 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
-    client_ip_headers CF-Connecting-IP X-Forwarded-For X-Real-IP
-  }
 }
-
-# ======================================================================
-# SHARED SNIPPETS
-# ======================================================================
 
 (health_common) {
   @healthz path /healthz
@@ -45,17 +34,9 @@
   }
 }
 
-(trusted_proxies_cf) {
-  trusted_proxies static private_ranges
-  trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
-  trusted_proxies static 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
-  trusted_proxies static 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 172.64.0.0/13 131.0.72.0/22
-  trusted_proxies static 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
-}
-
 (log_common) {
   log {
-    level ERROR
+    level {$CADDY_LOG_LEVEL:INFO}
     output stdout
     format filter {
       wrap json
@@ -65,6 +46,7 @@
 
 (access_log_json) {
   log {
+    level {$CADDY_ACCESS_LOG_LEVEL:INFO}
     output stdout
     format filter {
       wrap json
@@ -74,7 +56,6 @@
 
 (proxy_frontend) {
   reverse_proxy frontend:3000 {
-    import trusted_proxies_cf
     health_uri /healthz
     health_interval 10s
     health_timeout 3s
@@ -93,7 +74,6 @@
 
 (proxy_api) {
   reverse_proxy api:8000 {
-    import trusted_proxies_cf
     health_uri /healthz
     health_interval 10s
     health_timeout 3s
@@ -109,7 +89,6 @@
 
 (proxy_streamer) {
   reverse_proxy streamer:8100 {
-    import trusted_proxies_cf
     health_uri /healthz
     health_interval 10s
     health_timeout 3s
@@ -140,12 +119,10 @@
   tls internal
 }
 
-# ======================================================================
 # PRIMARY DOMAIN — revealmarket.xyz
-# ======================================================================
 revealmarket.xyz {
   encode zstd gzip
-  import tls_dns
+  import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
   import cache_frontend
@@ -153,12 +130,10 @@ revealmarket.xyz {
   import proxy_frontend
 }
 
-# ======================================================================
 # STREAMER — stream.revealmarket.xyz
-# ======================================================================
 stream.revealmarket.xyz {
   encode zstd gzip
-  import tls_dns
+  import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
   import cache_no_store
@@ -166,32 +141,21 @@ stream.revealmarket.xyz {
   import proxy_streamer
 }
 
-# ======================================================================
 # API — api.revealmarket.xyz
-# ======================================================================
 api.revealmarket.xyz {
   encode zstd gzip
-  import tls_dns
+  import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
   import cache_no_store
   import access_log_json
   import proxy_api
-  rate_limit {
-    zone api {
-      key {remote_ip}
-      events 20
-      window 10s
-    }
-  }
 }
 
-# ======================================================================
 # WWW REDIRECT → apex
-# ======================================================================
 www.revealmarket.xyz {
   encode zstd gzip
-  import tls_dns
+  import {$CADDY_TLS_PROFILE}
   import health_common
   redir https://revealmarket.xyz{uri} 308
 }

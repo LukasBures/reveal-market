@@ -97,6 +97,8 @@ CPU_COUNT="$(detect_cpu_count)"
 PARALLEL_BUILDS="$(calc_parallel_builds "${CPU_COUNT}")"
 NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
+# Default Caddy TLS profile to internal for local runs (overridable).
+export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_local}"
 COMPOSE_ENV_ARGS=()
 WAIT_FLAG=()
 
@@ -223,9 +225,9 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      log_warn "Unknown flag: $1"
-      usage
-      exit 1
+      # Treat bare arguments as service names or compose flags.
+      UP_ARGS+=("$1")
+      shift
       ;;
   esac
 done

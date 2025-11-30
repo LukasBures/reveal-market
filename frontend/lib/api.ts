@@ -69,7 +69,11 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
-    params.set("status", "active");
+    const statusParam = options?.status ?? "active";
+    if (statusParam && statusParam !== "any" && statusParam !== "all") {
+      params.set("status", statusParam);
+    }
+    const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
     }
@@ -97,6 +101,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       offset: options?.offset,
       category: options?.category,
       searchQuery: options?.searchQuery,
+      status: effectiveStatus,
       revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS,
     });
     const response = await fetch(url.toString(), {

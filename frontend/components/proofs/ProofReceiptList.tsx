@@ -18,8 +18,11 @@ export function ProofReceiptList({ receipts }: Props) {
 
   return (
     <div className="grid gap-6">
-      {receipts.map((receipt) => (
-        <ProofReceiptCard key={receipt.proofNonce} receipt={receipt} />
+      {receipts.map((receipt, index) => (
+        <ProofReceiptCard
+          key={receipt.requestId ?? receipt.proofHash ?? receipt.marketAddress ?? `${receipt.conditionId}-${index}`}
+          receipt={receipt}
+        />
       ))}
     </div>
   );
@@ -30,20 +33,22 @@ type CardProps = {
 };
 
 function ProofReceiptCard({ receipt }: CardProps) {
-  const statusColor =
-    receipt.status === "verified"
-      ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
-      : "bg-rose-500/20 text-rose-200 border border-rose-400/30";
+  const statusLabel = receipt.proofHash ? "Proof cached" : "Receipt cached";
+  const statusColor = receipt.proofHash
+    ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
+    : "bg-amber-500/20 text-amber-100 border border-amber-300/30";
+  const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
+  const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
 
   return (
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-md shadow-black/40">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof nonce</p>
-          <p className="font-mono text-sm text-white">{receipt.proofNonce}</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof request</p>
+          <p className="font-mono text-sm text-white">{shorten(receipt.requestId ?? receipt.proofHash ?? "—")}</p>
         </div>
         <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColor}`}>
-          {receipt.status === "verified" ? "On-chain verified" : "Rejected"}
+          {statusLabel}
         </span>
       </div>
 
@@ -51,42 +56,51 @@ function ProofReceiptCard({ receipt }: CardProps) {
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Market</dt>
           <dd className="font-mono text-white">
-            <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress} />
+            <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress ?? "—"} />
           </dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Verifier</dt>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Condition</dt>
+          <dd className="font-mono text-white">{shorten(receipt.conditionId ?? receipt.eventId ?? "—", 14)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof hash</dt>
+          <dd className="font-mono text-white">{shorten(receipt.proofHash ?? "—", 14)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Circuit</dt>
           <dd className="font-mono text-white">
-            <ExplorerLink href={hrefFor("address", receipt.verifier)} label={receipt.verifier} />
+            {shorten(receipt.circuitHash ?? "—", 14)}
+            {receipt.proverVersion ? <span className="text-slate-400"> (v{receipt.proverVersion})</span> : null}
           </dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Tx hash</dt>
-          <dd className="font-mono text-white">
-            <ExplorerLink href={hrefFor("tx", receipt.transactionHash)} label={receipt.transactionHash} />
-          </dd>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Generated at</dt>
+          <dd>{formatTimestamp(receipt.generatedAt)}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Verified at</dt>
-          <dd>{formatTimestamp(receipt.verifiedAt)}</dd>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Winning outcome</dt>
+          <dd className="font-mono text-white">{receipt.winningOutcomeId ?? "—"}</dd>
         </div>
-        {receipt.zkVerifyReceipt && (
-          <div>
-            <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">zkVerify receipt</dt>
-            <dd className="font-mono text-brand-200">{receipt.zkVerifyReceipt}</dd>
-          </div>
-        )}
       </dl>
 
       <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
-        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Public signals</p>
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Settlement signals</p>
         <div className="mt-3 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
-          <Signal label="Winning pool" value={formatBigInt(receipt.winningPool)} />
-          <Signal label="Total pool" value={formatBigInt(receipt.totalPool)} />
-          <Signal label="Outcome hash" value={shorten(receipt.outcomeHash, 12)} />
-          <Signal label="Circuit version" value={`v${receipt.circuitVersion}`} />
+          <Signal label="Winning pool" value={formatBigInt(winningPool)} />
+          <Signal label="Total pool" value={formatBigInt(totalPool)} />
+          <Signal label="Total liability" value={formatBigInt(receipt.totalLiability)} />
+          <Signal label="Total escrow" value={formatBigInt(receipt.totalEscrow)} />
+          <Signal label="Merkle root" value={shorten(receipt.merkleRoot, 12)} />
         </div>
       </div>
+
+      {receipt.proof && (
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof (truncated)</p>
+          <p className="font-mono text-xs text-slate-100 break-all">{shorten(receipt.proof, 24)}</p>
+        </div>
+      )}
     </article>
   );
 }
@@ -107,7 +121,7 @@ function Signal({ label, value }: SignalProps) {
 
 type ExplorerLinkProps = {
   href?: string | null;
-  label: string;
+  label?: string | null;
 };
 
 function ExplorerLink({ href, label }: ExplorerLinkProps) {
@@ -120,7 +134,30 @@ function ExplorerLink({ href, label }: ExplorerLinkProps) {
   );
 }
 
-function shorten(value: string, visible = 6): string {
+function deriveWinningPool(receipt: ProofReceipt): string | undefined {
+  if (receipt.winningOutcomeId === 0) {
+    return receipt.poolTotalYes ?? receipt.winningPool ?? undefined;
+  }
+  if (receipt.winningOutcomeId === 1) {
+    return receipt.poolTotalNo ?? receipt.winningPool ?? undefined;
+  }
+  return receipt.winningPool ?? undefined;
+}
+
+function deriveTotalPool(receipt: ProofReceipt): string | undefined {
+  if (receipt.totalPool) return receipt.totalPool;
+  if (receipt.totalEscrow) return receipt.totalEscrow;
+  if (receipt.poolTotalYes && receipt.poolTotalNo) {
+    try {
+      return (BigInt(receipt.poolTotalYes) + BigInt(receipt.poolTotalNo)).toString();
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function shorten(value?: string | null, visible = 6): string {
   if (!value) {
     return "—";
   }
@@ -130,11 +167,12 @@ function shorten(value: string, visible = 6): string {
   return `${value.slice(0, visible)}…${value.slice(-visible)}`;
 }
 
-function formatTimestamp(timestamp?: string) {
-  return formatDateTime(timestamp);
+function formatTimestamp(timestamp?: string | null) {
+  return formatDateTime(timestamp ?? undefined);
 }
 
-function formatBigInt(value: string) {
+function formatBigInt(value?: string | null) {
+  if (!value) return "—";
   try {
     const big = BigInt(value);
     const sign = big < 0 ? "-" : "";
@@ -145,7 +183,7 @@ function formatBigInt(value: string) {
   }
 }
 
-function hrefFor(kind: "address" | "tx", value?: string) {
+function hrefFor(kind: "address" | "tx", value?: string | null) {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;

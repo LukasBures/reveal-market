@@ -8,12 +8,18 @@ const ORDER: Record<LogLevel, number> = {
 };
 
 const defaultLevel: LogLevel = "info";
-const envLevel =
-  (process.env.NEXT_PUBLIC_LOG_LEVEL as LogLevel | undefined) ||
-  (process.env.LOG_LEVEL as LogLevel | undefined) ||
-  defaultLevel;
+const parseLogLevel = (value: string | undefined | null): LogLevel | null => {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.toLowerCase() as LogLevel;
+  return normalized in ORDER ? normalized : null;
+};
 
-const activeLevel: LogLevel = ORDER[envLevel] ? envLevel : "info";
+const envLevelRaw = process.env.NEXT_PUBLIC_LOG_LEVEL || process.env.LOG_LEVEL;
+const envLevel = parseLogLevel(envLevelRaw) ?? defaultLevel;
+
+const activeLevel: LogLevel = envLevel;
 const browserLoggingEnabled = process.env.NEXT_PUBLIC_ENABLE_BROWSER_LOGS === "true";
 const isBrowser = typeof window !== "undefined";
 
@@ -129,6 +135,15 @@ const baseLogger = {
     }
   },
 };
+
+if (!isBrowser) {
+  baseLogger.info("logging initialized", {
+    event: "logging.init",
+    log_level: activeLevel.toUpperCase(),
+    level_source: envLevelRaw ?? defaultLevel,
+    browser_logging_enabled: browserLoggingEnabled,
+  });
+}
 
 let heartbeatStarted = false;
 

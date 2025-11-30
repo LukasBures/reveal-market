@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from time import time
 from typing import Any, cast
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +24,6 @@ from .price_streamer import PriceStreamer
 from .state import StreamState
 
 logger = logging.getLogger("reveal_market.streamer")
-logger.setLevel(logging.INFO)
 
 
 def _compute_cors_host_warnings(
@@ -50,10 +50,11 @@ async def _sse_events(
     on_close: Callable[[], None] | None = None,
 ) -> AsyncGenerator[str, None]:
     try:
-        heartbeat = asyncio.create_task(asyncio.sleep(heartbeat_seconds))
+        effective_heartbeat = min(heartbeat_seconds, 1) if max_events else heartbeat_seconds
+        heartbeat = asyncio.create_task(asyncio.sleep(effective_heartbeat))
         emitted = 0
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat_seconds)
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=effective_heartbeat)
             if message and message.get("data"):
                 payload = message["data"]
                 yield f"data: {payload}\n\n"
@@ -68,10 +69,12 @@ async def _sse_events(
                     with suppress(Exception):
                         metrics.record_drop("sse", "heartbeat")
                 yield "event: ping\ndata: {}\n\n"
-                heartbeat = asyncio.create_task(asyncio.sleep(heartbeat_seconds))
+                heartbeat = asyncio.create_task(asyncio.sleep(effective_heartbeat))
                 emitted += 1
                 if max_events and emitted >= max_events:
                     break
+            elif max_events:
+                await asyncio.sleep(0)
     finally:
         with suppress(Exception):
             await pubsub.close()
@@ -120,7 +123,7 @@ def create_app() -> FastAPI:
     heartbeat_stop = start_heartbeat(logger, "streamer", interval_seconds=60)
     sanitized_config = {
         k: v
-        for k, v in settings.model_dump().items()
+        for k, v in settings.model_dump(warnings=False).items()
         if not any(secret in k for secret in ["key", "private", "secret", "password", "token"])
     }
     sanitized_config["cors_allow_origins_resolved"] = cors_allow_origins
@@ -314,6 +317,7 @@ def create_app() -> FastAPI:
         access_token: str | None = Header(default=None, alias="x-access-token"),
     ):
         _require_access_token(access_token)
+        connection_id = f"conn-{uuid4().hex}"
         client_id = request.client.host if request and request.client else "unknown"
         _rate_limit(client_id)
         # Allow on-demand subscription scoping.
@@ -334,6 +338,7 @@ def create_app() -> FastAPI:
                         "market_id": market_id,
                         "transport": "sse",
                         "target": fallback_target,
+                        "request_id": connection_id,
                     },
                 )
                 with suppress(Exception):
@@ -342,6 +347,18 @@ def create_app() -> FastAPI:
         if symbols:
             state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
         _acquire_connection()
+        logger.info(
+            "stream connection accepted",
+            extra={
+                "event": "stream.connection.accepted",
+                "request_id": connection_id,
+                "transport": "sse",
+                "market_id": market_id,
+                "assets_supplied": assets_supplied,
+                "assets": assets,
+                "symbols": symbols,
+            },
+        )
         pubsub = await state.subscribe(market_id)
         return StreamingResponse(
             _sse_events(
@@ -362,7 +379,11 @@ def create_app() -> FastAPI:
         assets_ids: str | None = None,
         symbols: str | None = None,
     ):
-        _require_access_token(websocket.headers.get("x-access-token"))
+        if settings.access_token and websocket.headers.get("x-access-token") != settings.access_token:
+            await websocket.accept()
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        connection_id = f"conn-{uuid4().hex}"
         client_id = websocket.client.host if websocket.client else "unknown"
         _rate_limit(client_id)
         assets: list[str] = []
@@ -381,6 +402,7 @@ def create_app() -> FastAPI:
                         "market_id": market_id,
                         "transport": "ws",
                         "target": fallback_target,
+                        "request_id": connection_id,
                     },
                 )
                 with suppress(Exception):
@@ -391,6 +413,18 @@ def create_app() -> FastAPI:
         pubsub = await state.subscribe(market_id)
         await websocket.accept()
         _acquire_connection()
+        logger.info(
+            "ws stream connection accepted",
+            extra={
+                "event": "stream.connection.accepted",
+                "request_id": connection_id,
+                "transport": "ws",
+                "market_id": market_id,
+                "assets_supplied": assets_supplied,
+                "assets": assets,
+                "symbols": symbols,
+            },
+        )
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat)
@@ -408,7 +442,10 @@ def create_app() -> FastAPI:
         except WebSocketDisconnect:
             return
         except Exception as exc:  # pragma: no cover - runtime guard
-            logger.warning("market websocket error", extra={"event": "stream.ws.error", "error": str(exc)})
+            logger.warning(
+                "market websocket error",
+                extra={"event": "stream.ws.error", "error": str(exc), "request_id": connection_id},
+            )
         finally:
             with suppress(Exception):
                 await pubsub.close()

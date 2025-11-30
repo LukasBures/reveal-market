@@ -53,6 +53,7 @@ ENV PROVER_LISTEN_ADDR=0.0.0.0:8085 \
     PROVER_WASM_PATH=/app/circuits/build/settlement_js/settlement.wasm \
     PROVER_ZKEY_PATH=/app/circuits/build/settlement_final.zkey \
     PROVER_RAPIDSNARK_BINARY=rapidsnark \
+    PROVER_LOG_LEVEL=INFO \
     LD_LIBRARY_PATH=/opt/rapidsnark/lib:${LD_LIBRARY_PATH:-}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

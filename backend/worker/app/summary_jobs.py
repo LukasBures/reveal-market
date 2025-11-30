@@ -18,6 +18,13 @@ logger = logging.getLogger("reveal_market.worker.summary")
 settings = get_settings()
 
 
+def _json_default(value: Any) -> Any:
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat()
+    return value
+
+
 @dataclass
 class SummaryJob:
     job_id: str
@@ -44,7 +51,7 @@ class SummaryJob:
             "attempts": self.attempts,
             "requested_at": self.requested_at.isoformat(),
         }
-        return json.dumps(payload)
+        return json.dumps(payload, default=_json_default)
 
     @classmethod
     def from_json(cls, raw: str) -> SummaryJob:

@@ -23,6 +23,8 @@ type ClientProps = {
   searchQuery?: string;
   categoryFilter?: string;
   emptyNotice?: string;
+  status?: string;
+  onlyActive?: boolean;
 };
 
 /**
@@ -35,6 +37,8 @@ export function FeaturedMarketsClient({
   searchQuery,
   categoryFilter,
   emptyNotice,
+  status = "active",
+  onlyActive = true,
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
@@ -44,31 +48,43 @@ export function FeaturedMarketsClient({
 
   const DEFAULT_BATCH = 40;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
-  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}`;
-  const sortByPopularity = (a: MarketSummary, b: MarketSummary) =>
-    (b.popularityScore ?? 0) - (a.popularityScore ?? 0);
+  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}`;
+  const sortByPopularity = (a: MarketSummary, b: MarketSummary) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0);
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
-  const filterActive = (items: MarketSummary[]) =>
-    items.filter((m) => {
-      const status = (m.status ?? "").toLowerCase();
-      return status === "" || status === "active" || status === "open";
-    });
+  const filterByStatus = useCallback(
+    (items: MarketSummary[]) =>
+      onlyActive
+        ? items.filter((m) => {
+            const normalizedStatus = (m.status ?? "").toLowerCase();
+            return (
+              normalizedStatus === "" ||
+              normalizedStatus === "active" ||
+              normalizedStatus === "open" ||
+              normalizedStatus === "live" ||
+              normalizedStatus === "commit"
+            );
+          })
+        : items,
+    [onlyActive],
+  );
 
   const { data: refreshedMarkets } = useFeaturedMarkets({
     limit: pageSize,
     searchQuery,
     category: normalizedCategory,
+    status,
     initialData: initialMarkets,
   });
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
-    setMarkets(filterActive([...initialMarkets]).sort(sortByPopularity));
-    setHasMore(initialMarkets.length >= pageSize);
+    const seeded = filterByStatus([...initialMarkets]);
+    setMarkets(seeded.sort(sortByPopularity));
+    setHasMore(seeded.length >= pageSize);
     setAutoLoadCount(0);
-  }, [initialMarkets, pageSize, filterSignature]);
+  }, [initialMarkets, pageSize, filterSignature, filterByStatus]);
 
   useEffect(() => {
     if (!refreshedMarkets) {
@@ -84,11 +100,11 @@ export function FeaturedMarketsClient({
         seen.add(item.eventId);
         merged.push(item);
       };
-      filterActive(refreshedMarkets || []).forEach(pushUnique);
-      filterActive(prev).forEach(pushUnique);
+      filterByStatus(refreshedMarkets || []).forEach(pushUnique);
+      filterByStatus(prev).forEach(pushUnique);
       return merged.sort(sortByPopularity).slice(0, maxItems);
     });
-  }, [refreshedMarkets, maxItems]);
+  }, [refreshedMarkets, maxItems, filterByStatus]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -100,8 +116,9 @@ export function FeaturedMarketsClient({
             searchQuery,
             category: normalizedCategory,
             offset: markets.length,
+            status,
           });
-          const activeAdditions = filterActive(additions);
+          const activeAdditions = filterByStatus(additions);
           if (activeAdditions.length === 0) {
             setHasMore(false);
             return;
@@ -129,7 +146,7 @@ export function FeaturedMarketsClient({
         }
       });
     },
-    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery],
+    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery, status, filterByStatus],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;

@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 
 import uvicorn
+from app.logging_config import resolve_log_level
 
 
 def main() -> None:
     mode = os.getenv("MODE", "prod").lower()
-    if mode == "dev":
-        os.environ.setdefault("LOG_LEVEL", "DEBUG")
+    log_level_default = "DEBUG" if mode == "dev" else "INFO"
+    log_level_name, _ = resolve_log_level(log_level_default)
+    os.environ["LOG_LEVEL"] = log_level_name
 
     # Bind to 0.0.0.0 in containers so health checks can reach the API; safe because
     # Docker publishes explicit ports.
@@ -28,6 +30,7 @@ def main() -> None:
             reload=True,
             reload_dirs=["app", "shared"],
             log_config=None,
+            log_level=log_level_name.lower(),
         )
     else:
         uvicorn.run(
@@ -35,6 +38,7 @@ def main() -> None:
             host=host,
             port=port,
             log_config=None,
+            log_level=log_level_name.lower(),
             workers=workers,
         )
 

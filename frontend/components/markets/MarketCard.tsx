@@ -1,6 +1,6 @@
 import type { MarketSummary } from "@/lib/api-types";
-import Image from "next/image";
 import Link from "next/link";
+import Image from "next/image";
 import { MarketArtwork } from "./MarketArtwork";
 
 type Props = {
@@ -61,7 +61,7 @@ export function MarketCard({ market }: Props) {
           <p className="text-2xl font-semibold text-white">{yesProbability !== null ? `${yesProbability}%` : "—"}</p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
-          <Image src="/brand/reveal-wolf-01.png" alt="" width={18} height={18} className="h-4 w-4 rounded-full object-cover" />
+          <img src="/brand/reveal-wolf-01.png" alt="" className="h-4 w-4 rounded-full object-cover" loading="lazy" />
           ZK
         </div>
       </div>

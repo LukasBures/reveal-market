@@ -20,8 +20,16 @@ import (
 	"github.com/reveal-market/prover/internal/shared"
 )
 
+const defaultLogLevel = "INFO"
+
+var (
+	logLevelName  string
+	logLevelValue int
+)
+
 func init() {
 	log.SetFlags(0)
+	logLevelName, logLevelValue = resolveLogLevel()
 }
 
 // ticketProof captures a single commitment input used by the prover.
@@ -126,6 +134,14 @@ func (a *app) routes() http.Handler {
 
 func main() {
 	cfg := shared.LoadConfig()
+	logLine("info", "logging.init", map[string]any{
+		"log_level":      logLevelName,
+		"log_level_env":  strings.TrimSpace(strings.ToUpper(os.Getenv("PROVER_LOG_LEVEL"))),
+		"service":        "prover",
+		"version":        cfg.Version,
+		"listen_addr":    cfg.ListenAddr,
+		"heartbeat_secs": cfg.HeartbeatSeconds,
+	})
 	requireArtifactsOrExit(cfg)
 	prover := initProver(cfg)
 	server := newApp(cfg, prover)
@@ -410,12 +426,66 @@ func newInternalError(err error) *proverError {
 	}
 }
 
+func resolveLogLevel() (string, int) {
+	raw := strings.TrimSpace(strings.ToUpper(os.Getenv("PROVER_LOG_LEVEL")))
+	if raw == "" {
+		raw = defaultLogLevel
+	}
+	value := levelValue(raw)
+	if value == 0 {
+		raw = defaultLogLevel
+		value = levelValue(raw)
+	}
+	return raw, value
+}
+
+func levelValue(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "DEBUG":
+		return 10
+	case "INFO":
+		return 20
+	case "WARN", "WARNING":
+		return 30
+	case "ERROR":
+		return 40
+	default:
+		return 0
+	}
+}
+
+func shouldLog(level string) bool {
+	lvl := levelValue(level)
+	if lvl == 0 {
+		lvl = levelValue(defaultLogLevel)
+	}
+	return lvl >= logLevelValue
+}
+
 func logLine(level, event string, fields map[string]any) {
+	if !shouldLog(level) {
+		return
+	}
 	payloadFields := make(map[string]any)
 	if fields != nil {
 		for key, value := range fields {
 			payloadFields[key] = value
 		}
+	}
+	if _, ok := payloadFields["service"]; !ok {
+		payloadFields["service"] = "prover"
+	}
+	requestID := "-"
+	if val, ok := payloadFields["request_id"]; ok {
+		if s, ok := val.(string); ok && s != "" {
+			requestID = s
+		}
+		delete(payloadFields, "request_id")
+	}
+	if _, ok := payloadFields["event"]; !ok {
+		payloadFields["event"] = event
+	} else {
+		event = fmt.Sprintf("%v", payloadFields["event"])
 	}
 	payload, _ := json.Marshal(payloadFields)
 	_, file, line, ok := runtime.Caller(2)
@@ -424,11 +494,12 @@ func logLine(level, event string, fields map[string]any) {
 		location = fmt.Sprintf("%s:%d", filepath.Base(file), line)
 	}
 	log.Printf(
-		"%s | %s | prover | %s | %s | %s",
+		"%s | %s | prover | %s | %s | %s | %s",
 		formatMillis(time.Now().UTC()),
 		strings.ToUpper(level),
 		location,
 		event,
+		requestID,
 		payload,
 	)
 }

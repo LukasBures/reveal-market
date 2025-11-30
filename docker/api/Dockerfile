@@ -7,6 +7,7 @@ ARG SERVICE_DIR=backend/api
 ARG SHARED_DIR=backend/shared
 ARG MIGRATIONS_DIR=backend/migrations
 ARG APP_USER=appuser
+ARG APP_GROUP=appuser
 
 # =============================================================================
 # Stage 1: Builder — install runtime deps with uv (no dev extras)
@@ -60,6 +61,8 @@ FROM ${PYTHON_RUNTIME_IMAGE} AS api
 ARG SERVICE_DIR=backend/api
 ARG SHARED_DIR=backend/shared
 ARG MIGRATIONS_DIR=backend/migrations
+ARG APP_USER=appuser
+ARG APP_GROUP=appuser
 
 WORKDIR /app
 
@@ -78,7 +81,8 @@ RUN apt-get update -qq \
 
 COPY --from=builder /app/.venv ./.venv
 
-RUN useradd --create-home ${APP_USER}
+# Ensure runtime user/group exist even if image lacks defaults.
+RUN id -u "${APP_USER}" >/dev/null 2>&1 || (groupadd -r "${APP_GROUP}" && useradd --create-home -r -g "${APP_GROUP}" "${APP_USER}")
 USER ${APP_USER}
 
 COPY --chown=appuser:appuser ${SHARED_DIR} ./shared

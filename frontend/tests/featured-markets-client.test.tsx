@@ -78,7 +78,12 @@ describe("FeaturedMarketsClient", () => {
     await waitFor(() => {
       expect(screen.getByText("Second Market")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith(expect.any(Number), { searchQuery: "sample", category: undefined, offset: 1 });
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(Number), {
+      searchQuery: "sample",
+      category: undefined,
+      offset: 1,
+      status: "active",
+    });
   });
 
   it("auto-loads additional pages before showing manual button", async () => {

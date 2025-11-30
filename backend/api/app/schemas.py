@@ -177,6 +177,31 @@ class ResolutionSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True, validate_by_name=True)
 
 
+class ProofReceipt(BaseModel):
+    request_id: str = Field(alias="requestId")
+    market_id: int | None = Field(default=None, alias="marketId")
+    event_id: str | None = Field(default=None, alias="eventId")
+    condition_id: str | None = Field(default=None, alias="conditionId")
+    market_address: str | None = Field(default=None, alias="marketAddress")
+    proof_hash: str | None = Field(default=None, alias="proofHash")
+    prover_version: str | None = Field(default=None, alias="proverVersion")
+    circuit_hash: str | None = Field(default=None, alias="circuitHash")
+    generated_at: datetime | None = Field(default=None, alias="generatedAt")
+    proof: str | None = None
+    public_signals: list[str] = Field(default_factory=list, alias="publicSignals")
+    merkle_root: str | None = Field(default=None, alias="merkleRoot")
+    total_escrow: str | None = Field(default=None, alias="totalEscrow")
+    total_liability: str | None = Field(default=None, alias="totalLiability")
+    rake_bps: int | None = Field(default=None, alias="rakeBps")
+    winning_outcome_id: int | None = Field(default=None, alias="winningOutcomeId")
+    pool_total_yes: str | None = Field(default=None, alias="poolTotalYes")
+    pool_total_no: str | None = Field(default=None, alias="poolTotalNo")
+    winning_pool: str | None = Field(default=None, alias="winningPool")
+    total_pool: str | None = Field(default=None, alias="totalPool")
+
+    model_config = ConfigDict(populate_by_name=True, validate_by_name=True)
+
+
 class PricingQuoteRequest(BaseModel):
     stake_zen: Decimal = Field(..., gt=0)
     market_id: str | None = Field(default=None, description="Market ID for cap tracking")

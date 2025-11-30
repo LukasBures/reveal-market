@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import Image from "next/image";
 
 type HeroStat = {
   label: string;
@@ -61,12 +61,10 @@ export function Hero({ stats }: HeroProps) {
           <div className="relative flex h-full flex-col items-center gap-5 text-center">
             <div className="relative flex items-center justify-center">
               <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/40 via-white/10 to-transparent opacity-70 blur-3xl" />
-              <Image
+              <img
                 src="/brand/reveal-wolf-02.png"
                 alt="Reveal Market wolf avatar"
-                width={320}
-                height={320}
-                priority
+                loading="eager"
                 className="relative z-10 w-64 max-w-full drop-shadow-[0_35px_70px_rgba(0,0,0,0.55)]"
               />
             </div>

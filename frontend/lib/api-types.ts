@@ -63,18 +63,26 @@ export type MarketDetail = MarketSummary & {
 };
 
 export type ProofReceipt = {
-  proofNonce: string;
-  verifier: string;
-  marketAddress: string;
-  transactionHash: string;
-  blockNumber?: number;
-  verifiedAt: string;
-  status: "verified" | "failed";
-  zkVerifyReceipt?: string | null;
-  circuitVersion: number;
-  outcomeHash: string;
-  winningPool: string;
-  totalPool: string;
+  requestId: string;
+  marketId?: number | null;
+  eventId?: string | null;
+  conditionId?: string | null;
+  marketAddress?: string | null;
+  proofHash?: string | null;
+  proverVersion?: string | null;
+  circuitHash?: string | null;
+  generatedAt?: string | null;
+  proof?: string | null;
+  publicSignals?: string[];
+  merkleRoot?: string | null;
+  totalEscrow?: string | null;
+  totalLiability?: string | null;
+  rakeBps?: number | null;
+  winningOutcomeId?: number | null;
+  poolTotalYes?: string | null;
+  poolTotalNo?: string | null;
+  winningPool?: string | null;
+  totalPool?: string | null;
 };
 
 export type MarketStatusStat = {

@@ -84,7 +84,6 @@ services:
         BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-api
     restart: unless-stopped
-    init: true
     mem_swappiness: 0
     environment:
       <<: *backend-env
@@ -167,10 +166,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1024M
+          memory: 2048M
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 1024M
 
   hedger:
     build:
@@ -280,6 +279,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     environment:
+      CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:2019/config/ >/dev/null"]

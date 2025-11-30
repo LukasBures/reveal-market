@@ -130,12 +130,17 @@ async def test_fx_ws_rejects_jump(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_metrics_update_on_fx_refresh():
+async def test_metrics_update_on_fx_refresh(monkeypatch):
     settings = Settings(fx_rest_interval_seconds=5, fx_max_age_seconds=5, fx_ws_stale_ttl_seconds=5)
     state = StreamState(settings)
     from app.price_streamer import PriceStreamer
 
     streamer = PriceStreamer(state, settings)
+
+    async def fake_refresh(label: str = "coingecko_rest"):
+        return state.register_fx(Decimal("12.34"), source=label, allow_jump=True)
+
+    monkeypatch.setattr(state, "refresh_fx", fake_refresh)
     await state.refresh_fx(label="coingecko_rest")
     streamer.metric_ws_connected.set(1 if state.fx_ws_connected else 0)
     streamer.metric_fx_stale.set(1 if state.fx_last_update is None else 0)
@@ -222,6 +227,7 @@ async def test_normalize_parses_stringified_arrays(monkeypatch):
 async def test_normalize_registers_clob_tokens():
     state = StubState()
     streamer = DataStreamer(state, state.settings)
+    streamer.clob_client = None  # avoid network midpoint fetches
     data = {"id": "m5", "outcomePrices": [0.2, 0.8], "clobTokenIds": ["tok1", "tok2"]}
     await streamer._normalize_and_publish(data, source="rest")
     assert state.market_tokens["m5"] == ["tok1", "tok2"]
@@ -268,6 +274,7 @@ async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
 
     with monkeypatch.context() as m:
         m.setattr("httpx.AsyncClient.get", lambda self, url: fake_client_get(url))
+        streamer.clob_client = None  # skip midpoint fetch
         await streamer._poll_rest()
     # placeholder should be swapped once token ids are known
     assert "123" not in state.subscriptions.assets
@@ -499,31 +506,38 @@ async def test_clob_ws_loop_reconnects_and_sends_subscribe(monkeypatch):
     ws_instances: list = []
 
     class DummyWS:
-        def __init__(self, name):
+        def __init__(self, name, *, disconnect_on: int | None = None, stop_after: int | None = None):
             self.name = name
             self.sent: list[str] = []
-            self.recv_count = 0
+            self.recv_calls = 0
+            self.disconnect_on = disconnect_on
+            self.stop_after = stop_after
 
         async def send(self, payload):
             self.sent.append(payload)
 
         async def recv(self):
-            self.recv_count += 1
+            self.recv_calls += 1
+            if self.disconnect_on and self.recv_calls >= self.disconnect_on:
+                raise RuntimeError("socket dropped")
+            if self.stop_after and self.recv_calls >= self.stop_after:
+                streamer._stop.set()
+                raise TimeoutError
             raise TimeoutError
 
     async def fake_iter_ws(url, name="ws", fatal_status=None):
-        ws1 = DummyWS("first")
+        ws1 = DummyWS("first", disconnect_on=1)
         ws_instances.append(ws1)
         yield ws1
-        ws2 = DummyWS("second")
+        ws2 = DummyWS("second", stop_after=2)
         ws_instances.append(ws2)
         yield ws2
-        streamer._stop.set()
 
     monkeypatch.setattr("app.data_streamer.iter_ws", fake_iter_ws)
-    await asyncio.wait_for(streamer._ws_loop(), timeout=1)
+    await asyncio.wait_for(streamer._ws_loop(), timeout=0.5)
     assert ws_instances
-    assert any('"tok-a"' in payload for ws in ws_instances for payload in ws.sent)
+    payloads = [payload for ws in ws_instances for payload in ws.sent]
+    assert any('"tok-a"' in payload for payload in payloads)
     assert streamer._stop.is_set()
 
 

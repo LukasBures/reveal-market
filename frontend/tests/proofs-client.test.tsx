@@ -5,17 +5,16 @@ import { ProofsClient } from "@/components/proofs/ProofsClient";
 import type { ProofReceipt } from "@/lib/api-types";
 
 const baseReceipt: ProofReceipt = {
-  proofNonce: "0xabc",
-  verifier: "0xVerifier",
+  requestId: "req-abc",
   marketAddress: "0xMarket",
-  transactionHash: "0xTxHash",
-  verifiedAt: "2025-01-01T00:00:00.000Z",
-  status: "verified",
-  zkVerifyReceipt: null,
-  circuitVersion: 1,
-  outcomeHash: "0xoutcome",
-  winningPool: "100000000",
-  totalPool: "200000000",
+  conditionId: "0xcondition",
+  proofHash: "0xhash",
+  circuitHash: "0xcircuit",
+  generatedAt: "2025-01-01T00:00:00.000Z",
+  winningOutcomeId: 0,
+  poolTotalYes: "100000000",
+  poolTotalNo: "200000000",
+  totalEscrow: "300000000",
 };
 
 describe("ProofsClient", () => {
@@ -43,16 +42,16 @@ describe("ProofsClient", () => {
   it("renders provided receipts and the manual pagination control", () => {
     render(<ProofsClient initialReceipts={[baseReceipt]} pageSize={1} />);
 
-    expect(screen.getByText(/Proof nonce/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proof request/i)).toBeInTheDocument();
+    expect(screen.getByText(/req-abc/i)).toBeInTheDocument();
     expect(screen.getByText(/Load more receipts/i)).toBeInTheDocument();
   });
 
   it("fetches and appends additional receipts when the button is clicked", async () => {
     const nextReceipt: ProofReceipt = {
       ...baseReceipt,
-      proofNonce: "0xdef",
+      requestId: "req-def",
       marketAddress: "0xAnother",
-      transactionHash: "0xNewTx",
     };
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -65,7 +64,7 @@ describe("ProofsClient", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/proofs?limit=1&offset=1", { cache: "no-store" });
-      expect(screen.getByText(/0xdef/i)).toBeInTheDocument();
+      expect(screen.getByText(/req-def/i)).toBeInTheDocument();
     });
   });
 

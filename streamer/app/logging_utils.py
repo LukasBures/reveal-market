@@ -64,8 +64,19 @@ class StructuredFormatter(logging.Formatter):
         return f"{ts} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"
 
 
+def resolve_log_level(default: str = "INFO") -> tuple[str, int]:
+    """Normalize LOG_LEVEL to a valid logging level with a safe fallback."""
+
+    level_name = os.getenv("LOG_LEVEL", default).upper()
+    resolved = logging.getLevelName(level_name)
+    if isinstance(resolved, str):
+        level_name = default.upper()
+        resolved = logging.getLevelName(level_name)
+    return level_name, int(resolved)
+
+
 def setup_logging(service_name: str, log_level: str = "INFO") -> None:
-    log_level_upper = log_level.upper()
+    log_level_name, log_level_value = resolve_log_level(log_level)
     log_to_file = os.getenv("LOG_TO_FILE", "false").lower() in {"1", "true", "yes"}
     log_dir = Path(os.getenv("LOG_DIR", "./logs"))
     max_bytes = int(os.getenv("LOG_MAX_BYTES", "5000000"))
@@ -85,15 +96,23 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
         file_handler.setFormatter(formatter)
         handlers.append(file_handler)
 
-    logging.basicConfig(level=log_level_upper, handlers=handlers, force=True)
+    logging.basicConfig(level=log_level_value, handlers=handlers, force=True)
 
     for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        logging.getLogger(noisy).handlers = []
-        logging.getLogger(noisy).propagate = True
+        noisy_logger = logging.getLogger(noisy)
+        noisy_logger.handlers = []
+        noisy_logger.propagate = True
 
+    service_logger = logging.getLogger(service_name)
+    service_logger.setLevel(log_level_value)
     logging.getLogger(service_name).info(
         "logging initialized",
-        extra={"event": "logging.init", "log_to_file": log_to_file, "log_dir": str(log_dir)},
+        extra={
+            "event": "logging.init",
+            "log_level": log_level_name,
+            "log_to_file": log_to_file,
+            "log_dir": str(log_dir),
+        },
     )
 
 

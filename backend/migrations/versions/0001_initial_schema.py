@@ -23,6 +23,9 @@ def _is_postgres() -> bool:
 
 def upgrade() -> None:
     is_pg = _is_postgres()
+    if is_pg:
+        # Needed for trigram GIN index on VARCHAR columns.
+        op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     # Core market tables
     op.create_table(
         "markets",
@@ -82,7 +85,13 @@ def upgrade() -> None:
     )
     op.create_index("ix_market_tags_market_id", "market_tags", ["market_id"])
     if is_pg:
-        op.create_index("ix_market_tags_gin", "market_tags", ["tag"], postgresql_using="gin")
+        op.create_index(
+            "ix_market_tags_gin",
+            "market_tags",
+            ["tag"],
+            postgresql_using="gin",
+            postgresql_ops={"tag": "gin_trgm_ops"},
+        )
 
     op.create_table(
         "market_clob_tokens",
@@ -405,33 +414,38 @@ def upgrade() -> None:
     op.create_index("ix_settlements_proof_status", "settlements", ["proof_status"])
 
     # Hedger treasury snapshots (folded from former 0002 migration)
-    op.create_table(
-        "hedger_treasury_snapshots",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "market_id",
-            sa.String(length=128),
-            sa.ForeignKey("markets.event_id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("outcome", sa.String(), nullable=False),
-        sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("refund_zen", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("rake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("payout_profit_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("borrowed_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("lp_share_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("repay_amount_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("platform_usdc_revenue", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("zen_balance", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("usdc_balance", sa.Numeric(precision=32, scale=8), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-    )
-    op.create_index(
-        "ix_hedger_treasury_snapshots_market_id",
-        "hedger_treasury_snapshots",
-        ["market_id"],
-    )
+    hedger_table = "hedger_treasury_snapshots"
+    hedger_idx = "ix_hedger_treasury_snapshots_market_id"
+    existing_tables = set(sa.inspect(op.get_bind()).get_table_names())
+    if hedger_table not in existing_tables:
+        op.create_table(
+            hedger_table,
+            sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+            sa.Column(
+                "market_id",
+                sa.String(length=128),
+                sa.ForeignKey("markets.event_id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("outcome", sa.String(), nullable=False),
+            sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("refund_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("rake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("payout_profit_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("borrowed_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("lp_share_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("repay_amount_usdc", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("platform_usdc_revenue", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("zen_balance", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("usdc_balance", sa.Numeric(precision=32, scale=8), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        )
+    if not any(idx.get("name") == hedger_idx for idx in sa.inspect(op.get_bind()).get_indexes(hedger_table)):
+        op.create_index(
+            hedger_idx,
+            hedger_table,
+            ["market_id"],
+        )
 
     # Optional ledger/audit helpers for future features
     op.create_table(

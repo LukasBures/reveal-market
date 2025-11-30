@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
+from uuid import uuid4
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .admin import router as admin_router
 from .config import get_settings
-from .local_logging import log_event, start_heartbeat_logger
+from .local_logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from .logging_config import setup_logging
 from .service import HedgerService
 
@@ -38,6 +39,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or request.headers.get("traceparent") or f"req-{uuid4().hex}"
+        token = set_request_id(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_request_id(token)
+        response.headers["x-request-id"] = request_id
+        return response
 
     service = HedgerService(settings)
     app.state.service = service

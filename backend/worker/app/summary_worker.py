@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 from redis import Redis
 from shared import cache as shared_cache
-from shared.logging import log_event
+from shared.logging import log_event, reset_request_id, set_request_id
 from shared.repository import apply_market_summary
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -149,44 +149,48 @@ def run_summary_worker() -> None:
 def process_job(job: SummaryJob, redis_client: Redis, client: SummaryClient) -> bool:
     """Process a single summary job; return True on success."""
 
-    if not settings.summary_enabled:
+    token = set_request_id(job.job_id)
+    try:
+        if not settings.summary_enabled:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.summary.skip_disabled",
+                message="skipping summary job because summaries are disabled",
+                job_id=job.job_id,
+                event_id=job.event_id,
+            )
+            return False
+
         log_event(
             logger,
-            logging.DEBUG,
-            event="worker.summary.skip_disabled",
-            message="skipping summary job because summaries are disabled",
+            logging.INFO,
+            event="worker.summary.processing",
+            message="processing summary job",
             job_id=job.job_id,
             event_id=job.event_id,
+            attempts=job.attempts,
         )
-        return False
+        try:
+            result = client.generate(job)
+        except SummaryClientError as exc:
+            _handle_failure(redis_client, job, str(exc))
+            return False
 
-    log_event(
-        logger,
-        logging.INFO,
-        event="worker.summary.processing",
-        message="processing summary job",
-        job_id=job.job_id,
-        event_id=job.event_id,
-        attempts=job.attempts,
-    )
-    try:
-        result = client.generate(job)
-    except SummaryClientError as exc:
-        _handle_failure(redis_client, job, str(exc))
-        return False
-
-    with session_scope() as session:
-        apply_market_summary(
-            session,
-            job.event_id,
-            summary=result.text,
-            source=result.source,
-            model=result.model,
-            metadata=result.metadata,
-            checked_at=result.generated_at,
-        )
-    _ack_success(redis_client, job, result.text)
-    return True
+        with session_scope() as session:
+            apply_market_summary(
+                session,
+                job.event_id,
+                summary=result.text,
+                source=result.source,
+                model=result.model,
+                metadata=result.metadata,
+                checked_at=result.generated_at,
+            )
+        _ack_success(redis_client, job, result.text)
+        return True
+    finally:
+        reset_request_id(token)
 
 
 def main() -> None:  # pragma: no cover - CLI entrypoint

@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import Image from "next/image";
 
 const footerLinks = [
   { href: "/about", label: "About" } as const,
@@ -28,7 +28,12 @@ export function Footer() {
             Institutional-grade prediction markets with Horizen roots, zk-settled proofs, and provable custody.
           </p>
           <div className="wolf-aura flex items-center gap-4 rounded-2xl border border-white/10 p-4 text-left text-white">
-            <Image src="/brand/reveal-wolf-01.png" alt="Reveal Market wolf" width={64} height={64} className="rounded-2xl border border-white/15 bg-white/5 p-2" />
+            <img
+              src="/brand/reveal-wolf-01.png"
+              alt="Reveal Market wolf"
+              className="h-16 w-16 rounded-2xl border border-white/15 bg-white/5 p-2"
+              loading="lazy"
+            />
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-white/70">Signal wolfpack</p>
               <p className="font-semibold text-white">Always-on risk ops &amp; zk attestations</p>

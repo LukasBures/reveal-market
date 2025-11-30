@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from .local_logging import StructuredFormatter, get_request_id
 
@@ -18,9 +19,20 @@ class RequestContextFilter(logging.Filter):
         return True
 
 
+def resolve_log_level(default: str = "INFO") -> tuple[str, int]:
+    """Normalize LOG_LEVEL/HEDGER_LOG_LEVEL to a valid logging level."""
+
+    env_level = logging.getLevelName(level.upper()) if (level := os.getenv("HEDGER_LOG_LEVEL") or None) else None
+    if isinstance(env_level, int):
+        return (os.getenv("HEDGER_LOG_LEVEL", default).upper(), env_level)
+    level_name = default.upper()
+    return level_name, int(logging.getLevelName(level_name))
+
+
 def setup_logging(service_name: str, level: str = "INFO") -> logging.Logger:
+    level_name, level_value = resolve_log_level(level)
     root = logging.getLogger()
-    root.setLevel(level)
+    root.setLevel(level_value)
     handler = logging.StreamHandler()
     handler.setFormatter(StructuredFormatter(service_name))
     handler.addFilter(RequestContextFilter(service_name))
@@ -29,9 +41,19 @@ def setup_logging(service_name: str, level: str = "INFO") -> logging.Logger:
     for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logger = logging.getLogger(logger_name)
         logger.handlers = [handler]
-        logger.setLevel(level)
+        logger.setLevel(level_value)
         logger.propagate = logger_name != "uvicorn.access"
     # Quiet overly chatty dependencies.
     logging.getLogger("httpx").setLevel(logging.INFO)
     logging.getLogger("httpcore").setLevel(logging.INFO)
-    return logging.getLogger(service_name)
+    service_logger = logging.getLogger(service_name)
+    service_logger.setLevel(level_value)
+    service_logger.info(
+        "logging initialized",
+        extra={
+            "event": "logging.init",
+            "log_level": level_name,
+            "log_to_file": False,
+        },
+    )
+    return service_logger

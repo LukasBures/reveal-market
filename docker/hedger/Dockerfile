@@ -60,7 +60,8 @@ WORKDIR /hedger
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/hedger \
-    PATH="/hedger/.venv/bin:$PATH"
+    PATH="/hedger/.venv/bin:$PATH" \
+    HEDGER_LOG_LEVEL=INFO
 
 RUN apt-get update -qq \
  && apt-get install -y --no-install-recommends \

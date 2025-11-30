@@ -7,6 +7,8 @@ describe("frontend logging utilities", () => {
     vi.unstubAllGlobals();
     delete (globalThis as any).window;
     delete process.env.NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT;
+    delete process.env.LOG_LEVEL;
+    delete process.env.NEXT_PUBLIC_LOG_LEVEL;
   });
 
   afterEach(() => {
@@ -14,6 +16,8 @@ describe("frontend logging utilities", () => {
     vi.unstubAllGlobals();
     delete (globalThis as any).window;
     delete process.env.NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT;
+    delete process.env.LOG_LEVEL;
+    delete process.env.NEXT_PUBLIC_LOG_LEVEL;
   });
 
   it("sends browser warnings to the remote logging endpoint", async () => {
@@ -42,6 +46,24 @@ describe("frontend logging utilities", () => {
     );
 
     consoleWarn.mockRestore();
+  });
+
+  it("honors server LOG_LEVEL case-insensitively", async () => {
+    process.env.LOG_LEVEL = "WARNING";
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const { logger } = await import("@/lib/logging");
+    logger.debug("skip", { probe: true });
+    logger.warn("emit", { probe: true });
+
+    expect(consoleDebug).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalled();
+
+    consoleInfo.mockRestore();
+    consoleWarn.mockRestore();
+    consoleDebug.mockRestore();
   });
 
   it("starts a single heartbeat interval on the server", async () => {

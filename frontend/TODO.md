@@ -2,13 +2,13 @@
 
 Focus only on the investor-facing gaps that keep the site from reflecting live readiness.
 
-1. **Live market chart** – Replace the mocked `MarketDetailChart` with historical price/liquidity pulled from the backend/worker so every market page visualizes real data.
-2. **Search experience** – Ship a `/markets/search` route (keyboard shortcuts, pagination, category pills) that queries the backend search endpoint instead of filtering placeholder cards.
-3. **Proof filters + exports** – Add status/verifier/market filters and CSV export to `/proofs`, plus a visible diligence CTA so investors can grab receipts immediately.
-4. **Bet limit UX + stale guards** – Keep the 100 ZEN per-bet cap surfaced in stake inputs, show per-user/per-market caps once exposed by the API, and disable betting when FX/market prices are stale (follow `/stream`/`/health` flags).
-5. **CSP/CORS alignment** – Keep `NEXT_PUBLIC_PRICE_STREAMER_URL` + CSP connect-src in sync, and surface a warning in dev when streamer/API origins aren’t allowed.
-6. **Signed-quote TX flow** – Ensure the client always requests quotes with wallet + market address + outcome id, reuses a single FX WS connection, and submits `commitWithQuote` with the signed payload (refreshing on expiry/chain mismatch).
-7. **Chain defaults** – Keep walletconnect/wagmi envs aligned to Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`); surface a wrong-network prompt and fallback when envs are missing.
-8. **Positions dashboard** – Ship a personal dashboard that shows all user positions (stakes, PnL, potential winnings, volume, aggregated stats) and includes a single “claim winnings” action.
+1. **Positions dashboard** – Build a signed-in positions view (stakes, PnL, potential winnings, volume, aggregated stats) with a single “claim winnings” CTA.
+2. **Search experience** – Replace the client-only `/markets/search` filtering with a backend search endpoint (keyboard shortcuts, pagination, category pills).
+3. **Proof filters + exports** – Add status/verifier/market filters and CSV export to `/proofs`, plus a visible diligence CTA for receipts.
+4. **Live market chart** – Wire `MarketDetailChart` to real historical price/liquidity from backend/worker/streamer so every market renders data.
+5. **Signed-quote TX flow** – Enforce wallet + market address + outcome id for quotes, reuse a single FX WS, refresh on expiry/chain mismatch, and submit `commitWithQuote` with the signed payload.
+6. **Bet limit UX + stale guards** – Surface the 100 ZEN cap and API-provided per-user/per-market caps, and disable betting when FX/market prices are stale.
+7. **CSP/CORS alignment** – Keep `NEXT_PUBLIC_PRICE_STREAMER_URL` aligned with CSP `connect-src` and warn in dev when streamer/API origins are blocked.
+8. **Chain defaults** – Keep walletconnect/wagmi envs pinned to Horizen Testnet (2651420) and prompt + fallback on wrong/missing network config.
 
 Everything else can follow once these core experiences are live.

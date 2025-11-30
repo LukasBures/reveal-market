@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: int = Field(default=15, ge=1, description="SSE heartbeat interval")
     rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
     ws_reconnect_seconds: float = Field(default=5.0, ge=0.01, description="Backoff between WS reconnect attempts")
+    rtds_enabled: bool = Field(default=False, description="Enable RTDS websocket ingestion (disabled by default)")
     publish_throttle_ms: int = Field(default=300, ge=50, description="Throttle for publishing ticks to Redis (ms)")
     max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
     cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")

@@ -23,10 +23,21 @@ class RequestContextFilter(logging.Filter):
         return True
 
 
+def resolve_log_level(default: str = "INFO") -> tuple[str, int]:
+    """Normalize LOG_LEVEL to a valid logging level and return its name + numeric value."""
+
+    level_name = os.getenv("LOG_LEVEL", default).upper()
+    resolved = logging.getLevelName(level_name)
+    if isinstance(resolved, str):
+        level_name = default.upper()
+        resolved = logging.getLevelName(level_name)
+    return level_name, int(resolved)
+
+
 def setup_logging(service_name: str) -> None:
     """Configure consistent console/file logging for the API service."""
 
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level_name, log_level = resolve_log_level()
     log_to_file = os.getenv("LOG_TO_FILE", "false").lower() in {"1", "true", "yes"}
     log_dir = Path(os.getenv("LOG_DIR", "./logs"))
     max_bytes = int(os.getenv("LOG_MAX_BYTES", "5000000"))
@@ -58,8 +69,15 @@ def setup_logging(service_name: str) -> None:
         logging.getLogger(noisy).propagate = True
     logging.getLogger("alembic").setLevel(logging.WARNING)
 
-    logging.getLogger(service_name).propagate = True
-    logging.getLogger(service_name).info(
+    service_logger = logging.getLogger(service_name)
+    service_logger.setLevel(log_level)
+    service_logger.propagate = True
+    service_logger.info(
         "logging initialized",
-        extra={"event": "logging.init", "log_to_file": log_to_file, "log_dir": str(log_dir)},
+        extra={
+            "event": "logging.init",
+            "log_level": log_level_name,
+            "log_to_file": log_to_file,
+            "log_dir": str(log_dir),
+        },
     )

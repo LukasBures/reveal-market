@@ -104,6 +104,7 @@ const nextConfig = (phase) => {
     reactStrictMode: true,
     output: 'standalone',
     images: {
+      unoptimized: true,
       remotePatterns: [
         { protocol: 'https', hostname: 'images.revealmarket.xyz' },
         { protocol: 'https', hostname: 'cdn.revealmarket.xyz' },

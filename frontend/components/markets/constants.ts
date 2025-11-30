@@ -1,2 +1,2 @@
 export const DEFAULT_PAGE_SIZE = 24;
-export const DEFAULT_MAX_ITEMS = 200;
+export const DEFAULT_MAX_ITEMS = Number.POSITIVE_INFINITY;

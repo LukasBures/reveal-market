@@ -58,6 +58,23 @@ def test_summary_job_enqueued_when_missing_summary(monkeypatch):
     assert market_record.summary_requested_at is not None
 
 
+def test_summary_job_serializes_datetime_metadata(monkeypatch):
+    redis = QueueRecorder()
+    market_record = build_market()
+    payload = build_payload()
+    naive_dt = datetime(2024, 1, 2, 3, 4, 5)  # naive to ensure UTC coercion
+    payload.gamma_metadata["start_date"] = naive_dt
+    monkeypatch.setattr(summary_jobs.settings, "summary_enabled", True, raising=False)
+
+    enqueued = maybe_enqueue_summary_job(redis, market_record=market_record, market_payload=payload)
+
+    assert enqueued is True
+    _, payload_json = redis.items[0]
+    job = SummaryJob.from_json(payload_json)
+    start_date = job.metadata["gamma_metadata"]["start_date"]
+    assert start_date == naive_dt.replace(tzinfo=UTC).isoformat()
+
+
 def test_summary_job_skipped_when_recent_request(monkeypatch):
     redis = QueueRecorder()
     now = datetime.now(UTC)

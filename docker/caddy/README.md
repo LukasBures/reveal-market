@@ -11,4 +11,4 @@
 - **Config validation**: Run `docker run --rm -v "$(pwd)/docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" reveal-market-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` before deploying changes. The built image includes the Cloudflare DNS module required by the Caddyfile.
 - **Client IPs**: The Caddyfile trusts Cloudflare’s IPv4/IPv6 ranges and `CF-Connecting-IP`/`X-Forwarded-For`/`X-Real-IP` so rate limiting and logs see real client addresses behind the proxy. Validate with the built image (includes the Cloudflare DNS module), not stock `caddy:2`.
 - **Upstream health**: Reverse proxies now probe `/healthz` with quick failover (`max_fails=2`, `fail_duration=30s`) so unhealthy backends are shed quickly.
-- **Access logs**: API and streamer vhosts emit JSON access logs; frontend remains quiet to limit noise. Tune sampling or exclusions if volume grows.
+- **Access logs**: All vhosts emit JSON access logs to stdout at INFO by default; override with `CADDY_LOG_LEVEL` / `CADDY_ACCESS_LOG_LEVEL` if you need to dial verbosity down.

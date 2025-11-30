@@ -24,6 +24,7 @@ export async function FeaturedMarketsSection({
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
+    status: "active",
   });
 
   if (initialMarkets.length === 0) {
@@ -51,6 +52,8 @@ export async function FeaturedMarketsSection({
       searchQuery={searchQuery}
       categoryFilter={categoryFilter}
       emptyNotice={emptyNotice}
+      status="active"
+      onlyActive
     />
   );
 }

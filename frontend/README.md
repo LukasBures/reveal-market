@@ -37,6 +37,8 @@ Tech stack callouts:
 - **Vitest + Testing Library** for behavioral tests.
 - **ESLint + Typescript** enforced via `npm run lint`.
 - **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `streamer` (via SSE and `/pricing/fx`). Market detail pages fetch `clobTokenIds` from the backend and include them in `assets_ids` when opening `/stream`/`/stream/ws`, so live prices/books/trades start immediately. A 100 ZEN per-bet UI cap mirrors backend limits.
+- **Server actions + API proxies** – SSR routes call the FastAPI backend directly, while `app/api/*` proxies pass search/proofs/contact traffic through Next to preserve cookies/headers. `AppProviders` shares a single React Query + Wagmi config across the tree.
+- **Streaming + FX resilience** – `usePriceStream`/`useLiveOutcomePrices` multiplex a shared WS stream per market with backoff and history seeding; `useFxStream` keeps one FX WS alive with HTTP fallbacks and stale guards so price cards stay safe when WS is blocked or slow.
 - **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
 
 ---

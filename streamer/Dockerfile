@@ -18,6 +18,13 @@ RUN uv sync --frozen --no-install-project --extra dev
 
 COPY app /app/app
 
+# Drop privileges to a dedicated user.
+ARG APP_USER=streamer
+ARG APP_GROUP=streamer
+RUN id -u "${APP_USER}" >/dev/null 2>&1 || (groupadd -r "${APP_GROUP}" && useradd --create-home -r -g "${APP_GROUP}" "${APP_USER}")
+RUN chown -R "${APP_USER}:${APP_GROUP}" /app
+USER ${APP_USER}
+
 EXPOSE 8100
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -m app.healthcheck
 

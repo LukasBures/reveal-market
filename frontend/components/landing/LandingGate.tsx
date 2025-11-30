@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import Image from "next/image";
 
 import { LandingAccessForm } from "@/components/landing/LandingAccessForm";
 
@@ -89,13 +89,11 @@ export function LandingGate() {
           <div className="wolf-aura flex flex-col items-center gap-4 overflow-hidden p-6 text-center lg:text-left">
             <div className="relative">
               <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/25 via-transparent to-transparent blur-3xl opacity-70" />
-              <Image
+              <img
                 src="/brand/reveal-wolf-03.png"
                 alt="Reveal Market wolf illustration"
-                width={360}
-                height={360}
-                priority
                 className="relative z-10 w-64 max-w-full drop-shadow-[0_45px_90px_rgba(0,0,0,0.65)]"
+                loading="eager"
               />
             </div>
             <p className="text-sm uppercase tracking-[0.4em] text-white/60">Proof-ready settlement stack</p>

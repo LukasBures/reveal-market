@@ -41,3 +41,24 @@ def test_structured_formatter_shape() -> None:
     assert "reveal_market.api" in output
     assert "test.event" in output
     assert "| INFO |" in output.upper()
+
+
+def test_resolve_log_level_defaults_to_info(monkeypatch) -> None:
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    level_name, level = logging_config.resolve_log_level()
+    assert level_name == "INFO"
+    assert level == logging.INFO
+
+
+def test_resolve_log_level_invalid_falls_back_to_default(monkeypatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "nope")
+    level_name, level = logging_config.resolve_log_level("DEBUG")
+    assert level_name == "DEBUG"
+    assert level == logging.DEBUG
+
+
+def test_resolve_log_level_respects_valid_env(monkeypatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "warning")
+    level_name, level = logging_config.resolve_log_level()
+    assert level_name == "WARNING"
+    assert level == logging.WARNING
