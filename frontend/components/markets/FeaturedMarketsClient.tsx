@@ -25,6 +25,7 @@ type ClientProps = {
   emptyNotice?: string;
   status?: string;
   onlyActive?: boolean;
+  trending?: boolean;
 };
 
 /**
@@ -39,6 +40,7 @@ export function FeaturedMarketsClient({
   emptyNotice,
   status = "active",
   onlyActive = true,
+  trending,
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
@@ -48,8 +50,12 @@ export function FeaturedMarketsClient({
 
   const DEFAULT_BATCH = 40;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
-  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}`;
-  const sortByPopularity = (a: MarketSummary, b: MarketSummary) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0);
+  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}`;
+  const sortByPopularity = (a: MarketSummary, b: MarketSummary) => {
+    const score = (m: MarketSummary) =>
+      Math.max(m.volume24hUsd ?? 0, m.orderbookVolumeUsd ?? 0, m.liquidityUsd ?? 0, 0);
+    return score(b) - score(a);
+  };
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
@@ -75,6 +81,7 @@ export function FeaturedMarketsClient({
     searchQuery,
     category: normalizedCategory,
     status,
+    trending,
     initialData: initialMarkets,
   });
 
@@ -117,6 +124,7 @@ export function FeaturedMarketsClient({
             category: normalizedCategory,
             offset: markets.length,
             status,
+            trending,
           });
           const activeAdditions = filterByStatus(additions);
           if (activeAdditions.length === 0) {
@@ -146,7 +154,7 @@ export function FeaturedMarketsClient({
         }
       });
     },
-    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery, status, filterByStatus],
+    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery, status, filterByStatus, trending],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;

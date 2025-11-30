@@ -90,11 +90,12 @@ class PriceStreamer:
             ws_stale = True
         if ws_stale:
             self.state.fx_ws_connected = False
-        needs_rest = (
-            ws_stale
-            or not self.state.fx_last_update
-            or (now - (self.state.fx_last_update or now)).total_seconds() > self.settings.fx_max_age_seconds
-        )
+        # Only hit REST when we have no quote or the current one is too old. WS staleness alone is not enough
+        # if we still have a fresh quote within `fx_max_age_seconds`.
+        age_seconds: float | None = None
+        if self.state.fx_last_update:
+            age_seconds = (now - self.state.fx_last_update).total_seconds()
+        needs_rest = (age_seconds is None) or (age_seconds > self.settings.fx_max_age_seconds)
         if self.settings.fx_rest_enabled and needs_rest:
             reason = "ws_stale" if ws_stale else "max_age"
             logger.info(

@@ -15,12 +15,15 @@ export async function GET(request: Request) {
   const searchQuery = params.get("search") ?? undefined;
   const category = params.get("category") ?? undefined;
   const status = params.get("status") ?? undefined;
+  const trending = params.get("trending");
+  const trendingFlag = trending === "1" || trending?.toLowerCase() === "true";
 
   const markets = await fetchFeaturedMarkets(limit, {
     searchQuery,
     category,
     offset,
     status,
+    trending: trendingFlag,
   });
 
   return NextResponse.json(markets);

@@ -125,6 +125,19 @@ class StreamState:
                     quote = await self._fetch_fx_from_url(self.settings.fx_secondary_rest_url, "cryptocompare_rest")
                 if quote:
                     return quote
+                # If the REST payload was ignored due to priority/filters, keep the existing quote without
+                # spamming rejection logs.
+                if self.fx_last_error is None and self.fx_quote:
+                    logger.info(
+                        "REST FX ignored; keeping current quote",
+                        extra={
+                            "event": "fx.refresh.ignored",
+                            "source": label or "binance_rest",
+                            "last_source": self.fx_last_source or "unknown",
+                            "stale": self.fx_quote.stale,
+                        },
+                    )
+                    return self.fx_quote
                 logger.info(
                     "REST FX rejected by sanity checks",
                     extra={
@@ -190,7 +203,11 @@ class StreamState:
         now = datetime.now(UTC)
         key = f"{self.settings.cache_prefix}:{market_id}:{outcome}"
         channel = f"{self.settings.pubsub_prefix}:{market_id}"
-        mapping = {k: str(v) for k, v in payload.items()}
+        # Preserve structured fields by JSON-encoding lists/dicts; fall back to string for scalars.
+        mapping = {
+            k: json.dumps(v) if isinstance(v, (list, dict)) else ("" if v is None else str(v))
+            for k, v in payload.items()
+        }
         if self.settings.signing_secret:
             mapping["sig"] = self._sign_payload(mapping)
         await self.redis.hset(key, mapping=mapping)

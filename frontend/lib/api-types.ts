@@ -1,3 +1,14 @@
+export type MarketSibling = {
+  eventId: string;
+  title?: string;
+  groupItemTitle?: string | null;
+  groupItemThreshold?: number | null;
+  groupPosition?: number | null;
+  outcomePrices?: number[] | null;
+  volume24hUsd?: number | null;
+  liquidityUsd?: number | null;
+};
+
 export type MarketSummary = {
   eventId: string;
   title: string;
@@ -22,11 +33,15 @@ export type MarketSummary = {
   enableOrderBook?: boolean | null;
   clobTokenIds?: string[] | null;
   imageVariants?: string[] | null;
-  popularityScore?: number;
   volume24hUsd?: number;
   orderbookVolumeUsd?: number;
   tradesQuantity?: number;
   openInterestUsd?: number;
+  groupSlug?: string | null;
+  groupItemTitle?: string | null;
+  groupItemThreshold?: number | null;
+  groupPosition?: number | null;
+  siblings?: MarketSibling[];
 };
 
 export type MarketDetail = MarketSummary & {
@@ -63,6 +78,13 @@ export type MarketDetail = MarketSummary & {
   enableOrderBook?: boolean | null;
   clobTokenIds?: string[] | null;
   imageVariants?: string[] | null;
+};
+
+export type GroupedMarkets = {
+  groupSlug: string;
+  markets: MarketDetail[];
+  aggregateVolume24hUsd?: number | null;
+  aggregateLiquidityUsd?: number | null;
 };
 
 export type ProofReceipt = {
@@ -118,4 +140,5 @@ export type FetchFeaturedMarketsOptions = {
   offset?: number;
   revalidate?: number;
   status?: string;
+  trending?: boolean;
 };

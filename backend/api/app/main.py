@@ -30,6 +30,7 @@ from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import (
     category_cache_key,
+    group_cache_key,
     markets_list_cache_key,
     proof_receipt_cache_key,
     resolution_cache_key,
@@ -41,7 +42,7 @@ from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from shared.onchain import OnChainConfigurationError
 from shared.onchain.client import load_account
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from web3 import Web3
@@ -70,6 +71,11 @@ logger.info("service configuration", extra={"event": "service.config", "config":
 mode_env = resolve_mode()
 is_production = mode_env == "prod" or settings.environment.lower() == "production"
 preset = get_preset()
+TRENDING_MIN_LIQUIDITY = 0
+TRENDING_MIN_VOLUME_24H = 0
+TRENDING_MIN_ORDERBOOK = 0
+TRENDING_MIN_TRADES = 0
+TRENDING_MIN_SCORE = 0.0
 logger.info(
     "service environment resolved",
     extra={
@@ -161,25 +167,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
-allowed_hosts = list(settings.allowed_hosts)
-if not allowed_hosts:
-    allowed_hosts = list(preset["api_allowed_hosts"])
-elif allowed_hosts != ["*"] and not is_production:
-    allowed_hosts = list({*allowed_hosts, *preset["api_allowed_hosts"]})
+# Use mode presets for host/CORS defaults so deployments don't depend on env quirks.
+allowed_hosts = list(preset["api_allowed_hosts"])
 if allowed_hosts and allowed_hosts != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 # Expand CORS origins in non-production environments to include local dev hosts
 # so browser clients hitting api.localhost/http://localhost work without manual overrides.
-cors_origins = list(settings.cors_allow_origins)
-expected_prod_origins = set(preset["api_cors_origins"])
+cors_origins = list(preset["api_cors_origins"])
+expected_prod_origins = set(cors_origins if is_production else preset["api_cors_origins"])
 local_origins = set(preset["api_cors_origins"]) if not is_production else set()
-if not cors_origins:
-    cors_origins = list(expected_prod_origins if is_production else preset["api_cors_origins"])
-elif not is_production:
-    cors_origins = list({*cors_origins, *local_origins})
-else:
-    cors_origins = list({*cors_origins, *expected_prod_origins})
+if not is_production:
+    cors_origins = list(local_origins)
 if cors_origins and cors_origins != ["*"] and is_production:
     missing_cors = sorted(origin for origin in expected_prod_origins if origin not in cors_origins)
     if missing_cors:
@@ -190,6 +189,8 @@ if cors_origins and cors_origins != ["*"] and is_production:
             message="RM_CORS_ALLOW_ORIGINS missing expected frontend origins",
             missing=missing_cors,
         )
+# Keep settings in sync with the middleware payload so /health reflects reality.
+settings.cors_allow_origins = cors_origins
 
 app.add_middleware(
     CORSMiddleware,
@@ -931,6 +932,270 @@ def _apply_market_caps(market: schemas.MarketResponse) -> None:
         market.caps = _build_market_caps()
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        numeric = float(value)
+        if numeric != numeric:  # NaN guard
+            return None
+        return numeric
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_group_threshold(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        cleaned = value.strip().lower().replace(",", "").replace("$", "")
+        cleaned = cleaned.lstrip("><= ")
+        multiplier = 1.0
+        if cleaned.endswith("k"):
+            multiplier = 1_000.0
+            cleaned = cleaned[:-1]
+        elif cleaned.endswith("m"):
+            multiplier = 1_000_000.0
+            cleaned = cleaned[:-1]
+        elif cleaned.endswith("b"):
+            multiplier = 1_000_000_000.0
+            cleaned = cleaned[:-1]
+        match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(0)) * multiplier
+        except Exception:
+            return None
+    return None
+
+
+def _parse_threshold_from_title(title: str | None) -> float | None:
+    if not title:
+        return None
+    cleaned = title.strip().lower().replace(",", "")
+    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    if not match:
+        return None
+    suffix = cleaned[match.end() :].strip()
+    multiplier = 1.0
+    if suffix.startswith("k"):
+        multiplier = 1_000.0
+    elif suffix.startswith("m"):
+        multiplier = 1_000_000.0
+    elif suffix.startswith("b"):
+        multiplier = 1_000_000_000.0
+    try:
+        return float(match.group(0)) * multiplier
+    except Exception:
+        return None
+
+
+def _normalize_datetime(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _load_group_aggregates(session: Session, slugs: set[str]) -> dict[str, dict[str, float | None]]:
+    if not slugs:
+        return {}
+    stmt = (
+        select(
+            models.Market.group_slug,
+            func.sum(models.Market.volume_24h_usd),
+            func.sum(models.Market.liquidity_usd),
+        )
+        .where(models.Market.group_slug.in_(list(slugs)))
+        .group_by(models.Market.group_slug)
+    )
+    aggregates: dict[str, dict[str, float | None]] = {}
+    for slug, volume_sum, liquidity_sum in session.execute(stmt):
+        if not slug:
+            continue
+        aggregates[slug] = {
+            "volume_24h_usd": _safe_float(volume_sum),
+            "liquidity_usd": _safe_float(liquidity_sum),
+        }
+    return aggregates
+
+
+def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.MarketSibling]:
+    normalized = (group_slug or "").strip().lower()
+    if not normalized:
+        return []
+    cache = get_cache_client()
+    cache_key = group_cache_key(normalized)
+    cached = get_json(cache, cache_key)
+    if cached is not None:
+        try:
+            return [schemas.MarketSibling.model_validate(item) for item in cached]
+        except Exception as exc:  # pragma: no cover - defensive cache parse
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="markets.group.cache_parse_failed",
+                message="failed to parse cached siblings payload",
+                group_slug=normalized,
+                error=str(exc),
+            )
+
+    markets = session.execute(select(models.Market).where(models.Market.group_slug == normalized)).scalars().all()
+    if not markets:
+        return []
+    ids = [m.id for m in markets if m.id is not None]
+    outcome_map: dict[int, list[models.MarketOutcome]] = {}
+    if ids:
+        outcome_rows = session.execute(
+            select(models.MarketOutcome)
+            .where(models.MarketOutcome.market_id.in_(ids))
+            .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+        ).scalars()
+        for row in outcome_rows:
+            outcome_map.setdefault(row.market_id, []).append(row)
+    meta_map: dict[int, models.MarketGammaMetadata] = {}
+    if ids:
+        meta_rows = session.execute(
+            select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(ids))
+        ).scalars()
+        meta_map = {row.market_id: row for row in meta_rows}
+
+    siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None, float | None]] = []
+    for record in markets:
+        meta = meta_map.get(record.id)
+        outcomes = outcome_map.get(getattr(record, "id", -1), [])
+        prices = [float(row.price) if row.price is not None else None for row in outcomes]
+        threshold = _parse_group_threshold(getattr(meta, "group_item_threshold", None) if meta else None)
+        title_value = getattr(meta, "group_item_title", None) if meta else None
+        threshold = threshold or _parse_threshold_from_title(title_value)
+        position = getattr(record, "group_position", None)
+        if position is None and threshold is not None:
+            try:
+                position = int(threshold)
+            except (TypeError, ValueError, OverflowError):
+                position = None
+        sibling = schemas.MarketSibling(
+            event_id=record.event_id,
+            title=record.title,
+            group_item_title=title_value,
+            group_item_threshold=threshold,
+            group_position=position,
+            outcome_prices=prices if any(p is not None for p in prices) else None,
+            liquidity_usd=_safe_float(record.liquidity_usd),
+            volume_24h_usd=_safe_float(record.volume_24h_usd),
+        )
+        siblings_raw.append(
+            (
+                sibling,
+                _normalize_datetime(getattr(record, "closes_at", None)),
+                getattr(record, "slug", None) or sibling.event_id,
+                position,
+                threshold,
+            )
+        )
+
+    def _sort_key(item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None, float | None]):
+        sibling, closes_at, slug_value, position_value, threshold_value = item
+        primary = (
+            position_value
+            if position_value is not None
+            else threshold_value
+            if threshold_value is not None
+            else float("inf")
+        )
+        close_ts = closes_at or datetime.max.replace(tzinfo=UTC)
+        return (primary, close_ts, slug_value or sibling.event_id)
+
+    siblings_raw.sort(key=_sort_key)
+    siblings = [item[0] for item in siblings_raw]
+    if cache is not None and siblings:
+        try:
+            schema_tag = get_schema_tag(cache, settings.schema_version_key)
+            set_json(cache, cache_key, [sib.model_dump(mode="json") for sib in siblings], settings.cache_ttl_seconds)
+            add_tag(cache, schema_tag, cache_key)
+            add_tag(cache, "markets:group", cache_key)
+            add_tag(cache, f"group:{normalized}", cache_key)
+        except Exception as exc:  # pragma: no cover - cache best-effort
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="markets.group.cache_write_failed",
+                message="failed to persist siblings cache payload",
+                group_slug=normalized,
+                error=str(exc),
+            )
+    return siblings
+
+
+def _sum_sibling_volume(siblings: list[schemas.MarketSibling]) -> float | None:
+    total = 0.0
+    any_value = False
+    for sibling in siblings:
+        value = _safe_float(getattr(sibling, "volume_24h_usd", None))
+        if value is not None:
+            total += value
+            any_value = True
+    return total if any_value else None
+
+
+def _sum_sibling_liquidity(siblings: list[schemas.MarketSibling]) -> float | None:
+    total = 0.0
+    any_value = False
+    for sibling in siblings:
+        value = _safe_float(getattr(sibling, "liquidity_usd", None))
+        if value is not None:
+            total += value
+            any_value = True
+    return total if any_value else None
+
+
+def _attach_group_fields(
+    session: Session, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
+) -> None:
+    slug_map: dict[str, list[schemas.MarketResponse]] = {}
+    for market in markets:
+        slug = getattr(market, "group_slug", None)
+        if not slug:
+            continue
+        if getattr(market, "group_item_threshold", None) is None and getattr(market, "group_item_title", None):
+            fallback = _parse_threshold_from_title(getattr(market, "group_item_title", None))
+            if fallback is not None:
+                market.group_item_threshold = fallback
+                if getattr(market, "group_position", None) is None:
+                    try:
+                        market.group_position = int(fallback)
+                    except (TypeError, ValueError, OverflowError):
+                        market.group_position = None
+        slug_map.setdefault(slug, []).append(market)
+    if not slug_map:
+        return
+    aggregates = _load_group_aggregates(session, set(slug_map.keys()))
+    for slug, group_markets in slug_map.items():
+        siblings: list[schemas.MarketSibling] | None = None
+        if include_siblings:
+            siblings = _get_group_siblings(session, slug)
+        aggregate = aggregates.get(slug)
+        aggregate_volume = aggregate.get("volume_24h_usd") if aggregate else None
+        aggregate_liquidity = aggregate.get("liquidity_usd") if aggregate else None
+        if siblings is not None:
+            aggregate_volume = aggregate_volume or _sum_sibling_volume(siblings)
+            aggregate_liquidity = aggregate_liquidity or _sum_sibling_liquidity(siblings)
+        for market in group_markets:
+            if siblings is not None:
+                market.siblings = siblings
+            if aggregate_volume is not None:
+                market.volume_24h_usd = aggregate_volume
+            if aggregate_liquidity is not None:
+                market.liquidity_usd = aggregate_liquidity
+
+
 def _load_normalized_fields(session: Session, markets: list[schemas.MarketResponse]) -> None:
     """Populate outcomes, prices, tags, clob tokens, and gamma metadata onto market models."""
 
@@ -1010,6 +1275,47 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
             target.order_min_size = Decimal(str(meta.order_min_size))
         if meta.enable_order_book is not None:
             target.enable_order_book = meta.enable_order_book
+        # Basic liquidity/volume hints from Gamma metadata for popularity scoring.
+        try:
+            if meta.liquidity_clob is not None:
+                target.liquidity_usd = float(meta.liquidity_clob)
+            elif meta.liquidity_num is not None:
+                target.liquidity_usd = float(meta.liquidity_num)
+            elif meta.liquidity is not None:
+                target.liquidity_usd = float(meta.liquidity)
+        except (TypeError, ValueError):
+            target.liquidity_usd = target.liquidity_usd or None
+        try:
+            if meta.volume1mo is not None:
+                target.volume_24h_usd = float(meta.volume1mo) / 30  # rough average
+            elif meta.volume_num is not None:
+                target.volume_24h_usd = float(meta.volume_num)
+            elif meta.volume is not None:
+                target.volume_24h_usd = float(meta.volume)
+        except (TypeError, ValueError):
+            target.volume_24h_usd = target.volume_24h_usd or None
+        try:
+            if meta.volume_clob is not None:
+                target.orderbook_volume_usd = float(meta.volume_clob)
+        except (TypeError, ValueError):
+            target.orderbook_volume_usd = target.orderbook_volume_usd or None
+        if meta.group_slug and not getattr(target, "group_slug", None):
+            target.group_slug = meta.group_slug
+        if meta.group_item_title and not getattr(target, "group_item_title", None):
+            target.group_item_title = meta.group_item_title
+        threshold_value = None
+        if meta.group_item_threshold is not None:
+            threshold_value = _parse_group_threshold(meta.group_item_threshold)
+            target.group_item_threshold = threshold_value
+        if threshold_value is None and getattr(target, "group_item_title", None):
+            threshold_value = _parse_threshold_from_title(target.group_item_title)
+            if threshold_value is not None:
+                target.group_item_threshold = threshold_value
+        if getattr(target, "group_position", None) is None and threshold_value is not None:
+            try:
+                target.group_position = int(threshold_value)
+            except (TypeError, ValueError, OverflowError):
+                target.group_position = None
 
 
 def _attach_resolution_to_market(
@@ -1037,6 +1343,39 @@ def _augment_market_models(markets: list[schemas.MarketResponse]) -> list[schema
     for market in markets:
         _apply_market_caps(market)
     return markets
+
+
+def _compute_market_popularity(market: schemas.MarketResponse) -> float:
+    def clamp(value: Any) -> float:
+        try:
+            if value is None:
+                return 0.0
+            numeric = float(value)
+            return numeric if numeric > 0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    liquidity = clamp(getattr(market, "liquidity_usd", None))
+    volume = clamp(getattr(market, "volume_24h_usd", None))
+    orderbook = clamp(getattr(market, "orderbook_volume_usd", None))
+    trades = clamp(getattr(market, "trades_quantity", None))
+    score = (liquidity**0.5) * 0.4 + (volume**0.5) * 0.35 + (orderbook**0.5) * 0.2 + (trades**0.5) * 0.05
+    return score if score > 0 and score == score else 0.0
+
+
+def _is_trending_market(market: schemas.MarketResponse, popularity: float | None = None) -> bool:
+    liquidity = getattr(market, "liquidity_usd", None) or 0
+    volume = getattr(market, "volume_24h_usd", None) or 0
+    orderbook = getattr(market, "orderbook_volume_usd", None) or 0
+    trades = getattr(market, "trades_quantity", None) or 0
+    popularity = popularity if popularity is not None else _compute_market_popularity(market)
+    return (
+        popularity >= TRENDING_MIN_SCORE
+        and liquidity >= TRENDING_MIN_LIQUIDITY
+        and volume >= TRENDING_MIN_VOLUME_24H
+        and (orderbook >= TRENDING_MIN_ORDERBOOK or orderbook == 0)
+        and (trades >= TRENDING_MIN_TRADES or trades == 0)
+    )
 
 
 def _load_resolution_records(session: Session, markets: list[schemas.MarketResponse]) -> dict[str, models.Resolution]:
@@ -1069,10 +1408,13 @@ def _load_outcomes_for_market(session: Session, market: models.Market | schemas.
     return list(rows)
 
 
-def _enrich_market_models(session: Session, markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
+def _enrich_market_models(
+    session: Session, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
+) -> list[schemas.MarketResponse]:
     """Attach metadata, caps, and cached resolutions to market responses."""
 
     _load_normalized_fields(session, markets)
+    _attach_group_fields(session, markets, include_siblings=include_siblings)
     _augment_market_models(markets)
     resolution_map = _load_resolution_records(session, markets)
     for market in markets:
@@ -1948,15 +2290,29 @@ def list_markets(
         ),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
+    order_by: Annotated[str | None, Query(description="Order results (popularity|recent)")] = None,
+    trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
+    popularity_mode = order_by == "popularity" or bool(trending)
+    if popularity_mode and not status:
+        status = "active"
     normalized_search = search
     if search is not None:
         normalized = search.strip().lower()
         if len(normalized) > 120:
             normalized = normalized[:120]
         normalized_search = normalized
-    cache_key = markets_list_cache_key(status, category, oracle, normalized_search, limit, offset)
+    cache_key = markets_list_cache_key(
+        status,
+        category,
+        oracle,
+        normalized_search,
+        limit,
+        offset,
+        order_by=order_by or ("popularity" if popularity_mode else None),
+        trending=trending,
+    )
     cache = get_cache_client()
     log_event(
         logger,
@@ -1970,6 +2326,8 @@ def list_markets(
         search=normalized_search,
         limit=limit,
         offset=offset,
+        order_by=order_by,
+        trending=bool(trending),
     )
     start = time.perf_counter()
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, normalized_search)
@@ -2005,17 +2363,37 @@ def list_markets(
         MARKETS_CACHE_COUNTER.labels(outcome="bypass", status=status or "*", category=category or "*").inc()
         update_cache_context(request, cache_key=None, hit=False, source="markets:list")
 
+    query_limit = limit
+    query_offset = offset
+    if popularity_mode:
+        query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
+        query_offset = 0
     markets = crud.get_markets(
         session,
         status=status,
         category=category,
         oracle=oracle,
         search=normalized_search,
-        limit=limit,
-        offset=offset,
+        limit=query_limit,
+        offset=query_offset,
     )
     market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
+    if popularity_mode:
+        popularity_scores = {m.event_id: _compute_market_popularity(m) for m in market_models}
+        selected = market_models
+        if trending:
+            trending_slice = [m for m in market_models if _is_trending_market(m, popularity_scores.get(m.event_id))]
+            if trending_slice:
+                selected = trending_slice
+        selected.sort(
+            key=lambda m: (
+                popularity_scores.get(m.event_id, 0),
+                getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+            ),
+            reverse=True,
+        )
+        market_models = selected[:limit]
     if not market_models:
         log_event(
             logger,
@@ -2028,6 +2406,8 @@ def list_markets(
             search=search,
             limit=limit,
             offset=offset,
+            order_by=order_by,
+            trending=bool(trending),
         )
     if cache_enabled and market_models:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
@@ -2055,6 +2435,8 @@ def list_markets(
             limit=limit,
             offset=offset,
             result_count=len(market_models),
+            order_by=order_by,
+            trending=bool(trending),
         )
     else:
         duration = (time.perf_counter() - start) * 1000
@@ -2073,6 +2455,8 @@ def list_markets(
             limit=limit,
             offset=offset,
             result_count=len(market_models),
+            order_by=order_by,
+            trending=bool(trending),
         )
     return market_models
 
@@ -2203,6 +2587,40 @@ def list_markets_by_category(
         )
         update_cache_context(request, cache_key=None, hit=False, source="markets:category")
     return market_models
+
+
+@app.get("/markets/group/{group_slug}", response_model=schemas.GroupedMarketsResponse, tags=["markets"])
+def list_grouped_markets(
+    group_slug: str,
+    session: Session = Depends(get_session),
+) -> schemas.GroupedMarketsResponse:
+    normalized_slug = group_slug.strip().lower()
+    markets = crud.get_markets_by_group_slug(session, normalized_slug)
+    if not markets:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="group_not_found")
+    market_models = _enrich_market_models(
+        session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
+    )
+
+    def _group_sort_key(market: schemas.MarketResponse):
+        position = getattr(market, "group_position", None)
+        threshold = getattr(market, "group_item_threshold", None)
+        closes_at = _normalize_datetime(getattr(market, "closes_at", None))
+        return (
+            position if position is not None else threshold if threshold is not None else float("inf"),
+            closes_at or datetime.max.replace(tzinfo=UTC),
+            getattr(market, "slug", None) or getattr(market, "event_id", ""),
+        )
+
+    market_models.sort(key=_group_sort_key)
+    aggregate_volume = _safe_float(market_models[0].volume_24h_usd) if market_models else None
+    aggregate_liquidity = _safe_float(market_models[0].liquidity_usd) if market_models else None
+    return schemas.GroupedMarketsResponse(
+        group_slug=normalized_slug,
+        markets=market_models,
+        aggregate_volume_24h_usd=aggregate_volume,
+        aggregate_liquidity_usd=aggregate_liquidity,
+    )
 
 
 @app.get("/markets/onchain", tags=["markets"])
@@ -2628,7 +3046,7 @@ def read_market(
     if cached is not None:
         duration = (time.perf_counter() - start) * 1000
         model = schemas.MarketResponse.model_validate(cached)
-        _enrich_market_models(session, [model])
+        _enrich_market_models(session, [model], include_siblings=True)
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:detail")
         MARKET_DETAIL_CACHE_COUNTER.labels(outcome="hit").inc()
         log_event(
@@ -2647,7 +3065,7 @@ def read_market(
     if not market:
         MARKET_DETAIL_CACHE_COUNTER.labels(outcome="miss").inc()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
-    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
+    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)], include_siblings=True)[0]
     duration = (time.perf_counter() - start) * 1000
     if cache_available:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
@@ -2660,6 +3078,8 @@ def read_market(
             add_tag(cache, f"market:{event_id}", cache_key)
             if getattr(response, "condition_id", None):
                 add_tag(cache, f"resolution:{str(response.condition_id).lower()}", cache_key)
+            if getattr(response, "group_slug", None):
+                add_tag(cache, f"group:{str(response.group_slug)}", cache_key)
             log_event(
                 logger,
                 logging.INFO,
@@ -2733,7 +3153,11 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
         payload.pop(legacy, None)
     market = crud.create_or_update_market(session, schemas.MarketCreate(**payload))
     session.flush()
-    _invalidate_market_cache(market.event_id, getattr(market, "condition_id", None))
+    _invalidate_market_cache(
+        market.event_id,
+        getattr(market, "condition_id", None),
+        getattr(market, "group_slug", None),
+    )
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -2766,7 +3190,11 @@ def update_market(
     )
     crud.patch_market(session, market, update)
     session.flush()
-    _invalidate_market_cache(event_id, getattr(market, "condition_id", None))
+    _invalidate_market_cache(
+        event_id,
+        getattr(market, "condition_id", None),
+        getattr(market, "group_slug", None),
+    )
     duration = (time.perf_counter() - start) * 1000
     log_event(
         logger,
@@ -2784,7 +3212,9 @@ def _market_detail_cache_key(event_id: str) -> str:
     return f"{MARKET_DETAIL_PREFIX}:{event_id}"
 
 
-def _invalidate_market_cache(event_id: str | None = None, condition_id: str | None = None) -> None:
+def _invalidate_market_cache(
+    event_id: str | None = None, condition_id: str | None = None, group_slug: str | None = None
+) -> None:
     cache = get_cache_client()
     log_event(
         logger,
@@ -2799,10 +3229,13 @@ def _invalidate_market_cache(event_id: str | None = None, condition_id: str | No
     invalidate_tag(cache, "markets:category")
     invalidate_tag(cache, "markets:tag")
     invalidate_tag(cache, "markets:suggest")
+    invalidate_tag(cache, "markets:group")
     if event_id:
         invalidate_tag(cache, f"market:{event_id}")
     if condition_id:
         invalidate_tag(cache, f"resolution:{condition_id.lower()}")
+    if group_slug:
+        invalidate_tag(cache, f"group:{group_slug}")
 
 
 _RNG = random.SystemRandom()

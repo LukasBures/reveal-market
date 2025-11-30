@@ -14,6 +14,7 @@ import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
 import { MarketActivityPanel } from "@/components/markets/MarketActivityPanel";
 import { fetchMarketActivity } from "@/lib/streamer-data";
+import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -236,12 +237,17 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
   const coverImage = resolveMarketImage(market);
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
+  const siblings = Array.isArray(market.siblings) ? market.siblings : [];
+  const isGrouped = Boolean(market.groupSlug && siblings.length > 1);
   const activity = market.conditionId ? await fetchMarketActivity(market.conditionId, { limit: 12 }) : [];
 
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
+          {isGrouped && market.groupSlug && (
+            <GroupedMarketSelector groupSlug={market.groupSlug} siblings={siblings} activeEventId={canonicalEventId} />
+          )}
           <MarketDetailHeader market={market} coverImage={coverImage} />
           <MarketLiveStatusBar marketId={canonicalEventId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
@@ -271,7 +277,6 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                   </div>
                 </div>
               </section>
-              <MarketActivityPanel activity={activity} />
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">
@@ -279,6 +284,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 marketAddress={market.marketAddress}
                 marketId={canonicalEventId}
                 outcomes={market.outcomes ?? []}
+                outcomePrices={market.outcomePrices ?? []}
                 initialOutcomeId={0}
               />
               <MarketLivePanels marketId={canonicalEventId} tokenIds={tokenIds} />

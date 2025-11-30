@@ -6,6 +6,9 @@ from functools import lru_cache
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared.env_presets import get_preset
+
+PRESET = get_preset()
 
 
 def _split_csv(value: str) -> list[str]:
@@ -48,9 +51,9 @@ class Settings(BaseSettings):
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
-    cache_ttl_seconds: int = Field(default=30, ge=1)
+    cache_ttl_seconds: int = Field(default=300, ge=1)
     cacheable_market_limit: int = Field(default=20, ge=1, le=250)
-    market_record_cache_ttl_seconds: int = Field(default=120, ge=30)
+    market_record_cache_ttl_seconds: int = Field(default=600, ge=30)
     cache_hydrate_on_startup: bool = Field(default=True)
     cache_hydrate_limit: int = Field(default=20, ge=1, le=250)
     cache_refresh_enabled: bool = Field(default=True)
@@ -93,8 +96,8 @@ class Settings(BaseSettings):
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)
-    allowed_hosts: list[str] = Field(default_factory=list)
-    cors_allow_origins: list[str] = Field(default_factory=list)
+    allowed_hosts: list[str] = Field(default_factory=lambda: list(PRESET.get("api_allowed_hosts", [])))
+    cors_allow_origins: list[str] = Field(default_factory=lambda: list(PRESET.get("api_cors_origins", [])))
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS"])
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)

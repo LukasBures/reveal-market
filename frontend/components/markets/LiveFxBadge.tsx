@@ -1,13 +1,15 @@
 "use client";
 
 import { useFxStream } from "@/hooks/useFxStream";
+import { formatZenUsd } from "@/lib/fx";
 
 export function LiveFxBadge() {
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const stale = status === "stale" || fx?.stale;
   const unavailable = status === "error";
   const live = status === "live" && !stale && !unavailable;
-  const label = unavailable ? "FX unavailable" : stale ? "FX stale" : `FX live ${fx ? fx.zen_usd.toFixed(4) : ""} USD`;
+  const fxValue = formatZenUsd(fx?.zen_usd);
+  const label = unavailable ? "FX unavailable" : stale ? "FX stale" : `FX live ${fxValue ?? ""} USD`;
   const className = live
     ? "bg-emerald-500/15 text-emerald-100"
     : stale

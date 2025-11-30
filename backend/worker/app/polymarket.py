@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
@@ -41,6 +42,10 @@ class MarketPayload(BaseModel):
     gamma_raw: dict[str, Any] | None = None
     gamma_metadata: dict[str, Any] | None = None
     gamma_events: list[dict[str, Any]] | None = None
+    group_slug: str | None = None
+    group_position: int | None = None
+    group_item_title: str | None = None
+    group_item_threshold: float | None = None
     rake_bps: int | None = None
     condition_id: str | None = None
     question_id: str | None = None
@@ -58,6 +63,10 @@ class MarketPayload(BaseModel):
     enable_order_book: bool | None = None
     image_variants: list[str] | None = None
     closes_at: datetime | None = None
+    liquidity_usd: float | None = None
+    volume_24h_usd: float | None = None
+    orderbook_volume_usd: float | None = None
+    trades_quantity: int | None = None
 
     @classmethod
     def from_gamma(cls, raw: dict[str, Any]) -> MarketPayload:
@@ -100,6 +109,16 @@ class MarketPayload(BaseModel):
         price_tick_size = _coerce_float(raw.get("orderPriceMinTickSize"))
         clob_token_ids = _extract_clob_ids(raw.get("clobTokenIds"))
         image_variants = _collect_images(raw)
+        group_item_title = _clean_string(raw.get("groupItemTitle") or raw.get("group_item_title"))
+        raw_group_threshold = raw.get("groupItemThreshold") or raw.get("group_item_threshold")
+        group_item_threshold = _parse_group_threshold(raw_group_threshold)
+        group_position = None
+        if group_item_threshold is not None:
+            try:
+                group_position = int(group_item_threshold)
+            except (TypeError, ValueError, OverflowError):
+                group_position = None
+        group_slug = _derive_group_slug(slug, raw.get("question"), group_item_title)
 
         gamma_metadata = {
             "gamma_id": str(event_id),
@@ -116,39 +135,21 @@ class MarketPayload(BaseModel):
             "order_min_size": order_min_size,
             "clob_token_id_yes": (clob_token_ids or [None, None])[0] if clob_token_ids else None,
             "clob_token_id_no": (clob_token_ids or [None, None])[1] if clob_token_ids else None,
+            "group_item_title": group_item_title,
+            "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
+            "group_slug": group_slug,
         }
         gamma_events = []
         for event in raw.get("events") or []:
             if isinstance(event, dict):
                 gamma_events.append(event)
 
-        hash_payload = {
-            "event_id": str(event_id),
-            "title": str(title),
-            "slug": str(slug) if slug is not None else None,
-            "category": category,
-            "status": status,
-            "outcomes": outcomes,
-            "outcome_prices": outcome_prices,
-            "tags": tags,
-            "closed": bool(closed) if isinstance(closed, bool) else None,
-            "image_url": str(image_url) if image_url is not None else None,
-            "uma_resolution_status": str(uma_status) if uma_status is not None else None,
-            "condition_id": str(condition_id) if condition_id is not None else None,
-            "question_id": str(question_id) if question_id is not None else None,
-            "closes_at": closes_at.isoformat() if isinstance(closes_at, datetime) else None,
-            "starts_at": starts_at.isoformat() if isinstance(starts_at, datetime) else None,
-            "orders_opened_at": orders_opened_at.isoformat() if isinstance(orders_opened_at, datetime) else None,
-            "resolution_source": resolution_source,
-            "market_maker": market_maker,
-            "order_min_size": order_min_size,
-            "price_tick_size": price_tick_size,
-            "enable_order_book": enable_order_book,
-            "clob_token_ids": clob_token_ids,
-            "image_variants": image_variants,
-        }
+        liquidity_usd = _extract_liquidity(raw)
+        volume_24h_usd = _extract_volume_24h(raw)
+        orderbook_volume_usd = _extract_orderbook_volume(raw)
+        trades_quantity = _extract_trades_quantity(raw)
 
-        return cls(
+        market = cls(
             event_id=str(event_id),
             title=str(title),
             slug=str(slug) if slug is not None else None,
@@ -171,7 +172,7 @@ class MarketPayload(BaseModel):
             closed=bool(closed) if isinstance(closed, bool) else None,
             uma_resolution_status=str(uma_status) if uma_status is not None else None,
             source_updated_at=updated_at,
-            content_hash=_compute_market_hash(hash_payload),
+            content_hash=None,
             closes_at=closes_at,
             starts_at=starts_at,
             orders_opened_at=orders_opened_at,
@@ -182,7 +183,17 @@ class MarketPayload(BaseModel):
             enable_order_book=enable_order_book,
             clob_token_ids=clob_token_ids,
             image_variants=image_variants,
+            liquidity_usd=liquidity_usd,
+            volume_24h_usd=volume_24h_usd,
+            orderbook_volume_usd=orderbook_volume_usd,
+            trades_quantity=trades_quantity,
+            group_slug=group_slug,
+            group_position=group_position,
+            group_item_title=group_item_title,
+            group_item_threshold=group_item_threshold,
         )
+        market.content_hash = _compute_market_hash(_build_market_hash_payload(market))
+        return market
 
 
 class PolymarketClient:
@@ -493,6 +504,68 @@ def _extract_prices(prices: Any) -> list[float] | None:
     return cleaned or None
 
 
+def _slugify(value: str | None) -> str | None:
+    if not value:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or None
+
+
+def _looks_like_range_token(token: str | None) -> bool:
+    if not token:
+        return False
+    if re.search(r"\d", token):
+        return True
+    return token in {"over", "under", "gt", "lt", "gte", "lte", "above", "below"}
+
+
+def _derive_group_slug(slug: str | None, question: str | None, group_item_title: str | None) -> str | None:
+    if not group_item_title:
+        return None
+    base_slug = _slugify(slug) or _slugify(question)
+    if not base_slug:
+        return None
+    if "committed-to-the-" in base_slug:
+        _, remainder = base_slug.split("committed-to-the-", 1)
+        base_slug = remainder or base_slug
+    parts = base_slug.split("-")
+    while parts and _looks_like_range_token(parts[-1]):
+        parts.pop()
+    trimmed = "-".join(parts).strip("-")
+    return trimmed or base_slug
+
+
+def _parse_group_threshold(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        cleaned = value.strip().lower().replace(",", "").replace("$", "")
+        cleaned = cleaned.lstrip("><= ")
+        multiplier = 1.0
+        if cleaned.endswith("k"):
+            multiplier = 1_000.0
+            cleaned = cleaned[:-1]
+        elif cleaned.endswith("m"):
+            multiplier = 1_000_000.0
+            cleaned = cleaned[:-1]
+        elif cleaned.endswith("b"):
+            multiplier = 1_000_000_000.0
+            cleaned = cleaned[:-1]
+        match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(0)) * multiplier
+        except Exception:
+            return None
+    return None
+
+
 def _clean_string(value: Any) -> str | None:
     if isinstance(value, str):
         cleaned = value.strip()
@@ -711,6 +784,63 @@ def _coerce_float(value: Any) -> float | None:
     return None
 
 
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_liquidity(raw: dict[str, Any]) -> float | None:
+    for key in (
+        "liquidity_usd",
+        "liquidityUsd",
+        "liquidityUSD",
+        "liquidity_clob",
+        "liquidityNum",
+        "liquidity_num",
+        "liquidity",
+    ):
+        candidate = _coerce_float(raw.get(key))
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _extract_volume_24h(raw: dict[str, Any]) -> float | None:
+    for key in ("volume24h", "volume_24h", "volume24hr", "volume24hrUsd", "volume24hUsd"):
+        candidate = _coerce_float(raw.get(key))
+        if candidate is not None:
+            return candidate
+    for key in ("volume_clob", "volumeClob", "volume1mo_clob"):
+        candidate = _coerce_float(raw.get(key))
+        if candidate is not None:
+            return candidate
+    for key in ("volume_num", "volumeNum", "volume"):
+        candidate = _coerce_float(raw.get(key))
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _extract_orderbook_volume(raw: dict[str, Any]) -> float | None:
+    for key in ("volume_clob", "volumeClob", "scaledCollateralVolume", "collateralVolume"):
+        candidate = _coerce_float(raw.get(key))
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _extract_trades_quantity(raw: dict[str, Any]) -> int | None:
+    for key in ("tradesQuantity", "trades_count", "tradesCount", "numberOfTrades"):
+        candidate = _coerce_int(raw.get(key))
+        if candidate is not None:
+            return candidate
+    return None
+
+
 def _extract_clob_ids(raw_ids: Any) -> list[str] | None:
     sequence = _coerce_sequence(raw_ids)
     if not sequence:
@@ -778,6 +908,46 @@ def _index_markets_by_identifier(markets: list[MarketPayload]) -> tuple[dict[str
         if market.event_id:
             by_event[str(market.event_id).lower()] = market
     return by_condition, by_slug, by_event
+
+
+def _build_market_hash_payload(market: MarketPayload) -> dict[str, Any]:
+    return {
+        "event_id": market.event_id,
+        "title": market.title,
+        "slug": market.slug,
+        "category": market.category,
+        "status": market.status,
+        "outcomes": market.outcomes,
+        "outcome_prices": market.outcome_prices,
+        "tags": market.tags,
+        "closed": market.closed,
+        "image_url": market.image_url,
+        "uma_resolution_status": market.uma_resolution_status,
+        "condition_id": market.condition_id,
+        "question_id": market.question_id,
+        "closes_at": market.closes_at.isoformat() if isinstance(market.closes_at, datetime) else market.closes_at,
+        "starts_at": market.starts_at.isoformat() if isinstance(market.starts_at, datetime) else market.starts_at,
+        "orders_opened_at": (
+            market.orders_opened_at.isoformat()
+            if isinstance(market.orders_opened_at, datetime)
+            else market.orders_opened_at
+        ),
+        "resolution_source": market.resolution_source,
+        "market_maker": market.market_maker,
+        "order_min_size": market.order_min_size,
+        "price_tick_size": market.price_tick_size,
+        "enable_order_book": market.enable_order_book,
+        "clob_token_ids": market.clob_token_ids,
+        "image_variants": market.image_variants,
+        "liquidity_usd": market.liquidity_usd,
+        "volume_24h_usd": market.volume_24h_usd,
+        "orderbook_volume_usd": market.orderbook_volume_usd,
+        "trades_quantity": market.trades_quantity,
+        "group_slug": market.group_slug,
+        "group_position": market.group_position,
+        "group_item_title": market.group_item_title,
+        "group_item_threshold": market.group_item_threshold,
+    }
 
 
 def _match_clob_market(raw: dict[str, Any], indexes: tuple[dict[str, MarketPayload], ...]) -> MarketPayload | None:

@@ -160,6 +160,10 @@ def _needs_summary(market_record, now: datetime) -> tuple[bool, str]:
     if not summary:
         return True, "summary_missing"
     checked_at = getattr(market_record, "summary_checked_at", None)
+    if isinstance(checked_at, datetime) and (
+        checked_at.tzinfo is None or checked_at.tzinfo.utcoffset(checked_at) is None
+    ):
+        checked_at = checked_at.replace(tzinfo=UTC)
     if checked_at is None:
         return True, "summary_time_unknown"
     age = (now - checked_at).total_seconds()
@@ -172,6 +176,10 @@ def _request_inflight(market_record, now: datetime) -> tuple[bool, float | None]
     requested_at = getattr(market_record, "summary_requested_at", None)
     if requested_at is None:
         return False, None
+    if isinstance(requested_at, datetime) and (
+        requested_at.tzinfo is None or requested_at.tzinfo.utcoffset(requested_at) is None
+    ):
+        requested_at = requested_at.replace(tzinfo=UTC)
     age = (now - requested_at).total_seconds()
     return age < settings.summary_requested_ttl_seconds, age
 

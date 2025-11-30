@@ -101,7 +101,10 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
     for noisy in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         noisy_logger = logging.getLogger(noisy)
         noisy_logger.handlers = []
-        noisy_logger.propagate = True
+        # Silence uvicorn access logs (high-volume) while keeping error logs aligned with our level.
+        if noisy == "uvicorn.access":
+            noisy_logger.setLevel(logging.WARNING)
+        noisy_logger.propagate = False
 
     service_logger = logging.getLogger(service_name)
     service_logger.setLevel(log_level_value)

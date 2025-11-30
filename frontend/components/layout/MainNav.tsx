@@ -8,6 +8,7 @@ import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { useFxStream } from "@/hooks/useFxStream";
 import { PriceBanner } from "@/components/layout/PriceBanner";
 import { resolveUrlConfig } from "@/lib/env-presets";
+import { formatZenUsd } from "@/lib/fx";
 
 const navLinks = [
   { href: "/markets/search", label: "Search" },
@@ -32,7 +33,8 @@ export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { fx, error: fxError, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
-  const fxLabel = fx ? `ZEN/USDC $${Number(fx.zen_usd).toFixed(2)}` : null;
+  const fxValue = formatZenUsd(fx?.zen_usd);
+  const fxLabel = fxValue ? `ZEN/USDC $${fxValue}` : null;
 
   useEffect(() => {
     if (!isMobileMenuOpen) {

@@ -260,7 +260,7 @@ async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
     streamer = DataStreamer(state, state.settings)
     state.subscriptions.add_assets(["123"])
 
-    async def fake_client_get(url):
+    async def fake_client_get(url, params=None):
         class Resp:
             status_code = 200
 
@@ -273,7 +273,7 @@ async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
         return Resp()
 
     with monkeypatch.context() as m:
-        m.setattr("httpx.AsyncClient.get", lambda self, url: fake_client_get(url))
+        m.setattr("httpx.AsyncClient.get", lambda self, url, params=None: fake_client_get(url, params))
         streamer.clob_client = None  # skip midpoint fetch
         await streamer._poll_rest()
     # placeholder should be swapped once token ids are known

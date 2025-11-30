@@ -9,6 +9,7 @@ import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { BaseError, type Address } from "viem";
 import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 import { fetchPriceHistory } from "@/lib/pricing-client";
+import { formatZenUsd } from "@/lib/fx";
 
 type Props = {
   market: MarketDetail;
@@ -50,6 +51,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const fxStaleCombined = fxStale || priceFxStale;
+  const fxValue = formatZenUsd(fx?.zen_usd);
   const tradingHaltedByStream = liveStore.status === "closed" || liveStore.status === "halted";
   const isTradable = !isResolved && !isLocked && !tradingHaltedByStream;
   const { address } = useAccount();
@@ -176,7 +178,7 @@ export function MarketDetailOutcomes({ market }: Props) {
       .filter(Boolean)
       .sort()
       .slice(-1)[0];
-  const fxBadge = fxStaleCombined ? "FX stale" : fx ? `FX ${fx.zen_usd.toFixed(4)} USD` : "FX connecting";
+  const fxBadge = fxStaleCombined ? "FX stale" : fxValue ? `FX ${fxValue} USD` : "FX connecting";
 
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
@@ -439,7 +441,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                       <div className="flex items-center justify-between">
                         <h4 className="text-base font-semibold text-white">Trade {outcome}</h4>
                         <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-100">
-                          Bets in ZEN
+                          Trades in ZEN
                         </span>
                       </div>
                       {!isTradable && (
@@ -482,7 +484,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                             </button>
                           ))}
                           <span className="rounded-full bg-white/5 px-3 py-1 text-white/60">
-                            Max per bet: {effectiveMaxStake.toFixed(3)} ZEN
+                    Max per stake: {effectiveMaxStake.toFixed(3)} ZEN
                           </span>
                         </div>
                       </div>
@@ -591,7 +593,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
                             ? `${quote.remaining_market_stake_zen.toFixed(3)} ZEN`
                             : "n/a"}
-                          {" · "}Max bet (API):{" "}
+                    {" · "}Max stake (API):{" "}
                           {quote.max_stake_zen !== null && quote.max_stake_zen !== undefined
                             ? `${quote.max_stake_zen.toFixed(3)} ZEN`
                             : `${DEFAULT_MAX_STAKE_ZEN} ZEN`}
@@ -639,7 +641,7 @@ export function MarketDetailOutcomes({ market }: Props) {
           profit shown above. Losses forfeit the staked ZEN.
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-100">
-          <li>All bets are denominated in ZEN; rake is charged on the ZEN stake.</li>
+            <li>All commitments are denominated in ZEN; rake is charged on the ZEN stake.</li>
           <li>Profit settles in USDC to keep upside stable while you get your (rake-adjusted) ZEN back.</li>
           <li>Live odds, bids, and asks stream from the streamer (WS/SSE) used by the backend.</li>
         </ul>

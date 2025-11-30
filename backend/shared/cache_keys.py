@@ -8,6 +8,7 @@ CATEGORY_PREFIX = f"{CACHE_VERSION}:markets:category"
 SUGGEST_PREFIX = f"{CACHE_VERSION}:markets:suggest"
 RESOLUTION_PREFIX = f"{CACHE_VERSION}:markets:resolution"
 PROOF_PREFIX = f"{CACHE_VERSION}:proofs:receipt"
+GROUP_PREFIX = f"{CACHE_VERSION}:markets:group"
 
 
 def markets_list_cache_key(
@@ -17,6 +18,8 @@ def markets_list_cache_key(
     search: str | None,
     limit: int,
     offset: int,
+    order_by: str | None = None,
+    trending: bool | None = None,
 ) -> str:
     """Build the cache key used for /markets list responses."""
 
@@ -29,6 +32,10 @@ def markets_list_cache_key(
         f"limit={limit}",
         f"offset={offset}",
     ]
+    if order_by:
+        parts.append(f"order_by={order_by}")
+    if trending is not None:
+        parts.append(f"trending={int(bool(trending))}")
     return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
 
 
@@ -50,6 +57,11 @@ def resolution_cache_key(condition_id: str) -> str:
 def proof_receipt_cache_key(condition_id: str) -> str:
     normalized = (condition_id or "*").strip().lower() or "*"
     return f"{PROOF_PREFIX}:{normalized}"
+
+
+def group_cache_key(group_slug: str) -> str:
+    slug = _slugify(group_slug)
+    return f"{GROUP_PREFIX}:{slug}"
 
 
 def _slugify(value: str | None) -> str:

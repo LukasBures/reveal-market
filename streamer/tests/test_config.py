@@ -6,7 +6,6 @@ from app.config import Settings
 def test_settings_defaults():
     cfg = Settings()
     assert cfg.clob_ws_url.startswith("wss://")
-    assert str(cfg.clob_rest_markets_url) == "https://gamma-api.polymarket.com/markets"
     assert cfg.fx_fallback_price == 0.0
     assert cfg.total_monetization == cfg.worsen_percent + cfg.haircut_percent + cfg.rake_percent
 

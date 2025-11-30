@@ -21,10 +21,12 @@ export async function FeaturedMarketsSection({
   categoryFilter,
   emptyNotice,
 }: Props = {}) {
+  const trending = !categoryFilter && !searchQuery;
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
     status: "active",
+    trending,
   });
 
   if (initialMarkets.length === 0) {
@@ -54,6 +56,7 @@ export async function FeaturedMarketsSection({
       emptyNotice={emptyNotice}
       status="active"
       onlyActive
+      trending={trending}
     />
   );
 }

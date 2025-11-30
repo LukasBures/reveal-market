@@ -9,6 +9,9 @@ from typing import Any
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared.env_presets import get_preset
+
+PRESET = get_preset()
 
 
 def _split_csv(value: str) -> list[str]:
@@ -55,16 +58,18 @@ class Settings(BaseSettings):
     polymarket_empty_page_tolerance: int = Field(default=2, ge=0)
     polymarket_stream_persist: bool = Field(default=False)
     poll_interval_seconds: int = Field(default=60, ge=1)
-    api_base_url: str | None = Field(default="http://localhost:8000")
-    prime_markets_cache_enabled: bool = Field(default=False)
+    api_base_url: str | None = Field(
+        default_factory=lambda: str(PRESET.get("api_internal_base_url", "http://localhost:8000"))
+    )
+    prime_markets_cache_enabled: bool = Field(default=True)
     markets_cache_limit: int = Field(default=18, ge=1, le=250)
     markets_cache_offset: int = Field(default=0, ge=0)
-    markets_cache_ttl_seconds: int = Field(default=30, ge=1)
+    markets_cache_ttl_seconds: int = Field(default=300, ge=1)
     cache_prime_timeout_seconds: float = Field(default=5.0, gt=0)
     category_cache_limit: int = Field(default=18, ge=1, le=250)
     suggest_cache_limit: int = Field(default=5, ge=1, le=25)
     heartbeat_key: str = Field(default="reveal_market_worker:heartbeat")
-    heartbeat_ttl_seconds: int = Field(default=120, ge=10)
+    heartbeat_ttl_seconds: int = Field(default=900, ge=10)
     heartbeat_max_retries: int = Field(default=2, ge=1)
     heartbeat_retry_backoff_seconds: float = Field(default=0.1, ge=0)
     heartbeat_retry_backoff_max_seconds: float = Field(default=1.0, ge=0)
@@ -148,6 +153,11 @@ class Settings(BaseSettings):
     goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)
     market_progress_log_intervals: int = Field(default=10, ge=1)
+    streamer_base_url: AnyHttpUrl = Field(
+        default_factory=lambda: str(PRESET.get("streamer_internal", "http://streamer:8100")),
+        description="Streamer base URL for orderbook/FX data",
+    )
+    streamer_timeout_seconds: float = Field(default=5.0, gt=0)
 
     @field_validator("featured_categories", "featured_suggest_queries", mode="before")
     @classmethod

@@ -180,8 +180,9 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
     ]
 
     monkeypatch.setattr(
-        "app.main.fetch_markets_from_polymarket",
-        lambda: (sample_markets, 42.0),
+        app.main.polymarket_client,
+        "fetch_markets_paginated",
+        lambda **_: [sample_markets],
     )
 
     dummy = DummyRedis()
@@ -288,7 +289,7 @@ def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
         published_stats.update(stats)
 
     monkeypatch.setattr("app.main._ensure_schema", lambda: schema_state, raising=False)
-    monkeypatch.setattr("app.main.fetch_markets_from_polymarket", fail_fetch, raising=False)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets_paginated", lambda **_: fail_fetch(), raising=False)
     monkeypatch.setattr("app.main.publish_heartbeat", fake_publish, raising=False)
 
     caplog.set_level(logging.WARNING, logger="reveal_market.worker")

@@ -2,7 +2,9 @@ import type {
   FetchFeaturedMarketsOptions,
   HealthSnapshot,
   InvestorKpis,
+  GroupedMarkets,
   MarketDetail,
+  MarketSibling,
   MarketStatusStat,
   MarketSummary,
   ProofReceipt,
@@ -11,7 +13,7 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
-import { fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
+import { fetchMarketActivity, fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
 export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
 
@@ -33,6 +35,11 @@ const OFFLINE_FALLBACK_BASE = process.env.RM_OFFLINE_API_BASE_URL
 const API_BASE_NORMALIZED = normalizeBase(DEFAULT_API_BASE);
 const IS_OFFLINE_BASE = OFFLINE_FALLBACK_BASE ? API_BASE_NORMALIZED === OFFLINE_FALLBACK_BASE : false;
 const SHOULD_SKIP_NETWORK = FORCE_OFFLINE && IS_OFFLINE_BASE;
+const TRENDING_MIN_LIQUIDITY = 0;
+const TRENDING_MIN_VOLUME_24H = 0;
+const TRENDING_MIN_ORDERBOOK = 0;
+const TRENDING_MIN_TRADES = 0;
+const TRENDING_MIN_SCORE = 0;
 
 const isNetworkUnavailable = (error: unknown) => {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
@@ -62,6 +69,211 @@ const maybeShortCircuitOffline = (scope: string) => {
   return false;
 };
 
+const computePopularity = (market: MarketSummary): number => {
+  const clamp = (value: number | null | undefined) => Math.max(0, value ?? 0);
+  const liquidity = clamp(market.liquidityUsd);
+  const volume = clamp(market.volume24hUsd);
+  const orderbook = clamp(market.orderbookVolumeUsd);
+  const trades = clamp(market.tradesQuantity);
+  // Use a dampened weighted score so outliers don't dominate ordering.
+  const score =
+    Math.sqrt(liquidity) * 0.4 +
+    Math.sqrt(volume) * 0.35 +
+    Math.sqrt(orderbook) * 0.2 +
+    Math.sqrt(trades) * 0.05;
+  return Number.isFinite(score) ? score : 0;
+};
+
+const meetsTrendingFloor = (market: MarketSummary, popularity?: number): boolean => {
+  const liquidity = market.liquidityUsd ?? 0;
+  const volume = market.volume24hUsd ?? 0;
+  const orderbook = market.orderbookVolumeUsd ?? 0;
+  const trades = market.tradesQuantity ?? 0;
+  const popularityScore = popularity ?? computePopularity(market);
+  return (
+    popularityScore >= TRENDING_MIN_SCORE &&
+    liquidity >= TRENDING_MIN_LIQUIDITY &&
+    volume >= TRENDING_MIN_VOLUME_24H &&
+    (orderbook >= TRENDING_MIN_ORDERBOOK || orderbook === 0) &&
+    (trades >= TRENDING_MIN_TRADES || trades === 0)
+  );
+};
+
+const coerceNumber = (value: any): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeClobTokenIds = (value: any): string[] | undefined => {
+  if (Array.isArray(value)) return value.map((v) => String(v));
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((v) => String(v));
+    } catch {
+      const parts = value.split(",").map((v) => v.trim()).filter(Boolean);
+      if (parts.length) return parts;
+    }
+  }
+  return undefined;
+};
+
+const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
+  const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
+  const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? null;
+  const groupItemTitle = payload.group_item_title ?? payload.groupItemTitle ?? payload.extra_data?.group_item_title ?? null;
+  const groupItemThreshold =
+    coerceNumber(payload.group_item_threshold ?? payload.groupItemThreshold ?? payload.extra_data?.group_item_threshold) ??
+    null;
+  const groupPosition = coerceNumber(payload.group_position ?? payload.groupPosition) ?? null;
+  const siblings = Array.isArray(payload.siblings)
+    ? payload.siblings
+        .map((sibling: any) => {
+          const siblingThreshold = coerceNumber(
+            sibling.group_item_threshold ?? sibling.groupItemThreshold ?? sibling.groupItemThresh ?? undefined,
+          );
+          const siblingPosition = coerceNumber(sibling.group_position ?? sibling.groupPosition);
+          return {
+            eventId: sibling.event_id ?? sibling.eventId ?? "",
+            title: sibling.title ?? undefined,
+            groupItemTitle: sibling.group_item_title ?? sibling.groupItemTitle ?? null,
+            groupItemThreshold: siblingThreshold ?? null,
+            groupPosition: siblingPosition ?? null,
+            outcomePrices: sibling.outcome_prices ?? sibling.outcomePrices ?? undefined,
+            volume24hUsd: coerceNumber(sibling.volume_24h_usd ?? sibling.volume24hUsd) ?? null,
+            liquidityUsd: coerceNumber(sibling.liquidity_usd ?? sibling.liquidityUsd) ?? null,
+          };
+        })
+        .filter((sib: MarketSibling) => Boolean(sib.eventId))
+    : undefined;
+
+  return {
+    eventId: payload.event_id ?? eventId,
+    title: payload.title ?? "Untitled market",
+    category: payload.category ?? undefined,
+    tags: payload.tags ?? payload.extra_data?.tags ?? [],
+    status: payload.status ?? undefined,
+    commitDeadline:
+      payload.commit_deadline ??
+      payload.commitDeadline ??
+      payload.extra_data?.commit_deadline ??
+      payload.extra_data?.gamma?.commit_deadline ??
+      payload.extra_data?.gamma?.commitDeadline ??
+      undefined,
+    revealDeadline:
+      payload.reveal_deadline ??
+      payload.revealDeadline ??
+      payload.extra_data?.reveal_deadline ??
+      payload.extra_data?.gamma?.reveal_deadline ??
+      payload.extra_data?.gamma?.revealDeadline ??
+      undefined,
+    liquidityUsd:
+      coerceNumber(payload.liquidity_usd) ??
+      coerceNumber(payload.liquidityUsd) ??
+      coerceNumber(payload.extra_data?.liquidity_usd) ??
+      coerceNumber(payload.extra_data?.gamma?.liquidity_usd),
+    outcomes: payload.outcomes ?? [],
+    outcomePrices: payload.outcome_prices ?? [],
+    imageUrl:
+      payload.image_url ??
+      payload.extra_data?.image_url ??
+      payload.extra_data?.gamma?.image_url ??
+      payload.extra_data?.gamma?.imageUrl ??
+      null,
+    slug: payload.slug ?? payload.extra_data?.gamma?.slug,
+    factory: payload.factory ?? undefined,
+    conditionId:
+      payload.condition_id ??
+      payload.conditionId ??
+      payload.extra_data?.condition_id ??
+      payload.extra_data?.gamma?.condition_id ??
+      payload.extra_data?.gamma?.conditionId ??
+      undefined,
+    questionId:
+      payload.question_id ??
+      payload.questionId ??
+      payload.extra_data?.question_id ??
+      payload.extra_data?.gamma?.question_id ??
+      payload.extra_data?.gamma?.questionId ??
+      undefined,
+    umaStatus: payload.uma_resolution_status ?? undefined,
+    marketAddress:
+      payload.market_address ??
+      payload.marketAddress ??
+      payload.extra_data?.market_address ??
+      payload.extra_data?.gamma?.market_address ??
+      payload.extra_data?.gamma?.marketAddress ??
+      undefined,
+    rakeBps: payload.rake_bps ?? undefined,
+    startsAt: payload.starts_at ?? null,
+    closesAt: payload.closes_at ?? payload.commit_deadline ?? null,
+    ordersOpenedAt: payload.orders_opened_at ?? null,
+    resolutionSource: payload.resolution_source ?? undefined,
+    marketMaker: payload.market_maker ?? undefined,
+    orderMinSize: payload.order_min_size ?? undefined,
+    priceTickSize: payload.price_tick_size ?? undefined,
+    enableOrderBook:
+      typeof payload.enable_order_book === "boolean" ? payload.enable_order_book : undefined,
+    clobTokenIds:
+      normalizeClobTokenIds(payload.clob_token_ids) ??
+      normalizeClobTokenIds(payload.clobTokenIds) ??
+      normalizeClobTokenIds(payload.extra_data?.gamma?.clob_token_ids) ??
+      normalizeClobTokenIds(payload.extra_data?.gamma?.clobTokenIds) ??
+      undefined,
+    imageVariants: payload.image_variants ?? undefined,
+    groupSlug,
+    groupItemTitle,
+    groupItemThreshold,
+    groupPosition,
+    siblings,
+    resolution: resolutionSource
+      ? {
+          resolved: Boolean(resolutionSource.resolved),
+          payouts: resolutionSource.payouts ?? [],
+          winners: resolutionSource.winners ?? [],
+          checkedAt: resolutionSource.checkedAt,
+          blockNumber: resolutionSource.blockNumber,
+          transactionHash: resolutionSource.transactionHash,
+        }
+      : payload.resolution
+        ? {
+            resolved: Boolean(payload.resolution.resolved),
+            payouts: payload.resolution.payouts ?? [],
+            winners: payload.resolution.winners ?? [],
+            checkedAt: payload.resolution.checked_at ?? payload.resolution.checkedAt,
+            blockNumber: payload.resolution.block_number ?? payload.resolution.blockNumber,
+            transactionHash: payload.resolution.transaction_hash ?? payload.resolution.transactionHash,
+          }
+        : undefined,
+    heartbeat: payload.extra_data?.heartbeat
+      ? {
+          timestamp: payload.extra_data.heartbeat.timestamp,
+          latencyMs: payload.extra_data.heartbeat.latency_ms ?? payload.extra_data.heartbeat.latencyMs,
+        }
+      : undefined,
+    description: payload.description ?? payload.extra_data?.description ?? payload.extra_data?.gamma?.description,
+    oracle: payload.oracle,
+    createdAt: payload.created_at ?? payload.createdAt ?? payload.extra_data?.gamma?.created_at,
+    updatedAt: payload.updated_at ?? payload.updatedAt ?? payload.extra_data?.gamma?.updated_at,
+    extraData: payload.extra_data ?? null,
+    volume24hUsd:
+      coerceNumber(payload.volume_24h_usd) ??
+      coerceNumber(payload.volume_24h) ??
+      coerceNumber(payload.volume24h) ??
+      coerceNumber(payload.extra_data?.volume_24h) ??
+      coerceNumber(payload.extra_data?.gamma?.volume_24h),
+    orderbookVolumeUsd:
+      coerceNumber(payload.orderbook_volume_usd) ??
+      coerceNumber(payload.orderbookVolumeUsd) ??
+      coerceNumber(payload.extra_data?.orderbook_volume_usd),
+    tradesQuantity:
+      coerceNumber(payload.trades_quantity) ??
+      coerceNumber(payload.tradesQuantity) ??
+      coerceNumber(payload.extra_data?.trades_quantity),
+  };
+};
+
+
 export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
   if (maybeShortCircuitOffline("fetchFeaturedMarkets")) {
     return [];
@@ -74,6 +286,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     if (statusParam && statusParam !== "any" && statusParam !== "all") {
       params.set("status", statusParam);
     }
+    params.set("order_by", "volume_24h_usd");
     const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
@@ -87,12 +300,20 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       }
     }
     const fetchTags: string[] = [];
+    const trendingMode =
+      options?.trending ??
+      (!options?.category && !options?.searchQuery && (effectiveStatus === "active" || effectiveStatus === "live"));
     if (options?.category) {
       const slug = slugify(options.category);
       endpoint = `/categories/${encodeURIComponent(slug)}`;
       fetchTags.push(`category:${slug}`);
     } else {
       fetchTags.push("markets:list");
+    }
+    if (trendingMode) {
+      params.set("trending", "1");
+      // Offsets do not combine with the backend trending slice; keep the hottest markets only.
+      params.delete("offset");
     }
     const url = new URL(endpoint, DEFAULT_API_BASE);
     params.forEach((value, key) => url.searchParams.set(key, value));
@@ -103,6 +324,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       category: options?.category,
       searchQuery: options?.searchQuery,
       status: effectiveStatus,
+      trending: trendingMode,
       revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS,
     });
     const response = await fetch(url.toString(), {
@@ -128,7 +350,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       count: items.length,
       cacheTags: fetchTags,
     });
-    const mapped: MarketSummary[] = items.map(mapApiMarketToSummary);
+    const mapped: MarketSummary[] = items.map((item: any) => mapApiMarketToSummary(item));
     // Enrich with orderbook aggregates when token IDs are present (best-effort).
     try {
       const tokenIds = mapped.flatMap((m) => m.clobTokenIds ?? []).filter(Boolean) as string[];
@@ -154,7 +376,24 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
         count: items.length,
       });
     }
-    return mapped;
+    const scored = mapped.map((m) => ({ market: m, popularity: computePopularity(m) }));
+    const getUpdatedAt = (m: MarketSummary): string =>
+      (m as any).updatedAt ?? (m as any).updated_at ?? m.extraData?.gamma?.updated_at ?? "";
+    const trending = scored.filter(({ market, popularity }) => meetsTrendingFloor(market, popularity));
+    const nonTrending = scored.filter(({ market, popularity }) => !meetsTrendingFloor(market, popularity));
+    const sorter = (a: { market: MarketSummary; popularity: number }, b: { market: MarketSummary; popularity: number }) => {
+      const diff = (b.popularity ?? 0) - (a.popularity ?? 0);
+      if (diff !== 0) return diff;
+      const aUpdated = getUpdatedAt(a.market);
+      const bUpdated = getUpdatedAt(b.market);
+      return bUpdated > aUpdated ? 1 : bUpdated < aUpdated ? -1 : 0;
+    };
+    if (trendingMode) {
+      const ranked = (trending.length ? trending : scored).sort(sorter);
+      return ranked.slice(0, limit).map((entry) => entry.market);
+    }
+    const ordered = [...trending.sort(sorter), ...nonTrending.sort(sorter)];
+    return ordered.map((entry) => entry.market);
   } catch (error) {
     logOfflineAwareError("fetchFeaturedMarkets", error);
     return [];
@@ -386,82 +625,15 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       return null;
     }
     const payload = await response.json();
-    const resolutionSource = payload.extra_data?.resolution;
-    const normalizeClobTokenIds = (value: any): string[] | undefined => {
-      if (Array.isArray(value)) return value.map((v) => String(v));
-      if (typeof value === "string") {
-        try {
-          const parsed = JSON.parse(value);
-          if (Array.isArray(parsed)) return parsed.map((v) => String(v));
-        } catch {
-          const parts = value.split(",").map((v) => v.trim()).filter(Boolean);
-          if (parts.length) return parts;
-        }
-      }
-      return undefined;
-    };
-    const detail: MarketDetail = {
-      eventId: payload.event_id ?? eventId,
-      title: payload.title ?? "Untitled market",
-      category: payload.category ?? undefined,
-      tags: payload.tags ?? payload.extra_data?.tags ?? [],
-      status: payload.status ?? undefined,
-      commitDeadline: payload.commit_deadline ?? undefined,
-      revealDeadline: payload.reveal_deadline ?? undefined,
-      liquidityUsd: payload.extra_data?.liquidity_usd ?? undefined,
-      outcomes: payload.outcomes ?? [],
-      outcomePrices: payload.outcome_prices ?? [],
-      imageUrl:
-        payload.image_url ??
-        payload.extra_data?.image_url ??
-        payload.extra_data?.gamma?.image_url ??
-        payload.extra_data?.gamma?.imageUrl ??
-        null,
-      slug: payload.slug ?? payload.extra_data?.gamma?.slug,
-      factory: payload.factory ?? undefined,
-      umaStatus: payload.uma_resolution_status ?? undefined,
-      marketAddress: payload.market_address ?? undefined,
-      rakeBps: payload.rake_bps ?? undefined,
-      startsAt: payload.starts_at ?? null,
-      closesAt: payload.closes_at ?? payload.commit_deadline ?? null,
-      ordersOpenedAt: payload.orders_opened_at ?? null,
-      resolutionSource: payload.resolution_source ?? undefined,
-      marketMaker: payload.market_maker ?? undefined,
-      orderMinSize: payload.order_min_size ?? undefined,
-      priceTickSize: payload.price_tick_size ?? undefined,
-      enableOrderBook:
-        typeof payload.enable_order_book === "boolean" ? payload.enable_order_book : undefined,
-      clobTokenIds:
-        normalizeClobTokenIds(payload.clob_token_ids) ??
-        normalizeClobTokenIds(payload.clobTokenIds) ??
-        normalizeClobTokenIds(payload.extra_data?.gamma?.clob_token_ids) ??
-        normalizeClobTokenIds(payload.extra_data?.gamma?.clobTokenIds) ??
-        undefined,
-      imageVariants: payload.image_variants ?? undefined,
-      resolution: resolutionSource
-        ? {
-            resolved: Boolean(resolutionSource.resolved),
-            payouts: resolutionSource.payouts ?? [],
-            winners: resolutionSource.winners ?? [],
-            checkedAt: resolutionSource.checkedAt,
-            blockNumber: resolutionSource.blockNumber,
-            transactionHash: resolutionSource.transactionHash,
-          }
-        : undefined,
-      heartbeat: payload.extra_data?.heartbeat
-        ? {
-            timestamp: payload.extra_data.heartbeat.timestamp,
-            latencyMs: payload.extra_data.heartbeat.latency_ms ?? payload.extra_data.heartbeat.latencyMs,
-          }
-        : undefined,
-      description: payload.description ?? payload.extra_data?.description ?? payload.extra_data?.gamma?.description,
-      oracle: payload.oracle,
-      createdAt: payload.created_at,
-      updatedAt: payload.updated_at,
-      extraData: payload.extra_data ?? null,
-    };
+    const detail: MarketDetail = mapMarketDetailPayload(payload, eventId);
     // Enrich with subgraph orderbook + OI when available (best-effort).
     try {
+      if (!detail.clobTokenIds?.length && detail.conditionId) {
+        const tokens = await fetchMarketTokens(detail.conditionId, { first: 40 });
+        if (tokens.length) {
+          detail.clobTokenIds = tokens;
+        }
+      }
       if (detail.clobTokenIds && detail.clobTokenIds.length > 0) {
         const aggregates = await fetchOrderbookAggregates(detail.clobTokenIds);
         const matching = detail.clobTokenIds.map((id) => aggregates[id]).filter(Boolean);
@@ -473,6 +645,10 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
           const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
           detail.orderbookVolumeUsd = volume;
           detail.tradesQuantity = trades;
+          const volume24h = matching.reduce((acc, curr) => acc + (curr.volume24h ?? 0), 0);
+          if (!detail.volume24hUsd && volume24h > 0) {
+            detail.volume24hUsd = volume24h;
+          }
         }
       }
       if (detail.conditionId) {
@@ -488,6 +664,39 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     return detail;
   } catch (error) {
     logOfflineAwareError("fetchMarketByEventId", error, { eventId });
+    return null;
+  }
+}
+
+export async function fetchGroupedMarkets(groupSlug: string): Promise<GroupedMarkets | null> {
+  if (maybeShortCircuitOffline("fetchGroupedMarkets")) {
+    return null;
+  }
+  const normalizedSlug = groupSlug.trim().toLowerCase();
+  if (!normalizedSlug) return null;
+  try {
+    const url = `${DEFAULT_API_BASE}/markets/group/${encodeURIComponent(normalizedSlug)}`;
+    logger.info("fetchGroupedMarkets:request", { groupSlug: normalizedSlug, endpoint: url });
+    const response = await fetch(url, { next: { revalidate: 30 } });
+    if (response.status === 404) {
+      logger.warn("fetchGroupedMarkets:not_found", { groupSlug: normalizedSlug });
+      return null;
+    }
+    if (!response.ok) {
+      logger.error("fetchGroupedMarkets:failed", { groupSlug: normalizedSlug, status: response.status });
+      return null;
+    }
+    const payload = await response.json();
+    const marketsPayload = Array.isArray(payload.markets) ? payload.markets : [];
+    const markets = marketsPayload.map((item: any) => mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""));
+    return {
+      groupSlug: payload.group_slug ?? payload.groupSlug ?? normalizedSlug,
+      markets,
+      aggregateVolume24hUsd: coerceNumber(payload.aggregate_volume_24h_usd ?? payload.aggregateVolume24hUsd) ?? null,
+      aggregateLiquidityUsd: coerceNumber(payload.aggregate_liquidity_usd ?? payload.aggregateLiquidityUsd) ?? null,
+    };
+  } catch (error) {
+    logOfflineAwareError("fetchGroupedMarkets", error, { groupSlug });
     return null;
   }
 }

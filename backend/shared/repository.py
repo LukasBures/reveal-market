@@ -27,7 +27,15 @@ def upsert_market(
     """Insert or update a market row based on the provided field mapping."""
     payload = dict(data)
     # Drop legacy/normalized-only fields that are no longer columns on markets
-    for legacy in ("outcomes", "outcome_prices", "tags", "clob_token_ids", "extra_data"):
+    for legacy in (
+        "outcomes",
+        "outcome_prices",
+        "tags",
+        "clob_token_ids",
+        "extra_data",
+        "group_item_title",
+        "group_item_threshold",
+    ):
         payload.pop(legacy, None)
     market = existing or get_market_by_event_id(session, payload["event_id"])
     if market is None:

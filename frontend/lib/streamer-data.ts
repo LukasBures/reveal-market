@@ -12,6 +12,7 @@ type OrderbookAggregate = {
   scaledCollateralBuyVolume?: number;
   collateralSellVolume?: number;
   scaledCollateralSellVolume?: number;
+  volume24h?: number;
 };
 
 const { streamerPublic, streamerInternal } = resolveUrlConfig();
@@ -66,6 +67,7 @@ export async function fetchOrderbookAggregates(tokenIds: string[]): Promise<Reco
           scaledCollateralBuyVolume: safeNumber(entry.scaledCollateralBuyVolume),
           collateralSellVolume: safeNumber(entry.collateralSellVolume),
           scaledCollateralSellVolume: safeNumber(entry.scaledCollateralSellVolume),
+          volume24h: safeNumber(entry.volume24h ?? entry.volume24H ?? entry.volume_24h),
         };
       }
     } catch (error) {
@@ -95,6 +97,32 @@ export async function fetchOpenInterest(conditionId: string): Promise<number | u
   } catch (error) {
     logger.warn("streamer.oi.fetch_error", { error: (error as Error).message, url });
     return undefined;
+  }
+}
+
+export async function fetchMarketTokens(conditionId: string, { first = 50 }: { first?: number } = {}): Promise<string[]> {
+  const normalized = conditionId.trim();
+  if (!normalized) return [];
+  const base = getStreamerBase(true);
+  const params = new URLSearchParams();
+  params.set("condition", normalized);
+  params.set("first", String(Math.max(1, Math.min(200, first))));
+  const url = `${base}/data/subgraph/market-data?${params.toString()}`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      logger.warn("streamer.marketdata.fetch_failed", { status: res.status, url });
+      return [];
+    }
+    const payload = await res.json();
+    const rows = Array.isArray(payload.data) ? payload.data : payload.data?.marketDatas ?? [];
+    const ids = rows
+      .map((row: { id?: string }) => String(row.id ?? "").trim())
+      .filter((id: string) => Boolean(id));
+    return Array.from(new Set(ids));
+  } catch (error) {
+    logger.warn("streamer.marketdata.fetch_error", { error: (error as Error).message, url });
+    return [];
   }
 }
 

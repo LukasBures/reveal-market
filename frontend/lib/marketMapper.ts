@@ -22,6 +22,7 @@ const normalizeClobTokenIds = (value: any): string[] | null => {
 
 export function mapApiMarketToSummary(item: any): MarketSummary {
   const volumeCandidate =
+    item.volume_24h_usd ??
     item.volume24h ??
     item.volume_24h ??
     item.volume24hr ??
@@ -32,14 +33,46 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     item.extra_data?.gamma?.volume ??
     0;
   const volume24hUsd = Number(volumeCandidate) || 0;
-  const liquidity = Number(item.liquidity_usd ?? item.liquidityUsd ?? item.extra_data?.liquidity_usd ?? 0) || 0;
-  const popularityScore = Math.max(volume24hUsd, liquidity, 0);
+  const liquidity =
+    Number(item.liquidity_usd ?? item.liquidityUsd ?? item.extra_data?.liquidity_usd ?? 0) || undefined;
+  const orderbookVolumeUsd =
+    Number(item.orderbook_volume_usd ?? item.orderbookVolumeUsd ?? item.extra_data?.orderbook_volume_usd ?? 0) ||
+    undefined;
+  const tradesQuantity =
+    typeof item.trades_quantity === "number"
+      ? item.trades_quantity
+      : typeof item.tradesQuantity === "number"
+        ? item.tradesQuantity
+        : undefined;
   const gammaImage =
     item.extra_data?.image_url ??
     item.extra_data?.gamma?.image_url ??
     item.extra_data?.gamma?.imageUrl ??
     item.extra_data?.gamma?.cover_image ??
     item.extra_data?.gamma?.coverImage;
+  const groupSlug = item.group_slug ?? item.groupSlug ?? null;
+  const rawGroupThreshold = Number(item.group_item_threshold ?? item.groupItemThreshold);
+  const groupItemThreshold = Number.isFinite(rawGroupThreshold) ? rawGroupThreshold : null;
+  const rawGroupPosition = Number(item.group_position ?? item.groupPosition);
+  const groupPosition = Number.isFinite(rawGroupPosition) ? rawGroupPosition : null;
+  const siblings = Array.isArray(item.siblings)
+    ? item.siblings.map((sibling: any) => {
+        const siblingThreshold = Number(sibling.group_item_threshold ?? sibling.groupItemThreshold);
+        const siblingPosition = Number(sibling.group_position ?? sibling.groupPosition);
+        const siblingVolume = Number(sibling.volume_24h_usd ?? sibling.volume24hUsd);
+        const siblingLiquidity = Number(sibling.liquidity_usd ?? sibling.liquidityUsd);
+        return {
+          eventId: sibling.event_id ?? sibling.eventId ?? "unknown",
+          title: sibling.title ?? undefined,
+          groupItemTitle: sibling.group_item_title ?? sibling.groupItemTitle ?? null,
+          groupItemThreshold: Number.isFinite(siblingThreshold) ? siblingThreshold : null,
+          groupPosition: Number.isFinite(siblingPosition) ? siblingPosition : null,
+          outcomePrices: sibling.outcome_prices ?? sibling.outcomePrices ?? null,
+          volume24hUsd: Number.isFinite(siblingVolume) ? siblingVolume : null,
+          liquidityUsd: Number.isFinite(siblingLiquidity) ? siblingLiquidity : null,
+        };
+      })
+    : undefined;
   return {
     eventId: item.event_id ?? item.eventId ?? "unknown",
     title: item.title ?? "Untitled market",
@@ -74,7 +107,13 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
       normalizeClobTokenIds(item.extra_data?.gamma?.clobTokenIds) ??
       null,
     imageVariants: item.image_variants ?? item.imageVariants ?? null,
-    popularityScore,
     volume24hUsd,
+    orderbookVolumeUsd,
+    tradesQuantity,
+    groupSlug,
+    groupItemTitle: item.group_item_title ?? item.groupItemTitle ?? null,
+    groupItemThreshold,
+    groupPosition,
+    siblings,
   };
 }

@@ -40,12 +40,18 @@ def upgrade() -> None:
         sa.Column("market_address", sa.String(length=64), nullable=True, unique=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="commit"),
         sa.Column("gamma_raw", sa.JSON(), nullable=True),
+        sa.Column("group_slug", sa.String(length=256), nullable=True),
+        sa.Column("group_position", sa.Integer(), nullable=True),
         sa.Column("summary", sa.Text(), nullable=True),
         sa.Column("summary_source", sa.String(length=64), nullable=True),
         sa.Column("summary_model", sa.String(length=64), nullable=True),
         sa.Column("summary_metadata", sa.JSON(), nullable=True),
         sa.Column("summary_checked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("summary_requested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("liquidity_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("volume_24h_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("orderbook_volume_usd", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("trades_quantity", sa.Integer(), nullable=True),
         sa.Column("rake_bps", sa.Integer(), nullable=True),
         sa.Column("condition_id", sa.String(length=66), nullable=True),
         sa.Column("question_id", sa.String(length=128), nullable=True),
@@ -74,6 +80,7 @@ def upgrade() -> None:
     op.create_index("ix_markets_status_category", "markets", ["status", "category"])
     op.create_index("ix_markets_slug", "markets", ["slug"])
     op.create_index("ix_markets_condition_id", "markets", ["condition_id"])
+    op.create_index("ix_markets_group_slug", "markets", ["group_slug"])
     op.create_index("ix_markets_event_id", "markets", ["event_id"], unique=True)
     # Normalize tags and clob token ids instead of storing JSON blobs
     op.create_table(
@@ -143,6 +150,7 @@ def upgrade() -> None:
         sa.Column("restricted", sa.Boolean(), nullable=True),
         sa.Column("group_item_title", sa.String(length=256), nullable=True),
         sa.Column("group_item_threshold", sa.String(length=64), nullable=True),
+        sa.Column("group_slug", sa.String(length=256), nullable=True),
         sa.Column("question_id", sa.String(length=128), nullable=True),
         sa.Column("enable_order_book", sa.Boolean(), nullable=True),
         sa.Column("order_price_min_tick_size", sa.Float(), nullable=True),
@@ -195,6 +203,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
+    op.create_index("ix_market_gamma_metadata_group_slug", "market_gamma_metadata", ["group_slug"])
 
     op.create_table(
         "market_gamma_events",

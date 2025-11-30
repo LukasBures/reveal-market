@@ -24,11 +24,21 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   };
   const liquidity =
     toNumber(market.liquidityUsd) ??
+    toNumber(market.liquidityUsd) ??
     toNumber(extraData?.liquidity_usd) ??
     toNumber(extraData?.liquidityUsd) ??
-    toNumber(gamma?.liquidity);
-  const volume24h = toNumber(extraData?.volume24h) ?? toNumber(gamma?.volume24h) ?? toNumber(gamma?.volume24H);
-  const openInterest = toNumber(extraData?.openInterest) ?? toNumber(gamma?.openInterest);
+    toNumber(gamma?.liquidity) ??
+    0;
+  const volume24h =
+    toNumber(market.volume24hUsd) ??
+    toNumber(market.orderbookVolumeUsd) ??
+    toNumber(extraData?.volume24h) ??
+    toNumber(extraData?.volume_24h) ??
+    toNumber(gamma?.volume24h) ??
+    toNumber(gamma?.volume24H) ??
+    0;
+  const openInterest =
+    toNumber(market.openInterestUsd) ?? toNumber(extraData?.openInterest) ?? toNumber(gamma?.openInterest) ?? 0;
   const backgroundStyle = coverImage
     ? {
         backgroundImage: `linear-gradient(120deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.75) 45%, rgba(0,0,0,0.6) 100%), url(${coverImage})`,

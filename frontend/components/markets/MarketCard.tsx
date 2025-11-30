@@ -25,12 +25,9 @@ const buildPlaceholderDataUrl = (label: string) => {
 };
 
 export function MarketCard({ market }: Props) {
-  const yesProbability = market.outcomePrices?.length ? Math.round((market.outcomePrices[0] ?? 0) * 100) : null;
   const outcomes = market.outcomes ?? [];
   const categoryLabel = market.category ?? "General";
-  const volumeUsd = market.orderbookVolumeUsd ?? market.volume24hUsd ?? market.liquidityUsd ?? 0;
-  const tradesCount = market.tradesQuantity ?? null;
-  const popularityScore = market.popularityScore ?? volumeUsd ?? 0;
+  const volumeUsd = market.volume24hUsd ?? market.orderbookVolumeUsd ?? market.liquidityUsd ?? 0;
   const formatUsd = (value: number) =>
     new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
   const extraImage =
@@ -43,46 +40,33 @@ export function MarketCard({ market }: Props) {
         (market.extraData as Record<string, any>).gamma?.coverImage
       : null;
   const coverImage = market.imageUrl ?? extraImage ?? buildPlaceholderDataUrl(categoryLabel);
+  const targetHref = market.groupSlug
+    ? ({ pathname: "/markets/group/[groupSlug]", params: { groupSlug: market.groupSlug } } as const)
+    : ({ pathname: "/markets/[eventId]", params: { eventId: market.eventId } } as const);
 
   return (
     <Link
-      href={`/markets/${market.eventId}`}
+      href={targetHref}
       prefetch
       className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 hover:-translate-y-1.5 hover:border-brand-400/60"
     >
       <div className="flex items-start gap-4">
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
-          <h3 className="mt-1 text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
-        </div>
-      </div>
-      <div className="relative flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Yes probability</p>
-          <p className="text-2xl font-semibold text-white">{yesProbability !== null ? `${yesProbability}%` : "—"}</p>
-        </div>
-        <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.4em] text-white/60">
-          <img src="/brand/reveal-wolf-01.png" alt="" className="h-4 w-4 rounded-full object-cover" loading="lazy" />
-          ZK
-        </div>
-      </div>
-      <div className={`grid ${tradesCount !== null ? "grid-cols-3" : "grid-cols-2"} gap-2 text-xs text-slate-300`}>
-        <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-          <p className="uppercase tracking-[0.25em] text-slate-500">Popularity</p>
-          <p className="text-sm font-semibold text-white">{formatUsd(popularityScore)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-          <p className="uppercase tracking-[0.25em] text-slate-500">Volume</p>
-          <p className="text-sm font-semibold text-white">{formatUsd(volumeUsd)}</p>
-        </div>
-        {tradesCount !== null && (
-          <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-            <p className="uppercase tracking-[0.25em] text-slate-500">Trades</p>
-            <p className="text-sm font-semibold text-white">
-              {new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(tradesCount)}
-            </p>
+          <div className="mb-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
+            <span className="rounded-full bg-slate-800 px-2 py-1 text-white/80">{categoryLabel}</span>
+            {market.groupSlug && (
+              <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-emerald-100">Grouped</span>
+            )}
           </div>
-        )}
+          <h3 className="text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
+        </div>
+      </div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-300">
+        <p className="uppercase tracking-[0.25em] text-slate-500">Overview</p>
+        <p className="text-sm font-semibold text-white">
+          ${formatUsd(volumeUsd)} Vol (24h)
+        </p>
       </div>
       {outcomes.length > 0 && (
         <div className="mt-1 space-y-1 text-xs text-slate-300">
@@ -90,9 +74,7 @@ export function MarketCard({ market }: Props) {
             const probability =
               market.outcomePrices?.[idx] !== undefined
                 ? `${Math.round((market.outcomePrices[idx] ?? 0) * 100)}%`
-                : idx === 0 && yesProbability !== null
-                  ? `${yesProbability}%`
-                  : "—";
+                : "—";
             const hoverColor =
               idx === 0
                 ? "transition hover:bg-emerald-900/40"

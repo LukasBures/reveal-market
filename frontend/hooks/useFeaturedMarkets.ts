@@ -8,16 +8,16 @@ import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 type UseFeaturedMarketsArgs = {
   limit: number;
   initialData?: MarketSummary[];
-} & Pick<FetchFeaturedMarketsOptions, "searchQuery" | "category" | "status">;
+} & Pick<FetchFeaturedMarketsOptions, "searchQuery" | "category" | "status" | "trending">;
 
-export function useFeaturedMarkets({ limit, searchQuery, category, status, initialData }: UseFeaturedMarketsArgs) {
+export function useFeaturedMarkets({ limit, searchQuery, category, status, trending, initialData }: UseFeaturedMarketsArgs) {
   const normalizedStatus = status ?? "active";
   return useQuery({
     queryKey: [
       "featuredMarkets",
-      { limit, searchQuery: searchQuery ?? null, category: category ?? null, status: normalizedStatus },
+      { limit, searchQuery: searchQuery ?? null, category: category ?? null, status: normalizedStatus, trending: trending ?? null },
     ],
-    queryFn: () => loadFeaturedMarketsAction(limit, { searchQuery, category, status: normalizedStatus }),
+    queryFn: () => loadFeaturedMarketsAction(limit, { searchQuery, category, status: normalizedStatus, trending }),
     initialData,
     staleTime: 30_000,
     refetchOnWindowFocus: false,

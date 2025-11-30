@@ -11,6 +11,7 @@ type Props = {
   marketId?: string;
   outcomes?: string[];
   initialOutcomeId?: number;
+  outcomePrices?: number[];
 };
 
 const DEFAULT_MAX_STAKE_ZEN = 100;
@@ -26,6 +27,7 @@ export function StakeQuoteCard({
   marketId,
   outcomes = [],
   initialOutcomeId = 0,
+  outcomePrices = [],
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [selectedOutcome, setSelectedOutcome] = useState<number>(initialOutcomeId);
@@ -39,6 +41,13 @@ export function StakeQuoteCard({
   const { address } = useAccount();
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
+  const isBinary = outcomeOptions.length === 2;
+  const normalizedPrices = Array.isArray(outcomePrices) ? outcomePrices : [];
+  const priceForOutcome = (index: number): number | null => {
+    const value = normalizedPrices[index];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    return null;
+  };
   const outcomeLabel =
     outcomeOptions[selectedOutcome] ??
     (selectedOutcome === 0 ? "Yes" : selectedOutcome === 1 ? "No" : `Outcome ${selectedOutcome + 1}`);
@@ -131,6 +140,10 @@ export function StakeQuoteCard({
     if (!quote) return null;
     return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
   }, [quote]);
+  const currentPrice = priceForOutcome(selectedOutcome);
+  const ctaLabel = loading
+    ? "Pricing…"
+    : `Buy ${outcomeLabel}${currentPrice !== null ? ` @ $${currentPrice.toFixed(3)}` : ""}`;
 
   return (
     <div className="md:sticky md:top-28 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-xl shadow-black/30 backdrop-blur">
@@ -164,19 +177,52 @@ export function StakeQuoteCard({
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {outcomeOptions.map((label, idx) => (
-          <button
-            key={`${label}-${idx}`}
-            type="button"
-            onClick={() => setSelectedOutcome(idx)}
-            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition ${
-              selectedOutcome === idx ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="mt-4 space-y-3">
+        {isBinary ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {[0, 1].map((idx) => {
+              const label = outcomeOptions[idx] ?? (idx === 0 ? "Yes" : "No");
+              const price = priceForOutcome(idx);
+              const formattedPrice = price !== null ? `$${price.toFixed(3)}` : "—";
+              const active = selectedOutcome === idx;
+              return (
+                <button
+                  key={`${label}-${idx}`}
+                  type="button"
+                  onClick={() => setSelectedOutcome(idx)}
+                  className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition ${
+                    active
+                      ? "border-emerald-400 bg-emerald-500/15 text-white"
+                      : "border-white/10 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold uppercase tracking-[0.25em]">Buy {label}</span>
+                    <span className="text-sm font-semibold text-emerald-200">{formattedPrice}</span>
+                  </div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {idx === 0 ? "Back the yes side" : "Back the no side"}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {outcomeOptions.map((label, idx) => (
+              <button
+                key={`${label}-${idx}`}
+                type="button"
+                onClick={() => setSelectedOutcome(idx)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                  selectedOutcome === idx ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 space-y-3">
@@ -240,7 +286,7 @@ export function StakeQuoteCard({
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}
         >
-          {loading ? "Pricing…" : `Buy ${outcomeLabel}`}
+          {ctaLabel}
         </button>
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">

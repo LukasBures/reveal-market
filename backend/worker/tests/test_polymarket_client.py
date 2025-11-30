@@ -293,6 +293,35 @@ def test_polymarket_client_handles_empty_pages_with_meta_total():
     assert [m.event_id for m in markets] == ["evt-1", "evt-2"]
 
 
+def test_polymarket_client_derives_grouping_fields():
+    payload = [
+        {
+            "id": "grp-1",
+            "slug": "makina-public-sale-total-commitments-1-5m",
+            "question": "How much will be committed to the Makina public sale?",
+            "groupItemTitle": ">$1.5M",
+            "groupItemThreshold": "1500000",
+            "outcomes": ["Yes", "No"],
+            "outcomePrices": [0.44, 0.56],
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+
+    assert len(markets) == 1
+    market = markets[0]
+    assert market.group_slug == "makina-public-sale-total-commitments"
+    assert market.group_position == 1500000
+    assert market.group_item_threshold == 1500000
+    assert market.group_item_title == ">$1.5M"
+    assert market.gamma_metadata.get("group_slug") == "makina-public-sale-total-commitments"
+
+
 def test_merge_clob_markets_enriches_payload():
     markets = [
         MarketPayload(

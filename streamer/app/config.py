@@ -16,10 +16,6 @@ class Settings(BaseSettings):
     clob_ws_url: str = Field(
         default="wss://ws-subscriptions-clob.polymarket.com/ws/market", description="Polymarket CLOB websocket URL"
     )
-    clob_rest_markets_url: AnyHttpUrl = Field(
-        default="https://gamma-api.polymarket.com/markets",
-        description="Polymarket Gamma REST markets endpoint (for seeding token IDs)",
-    )
     clob_host: AnyHttpUrl | None = Field(
         default="https://clob.polymarket.com",
         description="Optional Polymarket CLOB host used by py_clob_client for midpoint fetches",

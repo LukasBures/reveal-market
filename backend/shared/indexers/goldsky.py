@@ -35,6 +35,21 @@ query ConditionResolution($conditionId: Bytes!) {
 }
 """
 
+ORDERBOOK_QUERY = """
+query Orderbooks($first: Int!, $skip: Int!, $ids: [ID!]) {
+  orderbooks(
+    first: $first
+    skip: $skip
+    where: { id_in: $ids }
+  ) {
+    id
+    tradesQuantity
+    collateralVolume
+    scaledCollateralVolume
+  }
+}
+"""
+
 
 def _normalize_hex(value: str | None) -> str | None:
     if not isinstance(value, str):
@@ -134,6 +149,42 @@ class GoldskyClient:
             with attempt:
                 return action()
         raise GoldskyError("goldsky request failed unexpectedly")
+
+    def orderbook_aggregates(self, token_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch basic orderbook aggregates for the given token IDs."""
+
+        if not token_ids:
+            return {}
+        aggregates: dict[str, dict[str, Any]] = {}
+
+        def _fetch_batch(batch: list[str]) -> list[dict[str, Any]]:
+            payload = {
+                "query": ORDERBOOK_QUERY,
+                "variables": {"first": len(batch), "skip": 0, "ids": batch},
+            }
+            data = self._run_with_retry(lambda: self._post(payload))
+            return data.get("orderbooks") or []
+
+        chunk_size = 40
+        for idx in range(0, len(token_ids), chunk_size):
+            batch = token_ids[idx : idx + chunk_size]
+            try:
+                records = _fetch_batch(batch)
+            except Exception as exc:  # pragma: no cover - network path
+                log_event(
+                    self._logger,
+                    logging.WARNING,
+                    event="goldsky.request.failed",
+                    message="failed to fetch orderbook batch",
+                    error=str(exc),
+                )
+                continue
+            for record in records:
+                token_id = str(record.get("id") or "").strip()
+                if not token_id:
+                    continue
+                aggregates[token_id] = record
+        return aggregates
 
     def resolution_summary(
         self,

@@ -33,7 +33,7 @@ from shared.migrations import run_migrations as apply_migrations
 from shared.models import MarketStatusEnum
 from shared.onchain import ConditionalTokensClient
 from shared.onchain.conditional_tokens import _derive_winners
-from sqlalchemy import create_engine, or_, select
+from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import MissingSettingsError, get_settings, reload_settings, sanitize_settings, validate_required_settings
@@ -41,7 +41,10 @@ from .logging_config import setup_logging
 from .polymarket import (
     MarketPayload,
     PolymarketClient,
+    _build_market_hash_payload,
+    _compute_market_hash,
     _extract_timestamp_candidate,
+    _parse_group_threshold,
     merge_clob_markets,
 )
 from .proof_builder import SettlementDataMissingError, build_prover_payload
@@ -160,6 +163,7 @@ class SyncOutcome:
     resolution_cache_payload: dict[str, Any] | None
     market_created: bool = False
     market_updated: bool = False
+    group_slugs: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -185,6 +189,7 @@ class SyncSummary:
     changed_events: set[str] = field(default_factory=set)
     changed_conditions: set[str] = field(default_factory=set)
     changed_categories: set[str] = field(default_factory=set)
+    changed_group_slugs: set[str] = field(default_factory=set)
     resolution_cache_updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = field(default_factory=list)
     stats_dirty: bool = False
@@ -718,6 +723,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             error=str(exc),
         )
         raise
+    _enrich_popularity_from_orderbooks(markets)
     if clob_client is not None:
         try:
             merge_clob_markets(
@@ -764,6 +770,108 @@ def _build_filters_from_settings(settings_obj) -> dict[str, Any]:
     if settings_obj.polymarket_archived_filter is not None:
         params["archived"] = str(settings_obj.polymarket_archived_filter).lower()
     return params
+
+
+def _enrich_popularity_from_orderbooks(markets: list[MarketPayload]) -> None:
+    if not markets:
+        return
+    token_ids = sorted({token for m in markets for token in (m.clob_token_ids or []) if token})
+    if not token_ids:
+        return
+
+    def _as_float(value: Any) -> float:
+        try:
+            numeric = float(value)
+            return numeric if numeric == numeric else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    aggregates: dict[str, dict[str, Any]] = {}
+    if settings.streamer_base_url:
+        aggregates = _fetch_streamer_aggregates(token_ids)
+    if not aggregates and goldsky_client is not None:
+        try:
+            aggregates = goldsky_client.orderbook_aggregates(token_ids)
+        except Exception as exc:  # pragma: no cover - network path
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.popularity.enrich_failed",
+                message="failed to fetch orderbook aggregates for popularity",
+                error=str(exc),
+            )
+            aggregates = {}
+
+    for market in markets:
+        ids = [token for token in (market.clob_token_ids or []) if token]
+        if not ids:
+            continue
+        matching = [aggregates.get(token) for token in ids if token in aggregates]
+        if not matching:
+            continue
+        volume = 0.0
+        trades = 0
+        for entry in matching:
+            if not isinstance(entry, dict):
+                continue
+            volume += _as_float(entry.get("scaledCollateralVolume") or entry.get("collateralVolume"))
+            trades += _as_int(entry.get("tradesQuantity"))
+        if volume > 0:
+            market.orderbook_volume_usd = volume
+            # Treat streamer orderbook volume as TVL source when available.
+            market.liquidity_usd = volume
+        if trades > 0:
+            market.trades_quantity = trades
+        market.content_hash = _compute_market_hash(_build_market_hash_payload(market))
+
+
+def _fetch_streamer_aggregates(token_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if not token_ids or not settings.streamer_base_url:
+        return {}
+    base = str(settings.streamer_base_url).rstrip("/")
+    aggregates: dict[str, dict[str, Any]] = {}
+    chunk_size = 50
+    timeout = settings.streamer_timeout_seconds
+    for idx in range(0, len(token_ids), chunk_size):
+        batch = token_ids[idx : idx + chunk_size]
+        params = {"ids": ",".join(batch)}
+        url = f"{base}/data/subgraph/markets"
+        try:
+            res = httpx.get(url, params=params, timeout=timeout)
+            res.raise_for_status()
+            payload = res.json()
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            orderbooks = []
+            if isinstance(data, list):
+                orderbooks = data
+            elif isinstance(data, dict):
+                orderbooks = data.get("orderbooks") or data.get("data") or []
+            for entry in orderbooks:
+                if not isinstance(entry, dict):
+                    continue
+                token_id = str(entry.get("id") or "").strip()
+                if not token_id:
+                    continue
+                aggregates[token_id] = entry
+        except Exception as exc:  # pragma: no cover - network path
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.popularity.streamer_failed",
+                message="failed to fetch orderbook aggregates from streamer",
+                error=str(exc),
+                url=url,
+                ids=len(batch),
+                backoff_seconds=settings.poll_interval_seconds,
+            )
+            continue
+    return aggregates
 
 
 def _slugify_token(value: str | None) -> str | None:
@@ -1043,8 +1151,10 @@ def _collect_market_changes_with_summary(
             summary.markets_updated += 1
         if outcome.resolution_changed and outcome.condition_id:
             summary.changed_conditions.add(outcome.condition_id.lower())
-        if outcome.category_slug:
+        if outcome.category_slug and (outcome.market_changed or outcome.market_created or outcome.market_updated):
             summary.changed_categories.add(outcome.category_slug)
+        if outcome.group_slugs:
+            summary.changed_group_slugs.update(outcome.group_slugs)
         if outcome.resolution_cache_payload and outcome.condition_id:
             summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
         if maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
@@ -1104,6 +1214,19 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
     tags = [row.tag for row in record.tags_rel] if hasattr(record, "tags_rel") else None
     clob_ids = [row.token_id for row in record.clob_tokens_rel] if hasattr(record, "clob_tokens_rel") else None
     gamma_meta = record.gamma_metadata_rel if hasattr(record, "gamma_metadata_rel") else None
+    group_slug = getattr(record, "group_slug", None) or (
+        getattr(gamma_meta, "group_slug", None) if gamma_meta else None
+    )
+    group_position = getattr(record, "group_position", None)
+    group_item_title = getattr(gamma_meta, "group_item_title", None) if gamma_meta else None
+    group_item_threshold = (
+        _parse_group_threshold(getattr(gamma_meta, "group_item_threshold", None)) if gamma_meta else None
+    )
+    if group_position is None and group_item_threshold is not None:
+        try:
+            group_position = int(group_item_threshold)
+        except (TypeError, ValueError, OverflowError):
+            group_position = None
 
     return MarketPayload(
         event_id=record.event_id,
@@ -1144,6 +1267,10 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         enable_order_book=record.enable_order_book,
         image_variants=record.image_variants,
         closes_at=record.closes_at,
+        group_slug=group_slug,
+        group_position=group_position,
+        group_item_title=group_item_title,
+        group_item_threshold=group_item_threshold,
     )
 
 
@@ -1264,12 +1391,16 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
         _invalidate("markets:suggest")
     if summary.stats_dirty and summary.changed_events:
         _invalidate("markets:stats")
+    if summary.changed_group_slugs:
+        _invalidate("markets:group")
     for event_id in summary.changed_events:
         _invalidate(f"market:{event_id}")
     for condition_id in summary.changed_conditions:
         _invalidate(f"resolution:{condition_id}")
     for category_slug in summary.changed_categories:
         _invalidate(f"category:{category_slug}")
+    for group_slug in summary.changed_group_slugs:
+        _invalidate(f"group:{group_slug}")
     if summary.changed_categories:
         CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(summary.changed_categories))
     report.log()
@@ -1439,6 +1570,7 @@ def sync_market(
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
     now = datetime.now(UTC)
     existing = existing_market or shared_repository.get_market_by_event_id(session, market.event_id)
+    previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
     payload = market.model_dump()
     if payload.get("closed") is None:
         payload["closed"] = False
@@ -1549,6 +1681,11 @@ def sync_market(
     resolution_outcome = _apply_resolution(session, db_market, market)
     session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))
+    current_group_slug = getattr(db_market, "group_slug", None)
+    group_slugs: set[str] = set()
+    for slug in (previous_group_slug, current_group_slug):
+        if isinstance(slug, str) and slug:
+            group_slugs.add(slug)
     return db_market, SyncOutcome(
         market_changed=market_changed,
         resolution_changed=resolution_outcome.changed,
@@ -1557,6 +1694,7 @@ def sync_market(
         resolution_cache_payload=resolution_outcome.cache_payload,
         market_created=market_created,
         market_updated=market_updated,
+        group_slugs=group_slugs,
     )
 
 
@@ -1856,6 +1994,28 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
     }
 
 
+def _handle_sync_failure(exc: Exception, start: float, redis_client: Redis | None, schema_state: SchemaSyncResult):
+    """Uniform error handler for sync failures so logging and heartbeats stay consistent."""
+
+    logger.exception(
+        "failed to synchronise markets",
+        extra={"event": "worker.persist.error", "error": str(exc)},
+    )
+    latency_ms = (time.perf_counter() - start) * 1000
+    stats = _empty_sync_stats(round(latency_ms, 2))
+    stats["redis_available"] = redis_client is not None
+    log_event(
+        logger,
+        logging.WARNING,
+        event="worker.sync.skipped",
+        message="skipping market sync due to upstream failure",
+        error=str(exc),
+    )
+    publish_heartbeat(redis_client, stats)
+    _propagate_schema_revision(redis_client, schema_state)
+    return stats
+
+
 def process_once(redis_client: Redis | None = None) -> dict[str, float | int | str | bool]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
@@ -1878,7 +2038,6 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
     )
     streaming_mode = settings.polymarket_stream_persist
     try:
-        markets: list[MarketPayload] | None = None
         latency_ms: float = 0.0
         total_fetched = 0
         if streaming_mode:
@@ -1895,8 +2054,13 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         closed=settings.polymarket_closed_filter,
                         extra_params=_build_filters_from_settings(settings),
                     ):
+                        _enrich_popularity_from_orderbooks(page)
                         total_fetched += len(page)
                         summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)
+                        # Persist each page eagerly to reduce memory pressure and surface changes sooner.
+                        session.flush()
+                        session.commit()
+                        session.expunge_all()
                     _apply_retention_cleanup(session, summary)
                     backfilled = _backfill_missing_resolutions(session, summary)
                     if backfilled:
@@ -1909,42 +2073,28 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         )
                     gap_count = _log_resolution_gaps(session)
             except Exception as exc:  # pragma: no cover - defensive
-                logger.exception(
-                    "failed to synchronise markets",
-                    extra={"event": "worker.persist.error", "error": str(exc)},
-                )
-                latency_ms = (time.perf_counter() - start) * 1000
-                stats = _empty_sync_stats(round(latency_ms, 2))
-                stats["redis_available"] = redis_client is not None
-                publish_heartbeat(redis_client, stats)
-                _propagate_schema_revision(redis_client, schema_state)
-                return stats
+                return _handle_sync_failure(exc, start, redis_client, schema_state)
             latency_ms = (time.perf_counter() - start) * 1000
         else:
-            markets, latency_ms = fetch_markets_from_polymarket()
-            total_fetched = len(markets)
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.sync.fetch_complete",
-                message="polymarket fetch returned payloads",
-                markets_fetched=total_fetched,
-                latency_ms=round(latency_ms, 2),
-            )
+            start = time.perf_counter()
             summary = SyncSummary()
             gap_count = 0
             try:
                 with session_scope() as session:
-                    if markets:
-                        summary = _collect_market_changes(session, markets, redis_client)
-                    else:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            log_event(
-                                logger,
-                                logging.DEBUG,
-                                event="worker.persist.no_markets",
-                                message="skipping DB persistence because no markets were returned",
-                            )
+                    for page in polymarket_client.fetch_markets_paginated(
+                        page_size=settings.polymarket_page_size,
+                        max_pages=settings.polymarket_max_pages,
+                        order=settings.polymarket_order,
+                        ascending=settings.polymarket_sort_ascending,
+                        closed=settings.polymarket_closed_filter,
+                        extra_params=_build_filters_from_settings(settings),
+                    ):
+                        _enrich_popularity_from_orderbooks(page)
+                        total_fetched += len(page)
+                        summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)
+                        session.flush()
+                        session.commit()
+                        session.expunge_all()
                     _apply_retention_cleanup(session, summary)
                     backfilled = _backfill_missing_resolutions(session, summary)
                     if backfilled:
@@ -1957,15 +2107,16 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         )
                     gap_count = _log_resolution_gaps(session)
             except Exception as exc:  # pragma: no cover - defensive
-                logger.exception(
-                    "failed to synchronise markets",
-                    extra={"event": "worker.persist.error", "error": str(exc)},
-                )
-                stats = _empty_sync_stats(round(latency_ms, 2))
-                stats["redis_available"] = redis_client is not None
-                publish_heartbeat(redis_client, stats)
-                _propagate_schema_revision(redis_client, schema_state)
-                return stats
+                return _handle_sync_failure(exc, start, redis_client, schema_state)
+            latency_ms = (time.perf_counter() - start) * 1000
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.sync.fetch_complete",
+                message="polymarket fetch returned paginated payloads",
+                markets_fetched=total_fetched,
+                latency_ms=round(latency_ms, 2),
+            )
     except Exception as exc:
         stats = _empty_sync_stats()
         log_event(
@@ -2003,11 +2154,32 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
         latency_ms=round(latency_ms, 2),
         cache_invalidations=cache_report.total,
         market_errors=summary.failed_markets,
+        active_markets=stats.get("active_markets"),
+        total_markets=stats.get("total_markets"),
     )
     # INFO-level summary above mirrors the start-of-tick log so operators always see
     # a single before/after line even when DEBUG logs are disabled.
 
     stats["redis_available"] = redis_client is not None
+    try:
+        with session_scope() as session:
+            total_markets = int(session.scalar(select(func.count(shared_models.Market.id))) or 0)
+            active_markets = int(
+                session.scalar(
+                    select(func.count(shared_models.Market.id)).where(shared_models.Market.closed.is_(False))
+                )
+                or 0
+            )
+            stats["total_markets"] = total_markets
+            stats["active_markets"] = active_markets
+    except Exception as exc:  # pragma: no cover - best-effort diagnostics
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.metrics.count_failed",
+            message="failed to compute market counts",
+            error=str(exc),
+        )
     publish_heartbeat(redis_client, stats)
     _propagate_schema_revision(redis_client, schema_state)
     _persist_resolution_cache_updates(redis_client, summary)

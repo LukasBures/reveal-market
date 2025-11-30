@@ -155,13 +155,14 @@ def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
 
     status: schemas.HealthState = "ok"
     details: list[str] = []
+    is_prod = (settings.environment or "").lower() == "production"
 
     if settings.pricing_chain_id is None:
-        status = "error"
+        status = "error" if is_prod else "degraded"
         details.append("RM_PRICING_CHAIN_ID missing")
 
     if settings.pricing_signer_private_key is None:
-        status = "error"
+        status = "error" if is_prod else "degraded"
         details.append("RM_PRICING_SIGNER_PRIVATE_KEY missing")
 
     env_chain = os.getenv("RM_PRICING_CHAIN_ID")
@@ -193,7 +194,8 @@ def _check_cors(settings) -> tuple[str, schemas.HealthComponent]:
     """Warn when CORS is effectively wildcard to catch misconfiguration before prod."""
 
     origins = settings.cors_allow_origins or []
-    if origins == ["*"] or not origins:
+    is_prod = (settings.environment or "").lower() == "production"
+    if (origins == ["*"] or not origins) and is_prod:
         return (
             "cors",
             schemas.HealthComponent(
@@ -201,4 +203,9 @@ def _check_cors(settings) -> tuple[str, schemas.HealthComponent]:
                 detail="cors_allow_origins wildcard; set explicit origins for production",
             ),
         )
-    return ("cors", schemas.HealthComponent(status="ok", detail="cors_allow_origins configured"))
+    detail = (
+        "cors_allow_origins configured"
+        if origins
+        else "cors_allow_origins wildcard; set explicit origins for production"
+    )
+    return ("cors", schemas.HealthComponent(status="ok", detail=detail))

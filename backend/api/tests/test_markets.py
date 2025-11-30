@@ -18,6 +18,10 @@ def _make_market(
     oracle: str,
     status: str,
     rake_bps: int | None = None,
+    group_slug: str | None = None,
+    group_position: int | None = None,
+    volume_24h_usd: float | None = None,
+    liquidity_usd: float | None = None,
 ) -> models.Market:
     now = datetime.now(tz=UTC)
     return models.Market(
@@ -27,6 +31,10 @@ def _make_market(
         oracle=oracle,
         status=status,
         rake_bps=rake_bps,
+        group_slug=group_slug,
+        group_position=group_position,
+        volume_24h_usd=volume_24h_usd,
+        liquidity_usd=liquidity_usd,
         created_at=now,
         updated_at=now,
     )
@@ -128,6 +136,73 @@ def test_market_response_includes_summary_fields(client, db_session):
     assert payload["summary_source"] == "ai_enrichment"
     assert payload["summary_model"] == "gpt-5.1-mini"
     assert payload["summary_checked_at"].startswith(now.strftime("%Y-%m-%d"))
+
+
+def test_market_detail_includes_grouping_and_siblings(client, db_session):
+    group_slug = "makina-public-sale-total-commitments"
+    first = _make_market(
+        "evt-group-1",
+        "Makina threshold 1",
+        category="sales",
+        oracle="0xgroup",
+        status="commit",
+        group_slug=group_slug,
+        group_position=1500000,
+        volume_24h_usd=10.5,
+        liquidity_usd=50.0,
+    )
+    second = _make_market(
+        "evt-group-2",
+        "Makina threshold 2",
+        category="sales",
+        oracle="0xgroup",
+        status="commit",
+        group_slug=group_slug,
+        group_position=2000000,
+        volume_24h_usd=4.5,
+        liquidity_usd=25.0,
+    )
+    db_session.add_all([first, second])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=first.id,
+                group_item_title=">$1.5M",
+                group_item_threshold="1500000",
+                group_slug=group_slug,
+            ),
+            models.MarketGammaMetadata(
+                market_id=second.id,
+                group_item_title=">$2M",
+                group_item_threshold="2000000",
+                group_slug=group_slug,
+            ),
+        ]
+    )
+    db_session.add_all(
+        [
+            models.MarketOutcome(market_id=first.id, outcome_id=0, label="Yes", price=0.55),
+            models.MarketOutcome(market_id=first.id, outcome_id=1, label="No", price=0.45),
+            models.MarketOutcome(market_id=second.id, outcome_id=0, label="Yes", price=0.35),
+            models.MarketOutcome(market_id=second.id, outcome_id=1, label="No", price=0.65),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(f"/markets/{first.event_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["group_slug"] == group_slug
+    assert payload["group_position"] == 1500000
+    assert payload["volume_24h_usd"] == 15.0
+    siblings = payload["siblings"]
+    assert isinstance(siblings, list)
+    assert {sib["event_id"] for sib in siblings} == {first.event_id, second.event_id}
+    assert siblings[0]["group_position"] == 1500000
+    assert siblings[0]["group_item_title"] == ">$1.5M"
+    assert siblings[0]["outcome_prices"] == [0.55, 0.45]
+    assert siblings[1]["group_position"] == 2000000
 
 
 def test_patch_market_and_stats(client, db_session):

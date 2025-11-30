@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.streamer.data")
+CLOB_MARKETS_URL = "https://clob.polymarket.com/markets"
+CLOB_PAGE_SIZE = 500
 
 
 class DataStreamer:
@@ -36,6 +38,9 @@ class DataStreamer:
         self._stop = asyncio.Event()
         self._publish_cache: dict[str, dict] = {}
         self.clob_client: ClobClient | None = None
+        self._drop_log_counts: dict[tuple[str, str], int] = {}
+        self._drop_log_last_emit: datetime | None = None
+        self._tune_http_logging()
         if getattr(self.settings, "clob_host", None):
             try:
                 self.clob_client = ClobClient(str(self.settings.clob_host))
@@ -63,6 +68,37 @@ class DataStreamer:
             if isinstance(parsed, list):
                 return parsed
         return None
+
+    @staticmethod
+    def _tune_http_logging() -> None:
+        """Silence verbose httpx/httpcore access logs during tight rest-poll loops."""
+
+        for name in ("httpx", "httpcore"):
+            noisy = logging.getLogger(name)
+            noisy.setLevel(logging.WARNING)
+
+    def _record_drop_log(self, source: str, *, reason: str, payload_keys: list[str]) -> None:
+        """Aggregate noisy drop logs to avoid spamming identical messages."""
+
+        key = (source, reason)
+        self._drop_log_counts[key] = self._drop_log_counts.get(key, 0) + 1
+        now = datetime.now(UTC)
+        should_emit = self._drop_log_last_emit is None or (now - self._drop_log_last_emit).total_seconds() >= 30
+        if not should_emit:
+            return
+
+        if self._drop_log_counts:
+            summary = [{"source": k[0], "reason": k[1], "count": v} for k, v in self._drop_log_counts.items()]
+            logger.info(
+                "Dropping payloads missing market/prices",
+                extra={
+                    "event": "ingest.drop.summary",
+                    "drops": summary,
+                    "payload_keys": payload_keys,
+                },
+            )
+            self._drop_log_counts.clear()
+        self._drop_log_last_emit = now
 
     def _init_metrics(self) -> None:
         if self.metric_ticks is not None:
@@ -187,22 +223,35 @@ class DataStreamer:
                 await self.state.cache_tick(market_id, outcome, payload)
 
     async def _poll_rest(self) -> None:
+        total = 0
+        cursor: str | None = None
         async with httpx.AsyncClient(timeout=10) as client:
-            res = await client.get(str(self.settings.clob_rest_markets_url))
-            res.raise_for_status()
-            payload = res.json()
-            markets = payload if isinstance(payload, list) else payload.get("data") or []
-            for market in markets:
-                await self._normalize_and_publish(market, source="rest")
+            while True:
+                params = {"limit": CLOB_PAGE_SIZE}
+                if cursor:
+                    params["cursor"] = cursor
+                res = await client.get(CLOB_MARKETS_URL, params=params)
+                res.raise_for_status()
+                payload = res.json()
+                markets = payload if isinstance(payload, list) else payload.get("data") or []
+                for market in markets:
+                    await self._normalize_and_publish(market, source="rest")
+                total += len(markets)
+                for market in markets:
+                    market_id = str(market.get("id") or market.get("marketId") or "")
+                    tokens = self.state.get_clob_tokens(market_id)
+                    if market_id and tokens and market_id in self.state.subscriptions.assets:
+                        self.state.subscriptions.replace_asset(market_id, tokens)
+                cursor_val = (
+                    payload.get("next_cursor") or payload.get("nextCursor") if isinstance(payload, dict) else None
+                )
+                cursor = cursor_val or None
+                if cursor is None:
+                    break
             logger.debug(
                 "REST poll ingested markets",
-                extra={"event": "clob.rest.poll", "count": len(markets)},
+                extra={"event": "clob.rest.poll", "count": total, "cursor": cursor},
             )
-            for market in markets:
-                market_id = str(market.get("id") or market.get("marketId") or "")
-                tokens = self.state.get_clob_tokens(market_id)
-                if market_id and tokens and market_id in self.state.subscriptions.assets:
-                    self.state.subscriptions.replace_asset(market_id, tokens)
 
     async def _fetch_midpoints(self, token_ids: list[str]) -> list[Decimal] | None:
         if not self.clob_client:
@@ -383,10 +432,7 @@ class DataStreamer:
                     self.stream_metrics.record_ingest_drop(source, reason)
                 except Exception as exc:
                     logger.info("Failed to record drop metric", exc_info=exc)
-            logger.info(
-                "Dropping payload missing market/prices",
-                extra={"event": "ingest.drop", "reason": "missing_market_or_prices", "payload_keys": list(raw.keys())},
-            )
+            self._record_drop_log(source, reason="missing_market_or_prices", payload_keys=list(raw.keys()))
             return
         self.state.last_seen[str(market_id)] = datetime.now(UTC)
         if self.stream_metrics:

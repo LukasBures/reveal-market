@@ -69,11 +69,19 @@ class MarketBase(BaseModel):
     enable_order_book: bool | None = None
     clob_token_ids: list[str] | None = None
     image_variants: list[str] | None = None
+    group_slug: str | None = None
+    group_item_title: str | None = None
+    group_item_threshold: float | None = None
+    group_position: int | None = None
     summary: str | None = None
     summary_source: str | None = None
     summary_model: str | None = None
     summary_metadata: dict[str, Any] | None = None
     summary_checked_at: datetime | None = None
+    liquidity_usd: float | None = None
+    volume_24h_usd: float | None = None
+    orderbook_volume_usd: float | None = None
+    trades_quantity: int | None = None
 
 
 class MarketCreate(MarketBase):
@@ -115,16 +123,37 @@ class MarketRead(MarketBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MarketSibling(BaseModel):
+    event_id: str
+    title: str | None = None
+    group_item_title: str | None = None
+    group_item_threshold: float | None = None
+    group_position: int | None = None
+    outcome_prices: list[float] | None = None
+    liquidity_usd: float | None = None
+    volume_24h_usd: float | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MarketResponse(MarketRead):
     description: str | None = None
     clob_pair_id: str | None = None
     resolution: ResolutionSummary | None = None
     caps: MarketCaps | None = None
+    siblings: list[MarketSibling] | None = None
 
 
 class MarketStatusBreakdown(BaseModel):
     status: str
     count: int
+
+
+class GroupedMarketsResponse(BaseModel):
+    group_slug: str
+    markets: list[MarketResponse]
+    aggregate_volume_24h_usd: float | None = None
+    aggregate_liquidity_usd: float | None = None
 
 
 class MarketCaps(BaseModel):

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount } from "wagmi";
+import { formatZenUsd } from "@/lib/fx";
 
 type Props = {
   stakeZen: number;
@@ -18,7 +19,10 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
   const [error, setError] = useState<string | null>(null);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
-  const fxLabel = fx ? `FX: 1 ZEN = $${fx.zen_usd.toFixed(4)} USDC${fxStale ? " (stale)" : ""}` : "FX: loading…";
+  const fxValue = formatZenUsd(fx?.zen_usd);
+  const fxLabel = fxValue
+    ? `FX: 1 ZEN = $${fxValue} USDC${fxStale ? " (stale)" : ""}`
+    : "FX: loading…";
   const { address } = useAccount();
 
   useEffect(() => {

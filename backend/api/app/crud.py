@@ -65,6 +65,22 @@ def get_market_by_condition_id(session: Session, condition_id: str) -> models.Ma
     return session.scalars(stmt).first()
 
 
+def get_markets_by_group_slug(session: Session, group_slug: str) -> list[models.Market]:
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .where(models.Market.group_slug == group_slug)
+        .order_by(models.Market.created_at.desc())
+    )
+    rows = session.execute(stmt).unique().scalars().all()
+    return rows
+
+
 def get_resolution_by_condition_id(session: Session, condition_id: str) -> models.Resolution | None:
     stmt = select(models.Resolution).where(models.Resolution.condition_id == condition_id)
     return session.scalars(stmt).first()
