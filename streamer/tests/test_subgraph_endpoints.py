@@ -32,6 +32,7 @@ class DummySubgraph:
     async def fetch_market_data(self, **_kwargs):
         return [{"id": "md1"}]
 
+
 @pytest.fixture()
 def subgraph_app(monkeypatch):
     settings = Settings(subgraph_default_url="https://example.com/subgraph")

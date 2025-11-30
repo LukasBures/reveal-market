@@ -14,8 +14,11 @@ class SubgraphError(RuntimeError):
     """Raised when a subgraph request fails or returns errors."""
 
 
-class SubgraphNotConfigured(SubgraphError):
+class SubgraphNotConfiguredError(SubgraphError):
     """Raised when no endpoint is available for the requested data class."""
+
+
+SubgraphNotConfigured = SubgraphNotConfiguredError
 
 
 class SubgraphClient:
@@ -44,14 +47,16 @@ class SubgraphClient:
         }
         endpoint = mapping.get(kind) or self.settings.subgraph_default_url
         if not endpoint:
-            raise SubgraphNotConfigured(f"{kind} subgraph endpoint not configured")
+            raise SubgraphNotConfiguredError(f"{kind} subgraph endpoint not configured")
         return str(endpoint)
 
     async def _execute(self, endpoint: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(
             timeout=self.settings.subgraph_timeout_seconds, transport=self._transport
         ) as client:
-            response = await client.post(endpoint, json={"query": query, "variables": variables}, headers=self._headers())
+            response = await client.post(
+                endpoint, json={"query": query, "variables": variables}, headers=self._headers()
+            )
             response.raise_for_status()
         data = response.json()
         errors = data.get("errors")
@@ -78,13 +83,13 @@ class SubgraphClient:
         ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         id_filter = "where: { id_in: $ids }" if ids else ""
-        query = """
-        query Orderbooks($first: Int!, $skip: Int!, $ids: [ID!]) {
+        query = f"""
+        query Orderbooks($first: Int!, $skip: Int!, $ids: [ID!]) {{
           orderbooks(
             first: $first
             skip: $skip
-            %s
-          ) {
+            {id_filter}
+          ) {{
             id
             tradesQuantity
             buysQuantity
@@ -95,9 +100,9 @@ class SubgraphClient:
             scaledCollateralBuyVolume
             collateralSellVolume
             scaledCollateralSellVolume
-          }
-        }
-        """ % id_filter
+          }}
+        }}
+        """
         variables = {
             "first": first,
             "skip": skip,
@@ -203,9 +208,7 @@ class SubgraphClient:
         data = await self._run("positions", query, variables)
         return data.get("userBalances", [])
 
-    async def fetch_open_interest(
-        self, *, market_id: str, first: int = 100, skip: int = 0
-    ) -> list[dict[str, Any]]:
+    async def fetch_open_interest(self, *, market_id: str, first: int = 100, skip: int = 0) -> list[dict[str, Any]]:
         query = """
         query OpenInterest($marketId: String!, $first: Int!, $skip: Int!) {
           marketOpenInterests(

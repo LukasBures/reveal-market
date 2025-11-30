@@ -128,7 +128,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       count: items.length,
       cacheTags: fetchTags,
     });
-    const mapped = items.map(mapApiMarketToSummary);
+    const mapped: MarketSummary[] = items.map(mapApiMarketToSummary);
     // Enrich with orderbook aggregates when token IDs are present (best-effort).
     try {
       const tokenIds = mapped.flatMap((m) => m.clobTokenIds ?? []).filter(Boolean) as string[];

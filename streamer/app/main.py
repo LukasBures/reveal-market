@@ -23,7 +23,7 @@ from .logging_utils import setup_logging, start_heartbeat
 from .metrics import get_metrics
 from .price_streamer import PriceStreamer
 from .state import StreamState
-from .subgraph import SubgraphClient, SubgraphError, SubgraphNotConfigured
+from .subgraph import SubgraphClient, SubgraphError, SubgraphNotConfiguredError
 
 logger = logging.getLogger("reveal_market.streamer")
 
@@ -369,9 +369,7 @@ def create_app() -> FastAPI:
         first: int = Query(100, ge=1, le=300),
         skip: int = Query(0, ge=0),
     ):
-        oi = await _subgraph_query(
-            subgraph_client.fetch_open_interest, market_id=market_id, first=first, skip=skip
-        )
+        oi = await _subgraph_query(subgraph_client.fetch_open_interest, market_id=market_id, first=first, skip=skip)
         return {"market_id": market_id, "count": len(oi), "data": oi}
 
     @app_instance.get("/subgraph/open-interest/global")
@@ -582,15 +580,15 @@ def create_app() -> FastAPI:
     async def _subgraph_query(fn, **kwargs):
         try:
             return await fn(**kwargs)
-        except SubgraphNotConfigured as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        except SubgraphNotConfiguredError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         except httpx.HTTPStatusError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"subgraph HTTP {exc.response.status_code}",
-            )
+            ) from exc
         except SubgraphError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("subgraph query failed", extra={"event": "subgraph.query.error", "error": str(exc)})
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="subgraph query failed") from exc
@@ -600,7 +598,7 @@ def create_app() -> FastAPI:
         try:
             data = await fn(**kwargs)
             await ws.send_json({"data": data})
-        except SubgraphNotConfigured as exc:
+        except SubgraphNotConfiguredError as exc:
             await ws.send_json({"error": str(exc)})
         except httpx.HTTPStatusError as exc:
             await ws.send_json({"error": f"subgraph HTTP {exc.response.status_code}"})

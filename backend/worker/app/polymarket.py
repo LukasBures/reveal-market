@@ -7,10 +7,10 @@ import json
 import logging
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any, Iterator
+from typing import Any
 
 import httpx
 from py_clob_client.client import ClobClient

@@ -1893,7 +1893,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         order=settings.polymarket_order,
                         ascending=settings.polymarket_sort_ascending,
                         closed=settings.polymarket_closed_filter,
-                        extra_params=_build_filters(settings),
+                        extra_params=_build_filters_from_settings(settings),
                     ):
                         total_fetched += len(page)
                         summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)

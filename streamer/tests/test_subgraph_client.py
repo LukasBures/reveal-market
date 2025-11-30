@@ -4,9 +4,8 @@ import json
 
 import httpx
 import pytest
-
 from app.config import Settings
-from app.subgraph import SubgraphClient, SubgraphNotConfigured
+from app.subgraph import SubgraphClient, SubgraphNotConfiguredError
 
 
 @pytest.mark.asyncio
@@ -42,5 +41,5 @@ async def test_subgraph_requires_endpoint():
         subgraph_pnl_url=None,
     )
     client = SubgraphClient(settings)
-    with pytest.raises(SubgraphNotConfigured):
+    with pytest.raises(SubgraphNotConfiguredError):
         await client.fetch_markets()
