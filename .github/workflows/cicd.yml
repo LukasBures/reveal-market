@@ -23,6 +23,23 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+      - name: Install Foundry dependencies (polygon)
+        working-directory: contracts/polygon
+        run: |
+          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ]; then
+            forge install --no-git --shallow \
+              foundry-rs/forge-std@v1.9.1 \
+              openzeppelin/openzeppelin-contracts@v5.0.0
+          fi
+      - name: Install Foundry dependencies (zen)
+        working-directory: contracts/zen
+        run: |
+          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ] || [ ! -d lib/solmate ]; then
+            forge install --no-git --shallow \
+              foundry-rs/forge-std@40977d9e9444acd4c59c16b6782c658c786c0d05 \
+              openzeppelin/openzeppelin-contracts@v5.5.0 \
+              transmissions11/solmate@89365b880c4f3c786bdd453d4b8e8fe410344a69
+          fi
       - name: Install uv
         run: |
           python -m pip install --upgrade pip
@@ -161,6 +178,15 @@ jobs:
         with:
           version: nightly
 
+      - name: Install Foundry dependencies (polygon)
+        working-directory: contracts/polygon
+        run: |
+          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ]; then
+            forge install --no-git --shallow \
+              foundry-rs/forge-std@v1.9.1 \
+              openzeppelin/openzeppelin-contracts@v5.0.0
+          fi
+
       - name: Polygon contracts pipeline
         working-directory: contracts/polygon
         run: ./run_tests.sh
@@ -177,6 +203,16 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+
+      - name: Install Foundry dependencies (zen)
+        working-directory: contracts/zen
+        run: |
+          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ] || [ ! -d lib/solmate ]; then
+            forge install --no-git --shallow \
+              foundry-rs/forge-std@40977d9e9444acd4c59c16b6782c658c786c0d05 \
+              openzeppelin/openzeppelin-contracts@v5.5.0 \
+              transmissions11/solmate@89365b880c4f3c786bdd453d4b8e8fe410344a69
+          fi
 
       - name: Generate contract error selectors
         run: python scripts/generate_error_selectors.py > contracts/cache/errors.json
