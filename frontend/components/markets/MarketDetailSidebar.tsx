@@ -70,37 +70,23 @@ const pickStringArray = (sources: Array<LooseRecord | null>, keys: string[]): st
 };
 
 const normalizeBps = (value: number | null): number | null => {
-  if (value === null || !Number.isFinite(value)) {
-    return null;
-  }
-  if (value < 0) {
-    return null;
-  }
-  if (value === 0) {
-    return 0;
-  }
-  if (value <= 1) {
-    return Math.round(value * 10_000);
-  }
-  if (value <= 100) {
-    return Math.round(value * 100);
-  }
+  if (value === null || !Number.isFinite(value)) return null;
+  if (value < 0) return null;
+  if (value === 0) return 0;
+  if (value <= 1) return Math.round(value * 10_000);
+  if (value <= 100) return Math.round(value * 100);
   return Math.round(value);
 };
 
 const formatProbability = (value: number | null): string => {
-  if (value === null) {
-    return "—";
-  }
+  if (value === null) return "—";
   const normalized = value > 1 ? value : value * 100;
   const decimals = normalized >= 10 ? 0 : 2;
   return `${normalized.toFixed(decimals)}%`;
 };
 
 const formatBps = (value: number | null): string => {
-  if (value === null) {
-    return "—";
-  }
+  if (value === null) return "—";
   return `${value} bps`;
 };
 
@@ -160,7 +146,7 @@ export function MarketDetailSidebar({ market }: Props) {
 
   return (
     <aside className="space-y-6 rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-      <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
+      <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <span>Category</span>
           <span className="font-semibold text-white">{market.category ?? "General"}</span>
@@ -184,7 +170,8 @@ export function MarketDetailSidebar({ market }: Props) {
           <span className="text-white">{formatUsd(liquidity)}</span>
         </div>
       </div>
-      <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
+
+      <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <span>Commit deadline</span>
           <span className="text-white">{formatDateTime(market.commitDeadline)}</span>
@@ -206,6 +193,7 @@ export function MarketDetailSidebar({ market }: Props) {
           </div>
         )}
       </div>
+
       <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trading metrics</p>
@@ -228,6 +216,7 @@ export function MarketDetailSidebar({ market }: Props) {
           ))}
         </div>
       </div>
+
       {feeRows.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Fee schedule</p>
@@ -241,6 +230,7 @@ export function MarketDetailSidebar({ market }: Props) {
           </div>
         </div>
       )}
+
       {(clobPairId || (tokenIds?.length ?? 0) > 0) && (
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-5 text-sm text-slate-300">
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Order book routing</p>
@@ -261,13 +251,13 @@ export function MarketDetailSidebar({ market }: Props) {
       {resolution && (
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-5 text-sm text-slate-300">
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Settlement proof</p>
-          <p className="mt-2">Checked at {formatDate(resolution.checkedAt)}</p>
-          {resolution.transactionHash && (
-            <p className="mt-2 break-all text-xs text-slate-500">TX: {resolution.transactionHash}</p>
-          )}
-          {resolution.blockNumber && (
-            <p className="text-xs text-slate-500">Block #{resolution.blockNumber}</p>
-          )}
+          <div className="mt-3 space-y-1 text-xs text-slate-400">
+            <p>Checked at {formatDate(resolution.checkedAt)}</p>
+            {resolution.transactionHash && (
+              <p className="break-all text-slate-500">TX: {resolution.transactionHash}</p>
+            )}
+            {resolution.blockNumber && <p className="text-slate-500">Block #{resolution.blockNumber}</p>}
+          </div>
         </div>
       )}
     </aside>

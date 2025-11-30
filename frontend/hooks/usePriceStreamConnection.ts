@@ -21,6 +21,8 @@ export type OutcomePrice = {
   bestBid?: number;
   bestAsk?: number;
   status?: string | null;
+  depthBids?: Array<{ price?: number; size?: number }>;
+  depthAsks?: Array<{ price?: number; size?: number }>;
 };
 
 type StreamState = {
@@ -143,11 +145,45 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         const targetOutcome =
           Number.isInteger(Number(payload.outcome)) && Number(payload.outcome) >= 0 ? Number(payload.outcome) : null;
         const totalOutcomes = Math.max(conn.state.outcomes.length || 0, normalizedTokens.length || 0, 2);
+        const depthBids =
+          Array.isArray(payload.depth_bids) || Array.isArray(payload.depthBids) ? (payload.depth_bids || payload.depthBids) : [];
+        const depthAsks =
+          Array.isArray(payload.depth_asks) || Array.isArray(payload.depthAsks) ? (payload.depth_asks || payload.depthAsks) : [];
+        const parsedDepth = (entries: any[]) =>
+          entries
+            .filter(Boolean)
+            .map((entry) => ({
+              price:
+                entry && typeof entry.price !== "undefined"
+                  ? Number(entry.price)
+                  : entry && typeof entry.Price !== "undefined"
+                    ? Number(entry.Price)
+                    : undefined,
+              size:
+                entry && typeof entry.size !== "undefined"
+                  ? Number(entry.size)
+                  : entry && typeof entry.Size !== "undefined"
+                    ? Number(entry.Size)
+                    : undefined,
+            }))
+            .filter((d) => Number.isFinite(d.price));
         if (targetOutcome !== null) {
-          updateOutcome(conn, targetOutcome, (prev) => ({ ...prev, bestBid, bestAsk }));
+          updateOutcome(conn, targetOutcome, (prev) => ({
+            ...prev,
+            bestBid,
+            bestAsk,
+            depthBids: parsedDepth(depthBids),
+            depthAsks: parsedDepth(depthAsks),
+          }));
         } else {
           for (let i = 0; i < totalOutcomes; i += 1) {
-            updateOutcome(conn, i, (prev) => ({ ...prev, bestBid, bestAsk }));
+            updateOutcome(conn, i, (prev) => ({
+              ...prev,
+              bestBid,
+              bestAsk,
+              depthBids: parsedDepth(depthBids),
+              depthAsks: parsedDepth(depthAsks),
+            }));
           }
         }
         setState(conn, { lastUpdated: payload.timestamp ?? new Date().toISOString() });

@@ -35,6 +35,7 @@ export function StakeQuoteCard({
   const [refreshNonce, setRefreshNonce] = useState(0);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
+  const fxLive = status === "live" && !fx?.stale;
   const { address } = useAccount();
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
@@ -144,10 +145,10 @@ export function StakeQuoteCard({
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           <span
             className={`rounded-full px-3 py-1 ${
-              fxStale || fxUnavailable ? "bg-amber-500/20 text-amber-100" : "bg-emerald-500/15 text-emerald-100"
+              fxLive ? "bg-emerald-500/15 text-emerald-100" : fxStale || fxUnavailable ? "bg-amber-500/20 text-amber-100" : "bg-white/10 text-white/70"
             }`}
           >
-            FX {fxStale || fxUnavailable ? "stale" : "live"}
+            FX {fxLive ? "live" : fxUnavailable ? "unavailable" : "stale"}
           </span>
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
@@ -216,6 +217,15 @@ export function StakeQuoteCard({
           <Metric label="Rake (ZEN)" value={formatNumber(quote?.rake_zen ?? NaN, 3)} />
           <Metric label="Profit (USDC)" value={formatNumber(profitUsd ?? NaN, 3)} highlight />
           <Metric label="Odds" value={formatNumber(quote?.displayed_odds_multiplier ?? NaN, 3)} />
+          <Metric label="Quote expiry" value={quote ? new Date(quote.expires_at).toLocaleTimeString() : "—"} />
+          <Metric
+            label="Chain"
+            value={
+              quote?.chain_id !== undefined && quote?.chain_id !== null
+                ? String(quote.chain_id)
+                : "—"
+            }
+          />
         </div>
       </div>
 
@@ -251,6 +261,19 @@ export function StakeQuoteCard({
           </p>
         )}
       </div>
+      {quote && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3 text-xs text-slate-300">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Trade summary</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <span>Stake: {formatNumber(quote.stake_zen, 3)} ZEN</span>
+            <span>Refund: {formatNumber(quote.refund_zen, 3)} ZEN</span>
+            <span>Profit: {formatNumber(profitUsd ?? NaN, 3)} USDC</span>
+            <span>Haircut: {formatNumber(quote.haircut_percent * 100, 2)}%</span>
+            <span>Worsen: {formatNumber(quote.worsen_percent * 100, 2)}%</span>
+            <span>Rake: {formatNumber(quote.rake_percent * 100, 2)}%</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

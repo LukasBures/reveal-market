@@ -270,16 +270,49 @@ class DataStreamer:
             asks = data.get("asks") or data.get("sells") or data.get("ask")
             best_bid = None
             best_ask = None
+            depth_limit = 5
+            depth_bids: list[dict] = []
+            depth_asks: list[dict] = []
             if isinstance(bids, list) and bids:
-                try:
-                    best_bid = max(Decimal(str(b.get("price") if isinstance(b, dict) else b)) for b in bids)
-                except (ArithmeticError, ValueError, TypeError):
-                    best_bid = None
+                parsed_bids: list[tuple[Decimal, Decimal | None]] = []
+                for entry in bids:
+                    price_raw = entry.get("price") if isinstance(entry, dict) else entry
+                    size_raw = entry.get("size") if isinstance(entry, dict) else None
+                    try:
+                        price_val = Decimal(str(price_raw))
+                    except (ArithmeticError, ValueError, TypeError):
+                        continue
+                    try:
+                        size_val = Decimal(str(size_raw)) if size_raw is not None else None
+                    except (ArithmeticError, ValueError, TypeError):
+                        size_val = None
+                    parsed_bids.append((price_val, size_val))
+                if parsed_bids:
+                    best_bid = max(p[0] for p in parsed_bids)
+                    for price_val, size_val in sorted(parsed_bids, key=lambda p: p[0], reverse=True)[:depth_limit]:
+                        depth_bids.append(
+                            {"price": str(price_val), "size": str(size_val) if size_val is not None else None}
+                        )
             if isinstance(asks, list) and asks:
-                try:
-                    best_ask = min(Decimal(str(a.get("price") if isinstance(a, dict) else a)) for a in asks)
-                except (ArithmeticError, ValueError, TypeError):
-                    best_ask = None
+                parsed_asks: list[tuple[Decimal, Decimal | None]] = []
+                for entry in asks:
+                    price_raw = entry.get("price") if isinstance(entry, dict) else entry
+                    size_raw = entry.get("size") if isinstance(entry, dict) else None
+                    try:
+                        price_val = Decimal(str(price_raw))
+                    except (ArithmeticError, ValueError, TypeError):
+                        continue
+                    try:
+                        size_val = Decimal(str(size_raw)) if size_raw is not None else None
+                    except (ArithmeticError, ValueError, TypeError):
+                        size_val = None
+                    parsed_asks.append((price_val, size_val))
+                if parsed_asks:
+                    best_ask = min(p[0] for p in parsed_asks)
+                    for price_val, size_val in sorted(parsed_asks, key=lambda p: p[0])[:depth_limit]:
+                        depth_asks.append(
+                            {"price": str(price_val), "size": str(size_val) if size_val is not None else None}
+                        )
             payload = {
                 "market_id": market,
                 "type": "book",
@@ -298,6 +331,8 @@ class DataStreamer:
                     else None
                 ),
                 "spread": str(best_ask - best_bid) if best_bid is not None and best_ask is not None else None,
+                "depth_bids": depth_bids,
+                "depth_asks": depth_asks,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
             await self.state.cache_tick(market, "meta", payload)

@@ -39,22 +39,8 @@ export function MarketDetailMetadata({ market }: Props) {
       ? `${Math.round(market.rakeBps)} bps`
       : undefined;
 
-  const items: MetadataItem[] = [
-    { label: "UMA status", value: market.umaStatus ?? "pending" },
-    { label: "Market address", value: market.marketAddress, mono: true },
-  ];
-  if (market.factory) {
-    items.push({ label: "Factory address", value: market.factory, mono: true });
-  }
-  if (sourceSlug) {
-    items.push({ label: "Source slug", value: sourceSlug, mono: true });
-  }
-  if (feeLabel) {
-    items.push({ label: "Fee (bps)", value: feeLabel });
-  }
-  const tags = market.tags ?? [];
-  type ResolutionWinner = { index: number; label?: string | null; payout?: number | null };
   const resolution = (market.resolution ?? (market.extraData?.resolution as any)) || null;
+  type ResolutionWinner = { index: number; label?: string | null; payout?: number | null };
   const resolutionWinners: ResolutionWinner[] = Array.isArray(resolution?.winners)
     ? (resolution.winners as ResolutionWinner[])
     : [];
@@ -68,6 +54,30 @@ export function MarketDetailMetadata({ market }: Props) {
     }
   };
 
+  const renderItem = (item: MetadataItem) => (
+    <div
+      key={item.label}
+      className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200"
+    >
+      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
+      <div className="mt-2 flex items-center gap-2">
+        <span className={`${item.mono ? "font-mono text-xs" : "text-base font-semibold text-white"}`}>
+          {item.value ?? "—"}
+        </span>
+        {item.value && (
+          <button
+            type="button"
+            onClick={() => copyToClipboard(item.value)}
+            className="text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:text-brand-200"
+            aria-label={`Copy ${item.label}`}
+          >
+            Copy
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-300">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -75,40 +85,26 @@ export function MarketDetailMetadata({ market }: Props) {
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Prediction metadata</p>
           <h2 className="text-2xl font-semibold text-white">Identifiers & provenance</h2>
           <p className="text-slate-400">
-            Backed by the Reveal Market ledger with immutable IDs, so downstream systems can reconcile settlements and audits without chasing upstream quirks.
+            Copyable addresses, upstream slugs, and resolution details so downstream systems can reconcile audits and payouts.
           </p>
         </div>
       </div>
+
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        {items.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200"
-          >
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <span className={`${item.mono ? "font-mono text-xs" : "text-base font-semibold text-white"}`}>
-                {item.value ?? "—"}
-              </span>
-              {item.value && (
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(item.value)}
-                  className="text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:text-brand-200"
-                  aria-label={`Copy ${item.label}`}
-                >
-                  Copy
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+        {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending" })}
+        {renderItem({ label: "Market address", value: market.marketAddress, mono: true })}
+        {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
+        {sourceSlug && renderItem({ label: "Source slug", value: sourceSlug, mono: true })}
+        {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
+        {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}
+        {formattedTokens && renderItem({ label: "Token IDs", value: formattedTokens, mono: true })}
       </div>
-      {tags.length > 0 && (
+
+      {market.tags && market.tags.length > 0 && (
         <div className="mt-6 space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Tags</p>
           <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
+            {market.tags.map((tag) => (
               <span key={tag} className="rounded-full bg-brand-500/15 px-3 py-1 text-xs font-semibold text-brand-200">
                 #{tag}
               </span>
@@ -116,10 +112,11 @@ export function MarketDetailMetadata({ market }: Props) {
           </div>
         </div>
       )}
+
       {resolution && (
         <div className="mt-6 space-y-3 rounded-3xl border border-white/10 bg-slate-900/40 p-6">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Resolution</p>
-          <div className="text-sm text-slate-300">
+          <div className="text-sm text-slate-300 space-y-2">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-white">{resolution.resolved ? "Resolved" : "Pending"}</span>
               {resolution.checkedAt && (
@@ -127,7 +124,7 @@ export function MarketDetailMetadata({ market }: Props) {
               )}
             </div>
             {resolutionWinners.length > 0 && (
-              <ul className="mt-2 space-y-1 text-sm">
+              <ul className="space-y-1 text-sm">
                 {resolutionWinners.map((winner: ResolutionWinner) => (
                   <li key={`${winner.index}-${winner.label ?? winner.index}`}>
                     <span className="font-semibold text-white">{winner.label ?? `Outcome ${winner.index}`}</span>
@@ -139,9 +136,27 @@ export function MarketDetailMetadata({ market }: Props) {
                 ))}
               </ul>
             )}
+            {(resolution.transactionHash || resolution.blockNumber) && (
+              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-xs text-slate-400">
+                {resolution.transactionHash && (
+                  <p className="break-all">
+                    TX: {resolution.transactionHash}{" "}
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(resolution.transactionHash)}
+                      className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-400 hover:text-brand-200"
+                    >
+                      Copy
+                    </button>
+                  </p>
+                )}
+                {resolution.blockNumber && <p>Block #{resolution.blockNumber}</p>}
+              </div>
+            )}
           </div>
         </div>
       )}
+
       <div className="mt-6 grid gap-4 md:grid-cols-2 text-sm text-slate-300">
         <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-4">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Commit deadline</p>

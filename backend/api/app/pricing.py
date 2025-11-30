@@ -155,7 +155,7 @@ def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool]:
     if expires_at and expires_at > now and "zen_usd" in _FX_CACHE:
         price = _FX_CACHE.get("zen_usd")
         stale = bool(_FX_CACHE.get("stale"))
-        return (Decimal(str(price)) if price is not None else None, stale)
+        return Decimal(str(price)) if price is not None else None, stale
 
     retryer = Retrying(
         stop=stop_after_attempt(3),

@@ -169,6 +169,14 @@ export function MarketDetailOutcomes({ market }: Props) {
   const winSummaryLabel = `${refundZenValue !== null && refundZenValue !== undefined && Number.isFinite(refundZenValue) ? refundZenValue.toFixed(3) : "—"} ZEN + ${
     profitUsd !== null && profitUsd !== undefined && Number.isFinite(profitUsd) ? profitUsd.toFixed(3) : "—"
   } USDC`;
+  const lastUpdateTs =
+    liveStore.lastUpdated ||
+    liveStore.outcomes
+      .map((o) => o.updatedAt)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0];
+  const fxBadge = fxStaleCombined ? "FX stale" : fx ? `FX ${fx.zen_usd.toFixed(4)} USD` : "FX connecting";
 
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
@@ -271,6 +279,21 @@ export function MarketDetailOutcomes({ market }: Props) {
           }`}
         >
           {liveStore.connected ? "Live from streamer" : "Streaming reconnecting"}
+        </span>
+        {liveStore.transport && (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Transport {liveStore.transport}</span>
+        )}
+        {lastUpdateTs && (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
+            Last tick {new Date(lastUpdateTs).toLocaleTimeString()}
+          </span>
+        )}
+        <span
+          className={`rounded-full px-3 py-1 ${
+            fxStaleCombined ? "bg-amber-500/20 text-amber-100" : "bg-emerald-500/15 text-emerald-100"
+          }`}
+        >
+          {fxBadge}
         </span>
         {streamError && (
           <span className="rounded-full bg-rose-500/15 px-3 py-1 text-rose-100">Stream error: {streamError}</span>
@@ -481,8 +504,8 @@ export function MarketDetailOutcomes({ market }: Props) {
                       <p className="mt-1 text-xs text-slate-300">Win = {winSummaryLabel}</p>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                        <span>Quote {quote?.quote_id ?? "pending"}</span>
-                        {expiresLabel && <span>{expiresLabel}</span>}
+                        <span className="rounded-full bg-white/5 px-2 py-1">Quote {quote?.quote_id ?? "pending"}</span>
+                        {expiresLabel && <span className="rounded-full bg-white/5 px-2 py-1">{expiresLabel}</span>}
                         {quote?.chain_id && chainId && Number(quote.chain_id) !== chainId && (
                           <span className="rounded-full bg-rose-500/20 px-2 py-1 text-rose-100">
                             Wrong network (expected {quote.chain_id})
@@ -491,6 +514,18 @@ export function MarketDetailOutcomes({ market }: Props) {
                         {fxStaleCombined && (
                           <span className="rounded-full bg-amber-500/15 px-2 py-1 text-amber-100">FX stale</span>
                         )}
+                        {quote?.remaining_user_stake_zen !== null &&
+                          quote?.remaining_user_stake_zen !== undefined && (
+                            <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
+                              User cap {quote.remaining_user_stake_zen.toFixed(3)} ZEN
+                            </span>
+                          )}
+                        {quote?.remaining_market_stake_zen !== null &&
+                          quote?.remaining_market_stake_zen !== undefined && (
+                            <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
+                              Market cap {quote.remaining_market_stake_zen.toFixed(3)} ZEN
+                            </span>
+                          )}
                       </div>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">

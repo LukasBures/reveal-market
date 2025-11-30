@@ -10,6 +10,7 @@ import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes"
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
+import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -231,18 +232,21 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const contextCopy = selectMarketCopy(market);
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
   const coverImage = resolveMarketImage(market);
+  const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
 
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
           <MarketDetailHeader market={market} coverImage={coverImage} />
+          <MarketLiveStatusBar marketId={canonicalEventId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
               <MarketDetailOutcomes market={market} />
               <MarketDetailChart
                 marketId={canonicalEventId}
-                tokenIds={Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : []}
+                tokenIds={tokenIds}
+                outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
               />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -271,10 +275,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 outcomes={market.outcomes ?? []}
                 initialOutcomeId={0}
               />
-              <MarketLivePanels
-                marketId={canonicalEventId}
-                tokenIds={Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : []}
-              />
+              <MarketLivePanels marketId={canonicalEventId} tokenIds={tokenIds} />
               <MarketDetailSidebarPanel market={market} />
             </div>
           </div>
