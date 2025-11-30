@@ -24,6 +24,9 @@ export type MarketSummary = {
   imageVariants?: string[] | null;
   popularityScore?: number;
   volume24hUsd?: number;
+  orderbookVolumeUsd?: number;
+  tradesQuantity?: number;
+  openInterestUsd?: number;
 };
 
 export type MarketDetail = MarketSummary & {

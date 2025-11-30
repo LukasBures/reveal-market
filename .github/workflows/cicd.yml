@@ -22,7 +22,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.4.4
       - name: Install Foundry dependencies (polygon)
         working-directory: contracts/polygon
         run: |
@@ -176,7 +176,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.4.4
 
       - name: Install Foundry dependencies (polygon)
         working-directory: contracts/polygon
@@ -202,7 +202,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.4.4
 
       - name: Install Foundry dependencies (zen)
         working-directory: contracts/zen

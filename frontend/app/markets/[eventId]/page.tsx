@@ -11,6 +11,9 @@ import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
+import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
+import { MarketActivityPanel } from "@/components/markets/MarketActivityPanel";
+import { fetchMarketActivity } from "@/lib/streamer-data";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -233,6 +236,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
   const coverImage = resolveMarketImage(market);
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
+  const activity = market.conditionId ? await fetchMarketActivity(market.conditionId, { limit: 12 }) : [];
 
   return (
     <>
@@ -248,6 +252,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 tokenIds={tokenIds}
                 outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
               />
+              <MarketAnalyticsPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -266,6 +271,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                   </div>
                 </div>
               </section>
+              <MarketActivityPanel activity={activity} />
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">

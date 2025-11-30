@@ -10,6 +10,7 @@ from time import time
 from typing import Any, cast
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -22,6 +23,7 @@ from .logging_utils import setup_logging, start_heartbeat
 from .metrics import get_metrics
 from .price_streamer import PriceStreamer
 from .state import StreamState
+from .subgraph import SubgraphClient, SubgraphError, SubgraphNotConfigured
 
 logger = logging.getLogger("reveal_market.streamer")
 
@@ -120,6 +122,7 @@ def create_app() -> FastAPI:
     state = StreamState(settings, metrics=metrics)
     data_streamer = DataStreamer(state, settings, metrics=metrics)
     price_streamer = PriceStreamer(state, settings)
+    subgraph_client = SubgraphClient(settings)
     heartbeat_stop = start_heartbeat(logger, "streamer", interval_seconds=60)
     sanitized_config = {
         k: v
@@ -245,6 +248,7 @@ def create_app() -> FastAPI:
         }
 
     @app_instance.get("/fx/zen-usdc")
+    @app_instance.get("/data/fx")
     async def fx_quote_usdc() -> dict:
         return await _fx_payload()
 
@@ -296,15 +300,321 @@ def create_app() -> FastAPI:
     async def fx_websocket_usdt(ws: WebSocket):
         await _fx_ws_stream(ws)
 
+    @app_instance.websocket("/data/fx/ws")
+    async def fx_websocket_data(ws: WebSocket):
+        await _fx_ws_stream(ws)
+
     @app_instance.get("/metrics")
     async def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app_instance.get("/subgraph/markets")
+    @app_instance.get("/data/subgraph/markets")
+    async def subgraph_markets(
+        first: int = Query(20, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+        ids: str | None = Query(default=None, description="Comma-separated market ids to filter"),
+    ):
+        id_list = [item.strip() for item in ids.split(",") if item.strip()] if ids else None
+        markets = await _subgraph_query(
+            subgraph_client.fetch_markets,
+            first=first,
+            skip=skip,
+            ids=id_list,
+        )
+        return {"count": len(markets), "data": markets}
+
+    @app_instance.get("/subgraph/trades")
+    @app_instance.get("/data/subgraph/trades")
+    async def subgraph_trades(
+        asset_ids: str = Query(..., description="Comma-separated asset ids to filter (maker/taker asset ids)"),
+        first: int = Query(50, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+        user: str | None = Query(default=None, description="Optional user address filter"),
+    ):
+        assets = [item.strip() for item in asset_ids.split(",") if item.strip()]
+        if not assets:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_ids required")
+        trades = await _subgraph_query(
+            subgraph_client.fetch_trades,
+            asset_ids=assets,
+            first=first,
+            skip=skip,
+            user=user,
+        )
+        return {"asset_ids": assets, "count": len(trades), "data": trades}
+
+    @app_instance.get("/subgraph/positions")
+    @app_instance.get("/data/subgraph/positions")
+    async def subgraph_positions(
+        user: str = Query(..., description="User address to query positions for"),
+        asset_ids: str | None = Query(default=None, description="Optional comma-separated asset id filter"),
+        first: int = Query(50, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+    ):
+        assets = [item.strip() for item in asset_ids.split(",") if item.strip()] if asset_ids else None
+        positions = await _subgraph_query(
+            subgraph_client.fetch_positions,
+            user=user,
+            asset_ids=assets,
+            first=first,
+            skip=skip,
+        )
+        return {"user": user, "asset_ids": assets or [], "count": len(positions), "data": positions}
+
+    @app_instance.get("/subgraph/open-interest")
+    @app_instance.get("/data/subgraph/open-interest")
+    async def subgraph_open_interest(
+        market_id: str = Query(..., description="Market id to query open interest for"),
+        first: int = Query(100, ge=1, le=300),
+        skip: int = Query(0, ge=0),
+    ):
+        oi = await _subgraph_query(
+            subgraph_client.fetch_open_interest, market_id=market_id, first=first, skip=skip
+        )
+        return {"market_id": market_id, "count": len(oi), "data": oi}
+
+    @app_instance.get("/subgraph/open-interest/global")
+    @app_instance.get("/data/subgraph/open-interest/global")
+    async def subgraph_global_open_interest(
+        first: int = Query(10, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+    ):
+        oi = await _subgraph_query(subgraph_client.fetch_global_open_interest, first=first, skip=skip)
+        return {"count": len(oi), "data": oi}
+
+    @app_instance.get("/subgraph/pnl")
+    @app_instance.get("/data/subgraph/pnl")
+    async def subgraph_pnl(
+        user: str = Query(..., description="User address to query PnL for"),
+        token_ids: str | None = Query(default=None, description="Optional comma-separated token ids"),
+        first: int = Query(50, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+    ):
+        tokens = [item.strip() for item in token_ids.split(",") if item.strip()] if token_ids else None
+        pnl = await _subgraph_query(
+            subgraph_client.fetch_pnl,
+            user=user,
+            token_ids=tokens,
+            first=first,
+            skip=skip,
+        )
+        return {"user": user, "token_ids": tokens or [], "count": len(pnl), "data": pnl}
+
+    @app_instance.get("/subgraph/activity")
+    @app_instance.get("/data/subgraph/activity")
+    async def subgraph_activity(
+        user: str | None = Query(default=None, description="Optional user filter"),
+        condition: str | None = Query(default=None, description="Optional condition filter"),
+        first: int = Query(50, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+    ):
+        activity = await _subgraph_query(
+            subgraph_client.fetch_activity, user=user, condition=condition, first=first, skip=skip
+        )
+        return {"count": sum(len(v) for v in activity.values()), "data": activity}
+
+    @app_instance.get("/subgraph/market-data")
+    @app_instance.get("/data/subgraph/market-data")
+    async def subgraph_market_data(
+        condition: str | None = Query(default=None, description="Optional condition filter"),
+        outcome_index: int | None = Query(default=None, description="Optional outcome index filter"),
+        first: int = Query(50, ge=1, le=200),
+        skip: int = Query(0, ge=0),
+    ):
+        data = await _subgraph_query(
+            subgraph_client.fetch_market_data,
+            condition=condition,
+            outcome_index=outcome_index,
+            first=first,
+            skip=skip,
+        )
+        return {"count": len(data), "data": data}
+
+    @app_instance.websocket("/subgraph/ws/markets")
+    @app_instance.websocket("/data/subgraph/ws/markets")
+    async def ws_subgraph_markets(websocket: WebSocket, first: int = 20, skip: int = 0, ids: str | None = None):
+        id_list = [item.strip() for item in ids.split(",") if item.strip()] if ids else None
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_markets,
+            first=first,
+            skip=skip,
+            ids=id_list,
+        )
+
+    @app_instance.websocket("/subgraph/ws/trades")
+    @app_instance.websocket("/data/subgraph/ws/trades")
+    async def ws_subgraph_trades(
+        websocket: WebSocket,
+        asset_ids: str,
+        first: int = 50,
+        skip: int = 0,
+        user: str | None = None,
+    ):
+        assets = [item.strip() for item in asset_ids.split(",") if item.strip()]
+        if not assets:
+            await websocket.accept()
+            await websocket.send_json({"error": "asset_ids required"})
+            await websocket.close()
+            return
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_trades,
+            asset_ids=assets,
+            first=first,
+            skip=skip,
+            user=user,
+        )
+
+    @app_instance.websocket("/subgraph/ws/positions")
+    @app_instance.websocket("/data/subgraph/ws/positions")
+    async def ws_subgraph_positions(
+        websocket: WebSocket,
+        user: str,
+        asset_ids: str | None = None,
+        first: int = 50,
+        skip: int = 0,
+    ):
+        assets = [item.strip() for item in asset_ids.split(",") if item.strip()] if asset_ids else None
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_positions,
+            user=user,
+            asset_ids=assets,
+            first=first,
+            skip=skip,
+        )
+
+    @app_instance.websocket("/subgraph/ws/open-interest")
+    @app_instance.websocket("/data/subgraph/ws/open-interest")
+    async def ws_subgraph_open_interest(
+        websocket: WebSocket,
+        market_id: str,
+        first: int = 100,
+        skip: int = 0,
+    ):
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_open_interest,
+            market_id=market_id,
+            first=first,
+            skip=skip,
+        )
+
+    @app_instance.websocket("/subgraph/ws/open-interest/global")
+    @app_instance.websocket("/data/subgraph/ws/open-interest/global")
+    async def ws_subgraph_global_open_interest(
+        websocket: WebSocket,
+        first: int = 10,
+        skip: int = 0,
+    ):
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_global_open_interest,
+            first=first,
+            skip=skip,
+        )
+
+    @app_instance.websocket("/subgraph/ws/pnl")
+    @app_instance.websocket("/data/subgraph/ws/pnl")
+    async def ws_subgraph_pnl(
+        websocket: WebSocket,
+        user: str,
+        token_ids: str | None = None,
+        first: int = 50,
+        skip: int = 0,
+    ):
+        tokens = [item.strip() for item in token_ids.split(",") if item.strip()] if token_ids else None
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_pnl,
+            user=user,
+            token_ids=tokens,
+            first=first,
+            skip=skip,
+        )
+
+    @app_instance.websocket("/subgraph/ws/activity")
+    @app_instance.websocket("/data/subgraph/ws/activity")
+    async def ws_subgraph_activity(
+        websocket: WebSocket,
+        user: str | None = None,
+        condition: str | None = None,
+        first: int = 50,
+        skip: int = 0,
+    ):
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_activity,
+            user=user,
+            condition=condition,
+            first=first,
+            skip=skip,
+        )
+
+    @app_instance.websocket("/subgraph/ws/market-data")
+    @app_instance.websocket("/data/subgraph/ws/market-data")
+    async def ws_subgraph_market_data(
+        websocket: WebSocket,
+        condition: str | None = None,
+        outcome_index: int | None = None,
+        first: int = 50,
+        skip: int = 0,
+    ):
+        await _subgraph_ws_send(
+            websocket,
+            subgraph_client.fetch_market_data,
+            condition=condition,
+            outcome_index=outcome_index,
+            first=first,
+            skip=skip,
+        )
 
     def _require_control_token(control_header: str | None) -> None:
         if settings.control_token and control_header != settings.control_token:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid control token")
 
+    def _require_cache() -> None:
+        if not state.redis:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="cache unavailable")
+
+    async def _subgraph_query(fn, **kwargs):
+        try:
+            return await fn(**kwargs)
+        except SubgraphNotConfigured as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"subgraph HTTP {exc.response.status_code}",
+            )
+        except SubgraphError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("subgraph query failed", extra={"event": "subgraph.query.error", "error": str(exc)})
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="subgraph query failed") from exc
+
+    async def _subgraph_ws_send(ws: WebSocket, fn, **kwargs):
+        await ws.accept()
+        try:
+            data = await fn(**kwargs)
+            await ws.send_json({"data": data})
+        except SubgraphNotConfigured as exc:
+            await ws.send_json({"error": str(exc)})
+        except httpx.HTTPStatusError as exc:
+            await ws.send_json({"error": f"subgraph HTTP {exc.response.status_code}"})
+        except SubgraphError as exc:
+            await ws.send_json({"error": str(exc)})
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("subgraph ws failed", extra={"event": "subgraph.ws.error", "error": str(exc)})
+            await ws.send_json({"error": "subgraph query failed"})
+        finally:
+            with suppress(Exception):
+                await ws.close()
+
     @app_instance.get("/stream")
+    @app_instance.get("/data/stream")
     async def stream(
         request: Request,
         market_id: str = Query(..., description="Market ID to stream"),
@@ -455,7 +765,39 @@ def create_app() -> FastAPI:
                 state.release_assets(acquired)
             _release_connection()
 
+    @app_instance.websocket("/data/stream/ws")
+    async def data_stream_ws(
+        websocket: WebSocket,
+        market_id: str,
+        heartbeat: int = 15,
+        assets_ids: str | None = None,
+        symbols: str | None = None,
+    ):
+        await stream_ws(websocket, market_id, heartbeat, assets_ids, symbols)
+
+    @app_instance.get("/clob/latest")
+    @app_instance.get("/data/clob/latest")
+    async def clob_latest(
+        market_id: str = Query(..., description="Market id to fetch the latest cached tick for"),
+        outcome: str = Query("0", description="Outcome index or channel (e.g., meta, trades)"),
+    ):
+        _require_cache()
+        payload = await state.get_latest(market_id, outcome)
+        if not payload:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no cached tick")
+        return {"market_id": market_id, "outcome": outcome, "data": payload}
+
+    @app_instance.get("/clob/book")
+    @app_instance.get("/data/clob/book")
+    async def clob_book(market_id: str = Query(..., description="Market id to fetch order book snapshot for")):
+        _require_cache()
+        payload = await state.get_latest(market_id, "meta")
+        if not payload:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order book not available")
+        return {"market_id": market_id, "data": payload}
+
     @app_instance.get("/history")
+    @app_instance.get("/data/clob/history")
     async def history(
         market_id: str = Query(...),
         outcome: int = Query(0, ge=0),

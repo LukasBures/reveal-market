@@ -48,7 +48,9 @@ const metaMaskConnector = createConnector("metaMask", "MetaMask");
 const injectedConnector = createConnector("injected", "Injected");
 const coinbaseConnector = createConnector("coinbaseWalletSDK", "Coinbase Wallet");
 const walletConnectConnector = createConnector("walletConnect", "WalletConnect");
-const defaultChain = { id: 2651420, name: "Horizen Testnet" } as const;
+const hoistedDefaults = vi.hoisted(() => ({
+  defaultChain: { id: 2651420, name: "Horizen Testnet" } as const,
+}));
 
 let currentAccountState: WagmiAccountState;
 let currentConnectState: WagmiConnectState;
@@ -60,6 +62,7 @@ vi.mock("wagmi", async () => {
   const actual = await vi.importActual<typeof import("wagmi")>("wagmi");
   return {
     ...actual,
+    defaultChain: hoistedDefaults.defaultChain,
     useAccount: () => currentAccountState,
     useConnect: () => currentConnectState,
     useDisconnect: () => currentDisconnectState,
@@ -67,6 +70,10 @@ vi.mock("wagmi", async () => {
     useSwitchChain: () => currentSwitchChainState,
   };
 });
+
+vi.mock("@/lib/wagmi", () => ({
+  defaultChain: hoistedDefaults.defaultChain,
+}));
 
 describe("ConnectWalletButton", () => {
   beforeEach(() => {
@@ -90,7 +97,7 @@ describe("ConnectWalletButton", () => {
       signMessageAsync: vi.fn(async ({ message }: { message: string }) => `0xsigned-${message}`),
     };
     currentSwitchChainState = {
-      chains: [defaultChain],
+      chains: [hoistedDefaults.defaultChain],
       error: null,
       isPending: false,
       switchChain: vi.fn(),
@@ -140,7 +147,7 @@ describe("ConnectWalletButton", () => {
     expect(currentSignMessageState.signMessageAsync).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /horizen testnet/i }));
-    expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: defaultChain.id });
+    expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: hoistedDefaults.defaultChain.id });
   });
 
   it("renders a fallback when no connectors are available", () => {
@@ -155,9 +162,9 @@ describe("ConnectWalletButton", () => {
   it("disables signing when the message input is empty", () => {
     currentAccountState = {
       address: "0x9999999999999999999999999999999999999999",
-    chain: defaultChain,
-    status: "connected",
-  };
+      chain: hoistedDefaults.defaultChain,
+      status: "connected",
+    };
     const signSpy = vi.fn();
     currentSignMessageState.signMessageAsync = signSpy;
 

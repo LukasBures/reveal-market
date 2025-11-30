@@ -11,6 +11,7 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
+import { fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
 export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
 
@@ -127,7 +128,33 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       count: items.length,
       cacheTags: fetchTags,
     });
-    return items.map(mapApiMarketToSummary);
+    const mapped = items.map(mapApiMarketToSummary);
+    // Enrich with orderbook aggregates when token IDs are present (best-effort).
+    try {
+      const tokenIds = mapped.flatMap((m) => m.clobTokenIds ?? []).filter(Boolean) as string[];
+      if (tokenIds.length) {
+        const aggregates = await fetchOrderbookAggregates(tokenIds);
+        mapped.forEach((market) => {
+          const ids = market.clobTokenIds ?? [];
+          const matching = ids.map((id) => aggregates[id]).filter(Boolean);
+          if (matching.length) {
+            const volume = matching.reduce(
+              (acc, curr) => acc + (curr.scaledCollateralVolume ?? curr.collateralVolume ?? 0),
+              0,
+            );
+            const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
+            market.orderbookVolumeUsd = volume;
+            market.tradesQuantity = trades;
+          }
+        });
+      }
+    } catch (err) {
+      logger.warn("fetchFeaturedMarkets:orderbook_enrich_failed", {
+        error: (err as Error).message,
+        count: items.length,
+      });
+    }
+    return mapped;
   } catch (error) {
     logOfflineAwareError("fetchFeaturedMarkets", error);
     return [];
@@ -433,6 +460,30 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       updatedAt: payload.updated_at,
       extraData: payload.extra_data ?? null,
     };
+    // Enrich with subgraph orderbook + OI when available (best-effort).
+    try {
+      if (detail.clobTokenIds && detail.clobTokenIds.length > 0) {
+        const aggregates = await fetchOrderbookAggregates(detail.clobTokenIds);
+        const matching = detail.clobTokenIds.map((id) => aggregates[id]).filter(Boolean);
+        if (matching.length) {
+          const volume = matching.reduce(
+            (acc, curr) => acc + (curr.scaledCollateralVolume ?? curr.collateralVolume ?? 0),
+            0,
+          );
+          const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
+          detail.orderbookVolumeUsd = volume;
+          detail.tradesQuantity = trades;
+        }
+      }
+      if (detail.conditionId) {
+        const oi = await fetchOpenInterest(detail.conditionId);
+        if (oi !== undefined) {
+          detail.openInterestUsd = oi;
+        }
+      }
+    } catch (err) {
+      logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (err as Error).message });
+    }
     logger.info("fetchMarketByEventId:success", { eventId });
     return detail;
   } catch (error) {

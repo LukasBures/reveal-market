@@ -338,7 +338,12 @@ export function MarketDetailOutcomes({ market }: Props) {
 
       <div className="mt-5 space-y-4">
         {outcomes.map((outcome, idx) => {
-          const price = typeof livePrices[idx] === "number" ? livePrices[idx] : undefined;
+          const price =
+            typeof livePrices[idx] === "number"
+              ? livePrices[idx]
+              : typeof prices[idx] === "number"
+                ? prices[idx]
+                : undefined;
           const probability = price !== undefined ? `${Math.round(price * 100)}%` : "—";
           const outcomeState = liveStore.outcomes[idx] || {};
           const bestBid = outcomeState.bestBid;
@@ -383,7 +388,17 @@ export function MarketDetailOutcomes({ market }: Props) {
                   <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
                     Price {formatZen(price)}
                   </span>
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Implied {probability}</span>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
+                    Implied {probability}
+                    <span className="sr-only">{probability}</span>
+                  </span>
+                  <a
+                    href="#trade-panel"
+                    className="rounded-full bg-brand-500/20 px-3 py-1 text-white underline-offset-4 transition hover:bg-brand-500/30 hover:underline"
+                    aria-label={`Buy ${outcome}`}
+                  >
+                    Buy {outcome}
+                  </a>
                   {outcomeState.status && (
                     <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
                       Status: {outcomeState.status}
@@ -399,7 +414,7 @@ export function MarketDetailOutcomes({ market }: Props) {
               </button>
 
               {isSelected && (
-                <div className="border-t border-white/10 bg-slate-900/40 px-4 py-4 sm:px-5 sm:py-5">
+                <div id="trade-panel" className="border-t border-white/10 bg-slate-900/40 px-4 py-4 sm:px-5 sm:py-5">
                   <div className="grid gap-4 lg:grid-cols-[1.25fr,1fr]">
                     <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                       <div className="flex items-center justify-between">

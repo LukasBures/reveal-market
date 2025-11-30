@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     polymarket_rate_limit_requests: int | None = Field(default=100, ge=1)
     polymarket_rate_limit_window_seconds: float | None = Field(default=8.0, gt=0)
     polymarket_empty_page_tolerance: int = Field(default=2, ge=0)
+    polymarket_stream_persist: bool = Field(default=False)
     poll_interval_seconds: int = Field(default=60, ge=1)
     api_base_url: str | None = Field(default="http://localhost:8000")
     prime_markets_cache_enabled: bool = Field(default=False)

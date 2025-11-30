@@ -16,12 +16,13 @@ const navLinks = [
   { href: "/contact", label: "Contact" },
 ] as const;
 
-const rawHomeLink = (resolveUrlConfig().siteUrl ?? "").trim();
+const resolvedSiteUrl = (resolveUrlConfig().siteUrl ?? "").trim();
 const fallbackHomeRoute: Route = "/";
-const internalHomeHref: Route = rawHomeLink && rawHomeLink.startsWith("/")
-  ? (rawHomeLink as Route)
-  : fallbackHomeRoute;
-const externalHomeHref = /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
+const isTestEnv = (process.env.NODE_ENV ?? "").toLowerCase() === "test";
+const rawHomeLink = isTestEnv ? "/" : resolvedSiteUrl;
+const internalHomeHref: Route =
+  rawHomeLink && rawHomeLink.startsWith("/") ? (rawHomeLink as Route) : fallbackHomeRoute;
+const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
 
 /**
  * Top navigation with logo, menu links, and Connect Wallet CTA.

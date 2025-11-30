@@ -10,7 +10,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 from py_clob_client.client import ClobClient
@@ -233,6 +233,29 @@ class PolymarketClient:
     ) -> list[MarketPayload]:
         """Walk the offset-based API, returning a list of validated markets."""
         markets: list[MarketPayload] = []
+        for page in self.fetch_markets_paginated(
+            page_size=page_size,
+            max_pages=max_pages,
+            order=order,
+            ascending=ascending,
+            closed=closed,
+            extra_params=extra_params,
+        ):
+            markets.extend(page)
+        return markets
+
+    def fetch_markets_paginated(
+        self,
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+        order: str = "id",
+        ascending: bool = False,
+        closed: bool | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> Iterator[list[MarketPayload]]:
+        """Yield Polymarket markets page-by-page to reduce peak memory."""
+
         offset = 0
         page = 0
         empty_pages = 0
@@ -284,11 +307,14 @@ class PolymarketClient:
                     break
                 empty_pages = 0
 
+                page_payloads: list[MarketPayload] = []
                 for raw in records:
                     try:
-                        markets.append(MarketPayload.from_gamma(raw))
+                        page_payloads.append(MarketPayload.from_gamma(raw))
                     except (ValidationError, ValueError) as exc:
                         logger.warning("skipping polymarket record: %s", exc)
+
+                yield page_payloads
 
                 offset += len(records)
                 page += 1
@@ -299,8 +325,6 @@ class PolymarketClient:
                     break
                 if len(records) < page_size:
                     break
-
-        return markets
 
     def _request_page(self, client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:
         self._rate_limiter.acquire()

@@ -74,8 +74,9 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
                       key={`${market.eventId}-cta-${idx}`}
                       href={`#buy-${idx}`}
                       className="rounded-full bg-white/15 px-3 py-1 text-white transition hover:bg-white/25"
+                      aria-label={`Buy ${label ?? `Outcome ${idx + 1}`}`}
                     >
-                      {label ?? `Outcome ${idx + 1}`} {pct !== null ? `· ${pct}%` : ""}
+                      Buy {label ?? `Outcome ${idx + 1}`} {pct !== null ? `· ${pct}%` : ""}
                     </a>
                   );
                 })}

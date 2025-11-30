@@ -4,6 +4,7 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 
 ## Features
 - Polymarket CLOB websocket ingestion with per-market subscriptions and asset refcounts; unsubscribes upstream when the last client disconnects.
+- Goldsky subgraph passthrough for markets, trades/activity, positions, and open-interest snapshots so analytics data is reachable via the same service.
 - FX failover order (no RTDS for FX): Binance WS → Binance REST → CryptoCompare REST with jump/bounds guards and automatic WS reattempts.
 - RTDS only for market data (Polymarket `clob_market` topic); subscriptions mirror current asset IDs and keep a 5s ping cadence.
 - SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis and signed optionally.
@@ -17,9 +18,10 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 - Redis 5+
 - Environment variables (examples use `STREAMER_` prefix; see `.env.example`):
   - Core: `STREAMER_REDIS_URL`, `STREAMER_API_HOST`, `STREAMER_API_PORT`
-  - Polymarket: `STREAMER_POLYMARKET_WS_URL`, `STREAMER_POLYMARKET_REST_URL`, `STREAMER_RTDS_WS_URL`
-  - FX: `STREAMER_FX_PRIMARY_WS_URL`, `STREAMER_FX_PRIMARY_REST_URL`, `STREAMER_FX_SECONDARY_REST_URL`, `STREAMER_FX_REST_INTERVAL_SECONDS`, `STREAMER_FX_WS_STALE_TTL_SECONDS`, `STREAMER_FX_MAX_AGE_SECONDS`
-  - Pricing: `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
+- Polymarket: `STREAMER_POLYMARKET_WS_URL`, `STREAMER_POLYMARKET_REST_URL`, `STREAMER_RTDS_WS_URL`
+- Subgraphs: `STREAMER_SUBGRAPH_DEFAULT_URL` (or granular `STREAMER_SUBGRAPH_MARKETS_URL`, `STREAMER_SUBGRAPH_TRADES_URL`, `STREAMER_SUBGRAPH_POSITIONS_URL`, `STREAMER_SUBGRAPH_OPEN_INTEREST_URL`)
+- FX: `STREAMER_FX_PRIMARY_WS_URL`, `STREAMER_FX_PRIMARY_REST_URL`, `STREAMER_FX_SECONDARY_REST_URL`, `STREAMER_FX_REST_INTERVAL_SECONDS`, `STREAMER_FX_WS_STALE_TTL_SECONDS`, `STREAMER_FX_MAX_AGE_SECONDS`
+- Pricing: `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT`
 - Hosts/CORS: `STREAMER_PUBLIC_BASE_URL`, `STREAMER_INTERNAL_BASE_URL`, `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS`
 - Stream limits: `STREAMER_PUBLISH_THROTTLE_MS`, `STREAMER_HISTORY_LIMIT`, `STREAMER_HISTORY_TTL_SECONDS`, `STREAMER_HISTORY_DEBOUNCE_SECONDS`, `STREAMER_MAX_SUBSCRIPTIONS`, `STREAMER_MAX_ACTIVE_CONNECTIONS`, `STREAMER_RATE_LIMIT_PER_MINUTE`
 - Access/ops: `STREAMER_ACCESS_TOKEN`, `STREAMER_CONTROL_TOKEN`, `STREAMER_SIGNING_SECRET`
@@ -35,10 +37,34 @@ uv run --project streamer uvicorn app.main:app --reload --port 8100
 - `GET /healthz` – service + feed status (stale flags, FX age).
 - `GET /dashboard` – subscriptions, last-seen/published timestamps, FX status, and stale market list for quick ops checks.
 - `GET /history?market_id=...&outcome=0&limit=100` – recent ticks.
+- `GET /clob/latest?market_id=...&outcome=...` – last cached tick for an outcome (or `meta`/`trades` channels).
+- `GET /clob/book?market_id=...` – last cached order book snapshot (top-of-book + depth).
 - `GET /stream?market_id=...&assets_ids=a1,a2&symbols=zenusdt` – SSE stream; subscribes to provided asset IDs and optional RTDS symbols.
 - `GET /fx/zen-usd` (and `zen-usdc`, `zen-usdt`) – latest FX snapshot (worsen% applied; raw price also returned).
 - `WS /stream/ws?market_id=...` – websocket stream for market ticks (mirrors SSE); auto-subscribes to `market_id` when `assets_ids` is omitted.
 - `WS /fx/zen-usd` (aliases: `/fx/zen-usdc`, `/fx/zen-usdt`) – websocket stream of ZEN/USD quotes (pushes on change, worsen% applied; raw price included).
+- `GET /subgraph/markets` – proxy to the orderbook/markets subgraph (supports `ids`, pagination).
+- `GET /subgraph/trades` – proxy to order-filled events (requires `asset_ids`, optional `user`, pagination).
+- `GET /subgraph/positions` – proxy to positions subgraph (requires `user`, optional `asset_ids`, pagination).
+- `GET /subgraph/open-interest` – proxy to open-interest subgraph (requires `market_id`, pagination).
+- `GET /subgraph/pnl` – proxy to PnL subgraph (requires `user`, optional `token_ids`, pagination).
+- `GET /subgraph/open-interest/global` – global OI aggregates.
+- `GET /subgraph/activity` – splits/merges/redemptions (optional `user`/`condition` filters).
+- `GET /subgraph/market-data` – marketDatas (tokenId → condition/outcome mapping, optional filters).
+- WS mirrors: `/subgraph/ws/markets`, `/subgraph/ws/trades`, `/subgraph/ws/positions`, `/subgraph/ws/open-interest`, `/subgraph/ws/pnl` (same params) return one JSON payload per connection.
+- WS extras: `/subgraph/ws/open-interest/global`, `/subgraph/ws/activity`, `/subgraph/ws/market-data`.
+- Unified aliases: every subgraph route is also exposed under `/data/subgraph/...`; CLOB cache/history under `/data/clob/...`; FX WS under `/data/fx/ws`; SSE stream under `/data/stream`.
+
+### Subgraph endpoints (Goldsky-hosted examples)
+- Orders: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn`
+- Positions: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/positions-subgraph/0.0.7/gn`
+- Activity (trades): `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn`
+- Open Interest/TVL: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/oi-subgraph/0.0.6/gn`
+- PnL: `https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn`
+
+These Goldsky URLs are now wired in as defaults via `STREAMER_SUBGRAPH_*` env vars (override them or set to `None` to disable). Schema definitions live in the upstream Polymarket GitHub subgraph repo (`schema.graphql`).
+
+Note: Goldsky public subgraphs are open (no API key or special headers required). Use the defaults or point `STREAMER_SUBGRAPH_*` at your preferred deployment.
 
 > For TLS/WSS, front the service with Caddy/Nginx (see docker/caddy/Caddyfile for the `stream.revealmarket.xyz` setup). Use `wss://stream.revealmarket.xyz/...` everywhere (map the host locally so WSS works in dev).
 

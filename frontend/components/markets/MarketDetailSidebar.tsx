@@ -100,19 +100,23 @@ export function MarketDetailSidebar({ market }: Props) {
   const liquidity =
     market.liquidityUsd ??
     pickNumber(sources, ["liquidity_usd", "liquidityUsd", "liquidityUSD", "liquidity"]);
-  const volume24h = pickNumber(sources, [
-    "volume24h",
-    "volume24H",
-    "volume_24h",
-    "volume24hr",
-    "volume24Hr",
-    "volume_24hr",
-    "volume24",
-    "volume24Usd",
-    "volume24hUsd",
-  ]);
+  const volume24h =
+    market.orderbookVolumeUsd ??
+    pickNumber(sources, [
+      "volume24h",
+      "volume24H",
+      "volume_24h",
+      "volume24hr",
+      "volume24Hr",
+      "volume_24hr",
+      "volume24",
+      "volume24Usd",
+      "volume24hUsd",
+    ]);
   const totalVolume = pickNumber(sources, ["totalVolume", "total_volume", "volume", "volumeUsd", "volumeUSD"]);
-  const openInterest = pickNumber(sources, ["openInterest", "open_interest", "openInterestUsd", "openInterestUSD"]);
+  const openInterest =
+    market.openInterestUsd ??
+    pickNumber(sources, ["openInterest", "open_interest", "openInterestUsd", "openInterestUSD"]);
   const bestBid = pickNumber(sources, ["bestBid", "best_bid", "bestBidPrice"]);
   const bestAsk = pickNumber(sources, ["bestAsk", "best_ask", "bestAskPrice"]);
   const makerFeeBps = normalizeBps(
@@ -136,7 +140,10 @@ export function MarketDetailSidebar({ market }: Props) {
     { label: "Open interest", value: openInterest, formatted: formatUsd(openInterest) },
     { label: "Best bid", value: bestBid, formatted: formatProbability(bestBid) },
     { label: "Best ask", value: bestAsk, formatted: formatProbability(bestAsk) },
-  ];
+    market.tradesQuantity !== undefined && market.tradesQuantity !== null
+      ? { label: "Trades", value: market.tradesQuantity, formatted: market.tradesQuantity.toLocaleString() }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; value: number | null | undefined; formatted: string }>;
 
   const feeRows = [
     { label: "Rake", value: formatBps(rakeBps) },

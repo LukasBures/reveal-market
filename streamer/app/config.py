@@ -24,6 +24,35 @@ class Settings(BaseSettings):
         default="https://clob.polymarket.com",
         description="Optional Polymarket CLOB host used by py_clob_client for midpoint fetches",
     )
+    subgraph_default_url: AnyHttpUrl | None = Field(
+        default=None,
+        description="Default Polymarket subgraph endpoint (used when type-specific endpoints are unset)",
+    )
+    subgraph_markets_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        description="Markets/metadata subgraph endpoint (orderbook subgraph aggregates)",
+    )
+    subgraph_trades_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        description="Trades/Activity subgraph endpoint (order-filled events)",
+    )
+    subgraph_activity_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn",
+        description="Activity subgraph endpoint (splits/merges/redemptions)",
+    )
+    subgraph_positions_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/positions-subgraph/0.0.7/gn",
+        description="Positions/portfolio subgraph endpoint",
+    )
+    subgraph_open_interest_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/oi-subgraph/0.0.6/gn",
+        description="Open interest/TVL subgraph endpoint",
+    )
+    subgraph_pnl_url: AnyHttpUrl | None = Field(
+        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn",
+        description="PnL subgraph endpoint",
+    )
+    subgraph_timeout_seconds: float = Field(default=6.0, gt=0, description="HTTP timeout for subgraph calls")
     rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com", description="Secondary WS (RTDS market data)")
     rtds_ping_seconds: int = Field(default=10, ge=3, description="RTDS ping interval in seconds")
     rtds_topic_clob: str = Field(default="clob_market", description="RTDS topic for orderbook data")

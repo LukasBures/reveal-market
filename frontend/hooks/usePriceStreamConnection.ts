@@ -279,7 +279,7 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         setState(conn, { connected: false, error: "Price stream disconnected", transport: conn.transport ?? "ws" });
         conn.ws = null;
         conn.wsAttempts += 1;
-        if (conn.wsAttempts >= 2) {
+        if (conn.wsAttempts >= 3) {
           conn.wsDisabled = true;
         }
         connectSse();
@@ -288,7 +288,7 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     } catch (err) {
       setState(conn, { error: (err as Error).message, connected: false });
       conn.wsAttempts += 1;
-      conn.wsDisabled = conn.wsAttempts >= 2;
+      conn.wsDisabled = conn.wsAttempts >= 3;
       connectSse();
       scheduleReconnect();
     }

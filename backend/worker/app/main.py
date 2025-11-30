@@ -688,15 +688,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             error=str(exc) if exc else None,
         )
 
-    def _build_filters() -> dict[str, Any]:
-        params: dict[str, Any] = {}
-        if settings.polymarket_active_filter is not None:
-            params["active"] = str(settings.polymarket_active_filter).lower()
-        if settings.polymarket_archived_filter is not None:
-            params["archived"] = str(settings.polymarket_archived_filter).lower()
-        return params
-
-    extra_params = _build_filters()
+    extra_params = _build_filters_from_settings(settings)
 
     def _fetch() -> list[MarketPayload]:
         return polymarket_client.fetch_markets(
@@ -763,6 +755,15 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             latency_ms=round(latency_ms, 2),
         )
     return markets, latency_ms
+
+
+def _build_filters_from_settings(settings_obj) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if settings_obj.polymarket_active_filter is not None:
+        params["active"] = str(settings_obj.polymarket_active_filter).lower()
+    if settings_obj.polymarket_archived_filter is not None:
+        params["archived"] = str(settings_obj.polymarket_archived_filter).lower()
+    return params
 
 
 def _slugify_token(value: str | None) -> str | None:
@@ -988,7 +989,13 @@ def _load_existing_markets(
 
 
 def _collect_market_changes(session: Session, markets: list[MarketPayload], redis_client: Redis | None) -> SyncSummary:
-    summary = SyncSummary()
+    return _collect_market_changes_with_summary(session, markets, redis_client, summary=None)
+
+
+def _collect_market_changes_with_summary(
+    session: Session, markets: list[MarketPayload], redis_client: Redis | None, summary: SyncSummary | None = None
+) -> SyncSummary:
+    summary = summary or SyncSummary()
     if not markets:
         return summary
     existing_records = _load_existing_markets(session, markets)
@@ -1869,16 +1876,96 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
         current_revision=schema_state.current_revision,
         previous_revision=schema_state.previous_revision,
     )
+    streaming_mode = settings.polymarket_stream_persist
     try:
-        markets, latency_ms = fetch_markets_from_polymarket()
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.sync.fetch_complete",
-            message="polymarket fetch returned payloads",
-            markets_fetched=len(markets),
-            latency_ms=round(latency_ms, 2),
-        )
+        markets: list[MarketPayload] | None = None
+        latency_ms: float = 0.0
+        total_fetched = 0
+        if streaming_mode:
+            start = time.perf_counter()
+            summary = SyncSummary()
+            gap_count = 0
+            try:
+                with session_scope() as session:
+                    for page in polymarket_client.fetch_markets_paginated(
+                        page_size=settings.polymarket_page_size,
+                        max_pages=settings.polymarket_max_pages,
+                        order=settings.polymarket_order,
+                        ascending=settings.polymarket_sort_ascending,
+                        closed=settings.polymarket_closed_filter,
+                        extra_params=_build_filters(settings),
+                    ):
+                        total_fetched += len(page)
+                        summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)
+                    _apply_retention_cleanup(session, summary)
+                    backfilled = _backfill_missing_resolutions(session, summary)
+                    if backfilled:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.resolution.backfill_complete",
+                            message="backfilled missing resolution snapshots",
+                            count=backfilled,
+                        )
+                    gap_count = _log_resolution_gaps(session)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "failed to synchronise markets",
+                    extra={"event": "worker.persist.error", "error": str(exc)},
+                )
+                latency_ms = (time.perf_counter() - start) * 1000
+                stats = _empty_sync_stats(round(latency_ms, 2))
+                stats["redis_available"] = redis_client is not None
+                publish_heartbeat(redis_client, stats)
+                _propagate_schema_revision(redis_client, schema_state)
+                return stats
+            latency_ms = (time.perf_counter() - start) * 1000
+        else:
+            markets, latency_ms = fetch_markets_from_polymarket()
+            total_fetched = len(markets)
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.sync.fetch_complete",
+                message="polymarket fetch returned payloads",
+                markets_fetched=total_fetched,
+                latency_ms=round(latency_ms, 2),
+            )
+            summary = SyncSummary()
+            gap_count = 0
+            try:
+                with session_scope() as session:
+                    if markets:
+                        summary = _collect_market_changes(session, markets, redis_client)
+                    else:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            log_event(
+                                logger,
+                                logging.DEBUG,
+                                event="worker.persist.no_markets",
+                                message="skipping DB persistence because no markets were returned",
+                            )
+                    _apply_retention_cleanup(session, summary)
+                    backfilled = _backfill_missing_resolutions(session, summary)
+                    if backfilled:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.resolution.backfill_complete",
+                            message="backfilled missing resolution snapshots",
+                            count=backfilled,
+                        )
+                    gap_count = _log_resolution_gaps(session)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "failed to synchronise markets",
+                    extra={"event": "worker.persist.error", "error": str(exc)},
+                )
+                stats = _empty_sync_stats(round(latency_ms, 2))
+                stats["redis_available"] = redis_client is not None
+                publish_heartbeat(redis_client, stats)
+                _propagate_schema_revision(redis_client, schema_state)
+                return stats
     except Exception as exc:
         stats = _empty_sync_stats()
         log_event(
@@ -1894,45 +1981,9 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
         _propagate_schema_revision(redis_client, schema_state)
         return stats
 
-    summary = SyncSummary()
-    gap_count = 0
-    try:
-        with session_scope() as session:
-            if markets:
-                summary = _collect_market_changes(session, markets, redis_client)
-            else:
-                if logger.isEnabledFor(logging.DEBUG):
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        event="worker.persist.no_markets",
-                        message="skipping DB persistence because no markets were returned",
-                    )
-            _apply_retention_cleanup(session, summary)
-            backfilled = _backfill_missing_resolutions(session, summary)
-            if backfilled:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.resolution.backfill_complete",
-                    message="backfilled missing resolution snapshots",
-                    count=backfilled,
-                )
-            gap_count = _log_resolution_gaps(session)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.exception(
-            "failed to synchronise markets",
-            extra={"event": "worker.persist.error", "error": str(exc)},
-        )
-        stats = _empty_sync_stats(round(latency_ms, 2))
-        stats["redis_available"] = redis_client is not None
-        publish_heartbeat(redis_client, stats)
-        _propagate_schema_revision(redis_client, schema_state)
-        return stats
-
     summary.proofs_generated = _run_prover_jobs(summary, redis_client)
     cache_report = _invalidate_cache_tags(redis_client, summary)
-    stats = summary.to_stats(len(markets), latency_ms, cache_report.total)
+    stats = summary.to_stats(total_fetched, latency_ms, cache_report.total)
     stats["resolution_gaps"] = gap_count
     stats["polymarket_ok"] = True
 
@@ -1941,7 +1992,7 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
         logging.INFO,
         event="worker.sync.summary",
         message="sync tick complete",
-        processed=len(markets),
+        processed=total_fetched,
         created=summary.markets_created,
         updated=summary.markets_updated,
         deleted=summary.markets_deleted,

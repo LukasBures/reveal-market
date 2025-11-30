@@ -135,9 +135,12 @@ services:
     environment:
       <<: *backend-env
       RM_POLYMARKET_CLOSED_FILTER: "false"
+      RM_POLYMARKET_MAX_PAGES: ${RM_POLYMARKET_MAX_PAGES}
+      RM_POLYMARKET_PAGE_SIZE: ${RM_POLYMARKET_PAGE_SIZE}
       RM_POLL_INTERVAL_SECONDS: 60
       RM_POLYMARKET_TIMEOUT_SECONDS: 10
       RM_MARKETS_CACHE_LIMIT: 18
+      RM_SUMMARY_ENABLED: ${RM_SUMMARY_ENABLED}
       RM_PROVER_ENABLED: ${RM_PROVER_ENABLED}
       RM_PROVER_BASE_URL: ${RM_PROVER_BASE_URL}
       # Keep worker footprint light to avoid OOM restarts during sync.
@@ -166,10 +169,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 2048M
+          memory: 1024M
         reservations:
           cpus: "0.5"
-          memory: 1024M
+          memory: 512M
 
   hedger:
     build:

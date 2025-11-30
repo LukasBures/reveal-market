@@ -264,6 +264,15 @@ class StreamState:
                 )
         return list(reversed(records))
 
+    async def get_latest(self, market_id: str, outcome: str) -> dict[str, str]:
+        """Return the latest cached payload for the given market/outcome."""
+
+        if not self.redis:
+            return {}
+        key = f"{self.settings.cache_prefix}:{market_id}:{outcome}"
+        data = await self.redis.hgetall(key)
+        return data or {}
+
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:
         if self.metrics:
             return self.metrics.record_staleness(self.last_seen, stale_after=stale_after_seconds)

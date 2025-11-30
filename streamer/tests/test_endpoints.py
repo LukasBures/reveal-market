@@ -147,6 +147,8 @@ def test_fx_endpoint(monkeypatch):
         expected = float(2 * (1 - settings.worsen_percent))
         assert payload["zen_usd"] == expected
         assert payload["raw_zen_usd"] == 2.0
+        alias = client.get("/data/fx")
+        assert alias.status_code == 200
 
 
 def test_subscriptions_endpoint(monkeypatch):
