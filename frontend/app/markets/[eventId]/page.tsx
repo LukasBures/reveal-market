@@ -265,17 +265,12 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
-                    <p className="mt-3">{contextCopy}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
-                    {market.category && (
-                      <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
-                    )}
-                    {market.status && (
-                      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
-                        {market.status.toUpperCase()}
-                      </span>
-                    )}
+                    <details className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-slate-200">
+                      <summary className="cursor-pointer text-sm font-semibold text-white">
+                        Expand resolution criteria
+                      </summary>
+                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{contextCopy}</div>
+                    </details>
                   </div>
                 </div>
               </section>

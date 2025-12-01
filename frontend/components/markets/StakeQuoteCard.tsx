@@ -30,6 +30,7 @@ export function StakeQuoteCard({
   outcomePrices = [],
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
+  const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
   const [selectedOutcome, setSelectedOutcome] = useState<number>(initialOutcomeId);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -140,13 +141,29 @@ export function StakeQuoteCard({
     if (!quote) return null;
     return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
   }, [quote]);
+  const toWinZen = useMemo(() => {
+    if (!quote) return null;
+    const fx = quote.zen_usd;
+    const profitZen = profitUsd !== null && fx ? profitUsd / fx : null;
+    const baseStake = Number.isFinite(quote.stake_zen) ? quote.stake_zen : null;
+    if (baseStake === null) return null;
+    return profitZen !== null ? baseStake + profitZen : baseStake;
+  }, [profitUsd, quote]);
   const currentPrice = priceForOutcome(selectedOutcome);
+  const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const ctaLabel = loading
     ? "Pricing…"
-    : `Buy ${outcomeLabel}${currentPrice !== null ? ` @ $${currentPrice.toFixed(3)}` : ""}`;
+    : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
+
+  const highlightClass =
+    selectedOutcome === 0
+      ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
+      : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
 
   return (
-    <div className="md:sticky md:top-28 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30 backdrop-blur">
+    <div
+      className={`md:sticky md:top-0 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold text-white">Buy {outcomeLabel}</p>
@@ -179,7 +196,7 @@ export function StakeQuoteCard({
             {[0, 1].map((idx) => {
               const label = outcomeOptions[idx] ?? (idx === 0 ? "Yes" : "No");
               const price = priceForOutcome(idx);
-              const formattedPrice = price !== null ? `$${price.toFixed(3)}` : "—";
+              const formattedPrice = price !== null ? `${Math.round(price * 100)}%` : "—";
               const active = selectedOutcome === idx;
               const isYes = idx === 0;
               return (
@@ -235,9 +252,25 @@ export function StakeQuoteCard({
             min={0}
             max={effectiveMaxStake}
             step="0.01"
-            value={stakeZen}
+            value={stakeInput}
+            onFocus={() => {
+              if (stakeInput === "0" || stakeInput === "0.00") {
+                setStakeInput("");
+              }
+            }}
             onChange={(e) => {
-              const next = Number(e.target.value);
+              const raw = e.target.value;
+              const normalized = raw.replace(",", ".");
+              const pattern = /^\d*(?:\.\d{0,2})?$/;
+              if (normalized !== "" && !pattern.test(normalized)) {
+                return;
+              }
+              setStakeInput(raw);
+              if (normalized === "") {
+                setStakeZen(0);
+                return;
+              }
+              const next = Number(normalized);
               if (Number.isNaN(next)) {
                 setStakeZen(0);
                 return;
@@ -246,38 +279,43 @@ export function StakeQuoteCard({
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
             }}
+            onBlur={() => {
+              const normalized = stakeInput.replace(",", ".");
+              const next = Number(normalized);
+              if (Number.isNaN(next)) {
+                setStakeInput("0.00");
+                setStakeZen(0);
+                return;
+              }
+              const rounded = Math.round(next * 100) / 100;
+              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
+              setStakeZen(capped);
+              setStakeInput(capped.toFixed(2));
+            }}
             className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
             inputMode="decimal"
             aria-label="Stake in ZEN"
             placeholder="0.00 ZEN"
           />
-          <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-            {[5, 10, 25, 50, 100].map((preset) => (
+          <div className="grid grid-cols-4 gap-2 text-[11px] text-slate-500">
+            {[5, 10, 25, 50].map((preset) => (
               <button
                 key={preset}
                 type="button"
-                onClick={() => setStakeZen(Math.min(preset, effectiveMaxStake))}
-                className="rounded-full bg-white/5 px-3 py-1 font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
+                onClick={() => {
+                  const capped = Math.min(preset, effectiveMaxStake);
+                  setStakeZen(capped);
+                  setStakeInput(capped.toFixed(2));
+                }}
+                className="w-full rounded-full bg-white/5 px-3 py-1 text-center font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
               >
                 {preset} ZEN
               </button>
             ))}
           </div>
         </label>
-        <div className="grid grid-cols-2 gap-3 text-xs">
-          <Metric label="Refund (ZEN)" value={formatNumber(quote?.refund_zen ?? NaN, 3)} />
-          <Metric label="Rake (ZEN)" value={formatNumber(quote?.rake_zen ?? NaN, 3)} />
-          <Metric label="Profit (USDC)" value={formatNumber(profitUsd ?? NaN, 3)} highlight />
-          <Metric label="Odds" value={formatNumber(quote?.displayed_odds_multiplier ?? NaN, 3)} />
-          <Metric label="Quote expiry" value={quote ? new Date(quote.expires_at).toLocaleTimeString() : "—"} />
-          <Metric
-            label="Chain"
-            value={
-              quote?.chain_id !== undefined && quote?.chain_id !== null
-                ? String(quote.chain_id)
-                : "—"
-            }
-          />
+        <div className="grid grid-cols-1 gap-3 text-xs">
+          <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 2)} ZEN`} highlight />
         </div>
       </div>
 

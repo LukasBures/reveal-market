@@ -36,7 +36,7 @@ jobs:
         run: |
           if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ] || [ ! -d lib/solmate ]; then
             forge install --no-git --shallow \
-              foundry-rs/forge-std@40977d9e9444acd4c59c16b6782c658c786c0d05 \
+              foundry-rs/forge-std@v1.9.1 \
               openzeppelin/openzeppelin-contracts@v5.5.0 \
               transmissions11/solmate@89365b880c4f3c786bdd453d4b8e8fe410344a69
           fi
@@ -209,7 +209,7 @@ jobs:
         run: |
           if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ] || [ ! -d lib/solmate ]; then
             forge install --no-git --shallow \
-              foundry-rs/forge-std@40977d9e9444acd4c59c16b6782c658c786c0d05 \
+              foundry-rs/forge-std@v1.9.1 \
               openzeppelin/openzeppelin-contracts@v5.5.0 \
               transmissions11/solmate@89365b880c4f3c786bdd453d4b8e8fe410344a69
           fi
