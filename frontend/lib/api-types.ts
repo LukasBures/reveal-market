@@ -7,6 +7,9 @@ export type MarketSibling = {
   outcomePrices?: number[] | null;
   volume24hUsd?: number | null;
   liquidityUsd?: number | null;
+  commitDeadline?: string | null;
+  startsAt?: string | null;
+  closesAt?: string | null;
 };
 
 export type MarketSummary = {

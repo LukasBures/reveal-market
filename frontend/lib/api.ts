@@ -74,6 +74,11 @@ const coerceNumber = (value: any): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const coerceId = (value: any, fallback?: string): string => {
+  const raw = value ?? fallback ?? "";
+  return typeof raw === "string" ? raw.trim() : String(raw);
+};
+
 const normalizeClobTokenIds = (value: any): string[] | undefined => {
   if (Array.isArray(value)) return value.map((v) => String(v));
   if (typeof value === "string") {
@@ -89,6 +94,7 @@ const normalizeClobTokenIds = (value: any): string[] | undefined => {
 };
 
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
+  const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
   const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? null;
   const groupItemTitle = payload.group_item_title ?? payload.groupItemTitle ?? payload.extra_data?.group_item_title ?? null;
@@ -103,8 +109,23 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
             sibling.group_item_threshold ?? sibling.groupItemThreshold ?? sibling.groupItemThresh ?? undefined,
           );
           const siblingPosition = coerceNumber(sibling.group_position ?? sibling.groupPosition);
+          const siblingCommitDeadline =
+            sibling.commit_deadline ??
+            sibling.commitDeadline ??
+            sibling.closes_at ??
+            sibling.closesAt ??
+            sibling.orders_opened_at ??
+            sibling.ordersOpenedAt ??
+            sibling.extra_data?.commit_deadline ??
+            sibling.extra_data?.gamma?.commit_deadline ??
+            sibling.extra_data?.gamma?.commitDeadline ??
+            null;
+          const siblingStartsAt =
+            sibling.starts_at ?? sibling.startsAt ?? sibling.extra_data?.starts_at ?? sibling.extra_data?.gamma?.starts_at ?? null;
+          const siblingClosesAt =
+            sibling.closes_at ?? sibling.closesAt ?? sibling.extra_data?.closes_at ?? sibling.extra_data?.gamma?.closes_at ?? null;
           return {
-            eventId: sibling.event_id ?? sibling.eventId ?? "",
+            eventId: coerceId(sibling.event_id ?? sibling.eventId ?? ""),
             title: sibling.title ?? undefined,
             groupItemTitle: sibling.group_item_title ?? sibling.groupItemTitle ?? null,
             groupItemThreshold: siblingThreshold ?? null,
@@ -112,13 +133,16 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
             outcomePrices: sibling.outcome_prices ?? sibling.outcomePrices ?? undefined,
             volume24hUsd: coerceNumber(sibling.volume_24h_usd ?? sibling.volume24hUsd) ?? null,
             liquidityUsd: coerceNumber(sibling.liquidity_usd ?? sibling.liquidityUsd) ?? null,
+            commitDeadline: siblingCommitDeadline,
+            startsAt: siblingStartsAt,
+            closesAt: siblingClosesAt,
           };
         })
         .filter((sib: MarketSibling) => Boolean(sib.eventId))
     : undefined;
 
   return {
-    eventId: payload.event_id ?? eventId,
+    eventId: eventIdValue,
     title: payload.title ?? "Untitled market",
     category: payload.category ?? undefined,
     tags: payload.tags ?? payload.extra_data?.tags ?? [],

@@ -60,6 +60,9 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
             <h1 className="text-2xl font-semibold text-white sm:text-3xl">{market.title}</h1>
             {market.status && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
+                {market.category && (
+                  <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
+                )}
                 <span className="rounded-full px-2.5 py-1 bg-brand-500/20 text-brand-100">
                   {market.status}
                 </span>

@@ -12,6 +12,7 @@ type Props = {
   outcomes?: string[];
   initialOutcomeId?: number;
   outcomePrices?: number[];
+  marketTitle?: string;
 };
 
 const DEFAULT_MAX_STAKE_ZEN = 100;
@@ -30,6 +31,7 @@ export function StakeQuoteCard({
   outcomes = [],
   initialOutcomeId = 0,
   outcomePrices = [],
+  marketTitle,
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
@@ -167,6 +169,9 @@ export function StakeQuoteCard({
     <div
       className={`md:sticky md:top-0 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
+      {marketTitle && (
+        <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">{marketTitle}</p>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold text-white">Buy {outcomeLabel}</p>

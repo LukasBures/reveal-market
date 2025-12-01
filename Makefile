@@ -36,7 +36,7 @@ down:
 	$(COMPOSE) down
 
 test:
-	./backend/run_tests.sh
+	./run_tests.sh
 
 fmt:
 	pre-commit run --all-files

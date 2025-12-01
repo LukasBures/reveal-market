@@ -7,12 +7,9 @@ import { buildMetadata } from "@/lib/seo";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
-import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
-import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
-import { fetchMarketActivity } from "@/lib/streamer-data";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -26,27 +23,13 @@ const MarketDetailMetadataPanel = dynamic(
   },
 );
 
-const MarketDetailSidebarPanel = dynamic(
-  () =>
-    import("@/components/markets/MarketDetailSidebar").then((mod) => ({
-      default: mod.MarketDetailSidebar,
-    })),
-  {
-    loading: () => (
-      <aside
-        className="min-h-[320px] animate-pulse rounded-3xl border border-white/10 bg-slate-900/70 p-6"
-        aria-label="Loading market sidebar"
-      />
-    ),
-  },
-);
-
 type GroupParams = {
   groupSlug: string;
 };
 
 type GroupPageProps = {
   params: Promise<GroupParams>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 const selectMarketCopy = (market: MarketDetail): string => {
@@ -76,10 +59,29 @@ const resolveMarketImage = (market: MarketDetail): string | undefined => {
   return undefined;
 };
 
-export async function generateMetadata({ params }: GroupPageProps): Promise<Metadata> {
+const resolveTargetEventId = (searchParams: Record<string, string | string[] | undefined>): string | undefined => {
+  const rawCandidate =
+    searchParams.eventId ?? searchParams.event ?? searchParams.marketId ?? searchParams.market ?? undefined;
+  const candidate = Array.isArray(rawCandidate) ? rawCandidate[0] : rawCandidate;
+  const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+  return trimmed || undefined;
+};
+
+const selectActiveMarket = (markets: MarketDetail[], targetEventId?: string): MarketDetail => {
+  if (targetEventId) {
+    const normalizedTarget = targetEventId.trim();
+    const match = markets.find((item) => (item.eventId ?? "").toString().trim() === normalizedTarget);
+    if (match) return match;
+  }
+  return markets[0];
+};
+
+export async function generateMetadata({ params, searchParams }: GroupPageProps): Promise<Metadata> {
   const { groupSlug } = await params;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const targetEventId = resolveTargetEventId(resolvedSearchParams);
   const grouped = await fetchGroupedMarkets(groupSlug);
-  const market = grouped?.markets?.[0];
+  const market = grouped?.markets?.length ? selectActiveMarket(grouped.markets, targetEventId) : undefined;
   const title = market ? `${market.title} | Reveal Market` : `Markets group ${groupSlug} | Reveal Market`;
   const description = market ? selectMarketCopy(market).slice(0, 140) : "Aggregated markets bundle.";
   return buildMetadata({
@@ -89,46 +91,51 @@ export async function generateMetadata({ params }: GroupPageProps): Promise<Meta
   });
 }
 
-export default async function GroupedMarketPage({ params }: GroupPageProps) {
+export default async function GroupedMarketPage({ params, searchParams }: GroupPageProps) {
   const { groupSlug } = await params;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const targetEventId = resolveTargetEventId(resolvedSearchParams);
   const grouped = await fetchGroupedMarkets(groupSlug);
   if (!grouped || !grouped.markets.length) {
     notFound();
   }
-  const market = grouped.markets[0];
+  const market = selectActiveMarket(grouped.markets, targetEventId);
   const coverImage = resolveMarketImage(market);
   const tokenIds = Array.isArray(market.clobTokenIds)
     ? market.clobTokenIds.map((t: string | number) => String(t))
     : [];
-  const activity = market.conditionId ? await fetchMarketActivity(market.conditionId, { limit: 12 }) : [];
-
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
-          <GroupedMarketSelector groupSlug={grouped.groupSlug} siblings={market.siblings ?? []} activeEventId={market.eventId} />
           <MarketDetailHeader market={market} coverImage={coverImage} />
           <MarketLiveStatusBar marketId={market.eventId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
-              <MarketDetailOutcomes market={market} />
-              <MarketDetailChart marketId={market.eventId} tokenIds={tokenIds} outcomes={Array.isArray(market.outcomes) ? market.outcomes : []} />
+              <GroupedMarketSelector
+                groupSlug={grouped.groupSlug}
+                siblings={market.siblings ?? []}
+                activeEventId={market.eventId}
+                linkToGroupPage
+              />
+              <MarketDetailChart
+                marketId={market.eventId}
+                tokenIds={tokenIds}
+                outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
+              />
               <MarketAnalyticsPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
-                    <p className="mt-3">{selectMarketCopy(market)}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
-                    {market.category && (
-                      <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
-                    )}
-                    {market.status && (
-                      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
-                        {market.status.toUpperCase()}
-                      </span>
-                    )}
+                    <details className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-slate-200">
+                      <summary className="cursor-pointer text-sm font-semibold text-white">
+                        Expand resolution criteria
+                      </summary>
+                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">
+                        {selectMarketCopy(market)}
+                      </div>
+                    </details>
                   </div>
                 </div>
               </section>
@@ -141,9 +148,8 @@ export default async function GroupedMarketPage({ params }: GroupPageProps) {
                 outcomes={market.outcomes ?? []}
                 outcomePrices={market.outcomePrices ?? []}
                 initialOutcomeId={0}
+                marketTitle={market.title}
               />
-              <MarketLivePanels marketId={market.eventId} tokenIds={tokenIds} />
-              <MarketDetailSidebarPanel market={market} />
             </div>
           </div>
         </div>

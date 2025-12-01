@@ -23,9 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from py_clob_client.client import ClobClient
+from pydantic import SecretStr
 from redis import Redis
 from redis.exceptions import RedisError
-from pydantic import SecretStr
 from shared import models as shared_models
 from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
@@ -2139,13 +2139,13 @@ def pricing_submit(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
     db_expires_at = _as_aware(cast(datetime | None, getattr(db_quote, "expires_at", None)))
     if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
-        setattr(db_quote, "status", models.QuoteStatusEnum.EXPIRED.value)
+        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
         PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     quote_expires_at = _as_aware(quote.expires_at)
     if quote_expires_at and quote_expires_at <= now:
-        setattr(db_quote, "status", models.QuoteStatusEnum.EXPIRED.value)
+        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
         session.flush()
         PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
@@ -2243,7 +2243,7 @@ def pricing_submit(
         exclude_quote=db_quote,
     )
 
-    setattr(db_quote, "payload", quote.model_dump(mode="json"))
+    db_quote.payload = quote.model_dump(mode="json")
     shared_repository.mark_quote_status(
         session,
         db_quote,

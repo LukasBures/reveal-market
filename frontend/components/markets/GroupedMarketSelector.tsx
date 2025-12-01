@@ -1,11 +1,15 @@
 import Link from "next/link";
+import type { Route } from "next";
+import type { UrlObject } from "url";
+import { useMemo } from "react";
 import type { MarketSibling } from "@/lib/api-types";
-import { formatUsd } from "@/lib/formatters";
+import { formatDate, formatUsd } from "@/lib/formatters";
 
 type Props = {
   groupSlug: string;
   siblings: MarketSibling[];
   activeEventId: string;
+  linkToGroupPage?: boolean;
 };
 
 const formatGroupTitle = (slug: string): string =>
@@ -16,13 +20,47 @@ const formatGroupTitle = (slug: string): string =>
     .join(" ");
 
 const formatPrice = (value: number | null | undefined): string => {
-  if (typeof value === "number" && Number.isFinite(value)) return `$${value.toFixed(3)}`;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const pct = value * 100;
+    return `${pct.toFixed(2)}%`;
+  }
   return "—";
 };
 
-export function GroupedMarketSelector({ groupSlug, siblings, activeEventId }: Props) {
+export function GroupedMarketSelector({ groupSlug, siblings, activeEventId, linkToGroupPage = false }: Props) {
   if (!groupSlug || siblings.length <= 1) return null;
   const title = formatGroupTitle(groupSlug);
+
+  const labeledSiblings = useMemo(() => {
+    const used = new Set<string>();
+    const formatDay = (value?: string | null) => {
+      const formatted = value ? formatDate(value, { dateStyle: "medium" }) : "—";
+      return formatted !== "—" ? formatted : null;
+    };
+    return siblings.map((sibling, index) => {
+      const options = [
+        sibling.title?.trim(),
+        sibling.groupItemTitle?.trim(),
+        formatDay(sibling.commitDeadline),
+        formatDay(sibling.closesAt),
+        formatDay(sibling.startsAt),
+        sibling.groupPosition !== null && sibling.groupPosition !== undefined ? `Day ${sibling.groupPosition}` : null,
+        sibling.groupItemThreshold !== null && sibling.groupItemThreshold !== undefined
+          ? String(sibling.groupItemThreshold)
+          : null,
+        sibling.title,
+        `Market ${index + 1}`,
+      ].filter((opt): opt is string => Boolean(opt));
+
+      let label = options.find((opt) => !used.has(opt)) ?? options[0] ?? `Market ${index + 1}`;
+      if (used.has(label)) {
+        label = `${label} #${index + 1}`;
+      }
+      used.add(label);
+
+      return { ...sibling, _label: label };
+    });
+  }, [siblings]);
 
   return (
     <section className="rounded-3xl border border-emerald-900/60 bg-emerald-900/20 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
@@ -37,26 +75,29 @@ export function GroupedMarketSelector({ groupSlug, siblings, activeEventId }: Pr
         </span>
       </div>
       <div className="mt-4 space-y-2">
-        {siblings.map((sibling) => {
+        {labeledSiblings.map((sibling) => {
           const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
           const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
           const volume = sibling.volume24hUsd ?? null;
           const active = sibling.eventId === activeEventId;
-          const label = sibling.groupItemTitle || sibling.title || "Sub-market";
+          const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+          const href: UrlObject | Route = linkToGroupPage
+            ? { pathname: `/markets/group/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+            : (`/markets/${encodeURIComponent(sibling.eventId)}` as Route);
           return (
             <Link
               key={`${sibling.eventId}-summary`}
-              href={`/markets/${encodeURIComponent(sibling.eventId)}`}
-              className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition ${
+              href={href}
+              className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                 active
                   ? "border-emerald-400 bg-emerald-500/10 shadow-md shadow-emerald-500/20"
                   : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
               }`}
             >
               <span className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">{label}</span>
-              <span className="text-sm text-white">Yes {yesPrice}</span>
-              <span className="text-sm text-white">No {noPrice}</span>
-              <span className="text-xs text-emerald-100/80">24h vol {formatUsd(volume ?? 0)}</span>
+              <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+              <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+              <span className="text-xs text-emerald-100/80 sm:text-right">24h vol {formatUsd(volume ?? 0)}</span>
             </Link>
           );
         })}

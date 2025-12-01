@@ -21,9 +21,7 @@ from pathlib import Path
 try:
     from eth_utils import keccak
 except ImportError as exc:  # pragma: no cover - defensive CLI clarity
-    raise SystemExit(
-        "eth_utils is required to generate selectors. Install via `pip install -r scripts/requirements.txt`."
-    ) from exc
+    raise SystemExit("eth_utils is required to generate selectors. Install via `uv pip install eth-utils`.") from exc
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS_DIR = ROOT / "contracts" / "zen" / "src"

@@ -12,6 +12,8 @@ type MetadataItem = {
   label: string;
   value?: string | null;
   mono?: boolean;
+  copyDisabled?: boolean;
+  href?: string | null;
 };
 
 export function MarketDetailMetadata({ market }: Props) {
@@ -42,6 +44,14 @@ export function MarketDetailMetadata({ market }: Props) {
   const commitDeadline = getCommitDeadline(market);
 
   const resolution = (market.resolution ?? (market.extraData?.resolution as any)) || null;
+  const resolverSource =
+    market.resolutionSource ??
+    gamma?.resolution_source ??
+    gamma?.resolutionSource ??
+    extraData?.resolution_source ??
+    null;
+  const resolverHref = typeof resolverSource === "string" && resolverSource.startsWith("http") ? resolverSource : null;
+  const resolverLabel = resolverSource ?? "Not set";
   type ResolutionWinner = { index: number; label?: string | null; payout?: number | null };
   const resolutionWinners: ResolutionWinner[] = Array.isArray(resolution?.winners)
     ? (resolution.winners as ResolutionWinner[])
@@ -56,29 +66,45 @@ export function MarketDetailMetadata({ market }: Props) {
     }
   };
 
-  const renderItem = (item: MetadataItem) => (
-    <div
-      key={item.label}
-      className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200"
-    >
-      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
-      <div className="mt-2 flex items-center gap-2">
+  const renderItem = (item: MetadataItem) => {
+    const content =
+      item.href && item.value ? (
+        <a
+          href={item.href}
+          target="_blank"
+          rel="noreferrer"
+          className={`${item.mono ? "font-mono text-xs" : "text-base font-semibold text-white"} underline underline-offset-4 hover:text-brand-200`}
+        >
+          {item.value}
+        </a>
+      ) : (
         <span className={`${item.mono ? "font-mono text-xs" : "text-base font-semibold text-white"}`}>
           {item.value ?? "—"}
         </span>
-        {item.value && (
-          <button
-            type="button"
-            onClick={() => copyToClipboard(item.value)}
-            className="text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:text-brand-200"
-            aria-label={`Copy ${item.label}`}
-          >
-            Copy
-          </button>
-        )}
+      );
+
+    return (
+      <div
+        key={item.label}
+        className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200"
+      >
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
+        <div className="mt-2 flex items-center gap-2">
+          {content}
+          {item.value && !item.copyDisabled && !item.href && (
+            <button
+              type="button"
+              onClick={() => copyToClipboard(item.value)}
+              className="text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:text-brand-200"
+              aria-label={`Copy ${item.label}`}
+            >
+              Copy
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm text-slate-300">
@@ -93,8 +119,13 @@ export function MarketDetailMetadata({ market }: Props) {
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending" })}
-        {renderItem({ label: "Market address", value: market.marketAddress, mono: true })}
+        {renderItem({
+          label: "Resolver",
+          value: resolverLabel,
+          href: resolverHref,
+          copyDisabled: Boolean(resolverHref),
+        })}
+        {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending", copyDisabled: true })}
         {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
         {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
         {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}

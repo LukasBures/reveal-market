@@ -35,6 +35,7 @@ type StreamState = {
   status?: string | null;
   transport: "ws" | "sse" | null;
   lastUpdated?: string | null;
+  fxStale?: boolean;
 };
 
 type StreamConnection = {
@@ -67,6 +68,7 @@ const initialState: StreamState = {
   status: null,
   transport: null,
   lastUpdated: null,
+  fxStale: undefined,
 };
 
 function notify(conn: StreamConnection) {
@@ -210,7 +212,12 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         status: payload.status,
       }));
       appendHistory(conn, outcome, point);
-      setState(conn, { connected: true, error: null, lastUpdated: payload.timestamp ?? new Date().toISOString() });
+      setState(conn, {
+        connected: true,
+        error: null,
+        lastUpdated: payload.timestamp ?? new Date().toISOString(),
+        fxStale: payload.fx_stale === true,
+      });
     } catch (err) {
       setState(conn, { error: (err as Error).message });
     }

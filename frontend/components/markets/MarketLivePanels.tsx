@@ -43,21 +43,25 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
 
   return (
     <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-4">
-      <div className="flex items-center justify-between text-sm text-slate-200">
-        <span className="text-xs uppercase tracking-[0.25em] text-slate-500">Live order flow</span>
-        <span className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.2em] ${statusClass}`}>
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-[12px] uppercase tracking-[0.25em] text-slate-200">
+        <span className={`rounded-full px-3 py-1 text-[11px] ${statusClass}`}>
           {statusText}
         </span>
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-          {stream.tickSize && (
-            <span className="rounded-full bg-white/10 px-2 py-1 text-white/70">Tick size {stream.tickSize}</span>
-          )}
-          {stream.lastUpdated && (
-            <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
-              Last tick {new Date(stream.lastUpdated).toLocaleTimeString()}
-            </span>
-          )}
-        </div>
+        <span
+          className={`rounded-full px-3 py-1 text-[11px] ${
+            statusClass.includes("emerald")
+              ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/30"
+              : "bg-white/10 text-white/70"
+          }`}
+        >
+          FX {stream.fxStale ? "stale" : "live"}
+        </span>
+        <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/70">
+          Last tick {stream.lastUpdated ? new Date(stream.lastUpdated).toLocaleTimeString() : "—"}
+        </span>
+        {stream.tickSize && (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/70">Tick size {stream.tickSize}</span>
+        )}
       </div>
       {stream.error && (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
