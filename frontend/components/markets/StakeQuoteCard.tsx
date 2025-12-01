@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount } from "wagmi";
+import { formatTime } from "@/lib/formatters";
 
 type Props = {
   defaultStakeZen?: number;
@@ -13,6 +14,9 @@ type Props = {
   initialOutcomeId?: number;
   outcomePrices?: number[];
   marketTitle?: string;
+  marketStatus?: string | null;
+  isResolved?: boolean | null;
+  tradingHalted?: boolean | null;
 };
 
 const DEFAULT_MAX_STAKE_ZEN = 100;
@@ -32,6 +36,9 @@ export function StakeQuoteCard({
   initialOutcomeId = 0,
   outcomePrices = [],
   marketTitle,
+  marketStatus,
+  isResolved,
+  tradingHalted = null,
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
@@ -80,9 +87,28 @@ export function StakeQuoteCard({
     }
   }, [outcomeOptions, selectedOutcome]);
 
+  const statusNormalized = (marketStatus ?? "").toLowerCase();
+  const settledStates = ["settled", "resolved", "closed", "cancelled", "canceled", "voided"];
+  const lockedStates = ["locked", "disputed"];
+  const isSettled = isResolved === true || settledStates.includes(statusNormalized);
+  const isLocked = lockedStates.includes(statusNormalized);
+  const tradingDisabled = Boolean(tradingHalted || isSettled || isLocked);
+  const tradingReason = tradingHalted
+    ? "Trading halted"
+    : isSettled
+      ? "Market settled"
+      : isLocked
+        ? "Market locked"
+        : null;
+
   useEffect(() => {
     let cancelled = false;
     const requestQuote = async () => {
+      if (tradingDisabled) {
+        setQuote(null);
+        setError(tradingReason ?? "Trading disabled");
+        return;
+      }
       if (!address) {
         setQuote(null);
         setError("Connect wallet to request a quote");
@@ -130,7 +156,19 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [debouncedStake, fx, address, marketAddress, marketId, selectedOutcome, fxUnavailable, refreshNonce, effectiveMaxStake]);
+  }, [
+    debouncedStake,
+    fx,
+    address,
+    marketAddress,
+    marketId,
+    selectedOutcome,
+    fxUnavailable,
+    refreshNonce,
+    effectiveMaxStake,
+    tradingDisabled,
+    tradingReason,
+  ]);
 
   useEffect(() => {
     if (!quote) return;
@@ -179,7 +217,7 @@ export function StakeQuoteCard({
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
-              Quote {quote.quote_id.slice(0, 6)}… expires {new Date(quote.expires_at).toLocaleTimeString()}
+              Quote {quote.quote_id.slice(0, 6)}… expires {formatTime(quote.expires_at)}
             </span>
           )}
           {quote && (
@@ -205,13 +243,14 @@ export function StakeQuoteCard({
                   key={`${label}-${idx}`}
                   type="button"
                   onClick={() => setSelectedOutcome(idx)}
+                  disabled={tradingDisabled}
                   className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition ${
                     active
                       ? isYes
                         ? "border-emerald-400 bg-emerald-500/15 text-white"
                         : "border-rose-400 bg-rose-500/15 text-white"
                       : "border-white/10 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10"
-                  }`}
+                  } ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold uppercase tracking-[0.25em]">Buy {label}</span>
@@ -234,9 +273,10 @@ export function StakeQuoteCard({
                 key={`${label}-${idx}`}
                 type="button"
                 onClick={() => setSelectedOutcome(idx)}
+                disabled={tradingDisabled}
                 className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition ${
                   selectedOutcome === idx ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
-                }`}
+                } ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
               >
                 {label}
               </button>
@@ -259,54 +299,55 @@ export function StakeQuoteCard({
                 setStakeInput("");
               }
             }}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const normalized = raw.replace(",", ".");
-            const pattern = /^\d*(?:\.\d{0,2})?$/;
-            if (normalized !== "" && !pattern.test(normalized)) {
-              return;
-            }
-            setStakeInput(raw);
-            if (normalized === "") {
-              setStakeZen(0);
-              setStakeError("Enter between 5 and 50 ZEN");
-              return;
-            }
-            const next = Number(normalized);
-            if (Number.isNaN(next)) {
-              setStakeZen(0);
-              setStakeError("Enter between 5 and 50 ZEN");
-              return;
-            }
-            const rounded = Math.round(next * 100) / 100;
-            const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-            setStakeZen(capped);
-            if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-              setStakeError("Enter between 5 and 50 ZEN");
-            } else {
-              setStakeError(null);
-            }
-          }}
-          onBlur={() => {
-            const normalized = stakeInput.replace(",", ".");
-            const next = Number(normalized);
-            if (Number.isNaN(next)) {
-              setStakeInput("0.00");
-              setStakeZen(0);
-              setStakeError("Enter between 5 and 50 ZEN");
-              return;
-            }
-            const rounded = Math.round(next * 100) / 100;
-            const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-            setStakeZen(capped);
-            setStakeInput(capped.toFixed(2));
-            if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-              setStakeError("Enter between 5 and 50 ZEN");
-            } else {
-              setStakeError(null);
-            }
-          }}
-            className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
+            disabled={tradingDisabled}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const normalized = raw.replace(",", ".");
+              const pattern = /^\d*(?:\.\d{0,2})?$/;
+              if (normalized !== "" && !pattern.test(normalized)) {
+                return;
+              }
+              setStakeInput(raw);
+              if (normalized === "") {
+                setStakeZen(0);
+                setStakeError("Enter between 5 and 50 ZEN");
+                return;
+              }
+              const next = Number(normalized);
+              if (Number.isNaN(next)) {
+                setStakeZen(0);
+                setStakeError("Enter between 5 and 50 ZEN");
+                return;
+              }
+              const rounded = Math.round(next * 100) / 100;
+              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
+              setStakeZen(capped);
+              if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+                setStakeError("Enter between 5 and 50 ZEN");
+              } else {
+                setStakeError(null);
+              }
+            }}
+            onBlur={() => {
+              const normalized = stakeInput.replace(",", ".");
+              const next = Number(normalized);
+              if (Number.isNaN(next)) {
+                setStakeInput("0.00");
+                setStakeZen(0);
+                setStakeError("Enter between 5 and 50 ZEN");
+                return;
+              }
+              const rounded = Math.round(next * 100) / 100;
+              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
+              setStakeZen(capped);
+              setStakeInput(capped.toFixed(2));
+              if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+                setStakeError("Enter between 5 and 50 ZEN");
+              } else {
+                setStakeError(null);
+              }
+            }}
+            className={`w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400 ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
             inputMode="decimal"
             aria-label="Stake in ZEN"
             placeholder="0.00 ZEN"
@@ -326,7 +367,8 @@ export function StakeQuoteCard({
                     setStakeError(null);
                   }
                 }}
-                className="w-full rounded-full bg-white/5 px-3 py-1 text-center font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
+                disabled={tradingDisabled}
+                className={`w-full rounded-full bg-white/5 px-3 py-1 text-center font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15 ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
               >
                 {preset} ZEN
               </button>
@@ -339,6 +381,11 @@ export function StakeQuoteCard({
       </div>
 
       <div className="mt-4 flex flex-col gap-2">
+        {tradingDisabled && (
+          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+            {tradingReason ?? "Trading is unavailable for this market."}
+          </div>
+        )}
         <button
           type="button"
           disabled={
@@ -348,16 +395,17 @@ export function StakeQuoteCard({
             !marketAddress ||
             !address ||
             stakeZen < MIN_STAKE_ZEN ||
-            stakeZen > MAX_STAKE_ZEN
+            stakeZen > MAX_STAKE_ZEN ||
+            tradingDisabled
           }
           onClick={() => setRefreshNonce((prev) => prev + 1)}
           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
-            loading || fxStale || fxUnavailable || !address || !marketAddress
+            loading || fxStale || fxUnavailable || !address || !marketAddress || tradingDisabled
               ? "cursor-not-allowed bg-white/20 text-white/60"
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}
         >
-          {ctaLabel}
+          {tradingReason ?? ctaLabel}
         </button>
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">

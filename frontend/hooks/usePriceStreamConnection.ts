@@ -49,6 +49,7 @@ type StreamConnection = {
   wsAttempts: number;
   wsDisabled: boolean;
   idleCloseTimer: ReturnType<typeof setTimeout> | null;
+  cleanup?: () => void;
 };
 
 const connections = new Map<string, StreamConnection>();
@@ -70,6 +71,7 @@ const initialState: StreamState = {
   lastUpdated: null,
   fxStale: undefined,
 };
+const initialSnapshot = initialState;
 
 function notify(conn: StreamConnection) {
   conn.subscribers.forEach((cb) => cb());
@@ -119,6 +121,30 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     wsDisabled: !shouldUseStreamerWs(),
     idleCloseTimer: null,
   };
+
+  const cleanup = () => {
+    conn.cancelled = true;
+    if (conn.idleCloseTimer) {
+      clearTimeout(conn.idleCloseTimer);
+      conn.idleCloseTimer = null;
+    }
+    if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED && conn.ws.readyState !== WebSocket.CLOSING) {
+      try {
+        conn.ws.close(1000, "idle");
+      } catch {
+        // ignore
+      }
+    }
+    if (conn.sse) {
+      try {
+        conn.sse.close();
+      } catch {
+        // ignore
+      }
+    }
+    connections.delete(key);
+  };
+  conn.cleanup = cleanup;
 
   const handlePayload = (raw: string) => {
     try {
@@ -276,21 +302,33 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
         handlePayload(data);
       };
       ws.onerror = () => {
-        setState(conn, { connected: false, error: "Price stream disconnected", transport: conn.transport ?? "ws" });
+        if (conn.cancelled || conn.subscribers.size === 0) {
+          cleanup();
+          return;
+        }
+        // Treat transient socket issues as a reconnect without surfacing an error badge.
+        setState(conn, { connected: false, error: null, transport: conn.transport ?? "ws" });
         conn.ws = null;
         conn.wsAttempts += 1;
         connectSse();
         scheduleReconnect();
       };
-      ws.onclose = () => {
-        setState(conn, { connected: false, error: "Price stream disconnected", transport: conn.transport ?? "ws" });
+      ws.onclose = (evt: CloseEvent) => {
+        if (conn.cancelled || conn.subscribers.size === 0) {
+          cleanup();
+          return;
+        }
+        const graceful = evt?.wasClean || evt?.code === 1000 || evt?.code === 1001;
+        setState(conn, { connected: false, error: graceful ? null : "Price stream disconnected", transport: conn.transport ?? "ws" });
         conn.ws = null;
         conn.wsAttempts += 1;
         if (conn.wsAttempts >= 3) {
           conn.wsDisabled = true;
         }
-        connectSse();
-        scheduleReconnect();
+        if (!graceful) {
+          connectSse();
+          scheduleReconnect();
+        }
       };
     } catch (err) {
       setState(conn, { error: (err as Error).message, connected: false });
@@ -339,11 +377,8 @@ function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
       }
       conn.idleCloseTimer = setTimeout(() => {
         if (conn.subscribers.size > 0) return;
-        conn.cancelled = true;
-        if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED) conn.ws.close();
-        if (conn.sse) conn.sse.close();
-        connections.delete(key);
-      }, 30_000);
+        conn.cleanup?.();
+      }, 500);
     }
   };
 }
@@ -351,8 +386,7 @@ function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
 function snapshot(marketId: string, tokenIds: string[]): StreamState {
   const key = `${marketId}|${normalizeTokens(tokenIds).join(",")}`;
   const conn = connections.get(key);
-  if (!conn) return { ...initialState };
-  return conn.state;
+  return conn?.state ?? initialSnapshot;
 }
 
 export function usePriceStreamStore(marketId: string, tokenIds: string[] = []): StreamState {
@@ -361,7 +395,7 @@ export function usePriceStreamStore(marketId: string, tokenIds: string[] = []): 
   const subscribeFn = (onStoreChange: () => void) =>
     priceStreamsDisabled ? emptySubscribe(onStoreChange) : subscribe(marketId, tokenIds, onStoreChange);
   const getSnapshot = () => (priceStreamsDisabled ? emptySnapshot() : snapshot(marketId, tokenIds));
-  return useSyncExternalStore(subscribeFn, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribeFn, getSnapshot, () => initialSnapshot);
 }
 
 export function seedHistory(marketId: string, outcome: number, points: PricePoint[], tokenIds: string[] = []) {

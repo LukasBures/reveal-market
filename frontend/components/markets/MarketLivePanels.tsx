@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
+import { formatTime } from "@/lib/formatters";
 
 type Props = {
   marketId: string;
@@ -43,7 +44,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
         .reverse()
         .map((t) => ({
           ...t,
-          label: t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : "",
+          label: t.timestamp ? formatTime(t.timestamp) : "",
         })),
     [stream.trades],
   );
@@ -57,7 +58,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
           FX {stream.fxStale ? "stale" : "live"}
         </span>
         <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/70">
-          Last tick {stream.lastUpdated ? new Date(stream.lastUpdated).toLocaleTimeString() : "—"}
+          Last tick {stream.lastUpdated ? formatTime(stream.lastUpdated) : "—"}
         </span>
         {stream.tickSize && (
           <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/70">Tick size {stream.tickSize}</span>
@@ -85,7 +86,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
           <span className="text-slate-100">{spread !== null ? `${spread.toFixed(2)}%` : "—"}</span>
         </div>
         {stream.lastUpdated && (
-          <p className="mt-1 text-xs text-slate-500">Updated {new Date(stream.lastUpdated).toLocaleTimeString()}</p>
+          <p className="mt-1 text-xs text-slate-500">Updated {formatTime(stream.lastUpdated)}</p>
         )}
       </div>
       <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-3">
@@ -141,9 +142,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
               <span>{trade.price !== undefined ? Number(trade.price).toFixed(3) : "—"}</span>
               <span className="text-slate-400">{trade.size ? Number(trade.size).toFixed(2) : "—"}</span>
               <span className="text-slate-500">
-                {trade.label
-                  ? new Date(trade.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                  : "—"}
+                {trade.label ? formatTime(trade.timestamp, { hour: "2-digit", minute: "2-digit" }) : "—"}
               </span>
             </div>
           ))}

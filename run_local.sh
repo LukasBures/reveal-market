@@ -137,6 +137,20 @@ EOF
   fi
 }
 
+disable_next_telemetry() {
+  if [[ ! -d "${ROOT_DIR}/frontend" ]]; then
+    return
+  fi
+  if ! command -v npx >/dev/null 2>&1; then
+    log_warn "Skipping Next.js telemetry disable (npx not found)."
+    return
+  fi
+  log_step "Disabling Next.js telemetry"
+  if ! (cd "${ROOT_DIR}/frontend" && npx next telemetry disable >/dev/null 2>&1); then
+    log_warn "Failed to disable Next.js telemetry; continuing."
+  fi
+}
+
 # Enable BuildKit + Compose's CLI mode so builds are faster and parallelizable.
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
@@ -249,6 +263,7 @@ if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
   exit 1
 fi
 ensure_prover_artifacts
+disable_next_telemetry
 
 # Configure env file usage
 SUPPORTS_ENV_FILE=false

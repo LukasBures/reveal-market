@@ -1,10 +1,18 @@
 import { createConfig, http } from "wagmi";
-import type { CreateConnectorFn } from "wagmi";
+import type { Config, CreateConnectorFn } from "wagmi";
 import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
 import { defineChain } from "viem";
 import { ensureLocalStorage } from "@/lib/localStoragePolyfill";
 
 ensureLocalStorage();
+
+declare global {
+  // Prevent HMR from re-initializing WalletConnect multiple times.
+  // eslint-disable-next-line no-var
+  var __wagmiConfig: Config | undefined;
+  // eslint-disable-next-line no-var
+  var __wagmiWalletConnectors: CreateConnectorFn[] | undefined;
+}
 
 const DEFAULT_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 2651420);
 const DEFAULT_CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? "Horizen Testnet";
@@ -64,11 +72,23 @@ const createWalletConnectors = (): CreateConnectorFn[] => {
   return shared;
 };
 
-export const wagmiConfig = createConfig({
-  chains,
-  connectors: createWalletConnectors(),
-  transports: {
-    [defaultChain.id]: http(DEFAULT_RPC_URL),
-  },
-  ssr: true,
-});
+const getWalletConnectors = (): CreateConnectorFn[] => {
+  if (globalThis.__wagmiWalletConnectors) {
+    return globalThis.__wagmiWalletConnectors;
+  }
+  const connectors = createWalletConnectors();
+  globalThis.__wagmiWalletConnectors = connectors;
+  return connectors;
+};
+
+const buildWagmiConfig = (): Config =>
+  createConfig({
+    chains,
+    connectors: getWalletConnectors(),
+    transports: {
+      [defaultChain.id]: http(DEFAULT_RPC_URL),
+    },
+    ssr: true,
+  });
+
+export const wagmiConfig: Config = globalThis.__wagmiConfig ?? (globalThis.__wagmiConfig = buildWagmiConfig());

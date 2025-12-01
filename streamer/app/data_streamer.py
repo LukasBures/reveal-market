@@ -416,9 +416,25 @@ class DataStreamer:
             or raw.get("condition_id")
         )
         raw_prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
-        prices = self._coerce_array(raw_prices) or []
+        tokens = raw.get("tokens") if isinstance(raw.get("tokens"), list) else []
+        token_prices: list[Decimal] = []
+        token_ids_from_tokens: list[str] = []
+        for entry in tokens:
+            if not isinstance(entry, dict):
+                continue
+            price_raw = entry.get("price")
+            try:
+                token_price = Decimal(str(price_raw))
+                token_prices.append(token_price)
+            except (ArithmeticError, ValueError, TypeError):
+                pass
+            token_id_raw = entry.get("token_id") or entry.get("tokenId") or entry.get("id")
+            if token_id_raw is not None:
+                token_ids_from_tokens.append(str(token_id_raw))
+
+        prices = self._coerce_array(raw_prices) or token_prices
         token_ids_raw = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
-        token_ids = self._coerce_array(token_ids_raw) or []
+        token_ids = self._coerce_array(token_ids_raw) or token_ids_from_tokens
         coerced_token_ids = [str(token) for token in token_ids if str(token).strip()]
         if coerced_token_ids:
             self.state.register_clob_tokens(str(market_id), coerced_token_ids)

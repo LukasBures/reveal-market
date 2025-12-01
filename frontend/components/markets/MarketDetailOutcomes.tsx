@@ -10,6 +10,7 @@ import { BaseError, type Address } from "viem";
 import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 import { fetchPriceHistory } from "@/lib/pricing-client";
 import { formatZenUsd } from "@/lib/fx";
+import { formatTime } from "@/lib/formatters";
 
 type Props = {
   market: MarketDetail;
@@ -287,7 +288,7 @@ export function MarketDetailOutcomes({ market }: Props) {
         )}
         {lastUpdateTs && (
           <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
-            Last tick {new Date(lastUpdateTs).toLocaleTimeString()}
+            Last tick {formatTime(lastUpdateTs)}
           </span>
         )}
         <span
@@ -356,7 +357,7 @@ export function MarketDetailOutcomes({ market }: Props) {
               : "—";
           const updatedAt =
             outcomeState.updatedAt && !Number.isNaN(Date.parse(outcomeState.updatedAt))
-              ? new Date(outcomeState.updatedAt).toLocaleTimeString()
+              ? formatTime(outcomeState.updatedAt)
               : null;
           const isSelected = selectedOutcome === idx;
 

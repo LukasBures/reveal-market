@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePriceStream } from "@/hooks/usePriceStream";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
+import { formatTime } from "@/lib/formatters";
 import { MarketFomoOverlay } from "./MarketFomoOverlay";
 
 type Props = {
@@ -18,22 +19,30 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
   const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const hasStaleFx = history.some((p) => p.fx_stale);
-  const latestTs = history.length ? history[history.length - 1].timestamp : null;
+  const [fallbackHistory, setFallbackHistory] = useState<
+    Array<{ x: number; y: number; fx_stale?: boolean; timestamp: string }>
+  >([]);
+  const hasStaleFx = (history.length ? history : fallbackHistory).some((p) => p.fx_stale);
   const normalizedPrices = useMemo(() => (Array.isArray(outcomePrices) ? outcomePrices : []), [outcomePrices]);
   const fallbackPrice =
     typeof normalizedPrices[selectedOutcome] === "number" && Number.isFinite(normalizedPrices[selectedOutcome])
       ? normalizedPrices[selectedOutcome]
       : null;
-  const displayHistory = useMemo(() => {
-    if (history.length > 0) return history;
-    if (fallbackPrice === null) return [];
+  useEffect(() => {
+    if (history.length > 0 || fallbackPrice === null) {
+      setFallbackHistory((prev) => (prev.length ? [] : prev));
+      return;
+    }
     const now = Date.now();
-    return [
+    const points = [
       { x: now - 5 * 60 * 1000, y: fallbackPrice, fx_stale: false, timestamp: new Date(now - 5 * 60 * 1000).toISOString() },
       { x: now, y: fallbackPrice, fx_stale: false, timestamp: new Date(now).toISOString() },
     ];
-  }, [history, fallbackPrice]);
+    setFallbackHistory(points);
+  }, [history.length, fallbackPrice]);
+
+  const displayHistory = history.length ? history : fallbackHistory;
+  const latestTs = displayHistory.length ? displayHistory[displayHistory.length - 1].timestamp : null;
 
   const filteredHistory = useMemo(() => {
     if (displayHistory.length === 0) return displayHistory;
@@ -151,7 +160,7 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-500">
           <span className="rounded-full bg-white/5 px-3 py-1">
-            {hasStaleFx ? "FX stale" : "Live"} {latestTs ? `· ${new Date(latestTs).toLocaleTimeString()}` : ""}
+            {hasStaleFx ? "FX stale" : "Live"} {latestTs ? `· ${formatTime(latestTs)}` : ""}
           </span>
           <div className="flex items-center gap-2 text-[11px]">
             <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
@@ -278,7 +287,7 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
           {activePoint && (
             <>
               <span className="rounded-full bg-white/5 px-3 py-1">
-                {new Date(activePoint.timestamp).toLocaleTimeString()}
+                {formatTime(activePoint.timestamp)}
               </span>
               <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
                 {activePoint.y.toFixed(4)} ZEN

@@ -1,9 +1,14 @@
 import path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from "next/constants.js";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.revealmarket.xyz").replace(/\/$/, "");
-const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? "https://stream.revealmarket.xyz").replace(/\/$/, "");
+const MODE = (process.env.MODE ?? process.env.NODE_ENV ?? "development").toLowerCase();
+const IS_PROD_MODE = MODE.includes("prod");
+const DEFAULT_API_BASE = IS_PROD_MODE ? "https://api.revealmarket.xyz" : "http://localhost:8000";
+const DEFAULT_STREAMER_BASE = IS_PROD_MODE ? "https://stream.revealmarket.xyz" : "http://localhost:8100";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE).replace(/\/$/, "");
+const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? DEFAULT_STREAMER_BASE).replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
+const DISABLE_MINIFY = process.env.NEXT_DISABLE_MINIFY === "true";
 
 const GA_ORIGINS = [
   "https://www.googletagmanager.com",
@@ -61,6 +66,7 @@ const walletFrameOrigins = [
 const nextConfig = (phase) => {
   const isDev = phase === PHASE_DEVELOPMENT_SERVER;
   const isProd = phase === PHASE_PRODUCTION_BUILD || phase === PHASE_PRODUCTION_SERVER;
+  const shouldMinify = !(DISABLE_MINIFY && isProd);
 
   const scriptSrc = ["'self'", "'unsafe-inline'"];
   if (isDev) {
@@ -70,6 +76,9 @@ const nextConfig = (phase) => {
   }
 
   const connectSrc = ["'self'", API_BASE, STREAMER_BASE, STREAMER_WS, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
+  if (isDev) {
+    connectSrc.push("http://localhost:8000", "http://localhost:8100", "ws://localhost:8100");
+  }
   if (isProd) {
     scriptSrc.push(...GA_ORIGINS);
     connectSrc.push(...GA_ORIGINS);
@@ -120,6 +129,11 @@ const nextConfig = (phase) => {
       ignoreDuringBuilds: true,
     },
     webpack: (config) => {
+      if (!shouldMinify) {
+        config.optimization = config.optimization ?? {};
+        config.optimization.minimize = false;
+        config.optimization.minimizer = [];
+      }
       config.resolve = config.resolve ?? {};
       config.resolve.alias = config.resolve.alias ?? {};
       config.resolve.alias["@react-native-async-storage/async-storage"] = path.resolve(

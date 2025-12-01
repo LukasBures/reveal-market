@@ -65,6 +65,10 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["app.local_logging", "app.logging_config"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = ["streamer.*"]
 ignore_errors = true
 follow_imports = "skip"

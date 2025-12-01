@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     fx_rest_interval_seconds: int = Field(default=10, ge=5, description="Interval between FX REST refresh attempts")
     fx_timeout_seconds: float = Field(default=5.0, gt=0, description="HTTP timeout for FX REST requests")
     fx_fallback_price: float = Field(default=0.0, ge=0, description="Hard fallback FX price when all sources fail")
+    fx_ws_ping_interval_seconds: int = Field(default=20, ge=5, description="Interval between FX WS ping frames")
+    fx_ws_read_timeout_seconds: int = Field(
+        default=30, ge=5, description="Max seconds to wait for FX WS data before reconnect"
+    )
     market_stale_seconds: int = Field(default=60, ge=10, description="Threshold to consider market data stale")
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25, description="Percent worsen applied to displayed odds")
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")

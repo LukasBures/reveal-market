@@ -1968,6 +1968,17 @@ def pricing_quote(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Stake exceeds max of {settings.max_stake_zen} ZEN",
         )
+    if payload.market_id:
+        market_record = shared_repository.get_market_by_event_id(session, payload.market_id)
+        if market_record and (
+            market_record.status
+            in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
+            or market_record.resolved_at is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Market is settled; new quotes are disabled",
+            )
     # Always source FX server-side; ignore client-provided zen_usd.
     try:
         zen_usd_raw, stale = fetch_fx_price_sync(settings)

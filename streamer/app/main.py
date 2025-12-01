@@ -118,6 +118,8 @@ def create_app() -> FastAPI:
         )
         if not cors_allow_origins:
             raise ValueError("CORS origins must be set in prod mode")
+    if not cors_allow_origins:
+        raise ValueError("CORS origins resolved to empty list; check presets")
 
     metrics = get_metrics()
     state = StreamState(settings, metrics=metrics)
@@ -192,6 +194,18 @@ def create_app() -> FastAPI:
     )
     for warning in _compute_cors_host_warnings(settings, cors_allow_origins):
         logger.warning("streamer host/CORS mismatch", extra={"event": "streamer.host.mismatch", **warning})
+    if cors_allow_origins != ["*"]:
+        if str(settings.public_base_url).rstrip("/") not in cors_allow_origins:
+            logger.error(
+                "streamer public_base_url not allowed by CORS",
+                extra={
+                    "event": "streamer.cors.mismatch",
+                    "public_base_url": str(settings.public_base_url),
+                    "cors_allow_origins": cors_allow_origins,
+                },
+            )
+            if mode_env == "prod":
+                raise ValueError("public_base_url must be whitelisted in CORS")
 
     async def _health_payload() -> dict:
         fx = await state.get_fx()

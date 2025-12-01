@@ -2,7 +2,7 @@
 
 import type { MarketDetail } from "@/lib/api-types";
 import { useMemo } from "react";
-import { formatNumber, formatUsd, formatUsdCompact } from "@/lib/formatters";
+import { formatNumber, formatTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
 type Props = {
@@ -32,7 +32,7 @@ export function MarketAnalyticsPanel({ market }: Props) {
   const bestAsk = typeof live.bestAsk === "number" && Number.isFinite(live.bestAsk) ? live.bestAsk : null;
   const spread =
     bestBid !== null && bestAsk !== null && bestAsk > 0 ? ((bestAsk - bestBid) / bestAsk) * 100 : null;
-  const lastUpdated = stream?.lastUpdated ? new Date(stream.lastUpdated).toLocaleTimeString() : null;
+  const lastUpdated = stream?.lastUpdated ? formatTime(stream.lastUpdated) : null;
 
   const rows: Array<StatRow | null> = [
     { label: "24h volume", value: market.volume24hUsd ?? market.orderbookVolumeUsd, formatter: (v) => formatUsd(v as number) },

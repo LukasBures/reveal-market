@@ -43,19 +43,13 @@ export function GroupedMarketSelector({
   subtitleOverride,
   forceShow = false,
 }: Props) {
-  if (!forceShow && (!groupSlug || siblings.length <= 1)) return null;
-  const title = titleOverride ?? formatGroupTitle(groupSlug);
-  const label = labelOverride ?? "Grouped market";
-  const subtitle = subtitleOverride ?? "Select a threshold to jump between sub-markets.";
-  const countLabel = `${siblings.length} sub-market${siblings.length === 1 ? "" : "s"}`;
-
   const labeledSiblings = useMemo(() => {
     const used = new Set<string>();
     const formatDay = (value?: string | null) => {
       const formatted = value ? formatDate(value, { dateStyle: "medium" }) : "—";
       return formatted !== "—" ? formatted : null;
     };
-    return siblings.map((sibling, index) => {
+    const labeled = siblings.map((sibling, index) => {
       const options = [
         sibling.title?.trim(),
         sibling.groupItemTitle?.trim(),
@@ -78,27 +72,40 @@ export function GroupedMarketSelector({
 
       return { ...sibling, _label: label };
     });
+    return labeled.sort((a, b) => {
+      const aLabel = (a as MarketSibling & { _label?: string })._label ?? "";
+      const bLabel = (b as MarketSibling & { _label?: string })._label ?? "";
+      return aLabel.localeCompare(bLabel);
+    });
   }, [siblings]);
 
-    return (
-      <section className="rounded-3xl border border-white/10 bg-slate-950/40 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">{label}</p>
-            <h2 className="text-xl font-semibold text-white">{title}</h2>
-            <p className="text-sm text-emerald-100/80">{subtitle}</p>
-          </div>
-          <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
-            {countLabel}
-          </span>
+  const shouldShow = forceShow || (!!groupSlug && siblings.length > 1);
+  if (!shouldShow) return null;
+
+  const title = titleOverride ?? formatGroupTitle(groupSlug);
+  const label = labelOverride ?? "Grouped market";
+  const subtitle = subtitleOverride ?? "Select a threshold to jump between sub-markets.";
+  const countLabel = `${siblings.length} sub-market${siblings.length === 1 ? "" : "s"}`;
+
+  return (
+    <section className="rounded-3xl border border-white/10 bg-slate-950/40 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">{label}</p>
+          <h2 className="text-xl font-semibold text-white">{title}</h2>
+          <p className="text-sm text-emerald-100/80">{subtitle}</p>
         </div>
-        <div className="mt-4 space-y-2">
-          {labeledSiblings.map((sibling) => {
-            const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
-            const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
-            const volume = sibling.volume24hUsd ?? null;
-            const active = sibling.eventId === activeEventId;
-            const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+        <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
+          {countLabel}
+        </span>
+      </div>
+      <div className="mt-4 space-y-2">
+        {labeledSiblings.map((sibling) => {
+          const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
+          const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
+          const volume = sibling.volume24hUsd ?? null;
+          const active = sibling.eventId === activeEventId;
+          const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
           const href: UrlObject | Route =
             linkToGroupPage && groupSlug
               ? { pathname: `/markets/group/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }

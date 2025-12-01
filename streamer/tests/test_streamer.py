@@ -117,6 +117,25 @@ async def test_normalize_skips_when_fx_stale(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_normalize_uses_token_payload_when_outcome_prices_missing():
+    state = StubState()
+    streamer = DataStreamer(state, state.settings)
+    data = {
+        "id": "m-token",
+        "tokens": [
+            {"token_id": "tok-a", "price": "0.4"},
+            {"token_id": "tok-b", "price": "0.6"},
+        ],
+    }
+    await streamer._normalize_and_publish(data, source="rest")
+    # Two outcomes should be cached using token price fallback.
+    assert len(state.cached) == 2
+    prices = {payload.get("price") for _, _, payload in state.cached}
+    assert {"0.4", "0.6"}.issubset(prices)
+    assert state.market_tokens.get("m-token") == ["tok-a", "tok-b"]
+
+
+@pytest.mark.asyncio
 async def test_fx_ws_rejects_jump(monkeypatch):
     settings = Settings(fx_max_jump_percent=10.0, fx_jump_window_seconds=30)
     state = StreamState(settings)

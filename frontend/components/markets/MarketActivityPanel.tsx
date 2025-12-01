@@ -1,4 +1,5 @@
 import type { ActivityEntry } from "@/lib/streamer-data";
+import { formatTime } from "@/lib/formatters";
 
 type Props = {
   activity: ActivityEntry[];
@@ -52,9 +53,7 @@ export function MarketActivityPanel({ activity }: Props) {
             <div className="flex items-center gap-3 text-xs text-slate-400">
               {entry.amount !== undefined && <span>Amt {Number(entry.amount).toFixed(2)}</span>}
               {entry.payout !== undefined && <span>Payout {Number(entry.payout).toFixed(2)}</span>}
-              {entry.timestamp && (
-                <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-              )}
+              {entry.timestamp && <span>{formatTime(entry.timestamp, { hour: "2-digit", minute: "2-digit" })}</span>}
             </div>
           </div>
         ))}

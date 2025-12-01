@@ -61,7 +61,11 @@ export function resolveUrlConfig() {
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
   const siteUrl = coalesceUrl(process.env.NEXT_PUBLIC_SITE_URL, preset.siteUrl, "Site URL");
   const streamerPublic = coalesceUrl(process.env.NEXT_PUBLIC_PRICE_STREAMER_URL, preset.streamerPublic, "Streamer URL");
-  const streamerInternal = coalesceUrl(process.env.STREAMER_INTERNAL_URL, preset.streamerInternal, "Streamer internal URL");
+  const streamerInternal = coalesceUrl(
+    process.env.STREAMER_INTERNAL_URL ?? (runningInDocker ? preset.streamerInternal : preset.streamerPublic),
+    runningInDocker ? preset.streamerInternal : preset.streamerPublic,
+    "Streamer internal URL",
+  );
 
   return Object.freeze({
     apiBaseUrl,

@@ -301,6 +301,8 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 outcomePrices={market.outcomePrices ?? []}
                 initialOutcomeId={0}
                 marketTitle={market.title}
+                marketStatus={market.status}
+                isResolved={market.resolution?.resolved ?? null}
               />
             </div>
           </div>

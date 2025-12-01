@@ -81,6 +81,7 @@ class StreamState:
         self._acquired_history: set[str] = set()
         self._history_last_ts: dict[str, datetime] = {}
         self.active_connections: int = 0
+        self._last_ws_ping: datetime | None = None
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(
@@ -197,6 +198,14 @@ class StreamState:
         """Return ISO timestamps of last seen market updates for diagnostics."""
 
         return {k: v.isoformat() for k, v in self.last_seen.items()}
+
+    def register_ws_ping(self) -> None:
+        self._last_ws_ping = datetime.now(UTC)
+
+    def ws_ping_age_seconds(self) -> float | None:
+        if not self._last_ws_ping:
+            return None
+        return (datetime.now(UTC) - self._last_ws_ping).total_seconds()
 
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
         if not self.redis:

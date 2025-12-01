@@ -5,6 +5,9 @@ services:
       - "127.0.0.1:6379:6379"
 
   frontend:
+    build:
+      args:
+        NEXT_DISABLE_MINIFY: ${NEXT_DISABLE_MINIFY:-true}
     ports:
       - "127.0.0.1:3000:3000"
 

@@ -22,6 +22,8 @@ class PriceStreamer:
     _metric_fx_stale_shared: Gauge | None = None
     _metric_ws_connected_shared: Gauge | None = None
     _metric_ws_restarts_shared: Counter | None = None
+    _metric_ws_ping_age_shared: Gauge | None = None
+    _metric_rest_fallbacks_shared: Counter | None = None
 
     def __init__(self, state: StreamState, settings: Settings):
         self.state = state
@@ -32,6 +34,8 @@ class PriceStreamer:
         self.metric_fx_stale: Gauge | None = None
         self.metric_ws_connected: Gauge | None = None
         self.metric_ws_restarts: Counter | None = None
+        self.metric_ws_ping_age: Gauge | None = None
+        self.metric_rest_fallbacks: Counter | None = None
         self._init_metrics()
 
     def _init_metrics(self) -> None:
@@ -50,10 +54,18 @@ class PriceStreamer:
             PriceStreamer._metric_ws_restarts_shared = Counter(
                 "streamer_fx_ws_restarts_total", "FX websocket restart attempts", registry=REGISTRY
             )
+            PriceStreamer._metric_ws_ping_age_shared = Gauge(
+                "streamer_fx_ws_ping_age_seconds", "Seconds since last FX WS ping/pong", registry=REGISTRY
+            )
+            PriceStreamer._metric_rest_fallbacks_shared = Counter(
+                "streamer_fx_rest_fallbacks_total", "FX REST fallback fetches", registry=REGISTRY
+            )
         self.metric_fx_source = PriceStreamer._metric_fx_source_shared
         self.metric_fx_stale = PriceStreamer._metric_fx_stale_shared
         self.metric_ws_connected = PriceStreamer._metric_ws_connected_shared
         self.metric_ws_restarts = PriceStreamer._metric_ws_restarts_shared
+        self.metric_ws_ping_age = PriceStreamer._metric_ws_ping_age_shared
+        self.metric_rest_fallbacks = PriceStreamer._metric_rest_fallbacks_shared
 
     async def start(self) -> None:
         self._tasks = [
@@ -68,7 +80,12 @@ class PriceStreamer:
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
     def _update_fx_metrics(self) -> None:
-        if not self.metric_fx_source or not self.metric_fx_stale or not self.metric_ws_connected:
+        if (
+            not self.metric_fx_source
+            or not self.metric_fx_stale
+            or not self.metric_ws_connected
+            or not self.metric_ws_ping_age
+        ):
             return
         fx = self.state.fx_quote
         source = fx.source if fx else (self.state.fx_last_source or "unknown")
@@ -77,6 +94,9 @@ class PriceStreamer:
         self.metric_fx_stale.set(stale_flag)
         for label in ("binance_ws", "binance_rest", "cryptocompare_rest", "fallback", "unknown"):
             self.metric_fx_source.labels(source=label).set(1 if source == label else 0)
+        ping_age = self.state.ws_ping_age_seconds()
+        if ping_age is not None:
+            self.metric_ws_ping_age.set(ping_age)
 
     async def _fx_refresh_loop(self) -> None:
         while not self._stop.is_set():
@@ -109,6 +129,11 @@ class PriceStreamer:
                 },
             )
             await self.state.refresh_fx(label="binance_rest")
+            if self.metric_rest_fallbacks:
+                try:
+                    self.metric_rest_fallbacks.inc()
+                except Exception as exc:  # pragma: no cover
+                    logger.debug("metric_rest_fallbacks_increment_failed", exc_info=exc)
         self._update_fx_metrics()
 
     async def _fx_ws_loop(self) -> None:
@@ -126,6 +151,8 @@ class PriceStreamer:
                     self.settings.fx_primary_ws_url,
                     name="fx-ws",
                     fatal_status={400, 401, 403, 404, 429},
+                    ping_interval=self.settings.fx_ws_ping_interval_seconds,
+                    read_timeout=self.settings.fx_ws_read_timeout_seconds,
                 ):
                     if self._stop.is_set():
                         break
@@ -144,6 +171,7 @@ class PriceStreamer:
                     async for raw in ws:
                         if self._stop.is_set():
                             break
+                        self.state.register_ws_ping()
                         try:
                             data = json.loads(raw)
                         except json.JSONDecodeError:

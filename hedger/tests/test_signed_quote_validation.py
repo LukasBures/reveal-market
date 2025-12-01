@@ -4,13 +4,12 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from eth_account import Account
-from eth_account.messages import encode_defunct
-from web3 import Web3
-
 from app.config import Settings
 from app.service import HedgerService
 from app.types import CommitEvent, OutcomeSide
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from web3 import Web3
 
 
 class _FxStub:

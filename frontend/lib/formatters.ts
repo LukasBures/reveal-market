@@ -68,12 +68,15 @@ export function formatDateTime(value?: string | number | Date | null, options?: 
   if (!date) {
     return FALLBACK;
   }
-  return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: DEFAULT_TIME_ZONE,
-    ...options,
-  }).format(date);
+  const datePart = formatDate(date, { dateStyle: options?.dateStyle ?? "medium", timeZone: DEFAULT_TIME_ZONE });
+  const timePart = formatTime(date, {
+    hour: options?.hour ?? "numeric",
+    minute: options?.minute ?? "2-digit",
+    second: options?.second,
+    hour12: options?.hour12 ?? false,
+    timeZone: options?.timeZone ?? DEFAULT_TIME_ZONE,
+  });
+  return `${datePart} ${timePart}`;
 }
 
 export function formatDate(value?: string | number | Date | null, options?: Intl.DateTimeFormatOptions): string {
@@ -86,4 +89,21 @@ export function formatDate(value?: string | number | Date | null, options?: Intl
     timeZone: DEFAULT_TIME_ZONE,
     ...options,
   }).format(date);
+}
+
+export function formatTime(value?: string | number | Date | null, options?: Intl.DateTimeFormatOptions): string {
+  const date = toDate(value);
+  if (!date) {
+    return FALLBACK;
+  }
+  const formatterOptions: Intl.DateTimeFormatOptions = {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: DEFAULT_TIME_ZONE,
+    ...options,
+  };
+  delete (formatterOptions as any).timeStyle;
+  return new Intl.DateTimeFormat(DEFAULT_LOCALE, formatterOptions).format(date);
 }

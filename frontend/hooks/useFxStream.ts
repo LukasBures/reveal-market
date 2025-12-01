@@ -1,21 +1,19 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createFxWebSocket, fetchStreamerFxQuote, shouldUseStreamerWs, type FxQuote } from "@/lib/pricing-client";
 
+type FxStatus = "connecting" | "live" | "stale" | "error";
+
 type FxState = {
   fx: FxQuote | null;
   error: string | null;
-  status: "connecting" | "live" | "stale" | "error";
-};
-
-type FxConnectionState = {
-  fx: FxQuote | null;
-  error: string | null;
-  status: FxState["status"];
+  status: FxStatus;
   lastUpdate: number;
   wsConnected: boolean;
   wsDelivered: boolean;
   restFallbacks: number;
 };
+
+type FxConnectionState = FxState;
 
 type FxConnection = {
   state: FxConnectionState;
@@ -41,7 +39,7 @@ const initialState: FxConnectionState = {
   wsDelivered: false,
   restFallbacks: 0,
 };
-const initialFxSnapshot: FxState = { fx: null, error: null, status: "connecting" };
+const initialFxSnapshot: FxState = { ...initialState };
 
 function notify(conn: FxConnection) {
   conn.subscribers.forEach((cb) => cb());
@@ -80,16 +78,15 @@ function startFallback(path: string, conn: FxConnection, connect: () => void) {
       });
       console.error("FX HTTP fallback failed", err);
     }
-    if (
-      conn.state.restFallbacks >= 3 &&
-      (!conn.state.wsConnected || Date.now() - conn.state.lastUpdate > 15_000 || conn.state.fx?.stale)
-    ) {
-      setState(conn, { restFallbacks: 0 });
+    // Encourage a reconnect if WS is stale or missing while REST is carrying us.
+    const needsReconnect = !conn.state.wsConnected || Date.now() - conn.state.lastUpdate > 15_000 || conn.state.fx?.stale;
+    if (needsReconnect) {
+      conn.wsFailures = 0;
       conn.backoff = 1_000;
       if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
-        conn.ws.close();
+        conn.ws.close(1000, "refresh");
       }
-      setTimeout(connect, 200);
+      setTimeout(connect, 250);
     }
   };
   if (conn.fallbackTimer) return;
@@ -119,19 +116,15 @@ function startConnection(path: string) {
     if (conn.cancelled) return;
     // If WS is explicitly disabled (env or after repeated failures), rely on REST-only mode.
     const wsAllowed =
-      typeof window !== "undefined" && shouldUseStreamerWs() && "WebSocket" in window && conn.wsDisabledUntil !== Infinity;
+      typeof window !== "undefined" && shouldUseStreamerWs() && "WebSocket" in window && Date.now() >= conn.wsDisabledUntil;
     if (!wsAllowed) {
       setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
-      return;
-    }
-    if (Date.now() < conn.wsDisabledUntil) {
-      setTimeout(connect, 5_000);
       return;
     }
     try {
       const ws = createFxWebSocket(path);
       if (!ws) {
-        conn.wsDisabledUntil = Infinity;
+        conn.wsDisabledUntil = Date.now() + 60_000;
         setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
         return;
       }
@@ -157,6 +150,7 @@ function startConnection(path: string) {
             error: null,
             lastUpdate: Date.now(),
             wsDelivered: true,
+            restFallbacks: 0,
           });
         } catch (err) {
           setState(conn, { error: (err as Error).message, status: "error" });
@@ -164,7 +158,13 @@ function startConnection(path: string) {
         }
       };
       ws.onerror = () => {
+        if (conn.cancelled) return;
         setState(conn, { wsConnected: false, status: "stale", error: "FX socket error" });
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
       };
       ws.onclose = (evt) => {
         if (conn.cancelled) return;
@@ -177,22 +177,19 @@ function startConnection(path: string) {
           console.warn("FX socket closed, reconnecting", { delay });
         }
         conn.wsFailures += 1;
-        // After a couple failures, stop trying WS entirely and rely on REST to keep UI working.
-        if (conn.wsFailures >= 2) {
-          conn.wsDisabledUntil = Infinity;
-          return;
-        }
-        if (conn.wsFailures >= 3) {
+        if (conn.wsFailures >= 5) {
           conn.wsDisabledUntil = Date.now() + 60_000;
           conn.wsFailures = 0;
+          conn.backoff = 1_000;
+          setTimeout(connect, 60_000);
           return;
         }
-        conn.backoff = delay * 2;
+        conn.backoff = Math.min(delay * 2, 30_000);
         setTimeout(connect, delay);
       };
     } catch (err) {
       setState(conn, { wsConnected: false, error: (err as Error).message, status: "stale" });
-      conn.wsDisabledUntil = Date.now() + 60_000;
+      conn.wsDisabledUntil = Date.now() + 30_000;
       console.error("FX stream init failed; relying on REST", err);
     }
   };
@@ -215,7 +212,7 @@ function subscribeToConnection(path: string, onChange: () => void) {
 function getSnapshot(path: string): FxState {
   const conn = connections.get(path);
   if (!conn) return initialFxSnapshot;
-  return conn.state as FxState;
+  return conn.state;
 }
 
 export function useFxStream(path = "/fx/zen-usdc"): FxState {
