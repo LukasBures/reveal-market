@@ -2,6 +2,7 @@
 
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDateTime } from "@/lib/formatters";
+import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
   market: MarketDetail;
@@ -38,6 +39,7 @@ export function MarketDetailMetadata({ market }: Props) {
     typeof market.rakeBps === "number" && Number.isFinite(market.rakeBps)
       ? `${Math.round(market.rakeBps)} bps`
       : undefined;
+  const commitDeadline = getCommitDeadline(market);
 
   const resolution = (market.resolution ?? (market.extraData?.resolution as any)) || null;
   type ResolutionWinner = { index: number; label?: string | null; payout?: number | null };
@@ -160,7 +162,7 @@ export function MarketDetailMetadata({ market }: Props) {
         <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-4">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Commit deadline</p>
           <p className="mt-2 text-lg font-semibold text-white">
-            {market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
+            {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}
           </p>
         </div>
         <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-4">

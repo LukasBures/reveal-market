@@ -36,46 +36,28 @@ export function GroupedMarketSelector({ groupSlug, siblings, activeEventId }: Pr
           {siblings.length} sub-markets
         </span>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {siblings.map((sibling) => {
-          const active = sibling.eventId === activeEventId;
-          const label = sibling.groupItemTitle || sibling.title || sibling.eventId;
-          return (
-            <Link
-              key={sibling.eventId}
-              href={`/markets/${encodeURIComponent(sibling.eventId)}`}
-              className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                active
-                  ? "border-emerald-400 bg-emerald-500/20 text-white shadow-md shadow-emerald-500/20"
-                  : "border-white/10 bg-white/5 text-white/80 hover:border-emerald-400/60 hover:text-white"
-              }`}
-            >
-              {label}
-            </Link>
-          );
-        })}
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-4 space-y-2">
         {siblings.map((sibling) => {
           const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
           const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
           const volume = sibling.volume24hUsd ?? null;
+          const active = sibling.eventId === activeEventId;
+          const label = sibling.groupItemTitle || sibling.title || "Sub-market";
           return (
-            <div
+            <Link
               key={`${sibling.eventId}-summary`}
-              className={`rounded-2xl border px-4 py-3 transition ${
-                sibling.eventId === activeEventId ? "border-emerald-400 bg-emerald-500/10" : "border-white/5 bg-white/5"
+              href={`/markets/${encodeURIComponent(sibling.eventId)}`}
+              className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition ${
+                active
+                  ? "border-emerald-400 bg-emerald-500/10 shadow-md shadow-emerald-500/20"
+                  : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
               }`}
             >
-              <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">
-                {sibling.groupItemTitle || sibling.title || "Sub-market"}
-              </p>
-              <div className="mt-2 flex items-center justify-between text-sm text-white">
-                <span>Yes {yesPrice}</span>
-                <span>No {noPrice}</span>
-              </div>
-              <p className="mt-1 text-xs text-emerald-100/80">24h vol {formatUsd(volume ?? 0)}</p>
-            </div>
+              <span className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">{label}</span>
+              <span className="text-sm text-white">Yes {yesPrice}</span>
+              <span className="text-sm text-white">No {noPrice}</span>
+              <span className="text-xs text-emerald-100/80">24h vol {formatUsd(volume ?? 0)}</span>
+            </Link>
           );
         })}
       </div>

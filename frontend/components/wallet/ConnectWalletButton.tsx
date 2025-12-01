@@ -499,21 +499,16 @@ export function ConnectWalletButton() {
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleSwitchChain}
-                            disabled={!switchChain || isSwitching || chain?.id === defaultChain.id}
-                            className={
-                              "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition " +
-                              (chain?.id === defaultChain.id
-                                ? "border-brand-400 bg-brand-500/20 text-white"
-                                : "border-white/20 text-white/80 hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50")
-                            }
-                          >
-                            {chain?.id === defaultChain.id
-                              ? `On ${defaultChain.name}`
-                              : `Switch to ${defaultChain.name}`}
-                          </button>
+                          {switchChain && chain?.id !== defaultChain.id && (
+                            <button
+                              type="button"
+                              onClick={handleSwitchChain}
+                              disabled={!switchChain || isSwitching}
+                              className="rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/80 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {`Switch to ${defaultChain.name}`}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => disconnect()}
@@ -522,34 +517,6 @@ export function ConnectWalletButton() {
                             Disconnect
                           </button>
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <label className="w-full text-[11px] uppercase tracking-[0.25em] text-slate-400 md:w-auto">
-                        Sign a message
-                        <input
-                          type="text"
-                          value={message}
-                          onChange={(event) => setMessage(event.target.value)}
-                          placeholder="Enter a message"
-                          className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
-                        />
-                      </label>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleSignMessage}
-                          disabled={messageDisabled || isSigning}
-                          className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isSigning ? "Signing…" : "Sign message"}
-                        </button>
-                        {signature && (
-                          <span className="text-xs text-emerald-200">Signed {formatSignature(signature)}</span>
-                        )}
-                        {signErrorMessage && <span className="text-xs text-rose-300">{signErrorMessage}</span>}
                       </div>
                     </div>
                   </div>

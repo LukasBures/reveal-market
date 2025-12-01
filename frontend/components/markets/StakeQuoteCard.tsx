@@ -15,6 +15,8 @@ type Props = {
 };
 
 const DEFAULT_MAX_STAKE_ZEN = 100;
+const MIN_STAKE_ZEN = 5;
+const MAX_STAKE_ZEN = 50;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -31,6 +33,7 @@ export function StakeQuoteCard({
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
+  const [stakeError, setStakeError] = useState<string | null>(null);
   const [selectedOutcome, setSelectedOutcome] = useState<number>(initialOutcomeId);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -162,7 +165,7 @@ export function StakeQuoteCard({
 
   return (
     <div
-      className={`md:sticky md:top-0 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
+      className={`md:sticky md:top-0 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -258,40 +261,53 @@ export function StakeQuoteCard({
                 setStakeInput("");
               }
             }}
-            onChange={(e) => {
-              const raw = e.target.value;
-              const normalized = raw.replace(",", ".");
-              const pattern = /^\d*(?:\.\d{0,2})?$/;
-              if (normalized !== "" && !pattern.test(normalized)) {
-                return;
-              }
-              setStakeInput(raw);
-              if (normalized === "") {
-                setStakeZen(0);
-                return;
-              }
-              const next = Number(normalized);
-              if (Number.isNaN(next)) {
-                setStakeZen(0);
-                return;
-              }
-              const rounded = Math.round(next * 100) / 100;
-              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              setStakeZen(capped);
-            }}
-            onBlur={() => {
-              const normalized = stakeInput.replace(",", ".");
-              const next = Number(normalized);
-              if (Number.isNaN(next)) {
-                setStakeInput("0.00");
-                setStakeZen(0);
-                return;
-              }
-              const rounded = Math.round(next * 100) / 100;
-              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              setStakeZen(capped);
-              setStakeInput(capped.toFixed(2));
-            }}
+          onChange={(e) => {
+            const raw = e.target.value;
+            const normalized = raw.replace(",", ".");
+            const pattern = /^\d*(?:\.\d{0,2})?$/;
+            if (normalized !== "" && !pattern.test(normalized)) {
+              return;
+            }
+            setStakeInput(raw);
+            if (normalized === "") {
+              setStakeZen(0);
+              setStakeError("Enter between 5 and 50 ZEN");
+              return;
+            }
+            const next = Number(normalized);
+            if (Number.isNaN(next)) {
+              setStakeZen(0);
+              setStakeError("Enter between 5 and 50 ZEN");
+              return;
+            }
+            const rounded = Math.round(next * 100) / 100;
+            const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
+            setStakeZen(capped);
+            if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+              setStakeError("Enter between 5 and 50 ZEN");
+            } else {
+              setStakeError(null);
+            }
+          }}
+          onBlur={() => {
+            const normalized = stakeInput.replace(",", ".");
+            const next = Number(normalized);
+            if (Number.isNaN(next)) {
+              setStakeInput("0.00");
+              setStakeZen(0);
+              setStakeError("Enter between 5 and 50 ZEN");
+              return;
+            }
+            const rounded = Math.round(next * 100) / 100;
+            const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
+            setStakeZen(capped);
+            setStakeInput(capped.toFixed(2));
+            if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+              setStakeError("Enter between 5 and 50 ZEN");
+            } else {
+              setStakeError(null);
+            }
+          }}
             className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
             inputMode="decimal"
             aria-label="Stake in ZEN"
@@ -306,6 +322,11 @@ export function StakeQuoteCard({
                   const capped = Math.min(preset, effectiveMaxStake);
                   setStakeZen(capped);
                   setStakeInput(capped.toFixed(2));
+                  if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+                    setStakeError("Enter between 5 and 50 ZEN");
+                  } else {
+                    setStakeError(null);
+                  }
                 }}
                 className="w-full rounded-full bg-white/5 px-3 py-1 text-center font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15"
               >
@@ -322,7 +343,15 @@ export function StakeQuoteCard({
       <div className="mt-4 flex flex-col gap-2">
         <button
           type="button"
-          disabled={loading || fxStale || fxUnavailable || !address || !marketAddress}
+          disabled={
+            loading ||
+            fxStale ||
+            fxUnavailable ||
+            !marketAddress ||
+            !address ||
+            stakeZen < MIN_STAKE_ZEN ||
+            stakeZen > MAX_STAKE_ZEN
+          }
           onClick={() => setRefreshNonce((prev) => prev + 1)}
           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
             loading || fxStale || fxUnavailable || !address || !marketAddress
@@ -345,6 +374,7 @@ export function StakeQuoteCard({
           </p>
         )}
         {error && <p className="text-xs text-rose-300">{error}</p>}
+        {stakeError && <p className="text-xs text-rose-300">{stakeError}</p>}
         {fxStale && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
             Pricing paused due to stale FX. Please retry in a moment.

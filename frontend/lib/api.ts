@@ -36,12 +36,6 @@ const OFFLINE_FALLBACK_BASE = process.env.RM_OFFLINE_API_BASE_URL
 const API_BASE_NORMALIZED = normalizeBase(DEFAULT_API_BASE);
 const IS_OFFLINE_BASE = OFFLINE_FALLBACK_BASE ? API_BASE_NORMALIZED === OFFLINE_FALLBACK_BASE : false;
 const SHOULD_SKIP_NETWORK = FORCE_OFFLINE && IS_OFFLINE_BASE;
-const TRENDING_MIN_LIQUIDITY = 0;
-const TRENDING_MIN_VOLUME_24H = 0;
-const TRENDING_MIN_ORDERBOOK = 0;
-const TRENDING_MIN_TRADES = 0;
-const TRENDING_MIN_SCORE = 0;
-
 const isNetworkUnavailable = (error: unknown) => {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
   return (
@@ -73,21 +67,6 @@ const maybeShortCircuitOffline = (scope: string) => {
 const computePopularity = (market: MarketSummary): number => {
   const volume = getMarketVolume(market);
   return Number.isFinite(volume) ? volume : 0;
-};
-
-const meetsTrendingFloor = (market: MarketSummary, popularity?: number): boolean => {
-  const liquidity = market.liquidityUsd ?? 0;
-  const volume = getMarketVolume(market);
-  const orderbook = market.orderbookVolumeUsd ?? 0;
-  const trades = market.tradesQuantity ?? 0;
-  const popularityScore = popularity ?? computePopularity(market);
-  return (
-    popularityScore >= TRENDING_MIN_SCORE &&
-    liquidity >= TRENDING_MIN_LIQUIDITY &&
-    volume >= TRENDING_MIN_VOLUME_24H &&
-    (orderbook >= TRENDING_MIN_ORDERBOOK || orderbook === 0) &&
-    (trades >= TRENDING_MIN_TRADES || trades === 0)
-  );
 };
 
 const coerceNumber = (value: any): number | undefined => {
@@ -147,9 +126,20 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
     commitDeadline:
       payload.commit_deadline ??
       payload.commitDeadline ??
+      payload.closes_at ??
+      payload.closesAt ??
+      payload.orders_opened_at ??
+      payload.ordersOpenedAt ??
       payload.extra_data?.commit_deadline ??
       payload.extra_data?.gamma?.commit_deadline ??
       payload.extra_data?.gamma?.commitDeadline ??
+      payload.extra_data?.closes_at ??
+      payload.extra_data?.closesAt ??
+      payload.extra_data?.gamma?.closes_at ??
+      payload.extra_data?.gamma?.closesAt ??
+      payload.extra_data?.orders_opened_at ??
+      payload.extra_data?.gamma?.orders_opened_at ??
+      payload.extra_data?.gamma?.ordersOpenedAt ??
       undefined,
     revealDeadline:
       payload.reveal_deadline ??
@@ -278,7 +268,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     return [];
   }
   try {
-    const onlyFeatured = options?.onlyFeatured ?? true;
+    const onlyFeatured = options?.onlyFeatured ?? false;
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
@@ -303,9 +293,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       }
     }
     const fetchTags: string[] = [];
-    const trendingMode =
-      options?.trending ??
-      (!options?.category && !options?.searchQuery && (effectiveStatus === "active" || effectiveStatus === "live"));
+    const trendingMode = options?.trending === true;
     if (options?.category) {
       const slug = slugify(options.category);
       endpoint = `/categories/${encodeURIComponent(slug)}`;
@@ -382,8 +370,6 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     const getUpdatedAt = (m: MarketSummary): string =>
       (m as any).updatedAt ?? (m as any).updated_at ?? m.extraData?.gamma?.updated_at ?? "";
     const scored = mapped.map((m) => ({ market: m, popularity: computePopularity(m) }));
-    const trending = scored.filter(({ market, popularity }) => meetsTrendingFloor(market, popularity));
-    const nonTrending = scored.filter(({ market, popularity }) => !meetsTrendingFloor(market, popularity));
     const sorter = (a: { market: MarketSummary; popularity: number }, b: { market: MarketSummary; popularity: number }) => {
       const diff = (b.popularity ?? 0) - (a.popularity ?? 0);
       if (diff !== 0) return diff;
@@ -391,12 +377,8 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       const bUpdated = getUpdatedAt(b.market);
       return bUpdated > aUpdated ? 1 : bUpdated < aUpdated ? -1 : 0;
     };
-    if (trendingMode) {
-      const ranked = (trending.length ? trending : scored).sort(sorter);
-      return ranked.slice(0, limit).map((entry) => entry.market);
-    }
-    const ordered = [...trending.sort(sorter), ...nonTrending.sort(sorter)];
-    return ordered.map((entry) => entry.market);
+    const orderedByVolume = scored.sort(sorter).map((entry) => entry.market);
+    return trendingMode ? orderedByVolume.slice(0, limit) : orderedByVolume;
   } catch (error) {
     logOfflineAwareError("fetchFeaturedMarkets", error);
     return [];

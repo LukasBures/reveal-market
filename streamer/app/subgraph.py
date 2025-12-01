@@ -218,6 +218,8 @@ class SubgraphClient:
           ) {
             id
             amount
+            openInterestUSD
+            openInterestUsd
           }
         }
         """

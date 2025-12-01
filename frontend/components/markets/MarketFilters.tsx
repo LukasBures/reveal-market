@@ -10,15 +10,7 @@ import { MarketArtwork } from "@/components/markets/MarketArtwork";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
 import { formatNumber } from "@/lib/formatters";
 
-const categories = [
-  "Trending",
-  "Politics",
-  "Sports",
-  "Finance",
-  "Crypto",
-  "Geopolitics",
-  "Tech",
-];
+const categories = ["Politics", "Sports", "Finance", "Crypto", "Geopolitics", "Tech"];
 
 type Props = {
   initialSearch?: string;
@@ -236,7 +228,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
           <div>
             <h1 className="text-3xl font-semibold text-white sm:text-4xl">Trade-ready markets curated for every narrative.</h1>
             <p className="mt-3 text-base text-slate-300">
-              Browse liquidity-backed order books, trending catalysts, and bespoke categories powered by the Reveal Market feed.
+              Browse liquidity-backed order books, high-volume catalysts, and bespoke categories powered by the Reveal Market feed.
               Search instantly or jump straight into a category.
             </p>
           </div>

@@ -79,7 +79,24 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     category: item.category ?? item.tags?.[0] ?? "General",
     tags: item.tags ?? item.extra_data?.tags ?? [],
     status: item.status ?? undefined,
-    commitDeadline: item.commit_deadline ?? item.commitDeadline ?? undefined,
+    commitDeadline:
+      item.commit_deadline ??
+      item.commitDeadline ??
+      item.closes_at ??
+      item.closesAt ??
+      item.orders_opened_at ??
+      item.ordersOpenedAt ??
+      item.extra_data?.commit_deadline ??
+      item.extra_data?.gamma?.commit_deadline ??
+      item.extra_data?.gamma?.commitDeadline ??
+      item.extra_data?.closes_at ??
+      item.extra_data?.closesAt ??
+      item.extra_data?.gamma?.closes_at ??
+      item.extra_data?.gamma?.closesAt ??
+      item.extra_data?.orders_opened_at ??
+      item.extra_data?.gamma?.orders_opened_at ??
+      item.extra_data?.gamma?.ordersOpenedAt ??
+      undefined,
     revealDeadline: item.reveal_deadline ?? item.revealDeadline ?? undefined,
     liquidityUsd: item.liquidity_usd ?? item.liquidityUsd ?? item.extra_data?.liquidity_usd ?? undefined,
     outcomes: item.outcomes ?? item.extra_data?.outcomes ?? [],

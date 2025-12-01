@@ -1,5 +1,6 @@
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDateTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
+import { getCommitDeadline } from "@/lib/markets";
 import { MarketArtwork } from "./MarketArtwork";
 
 type Props = {
@@ -38,6 +39,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
     0;
   const openInterest =
     toNumber(market.openInterestUsd) ?? toNumber(extraData?.openInterest) ?? toNumber(gamma?.openInterest) ?? 0;
+  const commitDeadline = getCommitDeadline(market);
   const backgroundStyle = coverImage
     ? {
         backgroundImage: `linear-gradient(120deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.75) 45%, rgba(0,0,0,0.6) 100%), url(${coverImage})`,
@@ -72,7 +74,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
         <Stat label="Open interest" value={formatUsdCompact(openInterest)} />
         <Stat
           label="Commit deadline"
-          value={market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
+          value={commitDeadline ? formatDateTime(commitDeadline) : "TBA"}
           compact
         />
       </div>

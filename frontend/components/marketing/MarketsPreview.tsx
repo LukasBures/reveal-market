@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import type { MarketSummary } from "@/lib/api-types";
 import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { formatDateTime, formatUsd } from "@/lib/formatters";
+import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
   initialMarkets: MarketSummary[];
@@ -40,12 +41,17 @@ export function MarketsPreviewClient({ initialMarkets }: Props) {
             {market.title}
           </h3>
           <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-400">
-            <span>
-              Commit ends:{" "}
-              <strong className="text-white">
-                {market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
-              </strong>
-            </span>
+            {(() => {
+              const commitDeadline = getCommitDeadline(market);
+              return (
+                <span>
+                  Commit ends:{" "}
+                  <strong className="text-white">
+                    {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}
+                  </strong>
+                </span>
+              );
+            })()}
             <span>
               Reveal ends:{" "}
               <strong className="text-white">

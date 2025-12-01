@@ -2,6 +2,7 @@
 
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDate, formatDateTime, formatUsd } from "@/lib/formatters";
+import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
   market: MarketDetail;
@@ -117,6 +118,7 @@ export function MarketDetailSidebar({ market }: Props) {
   const openInterest =
     market.openInterestUsd ??
     pickNumber(sources, ["openInterest", "open_interest", "openInterestUsd", "openInterestUSD"]);
+  const commitDeadline = getCommitDeadline(market);
   const bestBid = pickNumber(sources, ["bestBid", "best_bid", "bestBidPrice"]);
   const bestAsk = pickNumber(sources, ["bestAsk", "best_ask", "bestAskPrice"]);
   const makerFeeBps = normalizeBps(
@@ -181,9 +183,7 @@ export function MarketDetailSidebar({ market }: Props) {
       <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <span>Commit deadline</span>
-          <span className="text-white">
-            {market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
-          </span>
+          <span className="text-white">{commitDeadline ? formatDateTime(commitDeadline) : "TBA"}</span>
         </div>
         <div className="flex items-center justify-between">
           <span>Reveal deadline</span>

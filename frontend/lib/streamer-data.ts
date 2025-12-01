@@ -92,8 +92,15 @@ export async function fetchOpenInterest(conditionId: string): Promise<number | u
     }
     const payload = await res.json();
     const first = Array.isArray(payload.data) ? payload.data[0] : (payload.data?.[0] ?? null);
-    const amount = first?.amount ?? first?.openInterestUSD ?? first?.openInterest ?? null;
-    return safeNumber(amount);
+    const amount =
+      first?.openInterestUSD ??
+      first?.openInterestUsd ??
+      first?.openInterest ??
+      first?.amount ??
+      first?.open_interest ??
+      null;
+    const parsed = safeNumber(amount);
+    return parsed !== undefined ? parsed : undefined;
   } catch (error) {
     logger.warn("streamer.oi.fetch_error", { error: (error as Error).message, url });
     return undefined;

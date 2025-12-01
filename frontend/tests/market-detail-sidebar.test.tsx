@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MarketDetailSidebar } from "@/components/markets/MarketDetailSidebar";
+import { formatDateTime } from "@/lib/formatters";
 import type { MarketDetail } from "@/lib/api-types";
 
 const detailMarket: MarketDetail = {
@@ -59,6 +60,8 @@ describe("MarketDetailSidebar", () => {
         }}
       />,
     );
-    expect(screen.getAllByText(/tba/i)).toHaveLength(2);
+    const createdAtFormatted = formatDateTime(detailMarket.createdAt);
+    expect(screen.getByText(createdAtFormatted)).toBeInTheDocument();
+    expect(screen.getAllByText(/tba/i)).toHaveLength(1);
   });
 });

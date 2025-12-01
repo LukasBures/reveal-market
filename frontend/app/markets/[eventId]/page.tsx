@@ -6,7 +6,6 @@ import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
-import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
@@ -15,6 +14,7 @@ import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel"
 import { MarketActivityPanel } from "@/components/markets/MarketActivityPanel";
 import { fetchMarketActivity } from "@/lib/streamer-data";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
+import { getCommitDeadline } from "@/lib/markets";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -147,6 +147,7 @@ const buildMarketStructuredData = (
 ): Record<string, any> => {
   const url = absoluteUrl(canonicalPath);
   const keywords = extractMarketKeywords(market);
+  const commitDeadline = getCommitDeadline(market);
   const structuredData: Record<string, any> = {
     "@context": "https://schema.org",
     "@type": "Event",
@@ -154,7 +155,7 @@ const buildMarketStructuredData = (
     description,
     eventStatus: mapMarketStatusToSchema(market.status),
     eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
-    startDate: market.commitDeadline ?? market.createdAt ?? undefined,
+    startDate: commitDeadline ?? market.createdAt ?? undefined,
     endDate: market.revealDeadline ?? market.updatedAt ?? undefined,
     url,
     image: [absoluteUrl(resolveMarketImage(market) ?? "/opengraph-image")],
@@ -245,14 +246,13 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
-          {isGrouped && market.groupSlug && (
-            <GroupedMarketSelector groupSlug={market.groupSlug} siblings={siblings} activeEventId={canonicalEventId} />
-          )}
           <MarketDetailHeader market={market} coverImage={coverImage} />
           <MarketLiveStatusBar marketId={canonicalEventId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
-              <MarketDetailOutcomes market={market} />
+              {isGrouped && market.groupSlug && (
+                <GroupedMarketSelector groupSlug={market.groupSlug} siblings={siblings} activeEventId={canonicalEventId} />
+              )}
               <MarketDetailChart
                 marketId={canonicalEventId}
                 tokenIds={tokenIds}
