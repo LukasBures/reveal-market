@@ -128,6 +128,7 @@ jobs:
           uv sync --project hedger --extra dev --no-install-project --frozen
 
       - name: Lint hedger
+        working-directory: hedger
         run: uv run --project hedger -- ruff check app tests
 
       - name: Hedger tests
@@ -265,6 +266,9 @@ jobs:
   prover:
     needs: precommit
     runs-on: ubuntu-latest
+    env:
+      PROVER_ARTIFACTS_URL: ${{ secrets.PROVER_ARTIFACTS_URL || vars.PROVER_ARTIFACTS_URL || '' }}
+      PROVER_ARTIFACTS_SHA256: ${{ secrets.PROVER_ARTIFACTS_SHA256 || vars.PROVER_ARTIFACTS_SHA256 || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -296,6 +300,10 @@ jobs:
           RS_DIR="/tmp/rapidsnark/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}"
           echo "${RS_DIR}/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+      - name: Download prover artifacts
+        working-directory: prover
+        run: ./scripts/download_artifacts.sh
 
       - name: Verify prover artifacts
         working-directory: prover

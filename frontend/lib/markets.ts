@@ -23,7 +23,6 @@ export const getCommitDeadline = (market: CommitDeadlineSource): string | undefi
     market.closesAt,
     market.ordersOpenedAt,
     market.startsAt,
-    market.createdAt ?? undefined,
   ];
   for (const value of candidates) {
     if (typeof value === "string" && value.trim()) {

@@ -152,7 +152,7 @@ Errors are returned as JSON with `error` and `message` fields (`invalid_request`
 
 If the artifacts are missing or the Groth16 toolchain fails, the service exits with a non-zero status so orchestrators can alert immediately—no mock mode is available.
 
-> **CI note:** `go test ./...` now includes an integration test that exercises the full request → witness → rapidsnark pipeline using deterministic stub binaries plus fresh artifacts created in `t.TempDir()`. GitHub Actions additionally installs rapidsnark and verifies `rapidsnark --version` so we know the binary is runnable in automation.
+> **CI note:** `go test ./...` now includes an integration test that exercises the full request → witness → rapidsnark pipeline using deterministic stub binaries plus fresh artifacts created in `t.TempDir()`. GitHub Actions additionally installs rapidsnark, pulls private circuit artifacts via `prover/scripts/download_artifacts.sh` (set `PROVER_ARTIFACTS_URL` and optionally `PROVER_ARTIFACTS_SHA256`), and verifies `rapidsnark --version` so we know the binary is runnable in automation.
 
 ## Testing
 
@@ -176,7 +176,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 
 ## Operational Tips
 
-- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity.
+- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). CI can pull a tar/zip of the `build/` directory via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .`. Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity.
 - **Concurrency tuning** – Start with the default `PROVER_MAX_CONCURRENCY=runtime.NumCPU()` and raise it incrementally only after measuring CPU saturation and memory usage (rapidsnark typically peaks around 250–350 MB per job for this circuit).
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.

@@ -62,6 +62,6 @@ describe("MarketDetailSidebar", () => {
     );
     const createdAtFormatted = formatDateTime(detailMarket.createdAt);
     expect(screen.getByText(createdAtFormatted)).toBeInTheDocument();
-    expect(screen.getAllByText(/tba/i)).toHaveLength(1);
+    expect(screen.getAllByText(/tba/i)).toHaveLength(2);
   });
 });

@@ -142,12 +142,13 @@ describe("ConnectWalletButton", () => {
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
     expect(currentDisconnectState.disconnect).toHaveBeenCalledTimes(1);
 
-    const signButton = screen.getByRole("button", { name: /sign message/i });
-    fireEvent.click(signButton);
-    expect(currentSignMessageState.signMessageAsync).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: /horizen testnet/i }));
+    const switchButton = screen.getByRole("button", {
+      name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i"),
+    });
+    fireEvent.click(switchButton);
     expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: hoistedDefaults.defaultChain.id });
+
+    expect(screen.queryByRole("button", { name: /sign message/i })).not.toBeInTheDocument();
   });
 
   it("renders a fallback when no connectors are available", () => {
@@ -159,28 +160,21 @@ describe("ConnectWalletButton", () => {
     expect(screen.getByText(/no compatible wallets detected/i)).toBeInTheDocument();
   });
 
-  it("disables signing when the message input is empty", () => {
+  it("omits signing controls when connected", () => {
     currentAccountState = {
       address: "0x9999999999999999999999999999999999999999",
       chain: hoistedDefaults.defaultChain,
       status: "connected",
     };
-    const signSpy = vi.fn();
-    currentSignMessageState.signMessageAsync = signSpy;
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0x9999/i }));
 
-    const input = screen.getByPlaceholderText(/enter a message/i);
-    fireEvent.change(input, { target: { value: "   " } });
-    const signButton = screen.getByRole("button", { name: /sign message/i });
-
-    expect(signButton).toBeDisabled();
-    fireEvent.click(signButton);
-    expect(signSpy).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText(/enter a message/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sign message/i })).not.toBeInTheDocument();
   });
 
-  it("disables switch buttons when switchChain is unavailable", () => {
+  it("hides switch action when switchChain is unavailable", () => {
     currentAccountState = {
       address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
       chain: { id: 1, name: "Ethereum" },
@@ -190,7 +184,9 @@ describe("ConnectWalletButton", () => {
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
-    const chainButton = screen.getByRole("button", { name: /horizen testnet/i });
-    expect(chainButton).toBeDisabled();
+
+    expect(
+      screen.queryByRole("button", { name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i") }),
+    ).not.toBeInTheDocument();
   });
 });
