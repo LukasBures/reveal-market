@@ -14,6 +14,7 @@ def get_markets(
     category: str | None = None,
     oracle: str | None = None,
     search: str | None = None,
+    featured: bool | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[models.Market]:
@@ -31,6 +32,8 @@ def get_markets(
         stmt = stmt.where(func.lower(models.Market.category) == category.lower())
     if oracle:
         stmt = stmt.where(models.Market.oracle == oracle)
+    if featured is True:
+        stmt = stmt.where(models.Market.featured.is_(True))
     stmt = _apply_text_search(session, stmt, search)
     stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)

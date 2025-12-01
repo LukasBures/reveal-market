@@ -18,7 +18,7 @@ export const MarketGrid = memo(function MarketGrid({ markets }: Props) {
   }
 
   return (
-    <div className="fade-up grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+    <div className="fade-up grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {markets.map((market) => (
         <MemoizedMarketCard key={market.eventId} market={market} />
       ))}

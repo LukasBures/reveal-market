@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -70,6 +71,7 @@ class Market(Base):
     price_tick_size = Column(Float, nullable=True)
     enable_order_book = Column(Boolean, nullable=True)
     image_variants = Column(JSON, nullable=True)
+    featured = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     closes_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     summary = Column(Text, nullable=True)
@@ -207,6 +209,7 @@ class MarketGammaMetadata(Base):
     competitive = Column(Float, nullable=True)
     pagerduty_enabled = Column(Boolean, nullable=True)
     approved = Column(Boolean, nullable=True)
+    featured = Column(Boolean, nullable=True)
     rewards_min_size = Column(Numeric(precision=32, scale=8), nullable=True)
     rewards_max_spread = Column(Numeric(precision=32, scale=8), nullable=True)
     spread = Column(Float, nullable=True)

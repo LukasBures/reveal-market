@@ -11,6 +11,7 @@ export async function CategoryMarkets({ slug }: { slug: string }) {
     category: normalizedSlug,
     status: "active",
     trending: false,
+    onlyFeatured: false,
   });
 
   return (

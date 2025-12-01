@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     performance_heartbeat_interval_seconds: int = Field(default=60, ge=10)
     worker_heartbeat_stale_seconds: int = Field(default=180, ge=30)
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
+    run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=None, ge=1, description="Chain id used for quote signatures")
     pricing_quote_ttl_seconds: int = Field(default=120, ge=30, le=600)

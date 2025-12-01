@@ -35,7 +35,8 @@ services:
       LOG_LEVEL: INFO
       # Mirror production heartbeat cadence so diagnostics fire once per minute.
       RM_POLL_INTERVAL_SECONDS: 60
-      RM_RUN_MIGRATIONS_ON_STARTUP: "false"
+      # Keep migrations enabled so a fresh database gets the schema before the worker starts syncing.
+      RM_RUN_MIGRATIONS_ON_STARTUP: "true"
     volumes:
       - ./backend/worker/app:/worker/app
       - ./backend/shared:/worker/shared

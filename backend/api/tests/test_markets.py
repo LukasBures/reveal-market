@@ -418,6 +418,24 @@ def test_category_endpoint_allows_hyphenated_slug(client, db_session):
     assert resp.json()[0]["event_id"] == "evt-cat-slug"
 
 
+def test_category_endpoint_orders_by_volume(client, db_session):
+    high = _make_market(
+        "evt-cat-high", "High Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=25
+    )
+    low = _make_market(
+        "evt-cat-low", "Low Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=5
+    )
+    db_session.add_all([low, high])
+    db_session.commit()
+
+    resp = client.get("/categories/sports", params={"limit": 5, "order_by": "volume_24h_usd"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert [item["event_id"] for item in payload] == ["evt-cat-high", "evt-cat-low"]
+    cache_key = category_cache_key("sports", 5, 0, order_by="volume_24h_usd")
+    assert cache_key in api_main.cache_client.store
+
+
 def test_category_endpoint_populates_trending_with_general_feed(client, db_session):
     db_session.add_all(
         [

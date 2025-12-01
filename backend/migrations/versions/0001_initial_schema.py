@@ -68,6 +68,7 @@ def upgrade() -> None:
         sa.Column("price_tick_size", sa.Float(), nullable=True),
         sa.Column("enable_order_book", sa.Boolean(), nullable=True),
         sa.Column("image_variants", sa.JSON(), nullable=True),
+        sa.Column("featured", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("closes_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -81,6 +82,7 @@ def upgrade() -> None:
     op.create_index("ix_markets_slug", "markets", ["slug"])
     op.create_index("ix_markets_condition_id", "markets", ["condition_id"])
     op.create_index("ix_markets_group_slug", "markets", ["group_slug"])
+    op.create_index("ix_markets_featured", "markets", ["featured"])
     op.create_index("ix_markets_event_id", "markets", ["event_id"], unique=True)
     # Normalize tags and clob token ids instead of storing JSON blobs
     op.create_table(
@@ -200,6 +202,7 @@ def upgrade() -> None:
         sa.Column("rfq_enabled", sa.Boolean(), nullable=True),
         sa.Column("holding_rewards_enabled", sa.Boolean(), nullable=True),
         sa.Column("fees_enabled", sa.Boolean(), nullable=True),
+        sa.Column("featured", sa.Boolean(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )

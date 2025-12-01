@@ -7,6 +7,26 @@ vi.mock("next/image", () => ({
     <img alt={alt} src={typeof src === "string" ? src : undefined} data-testid="market-image" />
   ),
 }));
+vi.mock("next/link", () => ({
+  __esModule: true,
+  default: ({ href, children, prefetch: _prefetch, ...rest }: any) => {
+    let resolved = "#";
+    if (typeof href === "string") {
+      resolved = href;
+    } else if (href?.pathname) {
+      resolved = href.pathname;
+      const params = href.params || href.query || {};
+      Object.keys(params).forEach((key) => {
+        resolved = resolved.replace(`[${key}]`, params[key]);
+      });
+    }
+    return (
+      <a href={resolved} {...rest}>
+        {children}
+      </a>
+    );
+  },
+}));
 
 const baseMarket = {
   eventId: "evt-card",
@@ -26,7 +46,7 @@ describe("MarketCard", () => {
 
     expect(screen.getByRole("link", { name: /card coverage/i })).toHaveAttribute("href", "/markets/evt-card");
     expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.example/cover.jpg");
-    expect(screen.getAllByText("72%")).toHaveLength(2);
+    expect(screen.getByText("72%")).toBeInTheDocument();
     expect(screen.getByText("20%")).toBeInTheDocument();
   });
 

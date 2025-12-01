@@ -6,6 +6,11 @@ def test_category_cache_key_slugifies_hyphenated_input():
     assert key == "v1:markets:category:ai-tech|limit=18|offset=5"
 
 
+def test_category_cache_key_respects_order_by():
+    key = cache_keys.category_cache_key("sports", 10, 0, order_by="volume_24h_usd")
+    assert key == "v1:markets:category:sports|limit=10|offset=0|order_by=volume_24h_usd"
+
+
 def test_suggest_cache_key_handles_whitespace():
     key = cache_keys.suggest_cache_key("  Alpha Query  ", 3)
     assert key == "v1:markets:suggest:alpha query|limit=3"

@@ -9,6 +9,7 @@ import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
 import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 import { categorySlugFromLabel } from "@/lib/slugs";
+import { getMarketVolume } from "@/lib/markets";
 
 /**
  * We auto-load up to three batches via IntersectionObserver to give users a lazy-loading feel
@@ -51,11 +52,11 @@ export function FeaturedMarketsClient({
   const DEFAULT_BATCH = 40;
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}`;
-  const sortByPopularity = (a: MarketSummary, b: MarketSummary) => {
-    const score = (m: MarketSummary) =>
-      Math.max(m.volume24hUsd ?? 0, m.orderbookVolumeUsd ?? 0, m.liquidityUsd ?? 0, 0);
-    return score(b) - score(a);
-  };
+  const sortByVolumeDesc = useCallback((a: MarketSummary, b: MarketSummary) => {
+    const diff = getMarketVolume(b) - getMarketVolume(a);
+    if (diff !== 0) return diff;
+    return (a.eventId ?? "").localeCompare(b.eventId ?? "");
+  }, []);
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
@@ -88,10 +89,10 @@ export function FeaturedMarketsClient({
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
     const seeded = filterByStatus([...initialMarkets]);
-    setMarkets(seeded.sort(sortByPopularity));
+    setMarkets(seeded.sort(sortByVolumeDesc));
     setHasMore(seeded.length >= pageSize);
     setAutoLoadCount(0);
-  }, [initialMarkets, pageSize, filterSignature, filterByStatus]);
+  }, [initialMarkets, pageSize, filterSignature, filterByStatus, sortByVolumeDesc]);
 
   useEffect(() => {
     if (!refreshedMarkets) {
@@ -109,9 +110,9 @@ export function FeaturedMarketsClient({
       };
       filterByStatus(refreshedMarkets || []).forEach(pushUnique);
       filterByStatus(prev).forEach(pushUnique);
-      return merged.sort(sortByPopularity).slice(0, maxItems);
+      return merged.sort(sortByVolumeDesc).slice(0, maxItems);
     });
-  }, [refreshedMarkets, maxItems, filterByStatus]);
+  }, [refreshedMarkets, maxItems, filterByStatus, sortByVolumeDesc]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -140,7 +141,7 @@ export function FeaturedMarketsClient({
           }
           const allowed = Math.max(0, maxItems - markets.length);
           const nextItems = allowed > 0 ? filtered.slice(0, allowed) : [];
-          const merged = [...markets, ...nextItems].sort(sortByPopularity);
+          const merged = [...markets, ...nextItems].sort(sortByVolumeDesc);
           const computedHasMore =
             merged.length < maxItems && nextItems.length > 0 && additions.length === nextLimit;
           setMarkets(merged);
@@ -154,7 +155,19 @@ export function FeaturedMarketsClient({
         }
       });
     },
-    [normalizedCategory, hasMore, isPending, markets, maxItems, remainingSlots, searchQuery, status, filterByStatus, trending],
+    [
+      normalizedCategory,
+      hasMore,
+      isPending,
+      markets,
+      maxItems,
+      remainingSlots,
+      searchQuery,
+      status,
+      filterByStatus,
+      trending,
+      sortByVolumeDesc,
+    ],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;

@@ -1,7 +1,8 @@
 import type { MarketSummary } from "@/lib/api-types";
+import type { Route } from "next";
 import Link from "next/link";
-import Image from "next/image";
 import { MarketArtwork } from "./MarketArtwork";
+import { getMarketVolume } from "@/lib/markets";
 
 type Props = {
   market: MarketSummary;
@@ -27,7 +28,7 @@ const buildPlaceholderDataUrl = (label: string) => {
 export function MarketCard({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const categoryLabel = market.category ?? "General";
-  const volumeUsd = market.volume24hUsd ?? market.orderbookVolumeUsd ?? market.liquidityUsd ?? 0;
+  const volumeUsd = getMarketVolume(market);
   const formatUsd = (value: number) =>
     new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
   const extraImage =
@@ -40,9 +41,9 @@ export function MarketCard({ market }: Props) {
         (market.extraData as Record<string, any>).gamma?.coverImage
       : null;
   const coverImage = market.imageUrl ?? extraImage ?? buildPlaceholderDataUrl(categoryLabel);
-  const targetHref = market.groupSlug
-    ? ({ pathname: "/markets/group/[groupSlug]", params: { groupSlug: market.groupSlug } } as const)
-    : ({ pathname: "/markets/[eventId]", params: { eventId: market.eventId } } as const);
+  const targetHref = (market.groupSlug
+    ? `/markets/group/${encodeURIComponent(market.groupSlug)}`
+    : `/markets/${encodeURIComponent(market.eventId)}`) as Route;
 
   return (
     <Link
@@ -53,22 +54,10 @@ export function MarketCard({ market }: Props) {
       <div className="flex items-start gap-4">
         <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
         <div>
-          <div className="mb-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
-            <span className="rounded-full bg-slate-800 px-2 py-1 text-white/80">{categoryLabel}</span>
-            {market.groupSlug && (
-              <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-emerald-100">Grouped</span>
-            )}
-          </div>
           <h3 className="text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
         </div>
       </div>
-      <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-300">
-        <p className="uppercase tracking-[0.25em] text-slate-500">Overview</p>
-        <p className="text-sm font-semibold text-white">
-          ${formatUsd(volumeUsd)} Vol (24h)
-        </p>
-      </div>
-      {outcomes.length > 0 && (
+      {!market.groupSlug && outcomes.length > 0 && (
         <div className="mt-1 space-y-1 text-xs text-slate-300">
           {outcomes.slice(0, 2).map((outcome, idx) => {
             const probability =
@@ -91,6 +80,11 @@ export function MarketCard({ market }: Props) {
               </div>
             );
           })}
+        </div>
+      )}
+      {!market.groupSlug && (
+        <div className="mt-2 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-300">
+          <span className="font-semibold text-white">${formatUsd(volumeUsd)} 24h vol</span>
         </div>
       )}
     </Link>

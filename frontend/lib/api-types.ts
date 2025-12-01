@@ -42,6 +42,7 @@ export type MarketSummary = {
   groupItemThreshold?: number | null;
   groupPosition?: number | null;
   siblings?: MarketSibling[];
+  featured?: boolean | null;
 };
 
 export type MarketDetail = MarketSummary & {
@@ -141,4 +142,5 @@ export type FetchFeaturedMarketsOptions = {
   revalidate?: number;
   status?: string;
   trending?: boolean;
+  onlyFeatured?: boolean;
 };

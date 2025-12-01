@@ -57,6 +57,7 @@ EXPECTED_SCHEMAS = {
             "uma_resolution_status",
             "updated_at",
             "volume_24h_usd",
+            "featured",
         ],
     },
     "ResolutionSummary": {

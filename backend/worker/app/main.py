@@ -723,7 +723,6 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             error=str(exc),
         )
         raise
-    _enrich_popularity_from_orderbooks(markets)
     if clob_client is not None:
         try:
             merge_clob_markets(
@@ -2054,7 +2053,6 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         closed=settings.polymarket_closed_filter,
                         extra_params=_build_filters_from_settings(settings),
                     ):
-                        _enrich_popularity_from_orderbooks(page)
                         total_fetched += len(page)
                         summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)
                         # Persist each page eagerly to reduce memory pressure and surface changes sooner.
@@ -2089,7 +2087,6 @@ def process_once(redis_client: Redis | None = None) -> dict[str, float | int | s
                         closed=settings.polymarket_closed_filter,
                         extra_params=_build_filters_from_settings(settings),
                     ):
-                        _enrich_popularity_from_orderbooks(page)
                         total_fetched += len(page)
                         summary = _collect_market_changes_with_summary(session, page, redis_client, summary=summary)
                         session.flush()

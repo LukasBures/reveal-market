@@ -62,6 +62,7 @@ class MarketPayload(BaseModel):
     price_tick_size: float | None = None
     enable_order_book: bool | None = None
     image_variants: list[str] | None = None
+    featured: bool = False
     closes_at: datetime | None = None
     liquidity_usd: float | None = None
     volume_24h_usd: float | None = None
@@ -100,6 +101,7 @@ class MarketPayload(BaseModel):
             raw.get("startDate") or raw.get("startTime") or raw.get("eventStartTime") or raw.get("eventStartTimestamp"),
         )
         orders_opened_at = _extract_timestamp_candidate(raw.get("acceptingOrdersTimestamp"))
+        featured = True if raw.get("featured") is True else False
         resolution_source = _clean_string(raw.get("resolutionSource")) or _extract_resolution_source_from_events(
             raw.get("events")
         )
@@ -138,6 +140,7 @@ class MarketPayload(BaseModel):
             "group_item_title": group_item_title,
             "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
             "group_slug": group_slug,
+            "featured": featured,
         }
         gamma_events = []
         for event in raw.get("events") or []:
@@ -183,6 +186,7 @@ class MarketPayload(BaseModel):
             enable_order_book=enable_order_book,
             clob_token_ids=clob_token_ids,
             image_variants=image_variants,
+            featured=featured,
             liquidity_usd=liquidity_usd,
             volume_24h_usd=volume_24h_usd,
             orderbook_volume_usd=orderbook_volume_usd,

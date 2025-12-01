@@ -13,6 +13,7 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
+import { getMarketVolume } from "./markets";
 import { fetchMarketActivity, fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
 export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
@@ -70,23 +71,13 @@ const maybeShortCircuitOffline = (scope: string) => {
 };
 
 const computePopularity = (market: MarketSummary): number => {
-  const clamp = (value: number | null | undefined) => Math.max(0, value ?? 0);
-  const liquidity = clamp(market.liquidityUsd);
-  const volume = clamp(market.volume24hUsd);
-  const orderbook = clamp(market.orderbookVolumeUsd);
-  const trades = clamp(market.tradesQuantity);
-  // Use a dampened weighted score so outliers don't dominate ordering.
-  const score =
-    Math.sqrt(liquidity) * 0.4 +
-    Math.sqrt(volume) * 0.35 +
-    Math.sqrt(orderbook) * 0.2 +
-    Math.sqrt(trades) * 0.05;
-  return Number.isFinite(score) ? score : 0;
+  const volume = getMarketVolume(market);
+  return Number.isFinite(volume) ? volume : 0;
 };
 
 const meetsTrendingFloor = (market: MarketSummary, popularity?: number): boolean => {
   const liquidity = market.liquidityUsd ?? 0;
-  const volume = market.volume24hUsd ?? 0;
+  const volume = getMarketVolume(market);
   const orderbook = market.orderbookVolumeUsd ?? 0;
   const trades = market.tradesQuantity ?? 0;
   const popularityScore = popularity ?? computePopularity(market);
@@ -214,6 +205,14 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
     priceTickSize: payload.price_tick_size ?? undefined,
     enableOrderBook:
       typeof payload.enable_order_book === "boolean" ? payload.enable_order_book : undefined,
+    featured:
+      typeof payload.featured === "boolean"
+        ? payload.featured
+        : typeof payload.extra_data?.featured === "boolean"
+          ? payload.extra_data.featured
+          : typeof payload.extra_data?.gamma?.featured === "boolean"
+            ? payload.extra_data.gamma.featured
+            : undefined,
     clobTokenIds:
       normalizeClobTokenIds(payload.clob_token_ids) ??
       normalizeClobTokenIds(payload.clobTokenIds) ??
@@ -279,6 +278,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     return [];
   }
   try {
+    const onlyFeatured = options?.onlyFeatured ?? true;
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
@@ -287,6 +287,9 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       params.set("status", statusParam);
     }
     params.set("order_by", "volume_24h_usd");
+    if (onlyFeatured) {
+      params.set("only_featured", "1");
+    }
     const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
@@ -376,9 +379,9 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
         count: items.length,
       });
     }
-    const scored = mapped.map((m) => ({ market: m, popularity: computePopularity(m) }));
     const getUpdatedAt = (m: MarketSummary): string =>
       (m as any).updatedAt ?? (m as any).updated_at ?? m.extraData?.gamma?.updated_at ?? "";
+    const scored = mapped.map((m) => ({ market: m, popularity: computePopularity(m) }));
     const trending = scored.filter(({ market, popularity }) => meetsTrendingFloor(market, popularity));
     const nonTrending = scored.filter(({ market, popularity }) => !meetsTrendingFloor(market, popularity));
     const sorter = (a: { market: MarketSummary; popularity: number }, b: { market: MarketSummary; popularity: number }) => {

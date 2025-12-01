@@ -20,6 +20,7 @@ def markets_list_cache_key(
     offset: int,
     order_by: str | None = None,
     trending: bool | None = None,
+    featured: bool | None = None,
 ) -> str:
     """Build the cache key used for /markets list responses."""
 
@@ -36,12 +37,17 @@ def markets_list_cache_key(
         parts.append(f"order_by={order_by}")
     if trending is not None:
         parts.append(f"trending={int(bool(trending))}")
+    if featured is not None:
+        parts.append(f"featured={int(bool(featured))}")
     return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
 
 
-def category_cache_key(category: str, limit: int, offset: int = 0) -> str:
+def category_cache_key(category: str, limit: int, offset: int = 0, order_by: str | None = None) -> str:
     slug = _slugify(category)
-    return f"{CATEGORY_PREFIX}:{slug}|limit={limit}|offset={offset}"
+    parts = [f"{CATEGORY_PREFIX}:{slug}", f"limit={limit}", f"offset={offset}"]
+    if order_by:
+        parts.append(f"order_by={order_by}")
+    return "|".join(parts)
 
 
 def suggest_cache_key(query: str, limit: int) -> str:

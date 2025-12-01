@@ -12,3 +12,13 @@ Only the items below are required to reach MVP. Ordered by priority.
 
 ## Low
 - **Docs alignment**: ensure service READMEs note normalized schema (no JSON outcomes/tags/clob IDs) and the streamer-only FX source; prune any stale references to switchable FX env vars.
+
+
+
+
+• Remaining gaps to meet your ask about Gamma fields on the frontend:
+
+  - We still don’t expose Gamma’s bestBid, bestAsk, spread, or other book/series stats (volume, liquidity, openInterest, etc.) in the API payload. They live in gamma_raw/market_gamma_metadata but aren’t mapped onto MarketSummary/MarketDetail. To use them on the frontend, we need to:
+      1. Extend worker ingestion to normalize those fields into markets or include them in the serialized response from market_gamma_metadata.
+      2. Add them to the API schemas/responses and snapshots.
+      3. Consume them in the frontend UI where you want them shown.

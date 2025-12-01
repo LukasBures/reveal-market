@@ -100,6 +100,14 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
         : typeof item.enableOrderBook === "boolean"
           ? item.enableOrderBook
           : null,
+    featured:
+      typeof item.featured === "boolean"
+        ? item.featured
+        : typeof item.extra_data?.featured === "boolean"
+          ? item.extra_data.featured
+          : typeof item.extra_data?.gamma?.featured === "boolean"
+            ? item.extra_data.gamma.featured
+            : null,
     clobTokenIds:
       normalizeClobTokenIds(item.clob_token_ids) ??
       normalizeClobTokenIds(item.clobTokenIds) ??

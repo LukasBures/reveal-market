@@ -2290,11 +2290,13 @@ def list_markets(
         ),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
-    order_by: Annotated[str | None, Query(description="Order results (popularity|recent)")] = None,
+    order_by: Annotated[str | None, Query(description="Order results (popularity|recent|volume_24h_usd)")] = None,
     trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
+    featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     popularity_mode = order_by == "popularity" or bool(trending)
+    volume_mode = order_by == "volume_24h_usd"
     if popularity_mode and not status:
         status = "active"
     normalized_search = search
@@ -2312,6 +2314,7 @@ def list_markets(
         offset,
         order_by=order_by or ("popularity" if popularity_mode else None),
         trending=trending,
+        featured=featured,
     )
     cache = get_cache_client()
     log_event(
@@ -2328,6 +2331,7 @@ def list_markets(
         offset=offset,
         order_by=order_by,
         trending=bool(trending),
+        featured=featured,
     )
     start = time.perf_counter()
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, normalized_search)
@@ -2354,6 +2358,7 @@ def list_markets(
                 limit=limit,
                 offset=offset,
                 result_count=len(hydrated),
+                featured=featured,
             )
             cached_models = _filter_markets_for_visibility(hydrated)
             return cached_models
@@ -2368,12 +2373,16 @@ def list_markets(
     if popularity_mode:
         query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
         query_offset = 0
+    elif volume_mode:
+        query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
+        query_offset = 0
     markets = crud.get_markets(
         session,
         status=status,
         category=category,
         oracle=oracle,
         search=normalized_search,
+        featured=featured,
         limit=query_limit,
         offset=query_offset,
     )
@@ -2394,6 +2403,14 @@ def list_markets(
             reverse=True,
         )
         market_models = selected[:limit]
+    elif order_by == "volume_24h_usd":
+        market_models.sort(
+            key=lambda m: (
+                _safe_float(getattr(m, "volume_24h_usd", None)) or 0,
+                getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+            ),
+            reverse=True,
+        )
     if not market_models:
         log_event(
             logger,
@@ -2472,6 +2489,8 @@ def list_markets_by_category(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
+    order_by = request.query_params.get("order_by")
+    volume_mode = order_by == "volume_24h_usd"
     start = time.perf_counter()
     cache = get_cache_client()
     log_event(
@@ -2482,6 +2501,7 @@ def list_markets_by_category(
         category_slug=category_slug,
         limit=limit,
         offset=offset,
+        order_by=order_by,
     )
     category_value = _decode_slug(category_slug)
     lookup = _canonical_category_lookup(category_value)
@@ -2496,7 +2516,7 @@ def list_markets_by_category(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
-    cache_key = category_cache_key(category_slug_key, limit, offset)
+    cache_key = category_cache_key(category_slug_key, limit, offset, order_by=order_by)
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)
@@ -2531,6 +2551,7 @@ def list_markets_by_category(
         trending=trending_category,
         limit=limit,
         offset=offset,
+        order_by=order_by,
     )
     if trending_category:
         markets = crud.get_markets(session, limit=limit, offset=offset)
@@ -2543,6 +2564,14 @@ def list_markets_by_category(
         fallback_matches = _fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
             market_models = _filter_markets_for_visibility(_enrich_market_models(session, fallback_matches))
+    if volume_mode and market_models:
+        market_models.sort(
+            key=lambda m: (
+                _safe_float(getattr(m, "volume_24h_usd", None)) or 0,
+                getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+            ),
+            reverse=True,
+        )
     if not market_models:
         log_event(
             logger,
@@ -2552,6 +2581,7 @@ def list_markets_by_category(
             category_slug=category_slug_key,
             limit=limit,
             offset=offset,
+            order_by=order_by,
         )
     if cache_enabled and market_models:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
