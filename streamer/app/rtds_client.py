@@ -306,7 +306,6 @@ class PolymarketRTDSClient:
                 ping_interval=self.ping_interval,
                 ping_timeout=self.ping_timeout,
                 ping_payload="PING",
-                origin=None,
             )
 
             # On exit from run_forever
