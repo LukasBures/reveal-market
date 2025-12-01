@@ -29,6 +29,8 @@ calc_pytest_workers() {
 }
 
 run_py_tests() {
+  cd "${ROOT_DIR}"
+
   local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
   local -a pytest_args=()
 
