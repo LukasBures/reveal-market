@@ -146,14 +146,10 @@ export function StakeQuoteCard({
     : `Buy ${outcomeLabel}${currentPrice !== null ? ` @ $${currentPrice.toFixed(3)}` : ""}`;
 
   return (
-    <div className="md:sticky md:top-28 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-xl shadow-black/30 backdrop-blur">
+    <div className="md:sticky md:top-28 rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30 backdrop-blur">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Trade</p>
-          <p className="text-lg font-semibold text-white">Buy/Sell {outcomeLabel}</p>
-          <p className="text-xs text-slate-400">
-            Live quotes with FX applied. Max stake {effectiveMaxStake.toFixed(3)} ZEN (API caps).
-          </p>
+          <p className="text-lg font-semibold text-white">Buy {outcomeLabel}</p>
         </div>
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           <span
@@ -185,6 +181,7 @@ export function StakeQuoteCard({
               const price = priceForOutcome(idx);
               const formattedPrice = price !== null ? `$${price.toFixed(3)}` : "—";
               const active = selectedOutcome === idx;
+              const isYes = idx === 0;
               return (
                 <button
                   key={`${label}-${idx}`}
@@ -192,17 +189,22 @@ export function StakeQuoteCard({
                   onClick={() => setSelectedOutcome(idx)}
                   className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition ${
                     active
-                      ? "border-emerald-400 bg-emerald-500/15 text-white"
+                      ? isYes
+                        ? "border-emerald-400 bg-emerald-500/15 text-white"
+                        : "border-rose-400 bg-rose-500/15 text-white"
                       : "border-white/10 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold uppercase tracking-[0.25em]">Buy {label}</span>
-                    <span className="text-sm font-semibold text-emerald-200">{formattedPrice}</span>
+                    <span
+                      className={`text-sm font-semibold ${
+                        active ? (isYes ? "text-emerald-200" : "text-rose-200") : "text-emerald-200"
+                      }`}
+                    >
+                      {formattedPrice}
+                    </span>
                   </div>
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                    {idx === 0 ? "Back the yes side" : "Back the no side"}
-                  </p>
                 </button>
               );
             })}
@@ -227,7 +229,7 @@ export function StakeQuoteCard({
 
       <div className="mt-4 space-y-3">
         <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Stake (ZEN)</span>
+          <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Buy with ZEN</span>
           <input
             type="number"
             min={0}
@@ -240,13 +242,17 @@ export function StakeQuoteCard({
                 setStakeZen(0);
                 return;
               }
-              const capped = Math.min(Math.max(next, 0), effectiveMaxStake);
+              const rounded = Math.round(next * 100) / 100;
+              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
             }}
             className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400"
+            inputMode="decimal"
+            aria-label="Stake in ZEN"
+            placeholder="0.00 ZEN"
           />
           <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-            {[5, 10, 25, 50].map((preset) => (
+            {[5, 10, 25, 50, 100].map((preset) => (
               <button
                 key={preset}
                 type="button"

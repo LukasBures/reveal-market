@@ -29,13 +29,29 @@ export function formatUsd(
         ? 0
         : abs >= 10
           ? 2
-          : 4;
+      : 4;
   const minimumFractionDigits = options?.minimumFractionDigits ?? 0;
   return new Intl.NumberFormat(DEFAULT_LOCALE, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits,
     maximumFractionDigits,
+  }).format(value);
+}
+
+export function formatUsdCompact(
+  value?: number | null,
+  options?: Pick<Intl.NumberFormatOptions, "minimumFractionDigits" | "maximumFractionDigits">,
+): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return FALLBACK;
+  }
+  return new Intl.NumberFormat(DEFAULT_LOCALE, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: options?.maximumFractionDigits ?? 1,
+    minimumFractionDigits: options?.minimumFractionDigits ?? 0,
   }).format(value);
 }
 

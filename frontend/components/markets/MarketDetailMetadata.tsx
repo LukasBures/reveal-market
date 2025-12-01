@@ -94,7 +94,6 @@ export function MarketDetailMetadata({ market }: Props) {
         {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending" })}
         {renderItem({ label: "Market address", value: market.marketAddress, mono: true })}
         {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
-        {sourceSlug && renderItem({ label: "Source slug", value: sourceSlug, mono: true })}
         {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
         {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}
         {formattedTokens && renderItem({ label: "Token IDs", value: formattedTokens, mono: true })}

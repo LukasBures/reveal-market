@@ -15,12 +15,10 @@ const baseMarket: MarketDetail = {
 };
 
 describe("MarketDetailHeader", () => {
-  it("renders buy buttons for outcome 0/1", () => {
+  it("renders header metadata without CTA chips", () => {
     render(<MarketDetailHeader market={baseMarket} />);
 
-    expect(screen.getByRole("link", { name: /buy yes/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /buy no/i })).toBeInTheDocument();
-    expect(screen.getByText(/70%/)).toBeInTheDocument();
-    expect(screen.getByText(/30%/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /market detail header/i })).toBeInTheDocument();
+    expect(screen.getByText(/commit deadline/i)).toBeInTheDocument();
   });
 });

@@ -258,7 +258,9 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 tokenIds={tokenIds}
                 outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
               />
+              <MarketLivePanels marketId={canonicalEventId} tokenIds={tokenIds} />
               <MarketAnalyticsPanel market={market} />
+              <MarketDetailSidebarPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -287,8 +289,6 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 outcomePrices={market.outcomePrices ?? []}
                 initialOutcomeId={0}
               />
-              <MarketLivePanels marketId={canonicalEventId} tokenIds={tokenIds} />
-              <MarketDetailSidebarPanel market={market} />
             </div>
           </div>
         </div>

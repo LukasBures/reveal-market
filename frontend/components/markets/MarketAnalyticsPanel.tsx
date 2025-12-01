@@ -1,5 +1,5 @@
 import type { MarketDetail } from "@/lib/api-types";
-import { formatUsd } from "@/lib/formatters";
+import { formatUsd, formatUsdCompact } from "@/lib/formatters";
 
 type Props = {
   market: MarketDetail;
@@ -14,7 +14,7 @@ const formatCount = (value?: number | null) => {
 export function MarketAnalyticsPanel({ market }: Props) {
   const rows = [
     { label: "Orderbook volume", value: market.orderbookVolumeUsd ?? market.volume24hUsd, formatter: formatUsd },
-    { label: "Open interest", value: market.openInterestUsd, formatter: formatUsd },
+    { label: "Open interest", value: market.openInterestUsd, formatter: formatUsdCompact },
     { label: "Trades", value: market.tradesQuantity, formatter: formatCount },
   ];
 

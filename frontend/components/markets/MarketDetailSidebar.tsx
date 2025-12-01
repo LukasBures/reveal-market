@@ -181,11 +181,15 @@ export function MarketDetailSidebar({ market }: Props) {
       <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-sm text-slate-300">
         <div className="flex items-center justify-between">
           <span>Commit deadline</span>
-          <span className="text-white">{formatDateTime(market.commitDeadline)}</span>
+          <span className="text-white">
+            {market.commitDeadline ? formatDateTime(market.commitDeadline) : "TBA"}
+          </span>
         </div>
         <div className="flex items-center justify-between">
           <span>Reveal deadline</span>
-          <span className="text-white">{formatDateTime(market.revealDeadline)}</span>
+          <span className="text-white">
+            {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}
+          </span>
         </div>
         {tags.length > 0 && (
           <div>

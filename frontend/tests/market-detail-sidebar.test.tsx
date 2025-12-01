@@ -48,4 +48,17 @@ describe("MarketDetailSidebar", () => {
     expect(screen.getByText(/token ids/i)).toBeInTheDocument();
     expect(screen.getByText(/token-a, token-b/i)).toBeInTheDocument();
   });
+
+  it("falls back to TBA when deadlines are missing", () => {
+    render(
+      <MarketDetailSidebar
+        market={{
+          ...detailMarket,
+          commitDeadline: undefined,
+          revealDeadline: undefined,
+        }}
+      />,
+    );
+    expect(screen.getAllByText(/tba/i)).toHaveLength(2);
+  });
 });
