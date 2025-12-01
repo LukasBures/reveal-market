@@ -170,20 +170,13 @@ export function StakeQuoteCard({
       className={`md:sticky md:top-0 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
       {marketTitle && (
-        <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">{marketTitle}</p>
+        <p className="text-sm font-semibold text-white/90">{marketTitle}</p>
       )}
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold text-white">Buy {outcomeLabel}</p>
         </div>
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
-          <span
-            className={`rounded-full px-3 py-1 ${
-              fxLive ? "bg-emerald-500/15 text-emerald-100" : fxStale || fxUnavailable ? "bg-amber-500/20 text-amber-100" : "bg-white/10 text-white/70"
-            }`}
-          >
-            FX {fxLive ? "live" : fxUnavailable ? "unavailable" : "stale"}
-          </span>
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
               Quote {quote.quote_id.slice(0, 6)}… expires {new Date(quote.expires_at).toLocaleTimeString()}

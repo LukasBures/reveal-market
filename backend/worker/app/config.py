@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import os
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=10, ge=0)
     database_pool_timeout: float = Field(default=10.0, gt=0)
     redis_url: str = Field(default="redis://redis:6379/0")
-    polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
+    polymarket_api_base: AnyHttpUrl = Field(default=cast(AnyHttpUrl, "https://gamma-api.polymarket.com"))
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
     polymarket_page_size: int = Field(default=100, ge=1, le=250)
     polymarket_max_pages: int | None = Field(default=None, ge=1)
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
             "{extra_context}\n"
         )
     )
-    summary_api_base_url: AnyHttpUrl | None = Field(default="https://api.openai.com/v1")
+    summary_api_base_url: AnyHttpUrl | None = Field(default=cast(AnyHttpUrl, "https://api.openai.com/v1"))
     summary_api_key: SecretStr | None = Field(default=None)
     summary_http_timeout_seconds: float = Field(default=20.0, gt=0)
     summary_queue_poll_seconds: float = Field(default=2.0, gt=0)
@@ -154,7 +154,7 @@ class Settings(BaseSettings):
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)
     market_progress_log_intervals: int = Field(default=10, ge=1)
     streamer_base_url: AnyHttpUrl = Field(
-        default_factory=lambda: str(PRESET.get("streamer_internal", "http://streamer:8100")),
+        default_factory=lambda: cast(AnyHttpUrl, str(PRESET.get("streamer_internal", "http://streamer:8100"))),
         description="Streamer base URL for orderbook/FX data",
     )
     streamer_timeout_seconds: float = Field(default=5.0, gt=0)

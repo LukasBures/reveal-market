@@ -57,7 +57,7 @@ class MarketExposure:
     def coverage_ratio(self) -> float:
         if self.absolute_usd == 0:
             return 1.0
-        return float(min(1, self.hedged_usd / self.absolute_usd))
+        return float(min(Decimal(1), self.hedged_usd / self.absolute_usd))
 
     def snapshot(self) -> MarketExposureSnapshot:
         return MarketExposureSnapshot(

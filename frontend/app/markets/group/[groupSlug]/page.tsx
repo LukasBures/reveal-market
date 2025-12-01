@@ -10,6 +10,8 @@ import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
+import { formatDateTime } from "@/lib/formatters";
+import { resolvePriceStreamMarketId } from "@/lib/markets";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -104,12 +106,20 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
   const tokenIds = Array.isArray(market.clobTokenIds)
     ? market.clobTokenIds.map((t: string | number) => String(t))
     : [];
+  const priceStreamMarketId = resolvePriceStreamMarketId(market, market.eventId);
+  const resolverSource =
+    market.resolutionSource ??
+    (market.extraData as any)?.resolution_source ??
+    (market.extraData as any)?.gamma?.resolution_source ??
+    null;
+  const resolverLabel = typeof resolverSource === "string" && resolverSource.trim() ? resolverSource.trim() : "Not provided";
+  const commitDeadline = market.commitDeadline ?? market.closesAt ?? market.ordersOpenedAt ?? null;
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
           <MarketDetailHeader market={market} coverImage={coverImage} />
-          <MarketLiveStatusBar marketId={market.eventId} tokenIds={tokenIds} />
+          <MarketLiveStatusBar marketId={priceStreamMarketId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
               <GroupedMarketSelector
@@ -119,9 +129,10 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                 linkToGroupPage
               />
               <MarketDetailChart
-                marketId={market.eventId}
+                marketId={priceStreamMarketId}
                 tokenIds={tokenIds}
                 outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
+                outcomePrices={market.outcomePrices ?? []}
               />
               <MarketAnalyticsPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
@@ -132,9 +143,12 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                       <summary className="cursor-pointer text-sm font-semibold text-white">
                         Expand resolution criteria
                       </summary>
-                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">
-                        {selectMarketCopy(market)}
-                      </div>
+                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{selectMarketCopy(market)}</div>
+                      <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                        <li>Resolver source: {resolverLabel}</li>
+                        <li>Commit deadline: {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}</li>
+                        <li>Reveal deadline: {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}</li>
+                      </ul>
                     </details>
                   </div>
                 </div>

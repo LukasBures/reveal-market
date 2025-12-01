@@ -86,8 +86,11 @@ contract RevealMarketTest is Test {
             _buildQuote(1 ether, OUTCOME_ID, block.timestamp + 1 hours, keccak256("quote-1"), USER, 1_000e18);
 
         vm.deal(USER, quote.stakeZen);
-        vm.prank(USER);
+        vm.startPrank(USER);
+        vm.expectEmit(true, true, true, true, address(market));
+        emit RevealMarket.QuoteCommitted(USER, quote.outcomeId, quote.stakeZen, quote.quoteId, market.marketId());
         market.commitWithQuote{value: quote.stakeZen}(quote.outcomeId, quote.stakeZen, WIN_SALT, quote);
+        vm.stopPrank();
 
         assertTrue(market.usedQuoteIds(quote.quoteId));
         assertEq(market.commitmentsCount(), 1);

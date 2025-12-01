@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from eth_utils import to_checksum_address
 from shared.models import Commitment, Settlement
@@ -43,7 +43,7 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     if settlement.winning_outcome_id not in (0, 1):
         raise SettlementDataMissingError("winning outcome out of range")
 
-    commitments: list[Commitment] = (
+    commitments: list[Commitment] = list(
         session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id))
         .scalars()
         .all()
@@ -51,9 +51,12 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     if not commitments:
         raise SettlementDataMissingError("no commitments for market")
 
+    merkle_root = cast(str, settlement.merkle_root)
+    total_liability = cast(int, settlement.total_liability)
+
     leaves = [bytes.fromhex(commitment.leaf.removeprefix("0x")) for commitment in commitments]
     computed_root, paths = build_merkle_root_and_paths(leaves)
-    expected_root = bytes.fromhex(settlement.merkle_root.removeprefix("0x"))
+    expected_root = bytes.fromhex(merkle_root.removeprefix("0x"))
     if computed_root != expected_root:
         raise SettlementDataMissingError("computed merkle root does not match stored root")
 
@@ -78,15 +81,17 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     winning_pool = settlement.pool_total_yes if settlement.winning_outcome_id == 0 else settlement.pool_total_no
     if winning_pool in (None, 0):
         raise SettlementDataMissingError("winning pool missing or zero")
-    payout_multiplier_wad = (int(settlement.total_liability) * 10**18) // int(winning_pool)
+    assert winning_pool is not None
+    winning_pool_int = int(winning_pool)
+    payout_multiplier_wad = (total_liability * 10**18) // winning_pool_int
 
     payload = {
         "marketId": str(market_id),
-        "merkleRoot": settlement.merkle_root,
+        "merkleRoot": merkle_root,
         "winningOutcomeId": settlement.winning_outcome_id,
         "poolTotals": [str(settlement.pool_total_yes or 0), str(settlement.pool_total_no or 0)],
         "totalEscrow": str(settlement.total_escrow),
-        "totalLiability": str(settlement.total_liability),
+        "totalLiability": str(total_liability),
         "payoutMultiplierWad": str(payout_multiplier_wad),
         "rakeBps": str(settlement.rake_bps or 0),
         "circuitHash": settlement.circuit_hash,

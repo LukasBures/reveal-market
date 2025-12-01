@@ -103,6 +103,7 @@ class PolymarketClient:
                 error=str(exc),
             )
             raise
+        raise RuntimeError("failed to fetch polymarket payload")
 
     async def _post_json(self, path: str, json: dict) -> dict:
         url = f"{self.base_url}{path}"
@@ -135,3 +136,4 @@ class PolymarketClient:
                 error=str(exc),
             )
             raise
+        raise RuntimeError("failed to post polymarket payload")

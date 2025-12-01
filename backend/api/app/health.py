@@ -5,10 +5,11 @@ import logging
 import os
 import time
 from datetime import UTC, datetime
+from inspect import isawaitable
 
 import httpx
 from redis.exceptions import RedisError
-from shared.cache import CacheStats, get_stats_client
+from shared.cache import get_stats_client
 from shared.logging import log_event
 from shared.onchain.client import load_account
 from shared.polymarket import build_polymarket_markets_url
@@ -29,7 +30,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     settings = get_settings()
     components: ComponentMap = {}
     component_states: list[str] = []
-    cache_stats: CacheStats | None = None
+    cache_stats: dict[str, float] | None = None
 
     checks: list[tuple[str, schemas.HealthComponent]] = [
         _check_database(session),
@@ -102,8 +103,11 @@ def _check_worker_heartbeat(settings) -> tuple[str, schemas.HealthComponent]:
     try:
         redis_client = get_redis_client()
         heartbeat_raw = redis_client.get(settings.heartbeat_key)
+        if isawaitable(heartbeat_raw):
+            raise TypeError("redis client returned awaitable")
         if heartbeat_raw:
-            heartbeat = json.loads(heartbeat_raw)
+            heartbeat_payload = heartbeat_raw.decode() if isinstance(heartbeat_raw, bytes) else str(heartbeat_raw)
+            heartbeat = json.loads(heartbeat_payload)
             component = schemas.HealthComponent(
                 status="ok",
                 detail=f"processed {heartbeat.get('markets_processed', 0)} markets",

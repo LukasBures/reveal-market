@@ -38,7 +38,7 @@ down:
 test:
 	./run_tests.sh
 
-fmt:
+format:
 	pre-commit run --all-files
 
 local:

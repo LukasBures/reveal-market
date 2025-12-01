@@ -96,8 +96,11 @@ jobs:
           PYTEST_WORKER_COUNT: 4
         run: uv run --project backend/api -- python -m pytest -n "${PYTEST_WORKER_COUNT}" backend/shared/tests
 
-      - name: Type check (mypy)
-        run: uv run --project backend/api -- mypy --config-file backend/api/pyproject.toml backend/api/app backend/shared
+      - name: Type check API + shared (mypy)
+        run: uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared
+
+      - name: Type check worker (mypy)
+        run: uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared
 
       - name: OpenAPI snapshot check
         run: uv run --project backend/api -- pytest backend/api/tests/test_openapi_snapshot.py
@@ -131,6 +134,9 @@ jobs:
         working-directory: hedger
         run: uv run --project hedger -- ruff check app tests
 
+      - name: Type check hedger (mypy)
+        run: uv run --project hedger -- mypy --config-file pyproject.toml hedger/app
+
       - name: Hedger tests
         env:
           PYTEST_WORKER_COUNT: 4
@@ -160,6 +166,9 @@ jobs:
       - name: Sync streamer dependencies
         run: |
           uv sync --project streamer --extra dev --no-install-project --frozen
+
+      - name: Type check streamer (mypy)
+        run: uv run --project streamer -- mypy --config-file pyproject.toml streamer/app
 
       - name: Run streamer tests
         env:

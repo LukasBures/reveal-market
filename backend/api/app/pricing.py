@@ -111,7 +111,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
     cache_ttl = float(settings.fx_cache_ttl_seconds)
     url = _resolved_fx_url(settings)
 
-    async def _request() -> dict:
+    async def _request() -> dict[str, object]:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
             wait=wait_random_exponential(multiplier=0.2, max=2.0),
@@ -123,6 +123,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
                     response = await client.get(url)
                     response.raise_for_status()
                     return response.json()
+        raise RuntimeError("failed to fetch FX price after retries")
 
     try:
         data = await _request()

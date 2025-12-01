@@ -123,9 +123,10 @@ export function MarketDetailMetadata({ market }: Props) {
           label: "Resolver",
           value: resolverLabel,
           href: resolverHref,
-          copyDisabled: Boolean(resolverHref),
+          copyDisabled: true,
         })}
         {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending", copyDisabled: true })}
+        {sourceSlug && renderItem({ label: "Source slug", value: sourceSlug, mono: true })}
         {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
         {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
         {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}

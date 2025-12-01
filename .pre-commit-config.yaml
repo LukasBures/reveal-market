@@ -20,6 +20,21 @@ repos:
         types_or: [python, pyi, jupyter]
         require_serial: true
         additional_dependencies: ["ruff>=0.6.9"]
+      - id: mypy
+        name: mypy (api/worker/hedger/streamer)
+        description: "Static type checks for all Python services"
+        entry: |
+          bash -c '
+            set -euo pipefail
+            uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared
+            uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared
+            uv run --project hedger -- mypy --config-file pyproject.toml hedger/app
+            uv run --project streamer -- mypy --config-file pyproject.toml streamer/app
+          '
+        language: system
+        types_or: [python]
+        pass_filenames: false
+        require_serial: true
       - id: forge-snapshot
         name: forge snapshot (contracts/* workspaces)
         description: "Regenerate gas snapshots when contracts change"

@@ -29,7 +29,20 @@ class RiskSeverity(str, Enum):
 class CommitEvent(BaseModel):
     """Commit observed from Horizen plus off-chain metadata."""
 
-    model_config = ConfigDict(use_enum_values=True, str_strip_whitespace=True, frozen=True)
+    model_config = ConfigDict(use_enum_values=True, str_strip_whitespace=True, frozen=True, populate_by_name=True)
+
+    class SignedQuotePayload(BaseModel):
+        model_config = ConfigDict(str_strip_whitespace=True)
+
+        quote_id: str
+        stake_wei: int
+        zen_usd_scaled: int
+        expiry_ts: int
+        chain_id: int
+        market_address: str
+        wallet_address: str
+        outcome_id: int
+        signature: str
 
     market_id: str = Field(..., description="RevealMarket identifier")
     stake_zen: Decimal = Field(..., description="Commit stake in ZEN")
@@ -41,6 +54,14 @@ class CommitEvent(BaseModel):
     metadata_source: str | None = Field(default=None, description="Origin of the off-chain direction hint")
     idempotency_key: str | None = Field(default=None, description="Unique key for replay-safe ingestion")
     stream_offset: str | None = Field(default=None, description="Event offset for replay checkpoints")
+    market_address: str | None = Field(default=None, description="On-chain market address")
+    outcome_id: int | None = Field(default=None, description="Outcome id used for the commitment")
+    wallet_address: str | None = Field(default=None, description="Wallet that submitted the on-chain commit")
+    signed_quote: SignedQuotePayload | None = Field(
+        default=None,
+        description="Pricing quote payload that matches the on-chain commit",
+        alias="quote",
+    )
 
 
 class MarketExposureSnapshot(BaseModel):

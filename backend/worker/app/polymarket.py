@@ -135,8 +135,8 @@ class MarketPayload(BaseModel):
             "enable_order_book": enable_order_book,
             "order_price_min_tick_size": price_tick_size,
             "order_min_size": order_min_size,
-            "clob_token_id_yes": (clob_token_ids or [None, None])[0] if clob_token_ids else None,
-            "clob_token_id_no": (clob_token_ids or [None, None])[1] if clob_token_ids else None,
+            "clob_token_id_yes": clob_token_ids[0] if clob_token_ids and clob_token_ids[0] is not None else None,
+            "clob_token_id_no": clob_token_ids[1] if clob_token_ids and len(clob_token_ids) > 1 else None,
             "group_item_title": group_item_title,
             "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
             "group_slug": group_slug,
@@ -1031,7 +1031,7 @@ def merge_clob_markets(
 def fetch_clob_markets(clob_client: ClobClient, *, max_pages: int | None = None) -> list[dict[str, Any]]:
     """Page through the CLOB simplified markets endpoint."""
     results: list[dict[str, Any]] = []
-    cursor = "MA=="
+    cursor: str | None = "MA=="
     pages = 0
     while True:
         payload = clob_client.get_simplified_markets(next_cursor=cursor)

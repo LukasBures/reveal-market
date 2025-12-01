@@ -37,7 +37,7 @@ def get_markets(
     stmt = _apply_text_search(session, stmt, search)
     stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)
-    rows = session.execute(stmt).unique().scalars().all()
+    rows: list[models.Market] = list(session.execute(stmt).unique().scalars().all())
     return rows
 
 
@@ -80,7 +80,7 @@ def get_markets_by_group_slug(session: Session, group_slug: str) -> list[models.
         .where(models.Market.group_slug == group_slug)
         .order_by(models.Market.created_at.desc())
     )
-    rows = session.execute(stmt).unique().scalars().all()
+    rows: list[models.Market] = list(session.execute(stmt).unique().scalars().all())
     return rows
 
 

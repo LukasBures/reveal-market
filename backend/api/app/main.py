@@ -5,9 +5,11 @@ import logging
 import random
 import re
 import time
+from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
+from inspect import isawaitable
 from secrets import token_hex
 from threading import Event, Lock, Thread
 from typing import Annotated, Any, cast
@@ -92,6 +94,12 @@ def _current_settings() -> Settings:
     return settings
 
 
+def _coerce_preset_list(value: object) -> list[str]:
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        return [str(item) for item in value]
+    return []
+
+
 instrumentator = Instrumentator()
 cache_client: Redis | None = None
 _cache_lock = Lock()
@@ -169,15 +177,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
 # Use mode presets for host/CORS defaults so deployments don't depend on env quirks.
-allowed_hosts = list(preset["api_allowed_hosts"])
+allowed_hosts = _coerce_preset_list(preset.get("api_allowed_hosts"))
 if allowed_hosts and allowed_hosts != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 # Expand CORS origins in non-production environments to include local dev hosts
 # so browser clients hitting api.localhost/http://localhost work without manual overrides.
-cors_origins = list(preset["api_cors_origins"])
-expected_prod_origins = set(cors_origins if is_production else preset["api_cors_origins"])
-local_origins = set(preset["api_cors_origins"]) if not is_production else set()
+cors_origins = _coerce_preset_list(preset.get("api_cors_origins"))
+expected_prod_origins = set(cors_origins if is_production else _coerce_preset_list(preset.get("api_cors_origins")))
+local_origins = set(_coerce_preset_list(preset.get("api_cors_origins"))) if not is_production else set()
 if not is_production:
     cors_origins = list(local_origins)
 if cors_origins and cors_origins != ["*"] and is_production:
@@ -360,36 +368,37 @@ def _build_resolution_summary_from_record(
     if winning_outcome_id is None and winners:
         winning_outcome_id = winners[0].get("index")
     checked_at = record.checked_at or record.created_at
-    return schemas.ResolutionSummary(
-        source=record.source,
-        condition_id=record.condition_id,
-        resolved=record.resolved,
-        outcomes=outcomes or [],
-        payouts=payouts or [],
-        winners=winners or [],
-        checked_at=checked_at,
-        market_id=getattr(record, "market_id", None),
-        event_id=record.event_id or (market.event_id if market else None),
-        title=market.title if market else None,
-        slug=market.slug if market else None,
-        oracle=record.oracle or (market.oracle if market else None),
-        question_id=record.question_id,
-        transaction_hash=record.transaction_hash,
-        block_number=record.block_number,
-        block_timestamp=record.block_timestamp,
-        winning_outcome_id=winning_outcome_id,
-        rake_bps=record.rake_bps if record.rake_bps is not None else getattr(market, "rake_bps", None),
-        request_id=record.request_id,
-        created_at=getattr(record, "created_at", None),
-        updated_at=getattr(record, "updated_at", None),
-    )
+    payload: dict[str, object] = {
+        "source": record.source,
+        "condition_id": record.condition_id,
+        "resolved": record.resolved,
+        "outcomes": outcomes or [],
+        "payouts": payouts or [],
+        "winners": winners or [],
+        "checked_at": checked_at,
+        "market_id": getattr(record, "market_id", None),
+        "event_id": record.event_id or (market.event_id if market else None),
+        "title": market.title if market else None,
+        "slug": market.slug if market else None,
+        "oracle": record.oracle or (market.oracle if market else None),
+        "question_id": record.question_id,
+        "transaction_hash": record.transaction_hash,
+        "block_number": record.block_number,
+        "block_timestamp": record.block_timestamp,
+        "winning_outcome_id": winning_outcome_id,
+        "rake_bps": record.rake_bps if record.rake_bps is not None else getattr(market, "rake_bps", None),
+        "request_id": record.request_id,
+        "created_at": getattr(record, "created_at", None),
+        "updated_at": getattr(record, "updated_at", None),
+    }
+    return schemas.ResolutionSummary.model_validate(payload)
 
 
 def _build_market_caps() -> schemas.MarketCaps:
     return schemas.MarketCaps(
-        max_stake_zen=settings.max_stake_zen,
-        max_user_stake_per_market_zen=settings.max_user_stake_per_market_zen,
-        max_market_stake_zen=settings.max_market_stake_zen,
+        max_stake_zen=Decimal(str(settings.max_stake_zen)),
+        max_user_stake_per_market_zen=Decimal(str(settings.max_user_stake_per_market_zen)),
+        max_market_stake_zen=Decimal(str(settings.max_market_stake_zen)),
     )
 
 
@@ -494,8 +503,12 @@ def _load_heartbeat_payload(key: str) -> dict[str, Any] | None:
         return None
     if raw is None:
         return None
+    if isawaitable(raw):
+        return None
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8")
+    elif not isinstance(raw, str):
+        return None
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -1072,7 +1085,7 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
     for record in markets:
         meta = meta_map.get(record.id)
         outcomes = outcome_map.get(getattr(record, "id", -1), [])
-        prices = [float(row.price) if row.price is not None else None for row in outcomes]
+        prices_raw = [float(row.price) if row.price is not None else None for row in outcomes]
         threshold = _parse_group_threshold(getattr(meta, "group_item_threshold", None) if meta else None)
         title_value = getattr(meta, "group_item_title", None) if meta else None
         threshold = threshold or _parse_threshold_from_title(title_value)
@@ -1082,13 +1095,17 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
                 position = int(threshold)
             except (TypeError, ValueError, OverflowError):
                 position = None
+        outcome_prices: list[float] | None = None
+        if any(p is not None for p in prices_raw):
+            outcome_prices = [float(p) for p in prices_raw if p is not None]
+
         sibling = schemas.MarketSibling(
             event_id=record.event_id,
             title=record.title,
             group_item_title=title_value,
             group_item_threshold=threshold,
             group_position=position,
-            outcome_prices=prices if any(p is not None for p in prices) else None,
+            outcome_prices=outcome_prices,
             liquidity_usd=_safe_float(record.liquidity_usd),
             volume_24h_usd=_safe_float(record.volume_24h_usd),
         )
@@ -1216,36 +1233,41 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
     ).scalars()
     outcome_map: dict[int, list[models.MarketOutcome]] = {}
-    for row in outcome_rows:
-        mid = getattr(row, "market_id", None)
+    for outcome_row in outcome_rows:
+        mid = getattr(outcome_row, "market_id", None)
         try:
             mid_int = int(mid) if mid is not None else None
         except (TypeError, ValueError):
             mid_int = None
         if mid_int is None:
             continue
-        outcome_map.setdefault(mid_int, []).append(row)
+        outcome_map.setdefault(mid_int, []).append(outcome_row)
     for mid, target in id_map.items():
         outcomes = outcome_map.get(mid, [])
-        labels = [row.label for row in outcomes]
-        prices = [float(row.price) if row.price is not None else None for row in outcomes]
+        labels = [outcome_row.label for outcome_row in outcomes]
+        prices_raw = [float(outcome_row.price) if outcome_row.price is not None else None for outcome_row in outcomes]
         target.outcomes = labels or None
-        target.outcome_prices = prices if any(p is not None for p in prices) else None
+        target.outcome_prices = (
+            [float(price) for price in prices_raw if price is not None]
+            if any(p is not None for p in prices_raw)
+            else None
+        )
 
     # Tags
     tag_rows = session.execute(
         select(models.MarketTag).where(models.MarketTag.market_id.in_(market_ids)).order_by(models.MarketTag.tag)
     ).scalars()
     tag_map: dict[int, list[str]] = {}
-    for row in tag_rows:
-        mid = getattr(row, "market_id", None)
+    tag_iter: Iterable[models.MarketTag] = cast(Iterable[models.MarketTag], tag_rows)
+    for tag_row in tag_iter:
+        mid = getattr(tag_row, "market_id", None)
         try:
             mid_int = int(mid) if mid is not None else None
         except (TypeError, ValueError):
             mid_int = None
-        if mid_int is None or row.tag is None:
+        if mid_int is None or tag_row.tag is None:
             continue
-        tag_map.setdefault(mid_int, []).append(str(row.tag))
+        tag_map.setdefault(mid_int, []).append(str(tag_row.tag))
     for mid, target in id_map.items():
         target.tags = tag_map.get(mid) or None
 
@@ -1256,15 +1278,16 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         .order_by(models.MarketClobToken.id)
     ).scalars()
     token_map: dict[int, list[str]] = {}
-    for row in token_rows:
-        mid = getattr(row, "market_id", None)
+    token_iter: Iterable[models.MarketClobToken] = cast(Iterable[models.MarketClobToken], token_rows)
+    for token_row in token_iter:
+        mid = getattr(token_row, "market_id", None)
         try:
             mid_int = int(mid) if mid is not None else None
         except (TypeError, ValueError):
             mid_int = None
-        if mid_int is None or not row.token_id:
+        if mid_int is None or not token_row.token_id:
             continue
-        token_map.setdefault(mid_int, []).append(str(row.token_id))
+        token_map.setdefault(mid_int, []).append(str(token_row.token_id))
     for mid, target in id_map.items():
         tokens = token_map.get(mid, [])
         target.clob_token_ids = tokens or None
@@ -1274,15 +1297,16 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(market_ids))
     ).scalars()
     meta_map: dict[int, models.MarketGammaMetadata] = {}
-    for row in meta_rows:
-        mid = getattr(row, "market_id", None)
+    meta_iter: Iterable[models.MarketGammaMetadata] = cast(Iterable[models.MarketGammaMetadata], meta_rows)
+    for meta_row in meta_iter:
+        mid = getattr(meta_row, "market_id", None)
         try:
             mid_int = int(mid) if mid is not None else None
         except (TypeError, ValueError):
             mid_int = None
         if mid_int is None:
             continue
-        meta_map[mid_int] = row
+        meta_map[mid_int] = meta_row
     for mid, target in id_map.items():
         meta = meta_map.get(mid)
         if not meta:

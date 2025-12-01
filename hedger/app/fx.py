@@ -4,17 +4,25 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Any, cast
 
 try:
     import httpx
 except ImportError:  # pragma: no cover - handled via runtime guard
     httpx = None  # type: ignore[assignment]
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
-except ImportError:  # pragma: no cover - handled at runtime when _fetch_quote used
-    AsyncRetrying = None  # type: ignore[assignment]
-    RetryError = None  # type: ignore[assignment]
-    retry_if_exception_type = stop_after_attempt = wait_exponential = None  # type: ignore[assignment]
+else:  # pragma: no cover - handled at runtime when _fetch_quote used
+    try:
+        from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
+    except ImportError:
+        AsyncRetrying = cast(Any, None)
+        RetryError = cast(Any, None)
+        retry_if_exception_type = cast(Any, None)
+        stop_after_attempt = cast(Any, None)
+        wait_exponential = cast(Any, None)
 
 from .types import FxQuote
 
@@ -113,6 +121,7 @@ class FxOracle:
                     )
                     self._stale_override = False
                     return quote
+            raise RuntimeError("failed to fetch FX payload")
 
         try:
             return await _pull(self.feed_url)

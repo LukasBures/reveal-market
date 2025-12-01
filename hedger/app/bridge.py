@@ -96,3 +96,4 @@ class BridgeClient:
                 idempotency=idempotency,
             )
             raise
+        raise RuntimeError("bridge submission failed")

@@ -25,6 +25,13 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
     : stream.connected
       ? "bg-emerald-500/15 text-emerald-100 border border-emerald-500/30"
       : "bg-amber-500/15 text-amber-100 border border-amber-500/30";
+  const transportText = stream.transport ? stream.transport.toUpperCase() : "N/A";
+  const transportClass = stream.connected
+    ? "bg-white/10 text-white/80 border border-white/20"
+    : "bg-amber-500/15 text-amber-100 border border-amber-400/30";
+  const fxClass = stream.fxStale
+    ? "bg-amber-500/20 text-amber-100 border border-amber-400/40"
+    : "bg-emerald-500/15 text-emerald-100 border border-emerald-400/30";
   const spread =
     best.bestBid !== undefined && best.bestAsk !== undefined && best.bestAsk > 0
       ? ((best.bestAsk - best.bestBid) / best.bestAsk) * 100
@@ -44,16 +51,9 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
   return (
     <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-4">
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-[12px] uppercase tracking-[0.25em] text-slate-200">
-        <span className={`rounded-full px-3 py-1 text-[11px] ${statusClass}`}>
-          {statusText}
-        </span>
-        <span
-          className={`rounded-full px-3 py-1 text-[11px] ${
-            statusClass.includes("emerald")
-              ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/30"
-              : "bg-white/10 text-white/70"
-          }`}
-        >
+        <span className={`rounded-full px-3 py-1 text-[11px] ${statusClass}`}>{statusText}</span>
+        <span className={`rounded-full px-3 py-1 text-[11px] ${transportClass}`}>Transport {transportText}</span>
+        <span className={`rounded-full px-3 py-1 text-[11px] ${fxClass}`}>
           FX {stream.fxStale ? "stale" : "live"}
         </span>
         <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/70">
@@ -61,6 +61,11 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
         </span>
         {stream.tickSize && (
           <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/70">Tick size {stream.tickSize}</span>
+        )}
+        {stream.error && (
+          <span className="rounded-full bg-rose-500/15 px-3 py-1 text-[11px] text-rose-100 border border-rose-400/40">
+            Stream error
+          </span>
         )}
       </div>
       {stream.error && (

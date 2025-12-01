@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -205,7 +204,7 @@ class HedgerService:
                 "pricing": pricing.model_dump(mode="json"),
             }
 
-        lock_ctx = self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else asyncio.nullcontext()
+        lock_ctx = self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else nullcontext()
         async with lock_ctx:
             snapshot, instruction, breaches = await self.exposure_ledger.record_commit(
                 commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc
@@ -229,6 +228,8 @@ class HedgerService:
         This mirrors the on-chain digest and prevents hedging against tampered client inputs.
         """
 
+        if hasattr(quote_payload, "model_dump"):
+            quote_payload = quote_payload.model_dump()
         market_address = getattr(commit, "market_address", None)
         outcome_id = getattr(commit, "outcome_id", None)
         try:

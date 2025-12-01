@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -19,10 +21,14 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
+
+
 BigIntPk = BigInteger().with_variant(Integer, "sqlite")
 
 
@@ -42,77 +48,79 @@ class Market(Base):
         ),
     )
 
-    id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(String(128), unique=True, index=True, nullable=False)
-    title = Column(String(256), nullable=False)
-    slug = Column(String(256), nullable=True)
-    category = Column(String(128), nullable=True)
-    metadata_uri = Column(String(512), nullable=True)
-    oracle = Column(String(64), nullable=False)
-    factory = Column(String(64), nullable=True)
-    market_address = Column(String(64), unique=True, nullable=True)
-    status = Column(String(32), nullable=False, default=MarketStatusEnum.COMMIT.value)
-    gamma_raw = Column(JSON, nullable=True)
-    group_slug = Column(String(256), nullable=True, index=True)
-    group_position = Column(Integer, nullable=True)
-    rake_bps = Column(Integer, nullable=True)
-    condition_id = Column(String(66), nullable=True)
-    question_id = Column(String(128), nullable=True)
-    image_url = Column(String(512), nullable=True)
-    closed = Column(Boolean, nullable=False, default=False)
-    uma_resolution_status = Column(String(64), nullable=True)
-    source_updated_at = Column(DateTime(timezone=True), nullable=True)
-    content_hash = Column(String(128), nullable=True)
-    starts_at = Column(DateTime(timezone=True), nullable=True)
-    orders_opened_at = Column(DateTime(timezone=True), nullable=True)
-    resolution_source = Column(String(512), nullable=True)
-    market_maker = Column(String(64), nullable=True)
-    order_min_size = Column(Float, nullable=True)
-    price_tick_size = Column(Float, nullable=True)
-    enable_order_book = Column(Boolean, nullable=True)
-    image_variants = Column(JSON, nullable=True)
-    featured = Column(Boolean, nullable=False, default=False, server_default=text("false"))
-    closes_at = Column(DateTime(timezone=True), nullable=True)
-    resolved_at = Column(DateTime(timezone=True), nullable=True)
-    summary = Column(Text, nullable=True)
-    summary_source = Column(String(64), nullable=True)
-    summary_model = Column(String(64), nullable=True)
-    summary_metadata = Column(JSON, nullable=True)
-    summary_checked_at = Column(DateTime(timezone=True), nullable=True)
-    summary_requested_at = Column(DateTime(timezone=True), nullable=True)
-    liquidity_usd = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume_24h_usd = Column(Numeric(precision=32, scale=8), nullable=True)
-    orderbook_volume_usd = Column(Numeric(precision=32, scale=8), nullable=True)
-    trades_quantity = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    slug: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    metadata_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oracle: Mapped[str] = mapped_column(String(64), nullable=False)
+    factory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    market_address: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default=MarketStatusEnum.COMMIT.value)
+    gamma_raw: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    group_slug: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    group_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rake_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    condition_id: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    question_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    uma_resolution_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    orders_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_source: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    market_maker: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_min_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_tick_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    enable_order_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    image_variants: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    featured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    summary_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    summary_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    summary_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    liquidity_usd: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume_24h_usd: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    orderbook_volume_usd: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    trades_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
-    outcomes_rel = relationship(
+    outcomes_rel: Mapped[list[MarketOutcome]] = relationship(
         "MarketOutcome",
         cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="selectin",
     )
-    tags_rel = relationship(
+    tags_rel: Mapped[list[MarketTag]] = relationship(
         "MarketTag",
         cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="selectin",
     )
-    clob_tokens_rel = relationship(
+    clob_tokens_rel: Mapped[list[MarketClobToken]] = relationship(
         "MarketClobToken",
         cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="selectin",
     )
-    gamma_metadata_rel = relationship(
+    gamma_metadata_rel: Mapped[MarketGammaMetadata | None] = relationship(
         "MarketGammaMetadata",
         cascade="all, delete-orphan",
         passive_deletes=True,
         uselist=False,
         lazy="selectin",
     )
-    gamma_events_rel = relationship(
+    gamma_events_rel: Mapped[list[MarketGammaEvent]] = relationship(
         "MarketGammaEvent",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -124,186 +132,206 @@ class MarketOutcome(Base):
     __tablename__ = "market_outcomes"
     __table_args__ = (UniqueConstraint("market_id", "outcome_id", name="ux_market_outcomes_market_outcome"),)
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    outcome_id = Column(Integer, nullable=False)
-    label = Column(String(256), nullable=False)
-    price = Column(Numeric(precision=32, scale=8), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    outcome_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String(256), nullable=False)
+    price: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class MarketTag(Base):
     __tablename__ = "market_tags"
     __table_args__ = (UniqueConstraint("market_id", "tag", name="ux_market_tags_market_tag"),)
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    tag = Column(String(128), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tag: Mapped[str] = mapped_column(String(128), nullable=False)
 
 
 class MarketClobToken(Base):
     __tablename__ = "market_clob_tokens"
     __table_args__ = (UniqueConstraint("market_id", "token_id", name="ux_market_clob_tokens_market_token"),)
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    token_id = Column(String(128), nullable=False)
-    side = Column(String(8), nullable=True)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
 
 class MarketGammaMetadata(Base):
     __tablename__ = "market_gamma_metadata"
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True)
-    gamma_id = Column(String(64), nullable=True)
-    question = Column(Text, nullable=True)
-    slug = Column(String(256), nullable=True)
-    resolution_source = Column(String(512), nullable=True)
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    start_date = Column(DateTime(timezone=True), nullable=True)
-    image = Column(String(512), nullable=True)
-    icon = Column(String(512), nullable=True)
-    description = Column(Text, nullable=True)
-    liquidity = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume = Column(Numeric(precision=32, scale=8), nullable=True)
-    active = Column(Boolean, nullable=True)
-    closed = Column(Boolean, nullable=True)
-    market_maker_address = Column(String(128), nullable=True)
-    created_at_raw = Column(DateTime(timezone=True), nullable=True)
-    updated_at_raw = Column(DateTime(timezone=True), nullable=True)
-    submitted_by = Column(String(128), nullable=True)
-    archived = Column(Boolean, nullable=True)
-    resolved_by = Column(String(128), nullable=True)
-    restricted = Column(Boolean, nullable=True)
-    group_item_title = Column(String(256), nullable=True)
-    group_item_threshold = Column(String(64), nullable=True)
-    question_id = Column(String(128), nullable=True)
-    enable_order_book = Column(Boolean, nullable=True)
-    order_price_min_tick_size = Column(Float, nullable=True)
-    order_min_size = Column(Float, nullable=True)
-    volume_num = Column(Numeric(precision=32, scale=8), nullable=True)
-    liquidity_num = Column(Numeric(precision=32, scale=8), nullable=True)
-    group_slug = Column(String(256), nullable=True, index=True)
-    end_date_iso = Column(String(64), nullable=True)
-    start_date_iso = Column(String(64), nullable=True)
-    has_reviewed_dates = Column(Boolean, nullable=True)
-    volume1mo = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume1yr = Column(Numeric(precision=32, scale=8), nullable=True)
-    clob_token_id_yes = Column(String(128), nullable=True)
-    clob_token_id_no = Column(String(128), nullable=True)
-    uma_bond = Column(Numeric(precision=32, scale=8), nullable=True)
-    uma_reward = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume1mo_clob = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume1yr_clob = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume_clob = Column(Numeric(precision=32, scale=8), nullable=True)
-    liquidity_clob = Column(Numeric(precision=32, scale=8), nullable=True)
-    custom_liveness = Column(Integer, nullable=True)
-    accepting_orders = Column(Boolean, nullable=True)
-    neg_risk = Column(Boolean, nullable=True)
-    neg_risk_market_id = Column(String(128), nullable=True)
-    neg_risk_request_id = Column(String(128), nullable=True)
-    ready = Column(Boolean, nullable=True)
-    funded = Column(Boolean, nullable=True)
-    accepting_orders_timestamp = Column(DateTime(timezone=True), nullable=True)
-    competitive = Column(Float, nullable=True)
-    pagerduty_enabled = Column(Boolean, nullable=True)
-    approved = Column(Boolean, nullable=True)
-    featured = Column(Boolean, nullable=True)
-    rewards_min_size = Column(Numeric(precision=32, scale=8), nullable=True)
-    rewards_max_spread = Column(Numeric(precision=32, scale=8), nullable=True)
-    spread = Column(Float, nullable=True)
-    one_day_price_change = Column(Float, nullable=True)
-    one_week_price_change = Column(Float, nullable=True)
-    one_month_price_change = Column(Float, nullable=True)
-    last_trade_price = Column(Float, nullable=True)
-    best_bid = Column(Float, nullable=True)
-    best_ask = Column(Float, nullable=True)
-    clear_book_on_start = Column(Boolean, nullable=True)
-    manual_activation = Column(Boolean, nullable=True)
-    neg_risk_other = Column(Boolean, nullable=True)
-    uma_resolution_statuses = Column(Text, nullable=True)
-    pending_deployment = Column(Boolean, nullable=True)
-    deploying = Column(Boolean, nullable=True)
-    deploying_timestamp = Column(DateTime(timezone=True), nullable=True)
-    rfq_enabled = Column(Boolean, nullable=True)
-    holding_rewards_enabled = Column(Boolean, nullable=True)
-    fees_enabled = Column(Boolean, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    gamma_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    resolution_source: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    image: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    liquidity: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    closed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    market_maker_address: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at_raw: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at_raw: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    archived: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    restricted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    group_item_title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    group_item_threshold: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enable_order_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    order_price_min_tick_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    order_min_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_num: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    liquidity_num: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    group_slug: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    end_date_iso: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    start_date_iso: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    has_reviewed_dates: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    volume1mo: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume1yr: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    clob_token_id_yes: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    clob_token_id_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    uma_bond: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    uma_reward: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume1mo_clob: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume1yr_clob: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume_clob: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    liquidity_clob: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    custom_liveness: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    accepting_orders: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    neg_risk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    neg_risk_market_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    neg_risk_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ready: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    funded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    accepting_orders_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    competitive: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pagerduty_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    featured: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rewards_min_size: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    rewards_max_spread: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    spread: Mapped[float | None] = mapped_column(Float, nullable=True)
+    one_day_price_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    one_week_price_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    one_month_price_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_trade_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clear_book_on_start: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    manual_activation: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    neg_risk_other: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    uma_resolution_statuses: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_deployment: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    deploying: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    deploying_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rfq_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    holding_rewards_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fees_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class MarketGammaEvent(Base):
     __tablename__ = "market_gamma_events"
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    event_id = Column(String(64), nullable=True)
-    ticker = Column(String(128), nullable=True)
-    slug = Column(String(256), nullable=True)
-    title = Column(String(512), nullable=True)
-    description = Column(Text, nullable=True)
-    resolution_source = Column(String(512), nullable=True)
-    start_date = Column(DateTime(timezone=True), nullable=True)
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    image = Column(String(512), nullable=True)
-    icon = Column(String(512), nullable=True)
-    active = Column(Boolean, nullable=True)
-    closed = Column(Boolean, nullable=True)
-    archived = Column(Boolean, nullable=True)
-    new = Column(Boolean, nullable=True)
-    featured = Column(Boolean, nullable=True)
-    restricted = Column(Boolean, nullable=True)
-    liquidity = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume = Column(Numeric(precision=32, scale=8), nullable=True)
-    open_interest = Column(Numeric(precision=32, scale=8), nullable=True)
-    sort_by = Column(String(64), nullable=True)
-    created_at_raw = Column(DateTime(timezone=True), nullable=True)
-    updated_at_raw = Column(DateTime(timezone=True), nullable=True)
-    competitive = Column(Float, nullable=True)
-    volume_1wk = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume_1mo = Column(Numeric(precision=32, scale=8), nullable=True)
-    volume_1yr = Column(Numeric(precision=32, scale=8), nullable=True)
-    enable_order_book = Column(Boolean, nullable=True)
-    liquidity_clob = Column(Numeric(precision=32, scale=8), nullable=True)
-    neg_risk = Column(Boolean, nullable=True)
-    neg_risk_market_id = Column(String(128), nullable=True)
-    comment_count = Column(Integer, nullable=True)
-    cyom = Column(Boolean, nullable=True)
-    show_all_outcomes = Column(Boolean, nullable=True)
-    show_market_images = Column(Boolean, nullable=True)
-    enable_neg_risk = Column(Boolean, nullable=True)
-    automatically_active = Column(Boolean, nullable=True)
-    neg_risk_augmented = Column(Boolean, nullable=True)
-    pending_deployment = Column(Boolean, nullable=True)
-    deploying = Column(Boolean, nullable=True)
-    deploying_timestamp = Column(DateTime(timezone=True), nullable=True)
-    competitive_flags = Column(String(256), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ticker: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_source: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    image: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    closed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    archived: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    new: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    featured: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    restricted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    liquidity: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    open_interest: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    sort_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at_raw: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at_raw: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    competitive: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_1wk: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume_1mo: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    volume_1yr: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    enable_order_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    liquidity_clob: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    neg_risk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    neg_risk_market_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    comment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cyom: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    show_all_outcomes: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    show_market_images: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    enable_neg_risk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    automatically_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    neg_risk_augmented: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pending_deployment: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    deploying: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    deploying_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    competitive_flags: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class Resolution(Base):
     __tablename__ = "resolutions"
 
-    condition_id = Column(String(66), primary_key=True, nullable=False)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="SET NULL"), nullable=True, index=True)
-    event_id = Column(String(128), ForeignKey("markets.event_id", ondelete="SET NULL"), nullable=True, index=True)
-    source = Column(String(32), nullable=False, default="conditional_tokens")
-    resolved = Column(Boolean, nullable=False, default=False)
-    payouts = Column(JSON, nullable=False, default=list)
-    winners = Column(JSON, nullable=True)
-    oracle = Column(String(64), nullable=True)
-    question_id = Column(String(66), nullable=True)
-    transaction_hash = Column(String(66), nullable=True)
-    block_number = Column(BigInteger, nullable=True)
-    block_timestamp = Column(DateTime(timezone=True), nullable=True)
-    winning_outcome_id = Column(Integer, nullable=True)
-    rake_bps = Column(Integer, nullable=True)
-    request_id = Column(String(128), nullable=True)
-    checked_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    condition_id: Mapped[str] = mapped_column(String(66), primary_key=True, nullable=False)
+    market_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("markets.event_id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="conditional_tokens")
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payouts: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    winners: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    oracle: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question_id: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    transaction_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    block_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    block_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    winning_outcome_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rake_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 Index("ix_resolutions_block_number", Resolution.block_number)
@@ -312,25 +340,29 @@ Index("ix_resolutions_block_number", Resolution.block_number)
 class Commitment(Base):
     __tablename__ = "commitments"
 
-    id = Column(BigIntPk, primary_key=True, index=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_address = Column(String(64), nullable=False)
-    outcome_id = Column(Integer, nullable=False)
-    amount_wei = Column(BigInteger, nullable=False)
-    salt = Column(String(66), nullable=True)
-    ticket_hash = Column(String(66), nullable=False)
-    leaf = Column(String(66), nullable=False)
-    leaf_index = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, index=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_address: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_wei: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    salt: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    ticket_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    leaf: Mapped[str] = mapped_column(String(66), nullable=False)
+    leaf_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CommitmentMerklePath(Base):
     __tablename__ = "commitment_merkle_paths"
 
-    id = Column(BigIntPk, primary_key=True, index=True, autoincrement=True)
-    commitment_id = Column(BigInteger, ForeignKey("commitments.id", ondelete="CASCADE"), nullable=False, index=True)
-    level = Column(Integer, nullable=False)
-    sibling_hash = Column(String(66), nullable=False)
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, index=True, autoincrement=True)
+    commitment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("commitments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    sibling_hash: Mapped[str] = mapped_column(String(66), nullable=False)
 
 
 class SettlementProofStatus(str, Enum):
@@ -349,49 +381,55 @@ class Settlement(Base):
         ),
     )
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
-    merkle_root = Column(String(66), nullable=True)
-    commitments_count = Column(Integer, nullable=True)
-    pool_total_yes = Column(BigInteger, nullable=True)
-    pool_total_no = Column(BigInteger, nullable=True)
-    total_escrow = Column(BigInteger, nullable=True)
-    total_liability = Column(BigInteger, nullable=True)
-    rake_bps = Column(Integer, nullable=True)
-    winning_outcome_id = Column(Integer, nullable=True)
-    circuit_hash = Column(String(66), nullable=True)
-    proof_status = Column(String(32), nullable=False, default=SettlementProofStatus.NONE.value)
-    proof_request_id = Column(String(128), nullable=True)
-    proof_hash = Column(String(66), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    merkle_root: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    commitments_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pool_total_yes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pool_total_no: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_escrow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_liability: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rake_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    winning_outcome_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    circuit_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    proof_status: Mapped[str] = mapped_column(String(32), nullable=False, default=SettlementProofStatus.NONE.value)
+    proof_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    proof_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class SchemaVersion(Base):
     __tablename__ = "schema_versions"
 
-    key = Column(String(64), primary_key=True, nullable=False)
-    revision = Column(String(64), nullable=False)
-    applied_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True, nullable=False)
+    revision: Mapped[str] = mapped_column(String(64), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class HedgerTreasurySnapshot(Base):
     __tablename__ = "hedger_treasury_snapshots"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    market_id = Column(String(128), ForeignKey("markets.event_id", ondelete="CASCADE"), nullable=False, index=True)
-    outcome = Column(String, nullable=False)
-    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    refund_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    rake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    payout_profit_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    borrowed_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    lp_share_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    repay_amount_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    platform_usdc_revenue = Column(Numeric(precision=32, scale=8), nullable=False)
-    zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
-    usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("markets.event_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    stake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    refund_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    rake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    payout_profit_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    borrowed_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    lp_share_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    repay_amount_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    platform_usdc_revenue: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    zen_balance: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    usdc_balance: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class QuoteStatusEnum(str, Enum):
@@ -409,59 +447,67 @@ class Quote(Base):
         ),
     )
 
-    quote_id = Column(String(66), primary_key=True, nullable=False)
-    status = Column(String(32), nullable=False, default=QuoteStatusEnum.ISSUED.value)
-    payload = Column(JSON, nullable=False)
-    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    stake_wei = Column(Numeric(precision=78, scale=0), nullable=False)
-    fx_scaled = Column(BigInteger, nullable=False)
-    zen_usd = Column(Float, nullable=False)
-    market_id = Column(String(128), ForeignKey("markets.event_id", ondelete="SET NULL"), nullable=True, index=True)
-    market_address = Column(String(64), nullable=True)
-    user_id = Column(String(128), nullable=True, index=True)
-    wallet_address = Column(String(64), nullable=True, index=True)
-    outcome_id = Column(Integer, nullable=True)
-    chain_id = Column(BigInteger, nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    consumed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    quote_id: Mapped[str] = mapped_column(String(66), primary_key=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default=QuoteStatusEnum.ISSUED.value)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    stake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    stake_wei: Mapped[Decimal] = mapped_column(Numeric(precision=78, scale=0), nullable=False)
+    fx_scaled: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    zen_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    market_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("markets.event_id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    market_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    wallet_address: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    outcome_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chain_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class FactoryEvent(Base):
     __tablename__ = "factory_events"
     __table_args__ = (UniqueConstraint("factory_address", "event", "tx_hash", name="ux_factory_events_dedupe"),)
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    factory_address = Column(String(64), nullable=False, index=True)
-    market_address = Column(
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    factory_address: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    market_address: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("markets.market_address", ondelete="SET NULL"), nullable=True, index=True
     )
-    event = Column(String(64), nullable=False)
-    tx_hash = Column(String(66), nullable=True, index=True)
-    block_number = Column(BigInteger, nullable=True)
-    block_timestamp = Column(DateTime(timezone=True), nullable=True)
-    payload = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True, index=True)
+    block_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    block_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class SettlementReceipt(Base):
     __tablename__ = "settlement_receipts"
     __table_args__ = (UniqueConstraint("market_id", "request_id", name="ux_settlement_receipts_market_request"),)
 
-    id = Column(BigIntPk, primary_key=True, autoincrement=True)
-    market_id = Column(Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True)
-    market_address = Column(
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    market_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    market_address: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("markets.market_address", ondelete="SET NULL"), nullable=True, index=True
     )
-    request_id = Column(String(128), nullable=False, index=True)
-    proof_hash = Column(String(66), nullable=True)
-    public_signals = Column(JSON, nullable=True)
-    prover_version = Column(String(64), nullable=True)
-    circuit_hash = Column(String(66), nullable=True)
-    generated_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    proof_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    public_signals: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    prover_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    circuit_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 # Secondary indexes (defined after models to avoid NameError during import)

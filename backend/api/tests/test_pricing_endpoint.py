@@ -106,3 +106,53 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     submit_body = submit_resp.json()
     assert submit_body["valid"] is True
     assert submit_body["quote"]["quote_id"] == quote["quote_id"]
+
+
+def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
+    from app.config import get_settings
+    from app.main import _build_quote_digest
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    from pydantic import SecretStr
+
+    signer = Account.create()
+    user = Account.create()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False))
+
+    class DummySyncResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"price": 10, "stale": False}
+
+    monkeypatch.setattr("app.main.httpx.get", lambda *a, **k: DummySyncResponse())
+
+    quote_payload = {
+        "stake_zen": 5,
+        "wallet_address": user.address,
+        "market_address": "0x1111111111111111111111111111111111111111",
+        "outcome_id": 0,
+        "market_id": "mkt-2",
+        "user_id": "user-2",
+    }
+    resp = client.post("/pricing/quote", json=quote_payload)
+    assert resp.status_code == 200
+    quote = resp.json()
+
+    digest = _build_quote_digest(
+        settings.pricing_chain_id,
+        quote["market_address"],
+        quote["wallet_address"],
+        int(quote["outcome_id"]),
+        int(quote["stake_wei"]),
+        int(quote["zen_usd_scaled"]),
+        int(quote["expiry_ts"]),
+        quote["quote_id"],
+    )
+    recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote["signature"])
+    assert recovered.lower() == signer.address.lower()

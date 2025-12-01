@@ -7,7 +7,6 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     CheckConstraint,
-    Column,
     DateTime,
     Index,
     Integer,
@@ -17,29 +16,31 @@ from sqlalchemy import (
     func,
     select,
 )
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from .types import CommitEvent, HedgeInstruction
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class CommitRecord(Base):
     __tablename__ = "hedger_commits"
     __table_args__ = (CheckConstraint("direction IN ('yes','no')", name="ck_hedger_commits_direction"),)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String, nullable=False, index=True)
-    direction = Column(String, nullable=False)
-    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    stake_usd = Column(Numeric(precision=32, scale=8), nullable=False)
-    committed_at = Column(DateTime(timezone=True), nullable=False)
-    tx_hash = Column(String, nullable=True)
-    idempotency_key = Column(String, nullable=True)
-    account = Column(String, nullable=True)
-    request_id = Column(String, nullable=True)
-    metadata_source = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    stake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    stake_usd: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    committed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    tx_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    account: Mapped[str | None] = mapped_column(String, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    metadata_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 class HedgeActionRecord(Base):
@@ -52,65 +53,65 @@ class HedgeActionRecord(Base):
         ),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String, nullable=False, index=True)
-    hedge_outcome = Column(String, nullable=False)
-    action = Column(String, nullable=False)
-    size_usd = Column(Numeric(precision=32, scale=8), nullable=False)
-    slippage_bps = Column(Integer, nullable=False)
-    reason = Column(String, nullable=False)
-    target_coverage = Column(Numeric(precision=10, scale=4), nullable=False)
-    status = Column(String, nullable=False, default="planned")
-    response_payload = Column(JSON, nullable=True)
-    is_unwind = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    hedge_outcome: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    size_usd: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    slippage_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    target_coverage: Mapped[Decimal] = mapped_column(Numeric(precision=10, scale=4), nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="planned")
+    response_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_unwind: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 class SettlementRecord(Base):
     __tablename__ = "hedger_settlements"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String, nullable=False, index=True)
-    outcome = Column(String, nullable=False)
-    proof_payload = Column(JSON, nullable=True)
-    prover_latency_seconds = Column(Integer, nullable=True)
-    submitted_tx = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    proof_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prover_latency_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    submitted_tx: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 class HedgerReplayOffset(Base):
     __tablename__ = "hedger_offsets"
 
-    stream_name = Column(String, primary_key=True)
-    offset = Column(String, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    stream_name: Mapped[str] = mapped_column(String, primary_key=True)
+    offset: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 class ResolvedMarketRecord(Base):
     __tablename__ = "hedger_resolved_markets"
 
-    market_id = Column(String, primary_key=True)
-    outcome = Column(String, nullable=False)
-    resolved_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    market_id: Mapped[str] = mapped_column(String, primary_key=True)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 class TreasurySnapshotRecord(Base):
     __tablename__ = "hedger_treasury_snapshots"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String, nullable=False, index=True)
-    outcome = Column(String, nullable=False)
-    stake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    refund_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    rake_zen = Column(Numeric(precision=32, scale=8), nullable=False)
-    payout_profit_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    borrowed_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    lp_share_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    repay_amount_usdc = Column(Numeric(precision=32, scale=8), nullable=False)
-    platform_usdc_revenue = Column(Numeric(precision=32, scale=8), nullable=False)
-    zen_balance = Column(Numeric(precision=32, scale=8), nullable=False)
-    usdc_balance = Column(Numeric(precision=32, scale=8), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    stake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    refund_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    rake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    payout_profit_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    borrowed_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    lp_share_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    repay_amount_usdc: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    platform_usdc_revenue: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    zen_balance: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    usdc_balance: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
 Index(

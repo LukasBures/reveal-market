@@ -110,6 +110,9 @@ contract RevealMarket is ReentrancyGuard {
     event GuardianUpdated(address indexed newGuardian);
     event CommitPauseSet(bool paused, address indexed triggeredBy);
     event ClaimPauseSet(bool paused, address indexed triggeredBy);
+    event QuoteCommitted(
+        address indexed user, uint256 indexed outcomeId, uint256 amount, bytes32 indexed quoteId, uint256 marketId
+    );
     event MarketCancelled(address indexed triggeredBy, string reason);
     event EmergencySettled(bytes32 outcomeHash, uint256 winningPool, address indexed triggeredBy);
     event OracleUpdated(address indexed previousOracle, address indexed newOracle);
@@ -332,6 +335,7 @@ contract RevealMarket is ReentrancyGuard {
     {
         if (msg.value != amount) revert InvalidPayment();
         _validateQuote(quote, msg.sender, amount, outcomeId);
+        emit QuoteCommitted(msg.sender, outcomeId, amount, quote.quoteId, marketId);
         _commitInternal(msg.sender, outcomeId, amount, salt);
     }
 

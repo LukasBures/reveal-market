@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from web3 import Web3
+from web3.types import HexStr
 
 _CONDITIONAL_TOKENS_ABI: list[dict[str, Any]] = [
     {
@@ -52,7 +53,7 @@ class ConditionalTokensClient:
         """Return whether payouts are set and the numerators for each outcome."""
         if outcome_count < 0:
             raise ValueError("outcome_count must be non-negative")
-        condition_id = Web3.to_bytes(hexstr=condition_id_hex)
+        condition_id = Web3.to_bytes(hexstr=cast(HexStr, condition_id_hex))
         resolved = bool(self._contract.functions.payoutsAreSet(condition_id).call())
         if not resolved:
             return False, [0] * max(outcome_count, 0)
@@ -94,7 +95,7 @@ class ConditionalTokensClient:
         }
 
     def _fetch_resolution_event(self, condition_id_hex: str) -> dict[str, Any]:
-        condition_bytes = Web3.to_bytes(hexstr=condition_id_hex)
+        condition_bytes = Web3.to_bytes(hexstr=cast(HexStr, condition_id_hex))
         event = self._contract.events.ConditionResolution()
         try:
             logs = event.get_logs(

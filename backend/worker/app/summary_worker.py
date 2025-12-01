@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from inspect import isawaitable
+from typing import cast
 
 from redis import Redis
 from shared import cache as shared_cache
@@ -48,10 +50,12 @@ def _get_redis_client() -> Redis:
 
 
 def _pop_job(redis_client: Redis) -> SummaryJob | None:
-    result = redis_client.brpop(settings.summary_queue_key, timeout=int(settings.summary_queue_poll_seconds))
+    result = redis_client.brpop([settings.summary_queue_key], timeout=int(settings.summary_queue_poll_seconds))
+    if isawaitable(result):
+        return None
     if result is None:
         return None
-    _, raw = result
+    _, raw = cast(tuple[str, str | bytes], result)
     payload = raw if isinstance(raw, str) else raw.decode("utf-8")
     job = SummaryJob.from_json(payload)
     log_event(

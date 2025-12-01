@@ -1,5 +1,6 @@
 """Worker entrypoint that periodically syncs markets from Polymarket into the local database."""
 
+# ruff: noqa: UP047
 from __future__ import annotations
 
 import json
@@ -11,7 +12,8 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from inspect import isawaitable
+from typing import Any, TypeVar
 from urllib.parse import quote_plus
 
 import httpx
@@ -51,11 +53,13 @@ from .proof_builder import SettlementDataMissingError, build_prover_payload
 from .prover_client import ProverClient, ProverError
 from .summary_jobs import maybe_enqueue_summary_job
 
+T = TypeVar("T")
+
 try:
     from prometheus_client import REGISTRY, CollectorRegistry, Counter
 except ImportError:  # pragma: no cover - optional dependency
 
-    class Counter:  # type: ignore[override]
+    class _CounterStub:
         def __init__(self, *args, **kwargs):
             pass
 
@@ -66,9 +70,11 @@ except ImportError:  # pragma: no cover - optional dependency
         def inc(amount: float = 1.0) -> None:
             return None
 
-    class CollectorRegistry:  # type: ignore[override]
+    class _CollectorRegistryStub:
         pass
 
+    Counter = _CounterStub  # type: ignore[misc,assignment]
+    CollectorRegistry = _CollectorRegistryStub  # type: ignore[misc,assignment]
     REGISTRY = None  # type: ignore[assignment]
 
 
@@ -351,13 +357,13 @@ def _record_factory_state(session: Session, market: shared_models.Market | None,
     )
 
 
-def _run_with_retries[T](
+def _run_with_retries(
     action: Callable[[], T],
     max_attempts: int,
     base_backoff: float,
     max_backoff: float | None = None,
     on_retry: Callable[[int, BaseException | None], None] | None = None,
-) -> T:
+) -> T:  # noqa: UP047
     """Execute an action with optional retry semantics using tenacity."""
 
     if max_attempts <= 1:
@@ -490,7 +496,7 @@ def _build_clob_client() -> ClobClient | None:
 def _build_prover_client() -> ProverClient | None:
     if settings.prover_enabled and settings.prover_base_url:
         return ProverClient(
-            base_url=settings.prover_base_url,
+            base_url=str(settings.prover_base_url),
             timeout_seconds=settings.prover_timeout_seconds,
         )
     return None
@@ -527,7 +533,7 @@ def _reload_worker_settings(signum=None, frame=None) -> None:  # pragma: no cove
         event="worker.config.reloaded",
         message="worker configuration reloaded",
         signal=signum,
-        cache_namespace=settings.cache_namespace or "",
+        cache_namespace=getattr(settings, "cache_namespace", "") or "",
     )
 
 
@@ -1201,15 +1207,18 @@ def _collect_market_changes_with_summary(
 
 def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
     outcomes = [row.label for row in record.outcomes_rel] if hasattr(record, "outcomes_rel") else None
-    prices = None
+    prices_raw: list[float | None] | None = None
     if hasattr(record, "outcomes_rel"):
-        prices = []
+        prices_raw = []
         any_price = False
         for row in record.outcomes_rel:
-            prices.append(float(row.price) if row.price is not None else None)
+            prices_raw.append(float(row.price) if row.price is not None else None)
             any_price = any_price or row.price is not None
         if not any_price:
-            prices = None
+            prices_raw = None
+    prices: list[float] | None = None
+    if prices_raw is not None:
+        prices = [price for price in prices_raw if price is not None]
     tags = [row.tag for row in record.tags_rel] if hasattr(record, "tags_rel") else None
     clob_ids = [row.token_id for row in record.clob_tokens_rel] if hasattr(record, "clob_tokens_rel") else None
     gamma_meta = record.gamma_metadata_rel if hasattr(record, "gamma_metadata_rel") else None
@@ -1226,6 +1235,12 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
             group_position = int(group_item_threshold)
         except (TypeError, ValueError, OverflowError):
             group_position = None
+
+    image_variants: list[str] | None = None
+    if isinstance(record.image_variants, dict):
+        image_variants = [str(value) for value in record.image_variants.values() if value is not None]
+    elif isinstance(record.image_variants, list):
+        image_variants = [str(value) for value in record.image_variants if value is not None]
 
     return MarketPayload(
         event_id=record.event_id,
@@ -1264,7 +1279,7 @@ def _market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         order_min_size=record.order_min_size,
         price_tick_size=record.price_tick_size,
         enable_order_book=record.enable_order_book,
-        image_variants=record.image_variants,
+        image_variants=image_variants,
         closes_at=record.closes_at,
         group_slug=group_slug,
         group_position=group_position,
@@ -1477,15 +1492,14 @@ def _apply_resolution(session: Session, db_market, market: MarketPayload) -> Res
 
     if not _should_refresh_resolution(existing, now):
         if logger.isEnabledFor(logging.DEBUG):
+            last_checked = getattr(existing, "checked_at", None)
             log_event(
                 logger,
                 logging.DEBUG,
                 event="worker.resolution.skip_refresh",
                 message="existing resolution snapshot still within freshness window",
                 condition_id=normalized_condition_id,
-                last_checked=getattr(existing, "checked_at", None).isoformat()
-                if getattr(existing, "checked_at", None)
-                else None,
+                last_checked=last_checked.isoformat() if last_checked else None,
                 resolved=getattr(existing, "resolved", None),
             )
         return ResolutionOutcome()
@@ -1969,7 +1983,7 @@ def run_worker() -> None:
         heartbeat_stop.set()
 
 
-def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int]:
+def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | bool]:
     """Return a zeroed-out stats payload so callers can keep metrics flowing."""
     rounded_latency = round(latency_ms, 2)
     return {
@@ -2385,8 +2399,9 @@ def maybe_generate_settlement_proof(
             if market_record:
                 if market_event_id is None:
                     market_event_id = getattr(market_record, "event_id", None)
-                if normalized_condition is None and isinstance(getattr(market_record, "condition_id", None), str):
-                    normalized_condition = market_record.condition_id.lower()
+                condition_value = getattr(market_record, "condition_id", None)
+                if normalized_condition is None and isinstance(condition_value, str):
+                    normalized_condition = condition_value.lower()
                 if market_address is None:
                     market_address = getattr(market_record, "market_address", None)
             settlement = (
@@ -2580,7 +2595,12 @@ def prime_featured_views(
     redis_client: Redis | None,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
-    summary: dict[str, Any] = {"categories_primed": 0, "suggestions_primed": 0, "suggestion_ttls": {}}
+    suggestion_ttls: dict[str, int] = {}
+    summary: dict[str, Any] = {
+        "categories_primed": 0,
+        "suggestions_primed": 0,
+        "suggestion_ttls": suggestion_ttls,
+    }
     if redis_client is None or not settings.api_base_url:
         return summary
     if not settings.featured_categories and not settings.featured_suggest_queries:
@@ -2604,14 +2624,16 @@ def prime_featured_views(
                     error=str(exc),
                 )
         for query in settings.featured_suggest_queries:
-            params = {"q": query, "limit": settings.suggest_cache_limit}
+            suggest_params: dict[str, str | int] = {"q": query, "limit": settings.suggest_cache_limit}
             try:
-                response = client.get(f"{base_url}/markets/suggest", params=params)
+                response = client.get(f"{base_url}/markets/suggest", params=suggest_params)
                 if response.is_success:
                     summary["suggestions_primed"] += 1
                     key = suggest_cache_key(query, settings.suggest_cache_limit)
                     try:
                         ttl = redis_client.ttl(key)
+                        if isawaitable(ttl):
+                            ttl = None
                     except Exception as exc:  # pragma: no cover - defensive
                         log_event(
                             logger,
@@ -2622,9 +2644,10 @@ def prime_featured_views(
                             error=str(exc),
                         )
                         ttl = settings.markets_cache_ttl_seconds
-                    if ttl is None or ttl < 0:
-                        ttl = settings.markets_cache_ttl_seconds
-                    summary["suggestion_ttls"][query] = ttl
+                    ttl_value = ttl if isinstance(ttl, (int, float)) else None
+                    if ttl_value is None or ttl_value < 0:
+                        ttl_value = settings.markets_cache_ttl_seconds
+                    suggestion_ttls[query] = int(ttl_value)
             except Exception as exc:
                 log_event(
                     logger,
@@ -2651,7 +2674,7 @@ def prime_featured_views(
 
 def record_batch_stats(
     redis_client: Redis | None,
-    sync_stats: dict[str, float | int],
+    sync_stats: dict[str, float | int | str | bool],
     prime_stats: dict[str, Any],
 ) -> None:
     """Persist batch-level metrics for observability dashboards."""

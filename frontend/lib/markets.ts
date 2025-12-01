@@ -31,3 +31,20 @@ export const getCommitDeadline = (market: CommitDeadlineSource): string | undefi
   }
   return undefined;
 };
+
+/**
+ * Price streams/history are keyed by the Polymarket condition id (CLOB market id).
+ * Fall back to the event id when condition id is missing so charts still render.
+ */
+export const resolvePriceStreamMarketId = (
+  market: { conditionId?: string | null; eventId?: string | null },
+  fallback?: string,
+): string => {
+  const candidates = [market.conditionId, market.eventId, fallback];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+};

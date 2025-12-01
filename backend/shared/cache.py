@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Sequence
+from inspect import isawaitable
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -87,7 +88,17 @@ def get_json(client: Redis | None, key: str) -> Any:
             )
         return None
     try:
-        payload = client.get(key)
+        payload_raw = client.get(key)
+        if isawaitable(payload_raw):
+            log_event(
+                logger,
+                logging.WARNING,
+                event="cache.get.awaitable",
+                message="redis GET returned awaitable unexpectedly",
+                key=key,
+            )
+            stats.record_error()
+            return None
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -99,7 +110,7 @@ def get_json(client: Redis | None, key: str) -> Any:
         )
         stats.record_error()
         return None
-    if payload is None:
+    if payload_raw is None:
         stats.record_miss()
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
@@ -109,6 +120,21 @@ def get_json(client: Redis | None, key: str) -> Any:
                 message="cache miss",
                 key=key,
             )
+        return None
+    if isinstance(payload_raw, bytes):
+        payload = payload_raw.decode()
+    elif isinstance(payload_raw, str):
+        payload = payload_raw
+    else:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.get.invalid_type",
+            message="redis GET returned unexpected type",
+            key=key,
+            value_type=type(payload_raw).__name__,
+        )
+        stats.record_error()
         return None
     try:
         data = json.loads(payload)
@@ -278,7 +304,21 @@ def invalidate_tag(client: Redis | None, tag: str) -> int:
     removed = 0
     try:
         scan_iter = getattr(client, "sscan_iter", None)
-        iterator = scan_iter(storage_key, count=512) if callable(scan_iter) else iter(client.smembers(storage_key))
+        if callable(scan_iter):
+            iterator: Iterable[str] = scan_iter(storage_key, count=512)
+        else:
+            members_raw = client.smembers(storage_key)
+            if isawaitable(members_raw):
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="cache.tag.awaitable",
+                    message="redis SMEMBERS returned awaitable unexpectedly",
+                    tag=tag,
+                )
+                get_stats_client().record_error()
+                return 0
+            iterator = iter(cast(set[str], members_raw))
         unlink = getattr(client, "unlink", None)
         delete_fn = unlink if callable(unlink) else client.delete
         batch: list[str] = []

@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from web3 import HTTPProvider, Web3
 from web3.contract.contract import Contract
-from web3.middleware import geth_poa_middleware
+from web3.middleware import geth_poa_middleware  # type: ignore[attr-defined]
 
 from .local_logging import log_event
 
@@ -111,16 +111,32 @@ class OnChainLpVaultClient(BaseLpVaultClient):
         destination = destination or self.account.address
         tx = self.contract.functions.borrow(
             self._to_usdc_units(amount_usd), Web3.to_checksum_address(destination)
-        ).build_transaction(self._tx_args())
-        receipt = await self._send_tx(tx)
+        ).build_transaction(cast(Any, self._tx_args()))
+        receipt = await self._send_tx(cast(dict[str, Any], tx))
         util = await self.current_utilization()
-        return {"tx_hash": receipt["transactionHash"].hex(), "utilization": util, "mode": "onchain"}
+        tx_hash_value = receipt.get("transactionHash")
+        if tx_hash_value is None:
+            tx_hash_hex = ""
+        elif hasattr(tx_hash_value, "hex"):
+            tx_hash_hex = tx_hash_value.hex()  # type: ignore[call-arg]
+        else:
+            tx_hash_hex = str(tx_hash_value)
+        return {"tx_hash": tx_hash_hex, "utilization": util, "mode": "onchain"}
 
     async def repay_from_hedge(self, amount_usd: Decimal, source: str | None = None) -> dict:
-        tx = self.contract.functions.repay(self._to_usdc_units(amount_usd)).build_transaction(self._tx_args())
-        receipt = await self._send_tx(tx)
+        tx = self.contract.functions.repay(self._to_usdc_units(amount_usd)).build_transaction(
+            cast(Any, self._tx_args())
+        )
+        receipt = await self._send_tx(cast(dict[str, Any], tx))
         util = await self.current_utilization()
-        return {"tx_hash": receipt["transactionHash"].hex(), "utilization": util, "mode": "onchain"}
+        tx_hash_value = receipt.get("transactionHash")
+        if tx_hash_value is None:
+            tx_hash_hex = ""
+        elif hasattr(tx_hash_value, "hex"):
+            tx_hash_hex = tx_hash_value.hex()  # type: ignore[call-arg]
+        else:
+            tx_hash_hex = str(tx_hash_value)
+        return {"tx_hash": tx_hash_hex, "utilization": util, "mode": "onchain"}
 
     async def current_utilization(self) -> float:
         util_bps = self.contract.functions.utilization().call()
@@ -141,16 +157,17 @@ class OnChainLpVaultClient(BaseLpVaultClient):
             "gasPrice": gas_price,
         }
 
-    async def _send_tx(self, tx: dict) -> dict:
+    async def _send_tx(self, tx: dict[str, Any]) -> dict[str, Any]:
         signed = self.account.sign_transaction(tx)
         tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
         receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        receipt_data = cast(dict[str, Any], receipt)
         log_event(
             logger,
             logging.INFO,
             event="vault.tx.sent",
             message="vault transaction sent",
             tx_hash=tx_hash.hex(),
-            status=receipt.status,
+            status=receipt_data.get("status"),
         )
-        return receipt
+        return receipt_data

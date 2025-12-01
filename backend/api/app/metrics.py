@@ -53,7 +53,7 @@ class RequestMetrics:
         self._max_latency_ms = 0.0
         self._bytes_sent_total = 0
         self._slow_requests = 0
-        self._latency_buckets: dict[str, int] = {label: 0 for _, label in _LATENCY_BUCKETS}
+        self._latency_buckets = {label: 0 for _, label in _LATENCY_BUCKETS}
         self._latency_buckets[">=1000ms"] = 0
 
     def record(

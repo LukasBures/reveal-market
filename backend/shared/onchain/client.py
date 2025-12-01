@@ -22,11 +22,11 @@ def get_async_web3(rpc_url: str | None):
         raise OnChainConfigurationError("RM_RPC_URL is not configured")
 
     from web3 import AsyncWeb3 as _AsyncWeb3
-    from web3.middleware import async_geth_poa_middleware
-    from web3.providers.async_rpc import AsyncHTTPProvider
+    from web3.middleware import async_geth_poa_middleware  # type: ignore[attr-defined]
+    from web3.providers.async_rpc import AsyncHTTPProvider  # type: ignore[import-not-found]
 
     provider = AsyncHTTPProvider(rpc_url)
-    web3 = _AsyncWeb3(provider)
+    web3: _AsyncWeb3 = _AsyncWeb3(provider)
 
     try:
         web3.middleware_onion.inject(async_geth_poa_middleware, layer=0)

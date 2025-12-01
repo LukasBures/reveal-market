@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import os
+from collections.abc import Iterable
 from functools import lru_cache
+from typing import cast
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +23,13 @@ def _split_csv(value: str) -> list[str]:
             if "," in inner:
                 items = inner.split(",")
     return [item.strip() for item in items if item.strip()]
+
+
+def _preset_list(key: str) -> list[str]:
+    preset_value = PRESET.get(key, [])
+    if isinstance(preset_value, Iterable) and not isinstance(preset_value, (str, bytes)):
+        return [str(item) for item in preset_value]
+    return []
 
 
 class Settings(BaseSettings):
@@ -66,7 +75,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
     fx_feed_url: AnyHttpUrl = Field(
-        default="https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd"
+        default=cast(AnyHttpUrl, "https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd")
     )
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
@@ -82,7 +91,7 @@ class Settings(BaseSettings):
         default=60, ge=15, description="Interval for sweeping expired quotes from the ledger"
     )
 
-    polymarket_api_base: AnyHttpUrl = Field(default="https://gamma-api.polymarket.com")
+    polymarket_api_base: AnyHttpUrl = Field(default=cast(AnyHttpUrl, "https://gamma-api.polymarket.com"))
     polymarket_timeout_seconds: float = Field(default=5.0)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
@@ -96,8 +105,8 @@ class Settings(BaseSettings):
 
     default_page_size: int = Field(default=50)
     max_page_size: int = Field(default=250)
-    allowed_hosts: list[str] = Field(default_factory=lambda: list(PRESET.get("api_allowed_hosts", [])))
-    cors_allow_origins: list[str] = Field(default_factory=lambda: list(PRESET.get("api_cors_origins", [])))
+    allowed_hosts: list[str] = Field(default_factory=lambda: _preset_list("api_allowed_hosts"))
+    cors_allow_origins: list[str] = Field(default_factory=lambda: _preset_list("api_cors_origins"))
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS"])
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)

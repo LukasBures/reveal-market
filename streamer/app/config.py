@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from urllib.parse import urlparse, urlunparse
 
 from pydantic import AnyHttpUrl, Field, field_validator
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
         default="wss://ws-subscriptions-clob.polymarket.com/ws/market", description="Polymarket CLOB websocket URL"
     )
     clob_host: AnyHttpUrl | None = Field(
-        default="https://clob.polymarket.com",
+        default=cast(AnyHttpUrl, "https://clob.polymarket.com"),
         description="Optional Polymarket CLOB host used by py_clob_client for midpoint fetches",
     )
     subgraph_default_url: AnyHttpUrl | None = Field(
@@ -25,27 +26,45 @@ class Settings(BaseSettings):
         description="Default Polymarket subgraph endpoint (used when type-specific endpoints are unset)",
     )
     subgraph_markets_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        ),
         description="Markets/metadata subgraph endpoint (orderbook subgraph aggregates)",
     )
     subgraph_trades_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn",
+        ),
         description="Trades/Activity subgraph endpoint (order-filled events)",
     )
     subgraph_activity_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/activity-subgraph/0.0.4/gn",
+        ),
         description="Activity subgraph endpoint (splits/merges/redemptions)",
     )
     subgraph_positions_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/positions-subgraph/0.0.7/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/positions-subgraph/0.0.7/gn",
+        ),
         description="Positions/portfolio subgraph endpoint",
     )
     subgraph_open_interest_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/oi-subgraph/0.0.6/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/oi-subgraph/0.0.6/gn",
+        ),
         description="Open interest/TVL subgraph endpoint",
     )
     subgraph_pnl_url: AnyHttpUrl | None = Field(
-        default="https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn",
+        default=cast(
+            AnyHttpUrl,
+            "https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/pnl-subgraph/0.0.14/gn",
+        ),
         description="PnL subgraph endpoint",
     )
     subgraph_timeout_seconds: float = Field(default=6.0, gt=0, description="HTTP timeout for subgraph calls")
@@ -53,11 +72,11 @@ class Settings(BaseSettings):
     rtds_ping_seconds: int = Field(default=10, ge=3, description="RTDS ping interval in seconds")
     rtds_topic_clob: str = Field(default="clob_market", description="RTDS topic for orderbook data")
     fx_primary_rest_url: AnyHttpUrl = Field(
-        default="https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT",
+        default=cast(AnyHttpUrl, "https://api.binance.com/api/v3/ticker/price?symbol=ZENUSDT"),
         description="Primary REST fallback for FX (Binance HTTP).",
     )
     fx_secondary_rest_url: AnyHttpUrl | None = Field(
-        default="https://min-api.cryptocompare.com/data/price?fsym=ZEN&tsyms=USD",
+        default=cast(AnyHttpUrl, "https://min-api.cryptocompare.com/data/price?fsym=ZEN&tsyms=USD"),
         description="Secondary REST fallback for FX (CryptoCompare).",
     )
     fx_primary_ws_url: str | None = Field(
@@ -115,10 +134,12 @@ class Settings(BaseSettings):
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-headers list")
     cors_allow_credentials: bool = Field(default=False, description="CORS allow-credentials flag")
     public_base_url: AnyHttpUrl | None = Field(
-        default="https://stream.revealmarket.xyz", description="Public HTTPS streamer host used by browsers."
+        default=cast(AnyHttpUrl, "https://stream.revealmarket.xyz"),
+        description="Public HTTPS streamer host used by browsers.",
     )
     internal_base_url: AnyHttpUrl | None = Field(
-        default="http://streamer:8100", description="Internal streamer host used by server components."
+        default=cast(AnyHttpUrl, "http://streamer:8100"),
+        description="Internal streamer host used by server components.",
     )
 
     @property

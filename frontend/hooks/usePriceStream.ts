@@ -12,7 +12,7 @@ export function usePriceStream(marketId: string, outcome = 0, tokenIds: string[]
     let cancelled = false;
     (async () => {
       try {
-        const data = await fetchPriceHistory(marketId, outcome, 200);
+        const data = await fetchPriceHistory(marketId, outcome, 500);
         if (cancelled) return;
         seedHistory(
           marketId,

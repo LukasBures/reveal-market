@@ -7,14 +7,12 @@ import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
-import { MarketLivePanels } from "@/components/markets/MarketLivePanels";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
-import { MarketActivityPanel } from "@/components/markets/MarketActivityPanel";
-import { fetchMarketActivity } from "@/lib/streamer-data";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
-import { getCommitDeadline } from "@/lib/markets";
+import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
+import { formatDateTime } from "@/lib/formatters";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -24,21 +22,6 @@ const MarketDetailMetadataPanel = dynamic(
   {
     loading: () => (
       <section className="h-64 animate-pulse rounded-3xl border border-white/10 bg-slate-900/40 p-6" aria-label="Loading market metadata" />
-    ),
-  },
-);
-
-const MarketDetailSidebarPanel = dynamic(
-  () =>
-    import("@/components/markets/MarketDetailSidebar").then((mod) => ({
-      default: mod.MarketDetailSidebar,
-    })),
-  {
-    loading: () => (
-      <aside
-        className="min-h-[320px] animate-pulse rounded-3xl border border-white/10 bg-slate-900/70 p-6"
-        aria-label="Loading market sidebar"
-      />
     ),
   },
 );
@@ -238,29 +221,58 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
   const coverImage = resolveMarketImage(market);
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
+  const priceStreamMarketId = resolvePriceStreamMarketId(market, canonicalEventId);
   const siblings = Array.isArray(market.siblings) ? market.siblings : [];
-  const isGrouped = Boolean(market.groupSlug && siblings.length > 1);
-  const activity = market.conditionId ? await fetchMarketActivity(market.conditionId, { limit: 12 }) : [];
+  const resolverSource =
+    market.resolutionSource ??
+    (market.extraData as any)?.resolution_source ??
+    (market.extraData as any)?.gamma?.resolution_source ??
+    null;
+  const resolverLabel = typeof resolverSource === "string" && resolverSource.trim() ? resolverSource.trim() : "Not provided";
+  const commitDeadline = getCommitDeadline(market);
+  const selectorSiblings =
+    siblings.length > 0
+      ? siblings
+      : [
+          {
+            eventId: canonicalEventId,
+            title: market.title,
+            groupItemTitle: market.groupItemTitle,
+            groupItemThreshold: market.groupItemThreshold,
+            groupPosition: market.groupPosition,
+            outcomePrices: market.outcomePrices ?? [],
+            volume24hUsd: market.volume24hUsd ?? null,
+            liquidityUsd: market.liquidityUsd ?? null,
+            commitDeadline: getCommitDeadline(market) ?? market.closesAt ?? market.commitDeadline ?? null,
+            startsAt: market.startsAt ?? null,
+            closesAt: market.closesAt ?? null,
+          },
+        ];
 
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-10">
           <MarketDetailHeader market={market} coverImage={coverImage} />
-          <MarketLiveStatusBar marketId={canonicalEventId} tokenIds={tokenIds} />
+          <MarketLiveStatusBar marketId={priceStreamMarketId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
-              {isGrouped && market.groupSlug && (
-                <GroupedMarketSelector groupSlug={market.groupSlug} siblings={siblings} activeEventId={canonicalEventId} />
-              )}
+              <GroupedMarketSelector
+                groupSlug={market.groupSlug ?? canonicalEventId}
+                siblings={selectorSiblings}
+                activeEventId={canonicalEventId}
+                labelOverride="Grouped market"
+                titleOverride={market.title}
+                subtitleOverride="Select a threshold to jump between sub-markets."
+                forceShow
+              />
               <MarketDetailChart
-                marketId={canonicalEventId}
+                marketId={priceStreamMarketId}
                 tokenIds={tokenIds}
                 outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
+                outcomePrices={market.outcomePrices ?? []}
               />
-              <MarketLivePanels marketId={canonicalEventId} tokenIds={tokenIds} />
               <MarketAnalyticsPanel market={market} />
-              <MarketDetailSidebarPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -270,6 +282,11 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                         Expand resolution criteria
                       </summary>
                       <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{contextCopy}</div>
+                      <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                        <li>Resolver source: {resolverLabel}</li>
+                        <li>Commit deadline: {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}</li>
+                        <li>Reveal deadline: {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}</li>
+                      </ul>
                     </details>
                   </div>
                 </div>
@@ -283,6 +300,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
                 outcomes={market.outcomes ?? []}
                 outcomePrices={market.outcomePrices ?? []}
                 initialOutcomeId={0}
+                marketTitle={market.title}
               />
             </div>
           </div>

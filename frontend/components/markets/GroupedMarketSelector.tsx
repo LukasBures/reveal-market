@@ -6,18 +6,24 @@ import type { MarketSibling } from "@/lib/api-types";
 import { formatDate, formatUsd } from "@/lib/formatters";
 
 type Props = {
-  groupSlug: string;
+  groupSlug?: string | null;
   siblings: MarketSibling[];
   activeEventId: string;
   linkToGroupPage?: boolean;
+  labelOverride?: string;
+  titleOverride?: string;
+  subtitleOverride?: string;
+  forceShow?: boolean;
 };
 
-const formatGroupTitle = (slug: string): string =>
-  slug
+const formatGroupTitle = (slug?: string | null): string => {
+  if (!slug) return "Market";
+  return slug
     .split("-")
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+};
 
 const formatPrice = (value: number | null | undefined): string => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -27,9 +33,21 @@ const formatPrice = (value: number | null | undefined): string => {
   return "—";
 };
 
-export function GroupedMarketSelector({ groupSlug, siblings, activeEventId, linkToGroupPage = false }: Props) {
-  if (!groupSlug || siblings.length <= 1) return null;
-  const title = formatGroupTitle(groupSlug);
+export function GroupedMarketSelector({
+  groupSlug,
+  siblings,
+  activeEventId,
+  linkToGroupPage = false,
+  labelOverride,
+  titleOverride,
+  subtitleOverride,
+  forceShow = false,
+}: Props) {
+  if (!forceShow && (!groupSlug || siblings.length <= 1)) return null;
+  const title = titleOverride ?? formatGroupTitle(groupSlug);
+  const label = labelOverride ?? "Grouped market";
+  const subtitle = subtitleOverride ?? "Select a threshold to jump between sub-markets.";
+  const countLabel = `${siblings.length} sub-market${siblings.length === 1 ? "" : "s"}`;
 
   const labeledSiblings = useMemo(() => {
     const used = new Set<string>();
@@ -62,28 +80,29 @@ export function GroupedMarketSelector({ groupSlug, siblings, activeEventId, link
     });
   }, [siblings]);
 
-  return (
-    <section className="rounded-3xl border border-emerald-900/60 bg-emerald-900/20 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">Grouped market</p>
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
-          <p className="text-sm text-emerald-100/80">Select a threshold to jump between sub-markets.</p>
+    return (
+      <section className="rounded-3xl border border-white/10 bg-slate-950/40 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">{label}</p>
+            <h2 className="text-xl font-semibold text-white">{title}</h2>
+            <p className="text-sm text-emerald-100/80">{subtitle}</p>
+          </div>
+          <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
+            {countLabel}
+          </span>
         </div>
-        <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
-          {siblings.length} sub-markets
-        </span>
-      </div>
-      <div className="mt-4 space-y-2">
-        {labeledSiblings.map((sibling) => {
-          const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
-          const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
-          const volume = sibling.volume24hUsd ?? null;
-          const active = sibling.eventId === activeEventId;
-          const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
-          const href: UrlObject | Route = linkToGroupPage
-            ? { pathname: `/markets/group/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
-            : (`/markets/${encodeURIComponent(sibling.eventId)}` as Route);
+        <div className="mt-4 space-y-2">
+          {labeledSiblings.map((sibling) => {
+            const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
+            const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
+            const volume = sibling.volume24hUsd ?? null;
+            const active = sibling.eventId === activeEventId;
+            const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+          const href: UrlObject | Route =
+            linkToGroupPage && groupSlug
+              ? { pathname: `/markets/group/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+              : (`/markets/${encodeURIComponent(sibling.eventId)}` as Route);
           return (
             <Link
               key={`${sibling.eventId}-summary`}
@@ -94,10 +113,10 @@ export function GroupedMarketSelector({ groupSlug, siblings, activeEventId, link
                   : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
               }`}
             >
-              <span className="text-[11px] uppercase tracking-[0.25em] text-emerald-100/70">{label}</span>
+              <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
               <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
               <span className="text-sm text-white sm:text-right">No {noPrice}</span>
-              <span className="text-xs text-emerald-100/80 sm:text-right">24h vol {formatUsd(volume ?? 0)}</span>
+              <span className="text-xs text-slate-200 sm:text-right">24h vol {formatUsd(volume ?? 0)}</span>
             </Link>
           );
         })}

@@ -217,7 +217,7 @@ export async function fetchPricingQuoteWithMeta(
 export async function fetchPriceHistory(
   marketId: string,
   outcome: number,
-  limit = 200,
+  limit = 500,
 ): Promise<Array<{ timestamp: string; price: string; display_price: string; fx_stale?: boolean }>> {
   const res = await fetch(
     getStreamerEndpoint(`/history?market_id=${encodeURIComponent(marketId)}&outcome=${outcome}&limit=${limit}`, true),
