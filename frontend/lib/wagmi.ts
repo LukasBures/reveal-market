@@ -63,7 +63,7 @@ const createWalletConnectors = (): CreateConnectorFn[] => {
           name: "Reveal Market",
           description: "Private prediction markets",
           url: resolvedSiteUrl,
-          icons: [new URL("/icon/favicon-96x96.png", resolvedSiteUrl).toString()],
+          icons: [new URL("/icons/favicon-96x96.png", resolvedSiteUrl).toString()],
         },
       }),
     );

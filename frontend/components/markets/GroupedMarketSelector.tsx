@@ -114,6 +114,7 @@ export function GroupedMarketSelector({
             <Link
               key={`${sibling.eventId}-summary`}
               href={href}
+              scroll={false}
               className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                 active
                   ? "border-emerald-400 bg-emerald-500/10 shadow-md shadow-emerald-500/20"

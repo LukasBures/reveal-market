@@ -502,8 +502,8 @@ class _AsyncWebSocket:
             if self._timeout is None:
                 return await self._ws.recv()
             return await asyncio.wait_for(self._ws.recv(), timeout=self._timeout)
-        except asyncio.TimeoutError as exc:
-            raise asyncio.TimeoutError(f"{self._name} read timeout after {self._timeout}s ({self._url})") from exc
+        except TimeoutError as exc:
+            raise TimeoutError(f"{self._name} read timeout after {self._timeout}s ({self._url})") from exc
 
 
 async def iter_ws(
