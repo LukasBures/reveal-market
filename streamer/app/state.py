@@ -482,10 +482,10 @@ class StreamState:
         return quote
 
 
-class _WsWithReadTimeout:
-    """Proxy websocket that enforces a read timeout on iteration."""
+class _AsyncWebSocket:
+    """Proxy websocket that supports async iteration with optional read timeout."""
 
-    def __init__(self, ws, timeout: float, name: str, url: str):
+    def __init__(self, ws, *, timeout: float | int | None, name: str, url: str):
         self._ws = ws
         self._timeout = timeout
         self._name = name
@@ -499,11 +499,11 @@ class _WsWithReadTimeout:
 
     async def __anext__(self):
         try:
-            return await asyncio.wait_for(self._ws.__anext__(), timeout=self._timeout)
+            if self._timeout is None:
+                return await self._ws.recv()
+            return await asyncio.wait_for(self._ws.recv(), timeout=self._timeout)
         except asyncio.TimeoutError as exc:
-            raise asyncio.TimeoutError(
-                f"{self._name} read timeout after {self._timeout}s ({self._url})"
-            ) from exc
+            raise asyncio.TimeoutError(f"{self._name} read timeout after {self._timeout}s ({self._url})") from exc
 
 
 async def iter_ws(
@@ -525,7 +525,7 @@ async def iter_ws(
                 ping_interval=ping_interval if ping_interval is not None else 5,
                 ping_timeout=ping_timeout if ping_timeout is not None else 20,
             ) as ws:
-                yield _WsWithReadTimeout(ws, read_timeout, name, ws_url) if read_timeout else ws
+                yield _AsyncWebSocket(ws, timeout=read_timeout, name=name, url=ws_url)
         except InvalidStatusCode as exc:  # pragma: no cover - reconnection path
             logger.warning(
                 "ws dropped; reconnecting",
