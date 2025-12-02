@@ -9,6 +9,7 @@ const PUBLIC_PATHS = [
   "/",
   "/healthz",
   "/contact",
+  "/brand",
   "/icons",
   "/site.webmanifest",
   "/opengraph-image",

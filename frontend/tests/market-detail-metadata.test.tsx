@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import React from "react";
 import { MarketDetailMetadata } from "@/components/markets/MarketDetailMetadata";
 import type { MarketDetail } from "@/lib/api-types";
+import { afterEach } from "vitest";
 
 const baseMarket: MarketDetail = {
   eventId: "evt-1",
@@ -25,6 +26,12 @@ const baseMarket: MarketDetail = {
   extraData: { description: "Mirror" },
 };
 
+const originalExplorer = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL;
+
+afterEach(() => {
+  process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = originalExplorer;
+});
+
 describe("MarketDetailMetadata", () => {
   it("renders core identifiers and tags", () => {
     render(<MarketDetailMetadata market={baseMarket} />);
@@ -33,6 +40,94 @@ describe("MarketDetailMetadata", () => {
     expect(screen.getByText(baseMarket.marketAddress!)).toBeInTheDocument();
     expect(screen.getByText("#fed")).toBeInTheDocument();
     expect(screen.getByText("#macro")).toBeInTheDocument();
+  });
+
+  it("renders condition/question IDs and links addresses to the explorer", () => {
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://explorer.testnet/";
+
+    render(<MarketDetailMetadata market={baseMarket} />);
+
+    expect(screen.getByText("0xabc")).toBeInTheDocument();
+    expect(screen.getByText("0xdef")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: baseMarket.marketAddress! })).toHaveAttribute(
+      "href",
+      "https://explorer.testnet/address/0x123",
+    );
+    expect(screen.getByRole("button", { name: "Copy Market address" })).toBeInTheDocument();
+  });
+
+  it("prefers gamma slug and renders CLOB metadata plus rake", () => {
+    const market: MarketDetail = {
+      ...baseMarket,
+      rakeBps: 149.6,
+      extraData: {
+        ...(baseMarket.extraData ?? {}),
+        gamma: {
+          slug: "gamma-slug",
+          clobTokenIds: [111, "222"],
+          clobPairId: "pair-999",
+        },
+      },
+    };
+
+    render(<MarketDetailMetadata market={market} />);
+
+    expect(screen.getByText("gamma-slug")).toBeInTheDocument();
+    expect(screen.getByText("pair-999")).toBeInTheDocument();
+    expect(screen.getByText("111, 222")).toBeInTheDocument();
+    expect(screen.getByText("150 bps")).toBeInTheDocument();
+  });
+
+  it("links resolver URLs and renders resolution winners", () => {
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://explorer.testnet/";
+    const market: MarketDetail = {
+      ...baseMarket,
+      resolutionSource: "https://resolver.example.com/market/evt-1",
+      resolution: {
+        resolved: true,
+        winners: [
+          { index: 1, label: "Outcome B", payout: 0.42 },
+          { index: 0, payout: 0.5 },
+        ],
+        checkedAt: "2025-12-01T10:00:00Z",
+        transactionHash: "0xfeedface",
+      },
+    };
+
+    render(<MarketDetailMetadata market={market} />);
+
+    expect(screen.getByRole("link", { name: "https://resolver.example.com/market/evt-1" })).toHaveAttribute(
+      "href",
+      "https://resolver.example.com/market/evt-1",
+    );
+    expect(screen.getByText("Outcome B")).toBeInTheDocument();
+    expect(screen.getByText(/42%/)).toBeInTheDocument();
+    expect(screen.getByText(/Outcome 0/)).toBeInTheDocument();
+    expect(screen.getByText("Dec 1, 2025 10:00")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "0xfeedface" })).toHaveAttribute(
+      "href",
+      "https://explorer.testnet/tx/0xfeedface",
+    );
+  });
+
+  it("renders resolution transaction details with explorer link and block number", () => {
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://explorer.testnet/";
+    const market: MarketDetail = {
+      ...baseMarket,
+      resolution: {
+        resolved: true,
+        transactionHash: "0xdeadbeef",
+        blockNumber: 99,
+      },
+    };
+
+    render(<MarketDetailMetadata market={market} />);
+
+    expect(screen.getByRole("link", { name: "0xdeadbeef" })).toHaveAttribute(
+      "href",
+      "https://explorer.testnet/tx/0xdeadbeef",
+    );
+    expect(screen.getByText("Block #99")).toBeInTheDocument();
   });
 
   it("hides tags when metadata missing", () => {

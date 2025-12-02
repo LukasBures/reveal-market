@@ -230,10 +230,12 @@ jobs:
           pip install uv
 
       - name: Install selector generation deps
-        run: uv pip install eth-utils
+        run: uv pip install --system eth-utils
 
       - name: Generate contract error selectors
-        run: python scripts/generate_error_selectors.py > contracts/cache/errors.json
+        run: |
+          python scripts/generate_error_selectors.py > contracts/cache/errors.json
+          python scripts/generate_error_selectors.py --write-frontend
 
       - name: Zen contracts pipeline
         working-directory: contracts/zen

@@ -4,44 +4,41 @@ import Image from "next/image";
 import { LandingAccessForm } from "@/components/landing/LandingAccessForm";
 
 const heroStats = [
-  { label: "Commit phase", value: "Sealed" },
-  { label: "Settlement", value: "Groth16" },
+  { label: "Access", value: "Invite code" },
+  { label: "Board status", value: "Private" },
 ];
 
 const steps = [
   {
-    title: "Sealed Commitments",
-    description:
-      "Participants buy tickets via hashed commits. No one — including the operator — can inspect odds, flows, or position sizes.",
+    title: "Make your call",
+    description: "Pick a market and submit your entry. No public odds board, no copy trading while it's live.",
   },
   {
-    title: "Lock & Resolve",
-    description:
-      "Once the oracle finalizes an event, the settlement module validates the commit set, rejects late entries, and computes payouts.",
+    title: "Let it play out",
+    description: "Our desk watches the event, posts pauses or rule tweaks, and closes the board when action stops.",
   },
   {
-    title: "Proof-Backed Settlement",
-    description:
-      "A Groth16 proof confirms totals, rake, and per-ticket rewards before any winnings are released. Losing tickets stay private forever.",
+    title: "Collect with a receipt",
+    description: "When the outcome is final, everyone gets a plain recap of what paid out and why.",
   },
 ];
 
 const benefits = [
   {
-    title: "No Herding or Copy-Trading",
-    description: "Hidden orderflow removes cascades, mirror trades, and odds-chasing pressure.",
+    title: "No copycats",
+    description: "Entries stay private until settlement, so sizing up doesn't invite a rush of mirror trades.",
   },
   {
-    title: "No MEV or Sniping",
-    description: "Sealed commits + private relays close off frontrunning and mempool analysis.",
+    title: "No sniping",
+    description: "With no public order book, there's no incentive to frontrun or chase prints.",
   },
   {
-    title: "Verifiable Fairness",
-    description: "zk-proofs validate every pool. No trusted operator, no secret math.",
+    title: "Receipts, not jargon",
+    description: "Settlement notes are written for investors, not engineers.",
   },
   {
-    title: "Simple Consumer UX",
-    description: "Buy a ticket, come back for a proof-backed claim — no public odds board required.",
+    title: "Simple flow",
+    description: "Buy a ticket, check back when results land, claim with confidence.",
   },
 ];
 
@@ -56,10 +53,10 @@ export function LandingGate() {
               Private beta
             </div>
             <div className="space-y-4">
-              <h1 className="text-4xl font-semibold sm:text-5xl">Private while live. Provable at the end.</h1>
+              <h1 className="text-4xl font-semibold sm:text-5xl">Hidden while live. Transparent when it counts.</h1>
               <p className="text-base text-slate-300">
-                Reveal Market runs sealed prediction markets on Horizen. While a market is live, no odds, positions, or
-                orderflow are visible. After resolution, a succinct zk-proof verifies pool math and payouts.
+                Reveal Market runs invite-only prediction boards. While a market is live, no odds, positions, or sizing
+                hit a public feed. When the outcome is final, everyone sees a clean settlement receipt.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
@@ -96,11 +93,8 @@ export function LandingGate() {
                 loading="eager"
               />
             </div>
-            <p className="text-sm uppercase tracking-[0.4em] text-white/60">Proof-ready settlement stack</p>
-            <p className="text-base text-slate-200">
-              Sealed commit phases, private relayers, and Groth16-backed settlement give partners verifiable fairness
-              without exposing live orderflow.
-            </p>
+            <p className="text-sm uppercase tracking-[0.4em] text-white/60">Private board with receipts</p>
+            <p className="text-base text-slate-200">The private board that shows its receipts once the story is over.</p>
           </div>
         </div>
 
@@ -131,11 +125,11 @@ export function LandingGate() {
         </section>
 
         <section className="space-y-4 text-center text-slate-200">
-          <p className="text-sm uppercase tracking-[0.45em] text-slate-500">Provable, fair, private</p>
+          <p className="text-sm uppercase tracking-[0.45em] text-slate-500">Private conviction, public receipts</p>
           <div className="space-y-2 text-sm">
-            <p>Commit → lock → proof-backed settle.</p>
-            <p>Blind pari-mutuel + fixed-odds engines pair with consumer UX, verifiable cryptography, and scalable creator distribution.</p>
-            <p>This isn&apos;t another odds board — it&apos;s a new prediction primitive.</p>
+            <p>Make your call while the board stays quiet.</p>
+            <p>When the story ends, read the receipt, claim, and move on to the next headline.</p>
+            <p>This isn&apos;t another odds board — it&apos;s conviction without the crowding.</p>
           </div>
         </section>
       </div>

@@ -17,6 +17,10 @@ type MetadataItem = {
 };
 
 export function MarketDetailMetadata({ market }: Props) {
+  const explorerBase = (
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz"
+  ).replace(/\/+$/, "");
+
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
     | null;
@@ -56,6 +60,12 @@ export function MarketDetailMetadata({ market }: Props) {
   const resolutionWinners: ResolutionWinner[] = Array.isArray(resolution?.winners)
     ? (resolution.winners as ResolutionWinner[])
     : [];
+  const explorerHref = (kind: "address" | "tx", value?: string | null) => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return kind === "tx" ? `${explorerBase}/tx/${trimmed}` : `${explorerBase}/address/${trimmed}`;
+  };
 
   const copyToClipboard = async (value?: string | null) => {
     if (!value || typeof navigator === "undefined" || !navigator.clipboard) return;
@@ -91,7 +101,7 @@ export function MarketDetailMetadata({ market }: Props) {
         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
         <div className="mt-2 flex items-center gap-2">
           {content}
-          {item.value && !item.copyDisabled && !item.href && (
+          {item.value && !item.copyDisabled && (
             <button
               type="button"
               onClick={() => copyToClipboard(item.value)}
@@ -126,6 +136,15 @@ export function MarketDetailMetadata({ market }: Props) {
           copyDisabled: true,
         })}
         {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending", copyDisabled: true })}
+        {market.marketAddress &&
+          renderItem({
+            label: "Market address",
+            value: market.marketAddress,
+            mono: true,
+            href: explorerHref("address", market.marketAddress),
+          })}
+        {market.conditionId && renderItem({ label: "Condition ID", value: market.conditionId, mono: true })}
+        {market.questionId && renderItem({ label: "Question ID", value: market.questionId, mono: true })}
         {sourceSlug && renderItem({ label: "Source slug", value: sourceSlug, mono: true })}
         {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
         {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
@@ -173,7 +192,19 @@ export function MarketDetailMetadata({ market }: Props) {
               <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-xs text-slate-400">
                 {resolution.transactionHash && (
                   <p className="break-all">
-                    TX: {resolution.transactionHash}{" "}
+                    TX:{" "}
+                    {explorerHref("tx", resolution.transactionHash) ? (
+                      <a
+                        href={explorerHref("tx", resolution.transactionHash) ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-4 hover:text-brand-200"
+                      >
+                        {resolution.transactionHash}
+                      </a>
+                    ) : (
+                      resolution.transactionHash
+                    )}{" "}
                     <button
                       type="button"
                       onClick={() => copyToClipboard(resolution.transactionHash)}

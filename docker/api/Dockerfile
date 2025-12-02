@@ -89,6 +89,8 @@ COPY --chown=appuser:appuser ${SHARED_DIR} ./shared
 COPY --chown=appuser:appuser ${SERVICE_DIR}/app ./app
 COPY --chown=appuser:appuser ${SERVICE_DIR}/run.py ./run.py
 COPY --chown=appuser:appuser ${MIGRATIONS_DIR} ./migrations
+# Include contract error selectors for backend decoding utilities.
+COPY --chown=appuser:appuser contracts/cache /contracts/cache
 
 EXPOSE 8000
 

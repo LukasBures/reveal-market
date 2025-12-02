@@ -6,6 +6,7 @@
 !frontend/
 !hedger/
 !streamer/
+!contracts/cache/
 !shared/
 !pyproject.toml
 !uv.lock

@@ -86,13 +86,8 @@ export const metadata: Metadata = {
     template: "%s | Reveal Market",
   },
   description:
-    "Zero-knowledge commit-and-reveal prediction markets with a fast FastAPI backend and Foundry contracts.",
-  keywords: [
-    "reveal market",
-    "prediction markets",
-    "zero knowledge",
-    "institutional trading",
-  ],
+    "Invite-only prediction markets that keep entries private while events play out and publish clear settlement receipts.",
+  keywords: ["reveal market", "prediction markets", "private markets", "institutional trading"],
   robots: {
     index: true,
     follow: true,
@@ -100,7 +95,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Reveal Market",
     description:
-      "Zero-knowledge prediction markets with a battle-tested backend and wallet-ready frontend.",
+      "Invite-only prediction markets where your entries stay private until outcomes settle and receipts post.",
     url: SITE_URL,
     siteName: "Reveal Market",
     images: [

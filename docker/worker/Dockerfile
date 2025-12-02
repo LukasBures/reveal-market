@@ -85,6 +85,8 @@ COPY --chown=workeruser:workeruser ${SHARED_DIR} ./shared
 COPY --chown=workeruser:workeruser ${SERVICE_DIR}/app ./app
 COPY --chown=workeruser:workeruser ${SERVICE_DIR}/run.py ./run.py
 COPY --chown=workeruser:workeruser ${MIGRATIONS_DIR} ./migrations
+# Include contract error selectors for backend decoding utilities.
+COPY --chown=workeruser:workeruser contracts/cache /contracts/cache
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -m app.healthcheck
