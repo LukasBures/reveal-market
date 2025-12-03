@@ -21,7 +21,19 @@ from pathlib import Path
 try:
     from eth_utils import keccak
 except ImportError as exc:  # pragma: no cover - defensive CLI clarity
-    raise SystemExit("eth_utils is required to generate selectors. Install via `uv pip install eth-utils`.") from exc
+    raise SystemExit(
+        "eth_utils is required to generate selectors. Install via `uv pip install eth-utils \"eth-hash[pysha3]\"`."
+    ) from exc
+
+# eth-utils depends on eth-hash, which needs a keccak backend such as pysha3.
+# Fail fast with a clearer message if the backend is missing.
+try:  # pragma: no cover - executed at import time
+    keccak(b"")
+except ImportError as exc:
+    raise SystemExit(
+        "eth-utils keccak backend missing. Install via `uv run --with eth-utils --with \"eth-hash[pysha3]\" "
+        "python scripts/generate_error_selectors.py` or `pip install \"eth-hash[pysha3]\"`."
+    ) from exc
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS_DIR = ROOT / "contracts" / "zen" / "src"

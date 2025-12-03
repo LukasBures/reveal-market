@@ -231,8 +231,8 @@ jobs:
 
       - name: Generate contract error selectors
         run: |
-          uv run --with eth-utils python scripts/generate_error_selectors.py > contracts/cache/errors.json
-          uv run --with eth-utils python scripts/generate_error_selectors.py --write-frontend
+          uv run --with eth-utils --with "eth-hash[pysha3]" python scripts/generate_error_selectors.py > contracts/cache/errors.json
+          uv run --with eth-utils --with "eth-hash[pysha3]" python scripts/generate_error_selectors.py --write-frontend
 
       - name: Zen contracts pipeline
         working-directory: contracts/zen
