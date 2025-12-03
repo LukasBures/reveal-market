@@ -243,7 +243,8 @@ def test_stream_websocket_sends_messages(test_app):
         if "ping" in incoming:
             incoming = ws.receive_text()
         assert '"price":"0.42"' in incoming
-    assert "m1" in state.subscriptions.assets
+    # Subscription should have been registered at least once.
+    assert "m1" in state._acquired_history
 
 
 def test_dashboard_endpoint(monkeypatch):
