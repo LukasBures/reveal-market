@@ -13,11 +13,12 @@ Defaults:
 from __future__ import annotations
 
 import logging
+import os
 import time
+from decimal import ROUND_UP, Decimal
 from typing import Any
 
 import requests
-from decimal import Decimal, ROUND_UP
 
 API_URL = "https://horizen-testnet.hub.caldera.xyz/api/trpc/faucet.requestFaucetFunds"
 EXPLORER_BASE = "https://horizen-testnet.explorer.caldera.xyz/tx"

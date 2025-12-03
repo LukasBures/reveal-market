@@ -4,47 +4,48 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from prometheus_client import REGISTRY, Counter, Gauge
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge
 
 
 class StreamerMetrics:
     """Container for shared Prometheus instruments and helpers."""
 
-    def __init__(self) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        registry = registry or REGISTRY
         self.stream_deliveries = Counter(
             "streamer_stream_deliveries_total",
             "Events delivered to clients",
             ["transport", "market_id", "source"],
-            registry=REGISTRY,
+            registry=registry,
         )
         self.stream_dropped = Counter(
             "streamer_stream_dropped_total",
             "Dropped/ignored stream events",
             ["transport", "reason"],
-            registry=REGISTRY,
+            registry=registry,
         )
         self.market_staleness = Gauge(
             "streamer_market_staleness_seconds",
             "Seconds since last tick per market",
             ["market_id"],
-            registry=REGISTRY,
+            registry=registry,
         )
         self.stale_market_total = Gauge(
             "streamer_stale_markets_total",
             "Count of markets considered stale",
-            registry=REGISTRY,
+            registry=registry,
         )
         self.assets_fallback = Counter(
             "streamer_assets_fallback_total",
             "Connections that fell back to market_id because assets_ids were missing",
             ["transport", "target"],
-            registry=REGISTRY,
+            registry=registry,
         )
         self.ingest_dropped = Counter(
             "streamer_ingest_dropped_total",
             "Dropped/ignored ingest events",
             ["source", "reason"],
-            registry=REGISTRY,
+            registry=registry,
         )
 
     def record_delivery(self, transport: str, payload: Any) -> None:

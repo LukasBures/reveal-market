@@ -7,6 +7,7 @@ import pytest
 from app.config import Settings
 from app.metrics import StreamerMetrics
 from app.state import FxQuote, StreamState
+from prometheus_client import CollectorRegistry
 
 
 class DummyRedis:
@@ -127,7 +128,7 @@ def test_stale_markets_detection():
 
 
 def test_stale_markets_eviction():
-    metrics = StreamerMetrics()
+    metrics = StreamerMetrics(registry=CollectorRegistry())
     settings = Settings(market_stale_seconds=60, market_stale_evict_seconds=120)
     state = StreamState(settings, metrics=metrics)
     state.last_seen["stale"] = datetime.now(UTC) - timedelta(seconds=90)
