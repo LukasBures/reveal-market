@@ -211,14 +211,18 @@ def create_app() -> FastAPI:
         fx = await state.get_fx()
         stale_markets = state.stale_markets(settings.market_stale_seconds)
         if stale_markets:
+            stale_sample = stale_markets[:50]
+            extra = {
+                "event": "stream.stale.markets",
+                "count": len(stale_markets),
+                "threshold_seconds": settings.market_stale_seconds,
+                "stale_markets": stale_sample,
+            }
+            if len(stale_sample) < len(stale_markets):
+                extra["stale_markets_omitted"] = len(stale_markets) - len(stale_sample)
             logger.warning(
                 "stale markets detected",
-                extra={
-                    "event": "stream.stale.markets",
-                    "count": len(stale_markets),
-                    "threshold_seconds": settings.market_stale_seconds,
-                    "stale_markets": stale_markets,
-                },
+                extra=extra,
             )
         status = "ok"
         if fx.stale or not state.fx_ws_connected:

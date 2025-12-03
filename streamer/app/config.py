@@ -101,6 +101,9 @@ class Settings(BaseSettings):
         default=30, ge=5, description="Max seconds to wait for FX WS data before reconnect"
     )
     market_stale_seconds: int = Field(default=60, ge=10, description="Threshold to consider market data stale")
+    market_stale_evict_seconds: int = Field(
+        default=900, ge=60, description="Evict markets from staleness tracking after this many seconds"
+    )
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25, description="Percent worsen applied to displayed odds")
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")
@@ -149,6 +152,14 @@ class Settings(BaseSettings):
     @property
     def total_monetization(self) -> float:
         return self.worsen_percent + self.haircut_percent + self.rake_percent
+
+    @field_validator("market_stale_evict_seconds")
+    @classmethod
+    def _require_evict_after_stale(cls, value, info):
+        stale_seconds = info.data.get("market_stale_seconds")
+        if stale_seconds and value <= stale_seconds:
+            raise ValueError("STREAMER_MARKET_STALE_EVICT_SECONDS must exceed STREAMER_MARKET_STALE_SECONDS")
+        return value
 
     @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
     @classmethod

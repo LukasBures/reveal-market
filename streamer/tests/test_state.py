@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from app.config import Settings
+from app.metrics import StreamerMetrics
 from app.state import FxQuote, StreamState
 
 
@@ -123,6 +124,20 @@ def test_stale_markets_detection():
     state.last_seen["old"] = datetime.now(UTC) - timedelta(seconds=120)
     stale = state.stale_markets(stale_after_seconds=60)
     assert "old" in stale and "fresh" not in stale
+
+
+def test_stale_markets_eviction():
+    metrics = StreamerMetrics()
+    settings = Settings(market_stale_seconds=60, market_stale_evict_seconds=120)
+    state = StreamState(settings, metrics=metrics)
+    state.last_seen["stale"] = datetime.now(UTC) - timedelta(seconds=90)
+    state.last_seen["evict"] = datetime.now(UTC) - timedelta(seconds=300)
+    metrics.market_staleness.labels(market_id="evict").set(300)
+    stale = state.stale_markets(stale_after_seconds=settings.market_stale_seconds)
+    assert "stale" in stale
+    assert "evict" not in stale
+    assert "evict" not in state.last_seen
+    assert metrics.stale_market_total._value.get() == len(stale)
 
 
 def test_add_rtds_symbols_increments_version():

@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -301,9 +302,27 @@ class StreamState:
         return data or {}
 
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:
+        now = datetime.now(UTC)
+        evict_after_seconds = max(
+            stale_after_seconds, getattr(self.settings, "market_stale_evict_seconds", stale_after_seconds)
+        )
+        evicted: list[str] = []
+        for market_id, ts in list(self.last_seen.items()):
+            age_seconds = (now - ts).total_seconds()
+            if age_seconds > evict_after_seconds:
+                evicted.append(market_id)
+                self.last_seen.pop(market_id, None)
+                if self.metrics:
+                    with suppress(Exception):
+                        self.metrics.market_staleness.remove(market_id)
+        if evicted:
+            logger.info(
+                "evicted long-stale markets from tracking",
+                extra={"event": "stream.stale.evict", "count": len(evicted), "evicted_sample": evicted[:10]},
+            )
         if self.metrics:
             return self.metrics.record_staleness(self.last_seen, stale_after=stale_after_seconds)
-        cutoff = datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
+        cutoff = now - timedelta(seconds=stale_after_seconds)
         return [mid for mid, ts in self.last_seen.items() if ts < cutoff]
 
     def acquire_assets(self, assets: Iterable[str]) -> list[str]:
