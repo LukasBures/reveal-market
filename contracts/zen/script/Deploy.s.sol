@@ -80,7 +80,8 @@ contract StubVerifier is IVerifier {
             }
 
             MarketFactory factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, deployer);
-            factory.syncFactoryHooks();
+            protocolPool.setMarketFactory(address(factory));
+            relayerEscrow.setMarketFactory(address(factory));
 
             vm.stopBroadcast();
 
@@ -96,16 +97,75 @@ contract StubVerifier is IVerifier {
             console.log("Expected public signals:", expectedInputs);
         }
 
-        function _loadVerifyingKeyJson(string memory json) private pure returns (VerifyingKeyConfig memory config) {
+        function _loadVerifyingKeyJson(string memory json) internal pure returns (VerifyingKeyConfig memory config) {
             // Support the canonical zkSync/rapidsnark layout (vk_alpha_1, vk_beta_2, vk_gamma_2, vk_delta_2, IC, circuitHash, expectedInputs).
-            config.alpha1 = abi.decode(vm.parseJson(json, ".vk_alpha_1"), (uint256[2]));
-            config.beta2 = abi.decode(vm.parseJson(json, ".vk_beta_2"), (uint256[2][2]));
-            config.gamma2 = abi.decode(vm.parseJson(json, ".vk_gamma_2"), (uint256[2][2]));
-            config.delta2 = abi.decode(vm.parseJson(json, ".vk_delta_2"), (uint256[2][2]));
-            config.ic = abi.decode(vm.parseJson(json, ".IC"), (uint256[2][]));
+            config.alpha1 = _readG1(json, ".vk_alpha_1");
+            config.beta2 = _readG2(json, ".vk_beta_2");
+            config.gamma2 = _readG2(json, ".vk_gamma_2");
+            config.delta2 = _readG2(json, ".vk_delta_2");
+            config.ic = _readIcPoints(json, ".IC");
             config.circuitHash = abi.decode(vm.parseJson(json, ".circuitHash"), (bytes32));
-            config.expectedInputs = abi.decode(vm.parseJson(json, ".expectedInputs"), (uint256));
+            config.expectedInputs = _readUint(json, ".expectedInputs");
             return config;
+        }
+
+        function _readUint(string memory json, string memory key) private pure returns (uint256) {
+            try vm.parseJsonUint(json, key) returns (uint256 numeric) {
+                return numeric;
+            } catch {
+                string memory numericStr = vm.parseJsonString(json, key);
+                return vm.parseUint(numericStr);
+            }
+        }
+
+        function _readUintArray(string memory json, string memory key) private pure returns (uint256[] memory values) {
+            try vm.parseJsonUintArray(json, key) returns (uint256[] memory numeric) {
+                return numeric;
+            } catch {
+                string[] memory text = vm.parseJsonStringArray(json, key);
+                values = new uint256[](text.length);
+                for (uint256 i = 0; i < text.length; ++i) {
+                    values[i] = vm.parseUint(text[i]);
+                }
+            }
+        }
+
+        function _readUintMatrix(string memory json, string memory key)
+            private
+            pure
+            returns (uint256[][] memory matrix)
+        {
+            matrix = abi.decode(vm.parseJson(json, key), (uint256[][]));
+        }
+
+        function _readG1(string memory json, string memory key) private pure returns (uint256[2] memory point) {
+            uint256[] memory coords = _readUintArray(json, key);
+            require(coords.length >= 2, "invalid g1 coords");
+            point[0] = coords[0];
+            point[1] = coords[1];
+        }
+
+        function _readG2(string memory json, string memory key) private pure returns (uint256[2][2] memory point) {
+            uint256[][] memory coords = _readUintMatrix(json, key);
+            require(coords.length >= 2 && coords[0].length >= 2 && coords[1].length >= 2, "invalid g2 coords");
+            point[0][0] = coords[0][0];
+            point[0][1] = coords[0][1];
+            point[1][0] = coords[1][0];
+            point[1][1] = coords[1][1];
+        }
+
+        function _readIcPoints(string memory json, string memory key)
+            private
+            pure
+            returns (uint256[2][] memory points)
+        {
+            uint256[][] memory coords = _readUintMatrix(json, key);
+            points = new uint256[2][](coords.length);
+            for (uint256 i = 0; i < coords.length; ++i) {
+                require(coords[i].length >= 2, "invalid ic coords");
+                points[i][0] = coords[i][0];
+                points[i][1] = coords[i][1];
+            }
         }
 
         function _envOrString(string memory key, string memory defaultValue) private view returns (string memory) {

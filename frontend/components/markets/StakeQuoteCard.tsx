@@ -19,9 +19,9 @@ type Props = {
   tradingHalted?: boolean | null;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 100;
-const MIN_STAKE_ZEN = 5;
-const MAX_STAKE_ZEN = 50;
+const DEFAULT_MAX_STAKE_ZEN = 1.0;
+const MIN_STAKE_ZEN = 0.1;
+const MAX_STAKE_ZEN = 10.0;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -29,7 +29,7 @@ const formatNumber = (value: number, decimals = 4) => {
 };
 
 export function StakeQuoteCard({
-  defaultStakeZen = 10,
+  defaultStakeZen = 0.1,
   marketAddress,
   marketId,
   outcomes = [],
@@ -184,6 +184,13 @@ export function StakeQuoteCard({
     if (!quote) return null;
     return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
   }, [quote]);
+  const profitZen = useMemo(() => {
+    if (!quote) return null;
+    if (profitUsd === null) return null;
+    const fx = Number(quote.zen_usd);
+    if (!Number.isFinite(fx) || fx <= 0) return null;
+    return profitUsd / fx;
+  }, [profitUsd, quote]);
   const toWinZen = useMemo(() => {
     if (!quote) return null;
     const fx = quote.zen_usd;
@@ -310,20 +317,20 @@ export function StakeQuoteCard({
               setStakeInput(raw);
               if (normalized === "") {
                 setStakeZen(0);
-                setStakeError("Enter between 5 and 50 ZEN");
+                setStakeError("Enter between 0.01 and 0.1 ZEN");
                 return;
               }
               const next = Number(normalized);
               if (Number.isNaN(next)) {
                 setStakeZen(0);
-                setStakeError("Enter between 5 and 50 ZEN");
+                setStakeError("Enter between 0.01 and 0.1 ZEN");
                 return;
               }
               const rounded = Math.round(next * 100) / 100;
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
               if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                setStakeError("Enter between 5 and 50 ZEN");
+                setStakeError("Enter between 0.01 and 0.1 ZEN");
               } else {
                 setStakeError(null);
               }
@@ -334,7 +341,7 @@ export function StakeQuoteCard({
               if (Number.isNaN(next)) {
                 setStakeInput("0.00");
                 setStakeZen(0);
-                setStakeError("Enter between 5 and 50 ZEN");
+                setStakeError("Enter between 0.01 and 0.1 ZEN");
                 return;
               }
               const rounded = Math.round(next * 100) / 100;
@@ -342,7 +349,7 @@ export function StakeQuoteCard({
               setStakeZen(capped);
               setStakeInput(capped.toFixed(2));
               if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                setStakeError("Enter between 5 and 50 ZEN");
+                setStakeError("Enter between 0.01 and 0.1 ZEN");
               } else {
                 setStakeError(null);
               }
@@ -353,7 +360,7 @@ export function StakeQuoteCard({
             placeholder="0.00 ZEN"
           />
           <div className="grid grid-cols-4 gap-2 text-[11px] text-slate-500">
-            {[5, 10, 25, 50].map((preset) => (
+            {[0.01, 0.1].map((preset) => (
               <button
                 key={preset}
                 type="button"
@@ -362,7 +369,7 @@ export function StakeQuoteCard({
                   setStakeZen(capped);
                   setStakeInput(capped.toFixed(2));
                   if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                    setStakeError("Enter between 5 and 50 ZEN");
+                    setStakeError("Enter between 0.01 and 0.1 ZEN");
                   } else {
                     setStakeError(null);
                   }
@@ -433,7 +440,7 @@ export function StakeQuoteCard({
           <div className="mt-2 grid grid-cols-2 gap-2">
             <span>Stake: {formatNumber(quote.stake_zen, 3)} ZEN</span>
             <span>Refund: {formatNumber(quote.refund_zen, 3)} ZEN</span>
-            <span>Profit: {formatNumber(profitUsd ?? NaN, 3)} USDC</span>
+            <span>Profit: {formatNumber(profitZen ?? NaN, 3)} ZEN</span>
             <span>Haircut: {formatNumber(quote.haircut_percent * 100, 2)}%</span>
             <span>Worsen: {formatNumber(quote.worsen_percent * 100, 2)}%</span>
             <span>Rake: {formatNumber(quote.rake_percent * 100, 2)}%</span>

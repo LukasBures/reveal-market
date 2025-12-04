@@ -9,7 +9,7 @@ export function LiveFxBadge() {
   const unavailable = status === "error";
   const live = status === "live" && !stale && !unavailable;
   const fxValue = formatZenUsd(fx?.zen_usd);
-  const label = unavailable ? "FX unavailable" : stale ? "FX stale" : `FX live ${fxValue ?? ""} USD`;
+  const label = unavailable ? "FX unavailable" : stale ? "FX stale" : `FX live 1 ZEN = ${fxValue ?? "?"} USD`;
   const className = live
     ? "bg-emerald-500/15 text-emerald-100"
     : stale

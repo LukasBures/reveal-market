@@ -51,7 +51,7 @@ export function PriceBanner({ fxLabel, fxStale, fxError }: PriceBannerProps) {
           )}
         </div>
         <span className="rounded-full bg-white/5 px-2 py-1 text-[11px] font-semibold tracking-wide md:px-3">
-          {fxLabel ? fxLabel : "ZEN/USDC loading ..."}
+          {fxLabel ? fxLabel : "ZEN/USD loading ..."}
         </span>
       </div>
     </div>

@@ -34,7 +34,7 @@ export function MainNav() {
   const { fx, error: fxError, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
-  const fxLabel = fxValue ? `ZEN/USDC $${fxValue}` : null;
+  const fxLabel = fxValue ? `ZEN/USD $${fxValue}` : null;
 
   useEffect(() => {
     if (!isMobileMenuOpen) {

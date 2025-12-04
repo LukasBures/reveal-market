@@ -12,10 +12,10 @@ def test_summary_client_fallback(monkeypatch):
     job = SummaryJob(
         job_id="job-1",
         event_id="evt-1",
-        title="Will ETH break 10k before 2026?",
-        description="Ethereum faces catalysts like ETF approvals and scaling upgrades.",
+        title="Will ZEN break 10k before 2026?",
+        description="ZEN faces catalysts like ETF approvals and scaling upgrades.",
         category="crypto",
-        tags=["eth", "markets"],
+        tags=["zen", "markets"],
         oracle="polymarket",
     )
     result = client.generate(job)

@@ -43,7 +43,7 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
         emit MarketRegistered(market);
     }
 
-    /// @notice Users deposit ZEN into their escrow balance.
+    /// @notice Users deposit native ZEN into their escrow balance.
     function deposit() external payable {
         balances[msg.sender] += msg.value;
         emit Deposited(msg.sender, msg.value);

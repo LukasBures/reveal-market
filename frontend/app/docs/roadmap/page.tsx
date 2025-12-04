@@ -61,8 +61,8 @@ export default function RoadmapPage() {
               worker batches for external observability platforms.
             </li>
             <li>
-              <strong>Horizen ZEN testnet support.</strong> Regulated partners can dress-rehearse deployments before
-              moving capital.
+              <strong>Horizen testnet (ZEN-denominated) support.</strong> Regulated partners can dress-rehearse deployments
+              before moving capital.
             </li>
           </ul>
         </div>

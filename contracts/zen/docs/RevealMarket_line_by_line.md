@@ -1,5 +1,7 @@
 # `RevealMarket.sol` line-by-line guide
 
+> Note: Horizen Testnet’s native asset is ZEN. References to “ETH” in function names/comments reflect the naming conventions in Solmate helpers (`safeTransferETH`, etc.) but represent native ZEN flows.
+
 Line 1 — `// SPDX-License-Identifier: MIT`
 Declares the MIT license for SPDX-aware tooling.
 

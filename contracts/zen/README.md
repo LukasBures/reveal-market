@@ -10,8 +10,8 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 - `Verifier`: configurable Groth16 verifier (10 public signals) with circuit hash.
 
 ## Flow
-1) Users `deposit` into `RelayerEscrow`.
-2) Backend issues `CommitAuth` signature; relayer calls `commitOnBehalf` → `market.commitWithAuthorization` with fixed ticket value; per-commit rake is forwarded immediately to `ProtocolPool`, net ticket value stays in-market, only commitments are stored.
+1) Users `deposit` into `RelayerEscrow` (native token, ZEN on Horizen testnet).
+2) Backend issues `CommitAuth` signature; relayer calls `commitOnBehalf` → `market.commitWithAuthorization` with fixed ticket value (choose denominations like `0.01 ether` or `0.1 ether` per market); per-commit rake is forwarded immediately to `ProtocolPool`, net ticket value stays in-market, only commitments are stored.
 3) After `commitDeadline`, oracle `lock()` (sets Merkle root) then `postResult`.
 4) Oracle calls `verifyAndSettle(proof, pubSignals)`; market enforces `totalLiability <= totalEscrow + protocolCap`, draws from `ProtocolPool` if needed, asserts proof rakeBps matches current config (rake already collected), pushes any surplus to the pool, moves to `Settled`.
 5) Relayer reveals winners via `claim(...)` with Merkle proof; payouts route to escrow, losers stay hidden. Once all liability claimed, market finishes and sends leftover to `ProtocolPool`.

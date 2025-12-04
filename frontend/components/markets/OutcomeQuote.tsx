@@ -15,14 +15,12 @@ type Props = {
 
 export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 }: Props) {
   const [refundZen, setRefundZen] = useState<string>("—");
-  const [profitUsd, setProfitUsd] = useState<string>("—");
+  const [profitZen, setProfitZen] = useState<string>("—");
   const [error, setError] = useState<string | null>(null);
   const { fx, status } = useFxStream("/fx/zen-usdc");
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
-  const fxLabel = fxValue
-    ? `FX: 1 ZEN = $${fxValue} USDC${fxStale ? " (stale)" : ""}`
-    : "FX: loading…";
+  const fxLabel = fxValue ? `FX: 1 ZEN ≈ $${fxValue}${fxStale ? " (stale)" : ""}` : "FX: loading…";
   const { address } = useAccount();
 
   useEffect(() => {
@@ -48,13 +46,15 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
         if (cancelled) return;
         setRefundZen(quote.refund_zen.toFixed(4));
         const profit = quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
-        setProfitUsd(profit.toFixed(4));
+        const fxZen = Number(quote.zen_usd);
+        const profitZenValue = Number.isFinite(fxZen) && fxZen > 0 ? profit / fxZen : null;
+        setProfitZen(profitZenValue !== null && Number.isFinite(profitZenValue) ? profitZenValue.toFixed(4) : "—");
         setError(null);
       } catch (err) {
         if (!cancelled) {
           setError((err as Error).message);
           setRefundZen("—");
-          setProfitUsd("—");
+          setProfitZen("—");
         }
       }
     };
@@ -99,7 +99,7 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
         Refund after rake: {refundZen} ZEN
       </span>
       <span className="rounded-full bg-sky-500/15 px-2 py-1 text-sky-200">
-        Est. profit on {stakeZen} ZEN: {profitUsd} USDC
+        Est. profit on {stakeZen} ZEN: {profitZen} ZEN
       </span>
       {fxStale && (
         <span className="rounded-full bg-amber-500/15 px-2 py-1 text-amber-200">

@@ -27,7 +27,8 @@ EXPLORER_BASE = "https://horizen-testnet.explorer.caldera.xyz/tx"
 # DEFAULT_ADDRESS = "0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369" # testnet oracle
 # DEFAULT_ADDRESS = "0x65CeDe1252B614ae9fb05e5620EBCbC471DF1627"  # testnet deployer
 # DEFAULT_ADDRESS = "0x38C57472479fe7bB4C87e7A4BB23c7AAf10595Fd" # testnet auth signer
-DEFAULT_ADDRESS = "0xdAdEbecf077cdA5f86F60a91f76B238F675204f9"  # testnet relayer
+# DEFAULT_ADDRESS = "0xdAdEbecf077cdA5f86F60a91f76B238F675204f9"  # testnet relayer
+DEFAULT_ADDRESS = "0x48e96bA58969f09e86B8B22AfEd12d3aF3367795"  # testnet zenith
 
 DEFAULT_ROLLUP = "horizen-testnet"
 DRIP_AMOUNT_ETH = Decimal("0.01")

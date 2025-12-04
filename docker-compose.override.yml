@@ -48,7 +48,7 @@ services:
 
   hedger:
     environment:
-      MODE: dev
+      HEDGER_ENVIRONMENT: dev
       HEDGER_LOG_LEVEL: DEBUG
     volumes:
       - ./hedger/app:/hedger/app

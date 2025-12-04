@@ -23,7 +23,7 @@ const DEFAULT_EXPLORER =
 export const defaultChain = defineChain({
   id: DEFAULT_CHAIN_ID,
   name: DEFAULT_CHAIN_NAME,
-  nativeCurrency: { name: "ZEN", symbol: "ZEN", decimals: 18 },
+  nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
   rpcUrls: {
     default: { http: [DEFAULT_RPC_URL] },
     public: { http: [DEFAULT_RPC_URL] },

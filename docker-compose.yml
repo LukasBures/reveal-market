@@ -174,6 +174,66 @@ services:
           cpus: "0.5"
           memory: 512M
 
+  hedger:
+    build:
+      context: .
+      dockerfile: docker/hedger/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    profiles: ["hedger"]
+    container_name: reveal-market-hedger
+    restart: unless-stopped
+    mem_swappiness: 0
+    environment:
+      HEDGER_ENVIRONMENT: ${MODE:-dev}
+      HEDGER_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HEDGER_DATABASE_URL: ${HEDGER_DATABASE_URL}
+      HEDGER_REDIS_URL: ${HEDGER_REDIS_URL}
+      HEDGER_POLYMARKET_API_BASE: ${HEDGER_POLYMARKET_API_BASE}
+      HEDGER_FX_FEED_URL: ${HEDGER_FX_FEED_URL}
+      HEDGER_FX_FEED_ALT_URL: ${HEDGER_FX_FEED_ALT_URL:-}
+      HEDGER_FX_HAIRCUT_BPS: ${HEDGER_FX_HAIRCUT_BPS}
+      HEDGER_RISK_MAX_GLOBAL_EXPOSURE_USD: ${HEDGER_RISK_MAX_GLOBAL_EXPOSURE_USD}
+      HEDGER_RISK_MAX_PER_MARKET_USD: ${HEDGER_RISK_MAX_PER_MARKET_USD}
+      HEDGER_FLOAT_MIN_ZEN: ${HEDGER_FLOAT_MIN_ZEN}
+      HEDGER_MAX_SLIPPAGE_BPS: ${HEDGER_MAX_SLIPPAGE_BPS:-100}
+      HEDGER_PRICING_SIGNER_ADDRESS: ${HEDGER_PRICING_SIGNER_ADDRESS:-}
+      HEDGER_PROVER_BASE_URL: ${HEDGER_PROVER_BASE_URL}
+      HEDGER_BRIDGE_ENDPOINT: ${HEDGER_BRIDGE_ENDPOINT}
+      HEDGER_LP_VAULT_ADDRESS: ${HEDGER_LP_VAULT_ADDRESS}
+      HEDGER_VAULT_RPC_URL: ${HEDGER_VAULT_RPC_URL}
+      HEDGER_VAULT_PRIVATE_KEY: ${HEDGER_VAULT_PRIVATE_KEY}
+      HEDGER_VAULT_SENDER_ADDRESS: ${HEDGER_VAULT_SENDER_ADDRESS}
+      HEDGER_VAULT_CHAIN_ID: ${HEDGER_VAULT_CHAIN_ID}
+      HEDGER_VAULT_GAS_PRICE_GWEI: ${HEDGER_VAULT_GAS_PRICE_GWEI}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      streamer:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
   relayer:
     build:
       context: .

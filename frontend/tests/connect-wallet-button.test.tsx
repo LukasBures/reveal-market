@@ -130,7 +130,7 @@ describe("ConnectWalletButton", () => {
   it("allows managing a connected session inside the modal", () => {
     currentAccountState = {
       address: "0x1234567890abcdef1234567890abcdef12345678",
-      chain: { id: 1, name: "Ethereum" },
+      chain: { id: 1, name: "Other Chain" },
       status: "connected",
     };
 
@@ -177,7 +177,7 @@ describe("ConnectWalletButton", () => {
   it("hides switch action when switchChain is unavailable", () => {
     currentAccountState = {
       address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-      chain: { id: 1, name: "Ethereum" },
+      chain: { id: 1, name: "Other Chain" },
       status: "connected",
     };
     currentSwitchChainState.switchChain = undefined;

@@ -1,5 +1,7 @@
 # `RakeManager.sol` line-by-line guide
 
+> Note: Horizen Testnet uses ZEN as the native asset. Any mentions of “ETH” in comments or helper names refer to the native ZEN token (Solmate/OpenZeppelin keep the `ETH` suffix for their payable helpers).
+
 Line 1 — `// SPDX-License-Identifier: MIT`
 States the contract is released under MIT so automated tools know the license.
 

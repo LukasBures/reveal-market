@@ -16,7 +16,7 @@ type Props = {
   market: MarketDetail;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 100;
+const DEFAULT_MAX_STAKE_ZEN = 0.1;
 
 const formatZen = (value: number | undefined): string => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -42,7 +42,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   );
   const liveStore = usePriceStreamStore(market.eventId, tokenIds);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
-  const [stakeZen, setStakeZen] = useState(10);
+  const [stakeZen, setStakeZen] = useState(0.1);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
@@ -143,9 +143,13 @@ export function MarketDetailOutcomes({ market }: Props) {
     };
   }, [quote, requestQuote]);
 
-  const profitUsd = useMemo(() => {
+  const profitZen = useMemo(() => {
     if (!quote) return null;
-    return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
+    const fx = Number(quote.zen_usd);
+    if (!Number.isFinite(fx) || fx <= 0) return null;
+    const profitUsd = quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
+    if (!Number.isFinite(profitUsd)) return null;
+    return profitUsd / fx;
   }, [quote]);
 
   const expiresLabel = useMemo(() => {
@@ -170,8 +174,8 @@ export function MarketDetailOutcomes({ market }: Props) {
         ? Math.max(stakeZenFromQuote - rakeZenValue, 0)
         : null;
   const winSummaryLabel = `${refundZenValue !== null && refundZenValue !== undefined && Number.isFinite(refundZenValue) ? refundZenValue.toFixed(3) : "—"} ZEN + ${
-    profitUsd !== null && profitUsd !== undefined && Number.isFinite(profitUsd) ? profitUsd.toFixed(3) : "—"
-  } USDC`;
+    profitZen !== null && profitZen !== undefined && Number.isFinite(profitZen) ? profitZen.toFixed(3) : "—"
+  } ZEN`;
   const lastUpdateTs =
     liveStore.lastUpdated ||
     liveStore.outcomes
@@ -179,7 +183,7 @@ export function MarketDetailOutcomes({ market }: Props) {
       .filter(Boolean)
       .sort()
       .slice(-1)[0];
-  const fxBadge = fxStaleCombined ? "FX stale" : fxValue ? `FX ${fxValue} USD` : "FX connecting";
+  const fxBadge = fxStaleCombined ? "FX stale" : fxValue ? `FX 1 ZEN = $${fxValue} USD` : "FX connecting";
 
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
@@ -329,8 +333,8 @@ export function MarketDetailOutcomes({ market }: Props) {
         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Tradable outcomes</p>
         <h2 className="text-2xl font-semibold leading-snug text-white">{market.title}</h2>
         <p className="text-sm text-slate-300">
-          Expand an outcome to see live odds, bids/asks from the streamer, and trade with ZEN. Winnings pay out as
-          ZEN (minus rake) plus USDC profit.
+          Expand an outcome to see live odds, bids/asks from the streamer, and trade with ZEN. Winnings pay out as ZEN
+          (minus rake) plus ZEN profit.
         </p>
         {!isTradable && (
           <p className="text-sm font-semibold text-amber-200">
@@ -473,7 +477,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           />
                         </label>
                         <div className="flex flex-wrap gap-2 text-[11px]">
-                          {[5, 10, 25, 50].map((preset) => (
+                          {[0.01, 0.1].map((preset) => (
                             <button
                               key={preset}
                               type="button"
@@ -482,15 +486,15 @@ export function MarketDetailOutcomes({ market }: Props) {
                               disabled={!isTradable}
                             >
                               {preset} ZEN
-                            </button>
-                          ))}
-                          <span className="rounded-full bg-white/5 px-3 py-1 text-white/60">
-                    Max per stake: {effectiveMaxStake.toFixed(3)} ZEN
-                          </span>
-                        </div>
+                          </button>
+                        ))}
+                        <span className="rounded-full bg-white/5 px-3 py-1 text-white/60">
+                          Max per stake: {effectiveMaxStake.toFixed(3)} ZEN
+                        </span>
                       </div>
+                    </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                         <PayoutRow label="Stake" value={`${stakeZenFromQuote.toFixed(3)} ZEN`} />
                         <PayoutRow
                           label="Rake"
@@ -509,11 +513,11 @@ export function MarketDetailOutcomes({ market }: Props) {
                           }
                         />
                         <PayoutRow
-                          label="Profit (USDC)"
+                          label="Profit (ZEN)"
                           highlight
                           value={
-                            profitUsd !== null && profitUsd !== undefined && Number.isFinite(profitUsd)
-                              ? `${profitUsd.toFixed(3)} USDC`
+                            profitZen !== null && profitZen !== undefined && Number.isFinite(profitZen)
+                              ? `${profitZen.toFixed(3)} ZEN`
                               : "—"
                           }
                         />
@@ -594,7 +598,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
                             ? `${quote.remaining_market_stake_zen.toFixed(3)} ZEN`
                             : "n/a"}
-                    {" · "}Max stake (API):{" "}
+                          {" · "}Max stake (API):{" "}
                           {quote.max_stake_zen !== null && quote.max_stake_zen !== undefined
                             ? `${quote.max_stake_zen.toFixed(3)} ZEN`
                             : `${DEFAULT_MAX_STAKE_ZEN} ZEN`}
@@ -638,12 +642,12 @@ export function MarketDetailOutcomes({ market }: Props) {
       <div className="mt-6 rounded-3xl border border-amber-200/30 bg-amber-500/5 p-4 text-sm text-slate-200 sm:p-5">
         <p className="text-base font-semibold text-white">How payouts work</p>
         <p className="mt-2 text-slate-200">
-          You deposit ZEN. If you win, you receive two pieces: your ZEN stake back minus the rake fee, plus the USDC
+          You deposit ZEN. If you win, you receive two pieces: your ZEN stake back minus the rake fee, plus the ZEN
           profit shown above. Losses forfeit the staked ZEN.
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-100">
-            <li>All commitments are denominated in ZEN; rake is charged on the ZEN stake.</li>
-          <li>Profit settles in USDC to keep upside stable while you get your (rake-adjusted) ZEN back.</li>
+          <li>All commitments are denominated in ZEN; rake is charged on the ZEN stake.</li>
+          <li>Profit settles in ZEN to keep upside stable while you get your (rake-adjusted) ZEN back.</li>
           <li>Live odds, bids, and asks stream from the streamer (WS/SSE) used by the backend.</li>
         </ul>
       </div>
