@@ -1,282 +1,213 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
+import {ProtocolPool} from "./ProtocolPool.sol";
+import {RelayerEscrow} from "./RelayerEscrow.sol";
 import {RevealMarket} from "./RevealMarket.sol";
-import {IMarketFactoryRisk} from "./interfaces/IMarketFactoryRisk.sol";
-import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol";
-import {IRakeManager} from "./interfaces/IRakeManager.sol";
 
-/// @title MarketFactory – deploys ZEN-only RevealMarket instances with risk controls.
-contract MarketFactory is Ownable2Step, IMarketFactoryRisk, IMarketFactoryStatus {
+/// @notice Deploys minimal RevealMarket clones with trusted configuration and registers them with the relayer + protocol pool.
+contract MarketFactory is Ownable {
     using Clones for address;
 
     struct CreateMarketParams {
-        string eventId;
+        address oracle;
+        address verifier;
+        bytes32 circuitHash;
         uint256 commitDeadline;
         uint256 revealDeadline;
-        address oracle;
-        uint256 rakeBpsOverride;
-        uint256 payoutMultiplier;
-        RevealMarket.PayoutCurve payoutCurve;
-        uint256 floatAmount;
-        uint256 maxMarketSize;
-        uint256 minCommitmentSize;
-        uint256 maxTicketsPerUser;
+        uint256 fixedTicketSize;
         uint256 maxCommitments;
+        address authorizationSigner;
+        uint256 protocolLiabilityCap;
     }
+
+    address public immutable IMPLEMENTATION;
+    RelayerEscrow public relayerEscrow;
+    ProtocolPool public protocolPool;
+
+    uint256 public nextMarketId = 1;
+    uint256 public globalRakeBps = 200; // 2%
+    bool public factoryPaused;
+    mapping(address => bool) public isMarket;
+    mapping(uint256 => address) public marketForId;
 
     event MarketCreated(
+        uint256 indexed marketId,
         address indexed market,
-        string indexed eventId,
+        address indexed oracle,
+        bytes32 circuitHash,
+        uint256 ticketSize,
         uint256 commitDeadline,
         uint256 revealDeadline,
-        uint256 payoutMultiplier,
-        uint8 payoutCurve,
-        uint256 floatAmount,
-        uint256 rakeBps,
-        uint256 maxMarketSize
+        uint256 liabilityCap
     );
-    event GuardianUpdated(address indexed newGuardian);
-    event GlobalCommitPauseSet(bool paused, address indexed triggeredBy);
-    event GlobalClaimPauseSet(bool paused, address indexed triggeredBy);
-    event MarketPaused(address indexed market, bool commitPaused, bool claimPaused, address indexed triggeredBy);
-    event MarketGuardianUpdated(address indexed market, address indexed newGuardian);
-    event LimitsUpdated(uint256 marketMaxSize, uint256 maxMarketLiability, uint256 maxGlobalLiability);
-    event FloatSeeded(address indexed market, uint256 amount);
+    event RelayerEscrowUpdated(address indexed relayer);
+    event ProtocolPoolUpdated(address indexed pool);
+    event GlobalRakeUpdated(uint256 rakeBps);
+    event MarketRakeSynced(address indexed market, uint256 rakeBps);
+    event FactoryPaused(bool paused);
+    event AuthorizationSignerUpdated(address indexed market, address indexed signer);
+    event OracleUpdated(address indexed market, address indexed oracle);
+    event MarketRelayerUpdated(address indexed market, address indexed relayer);
+    event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
 
-    address public implementation;
-    address public rakeManager;
-    address public treasury;
-    address public verifier;
-    address public guardian;
-    address public pricingSigner;
-    bool public override globalCommitPaused;
-    bool public override globalClaimPaused;
-
-    uint256 public override marketMaxSize;
-    uint256 public override maxMarketLiability;
-    uint256 public override maxGlobalLiability;
-    uint256 public override totalRecordedLiability;
-
-    address[] private _markets;
-    mapping(address => bool) public isMarket;
-    mapping(address => uint256) public override marketLiability;
-    mapping(address => uint256) public override marketFloatAllocation;
-    mapping(address => uint256) public marketSizeLimit;
-
-    error ZeroAddress();
-    error InvalidPayoutMultiplier();
+    error InvalidImplementation();
+    error InvalidRelayer();
+    error InvalidProtocolPool();
+    error InvalidOracle();
+    error InvalidVerifier();
+    error InvalidSigner();
+    error InvalidTicketSize();
     error InvalidDeadlines();
-    error NotGuardianOrOwner();
-    error UnknownMarket();
     error InvalidRakeBps();
-    error InvalidFloatPayment();
-    error MarketSizeExceeded();
-    error MarketLiabilityExceeded();
-    error GlobalLiabilityExceeded();
-    error NotTreasuryOrOwner();
+    error UnknownMarket();
+    error FactoryPausedErr();
 
-    modifier onlyGuardianOrOwner() {
-        _onlyGuardianOrOwner();
-        _;
-    }
-
-    constructor(address implementation_, address rakeManager_, address treasury_, address verifier_, address pricingSigner_)
-        Ownable(msg.sender)
+    constructor(address implementation_, ProtocolPool protocolPool_, RelayerEscrow relayerEscrow_, address owner_)
+        Ownable(owner_)
     {
-        if (
-            implementation_ == address(0) || rakeManager_ == address(0) || treasury_ == address(0) || verifier_ == address(0)
-                || pricingSigner_ == address(0)
-        ) revert ZeroAddress();
-
-        implementation = implementation_;
-        rakeManager = rakeManager_;
-        treasury = treasury_;
-        verifier = verifier_;
-        guardian = msg.sender;
-        pricingSigner = pricingSigner_;
-        emit GuardianUpdated(msg.sender);
+        if (implementation_ == address(0)) revert InvalidImplementation();
+        if (address(protocolPool_) == address(0)) revert InvalidProtocolPool();
+        if (address(relayerEscrow_) == address(0)) revert InvalidRelayer();
+        IMPLEMENTATION = implementation_;
+        protocolPool = protocolPool_;
+        relayerEscrow = relayerEscrow_;
     }
 
-    // ───────────────────────────────
-    // Admin setters
-    // ───────────────────────────────
-    function setImplementation(address implementation_) external onlyOwner {
-        if (implementation_ == address(0)) revert ZeroAddress();
-        implementation = implementation_;
+    /// @notice Owner can update the relayer escrow address (e.g., when rotating relayers).
+    function setRelayerEscrow(RelayerEscrow relayer) external onlyOwner {
+        if (address(relayer) == address(0)) revert InvalidRelayer();
+        relayerEscrow = relayer;
+        emit RelayerEscrowUpdated(address(relayer));
     }
 
-    function setRakeManager(address rakeManager_) external onlyOwner {
-        if (rakeManager_ == address(0)) revert ZeroAddress();
-        rakeManager = rakeManager_;
+    /// @notice Owner can update the protocol pool.
+    function setProtocolPool(ProtocolPool pool) external onlyOwner {
+        if (address(pool) == address(0)) revert InvalidProtocolPool();
+        protocolPool = pool;
+        emit ProtocolPoolUpdated(address(pool));
     }
 
-    function setTreasury(address treasury_) external onlyOwner {
-        if (treasury_ == address(0)) revert ZeroAddress();
-        treasury = treasury_;
+    /// @notice Syncs this factory into the relayer + protocol pool hooks.
+    function syncFactoryHooks() external onlyOwner {
+        protocolPool.setMarketFactory(address(this));
+        relayerEscrow.setMarketFactory(address(this));
     }
 
-    function setVerifier(address verifier_) external onlyOwner {
-        if (verifier_ == address(0)) revert ZeroAddress();
-        verifier = verifier_;
+    /// @notice Updates the global rake applied to all markets.
+    function setGlobalRakeBps(uint256 rakeBps) external onlyOwner {
+        if (rakeBps > 10_000) revert InvalidRakeBps();
+        globalRakeBps = rakeBps;
+        emit GlobalRakeUpdated(rakeBps);
     }
 
-    function setPricingSigner(address pricingSigner_) external onlyOwner {
-        if (pricingSigner_ == address(0)) revert ZeroAddress();
-        pricingSigner = pricingSigner_;
-    }
-
-    function setGuardian(address newGuardian) external onlyOwner {
-        if (newGuardian == address(0)) revert ZeroAddress();
-        guardian = newGuardian;
-        emit GuardianUpdated(newGuardian);
-    }
-
-    function setRiskLimits(uint256 marketMaxSize_, uint256 maxMarketLiability_, uint256 maxGlobalLiability_)
-        external
-        onlyOwner
-    {
-        marketMaxSize = marketMaxSize_;
-        maxMarketLiability = maxMarketLiability_;
-        maxGlobalLiability = maxGlobalLiability_;
-        _enforceGlobalLiability(totalRecordedLiability);
-        emit LimitsUpdated(marketMaxSize_, maxMarketLiability_, maxGlobalLiability_);
-    }
-
-    // ───────────────────────────────
-    // Global controls
-    // ───────────────────────────────
-    function setGlobalCommitPaused(bool paused) external onlyGuardianOrOwner {
-        globalCommitPaused = paused;
-        emit GlobalCommitPauseSet(paused, msg.sender);
-    }
-
-    function setGlobalClaimPaused(bool paused) external onlyGuardianOrOwner {
-        globalClaimPaused = paused;
-        emit GlobalClaimPauseSet(paused, msg.sender);
-    }
-
-    // ───────────────────────────────
-    // Per-market controls
-    // ───────────────────────────────
-    function setMarketPauses(address market, bool commitPaused, bool claimPaused) external onlyGuardianOrOwner {
+    /// @notice Pushes the current global rake to an existing market.
+    function syncMarketRake(address market) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
-        RevealMarket(payable(market)).setCommitPaused(commitPaused);
-        RevealMarket(payable(market)).setClaimPaused(claimPaused);
-        emit MarketPaused(market, commitPaused, claimPaused, msg.sender);
+        RevealMarket(payable(market)).setRakeBps(globalRakeBps);
+        emit MarketRakeSynced(market, globalRakeBps);
     }
 
-    function setMarketGuardian(address market, address newGuardian) external onlyGuardianOrOwner {
+    /// @notice Pause/unpause market creation.
+    function setFactoryPaused(bool paused) external onlyOwner {
+        factoryPaused = paused;
+        emit FactoryPaused(paused);
+    }
+
+    /// @notice Rotate the authorization signer for a specific market (key hygiene).
+    function updateAuthorizationSigner(address market, address newSigner) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
-        RevealMarket(payable(market)).setGuardian(newGuardian);
-        emit MarketGuardianUpdated(market, newGuardian);
+        if (newSigner == address(0)) revert InvalidSigner();
+        RevealMarket(payable(market)).setAuthorizationSigner(newSigner);
+        emit AuthorizationSignerUpdated(market, newSigner);
     }
 
-    // ───────────────────────────────
-    // Market creation / funding
-    // ───────────────────────────────
-    function createMarket(CreateMarketParams calldata params) external payable onlyOwner returns (address market) {
-        if (params.oracle == address(0)) revert ZeroAddress();
-        if (params.commitDeadline <= block.timestamp || params.revealDeadline <= params.commitDeadline) {
+    /// @notice Rotate the oracle for a specific market.
+    function updateOracle(address market, address newOracle) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        if (newOracle == address(0)) revert InvalidOracle();
+        RevealMarket(payable(market)).setOracle(newOracle);
+        emit OracleUpdated(market, newOracle);
+    }
+
+    /// @notice Point a market at a new relayer escrow (e.g., relayer rotation).
+    function updateMarketRelayer(address market, RelayerEscrow newRelayer) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        if (address(newRelayer) == address(0)) revert InvalidRelayer();
+        if (newRelayer.marketFactory() != address(this)) revert InvalidRelayer();
+        newRelayer.registerMarket(market);
+        RevealMarket(payable(market)).setRelayerEscrow(address(newRelayer));
+        emit MarketRelayerUpdated(market, address(newRelayer));
+    }
+
+    /// @notice Update the protocol liability cap for a market (before settlement).
+    function updateProtocolLiabilityCap(address market, uint256 newCap) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).setProtocolLiabilityCap(newCap);
+        protocolPool.updateLiabilityCap(market, newCap);
+        emit MarketLiabilityCapUpdated(market, newCap);
+    }
+
+    /// @notice Deploys a new minimal market clone with the given parameters.
+    function createMarket(CreateMarketParams calldata params) external onlyOwner returns (address market) {
+        if (factoryPaused) revert FactoryPausedErr();
+        if (params.oracle == address(0)) revert InvalidOracle();
+        if (params.verifier == address(0)) revert InvalidVerifier();
+        if (params.authorizationSigner == address(0)) revert InvalidSigner();
+        if (params.fixedTicketSize == 0) revert InvalidTicketSize();
+        if (params.revealDeadline <= params.commitDeadline || params.commitDeadline <= block.timestamp) {
             revert InvalidDeadlines();
         }
-        if (params.payoutMultiplier == 0) revert InvalidPayoutMultiplier();
-        uint256 maxRake = IRakeManager(rakeManager).maxRakeBps();
-        if (params.rakeBpsOverride > maxRake) revert InvalidRakeBps();
-        if (msg.value != params.floatAmount) revert InvalidFloatPayment();
+        uint256 appliedRakeBps = globalRakeBps;
 
-        market = implementation.clone();
-        uint256 marketSize = params.maxMarketSize == 0 ? marketMaxSize : params.maxMarketSize;
-        RevealMarket.InitConfig memory cfg = RevealMarket.InitConfig({
-            eventId: params.eventId,
-            commitDeadline: params.commitDeadline,
-            revealDeadline: params.revealDeadline,
-            oracle: params.oracle,
-            verifier: verifier,
-            rakeManager: rakeManager,
-            treasury: treasury,
-            guardian: guardian,
-            rakeBpsOverride: params.rakeBpsOverride,
-            payoutMultiplier: params.payoutMultiplier,
-            payoutCurve: params.payoutCurve,
-            maxMarketSize: marketSize,
-            pricingSigner: pricingSigner,
-            minCommitmentSize: params.minCommitmentSize,
-            maxTicketsPerUser: params.maxTicketsPerUser,
-            maxCommitments: params.maxCommitments
-        });
-        RevealMarket(payable(market)).initialize(cfg);
+        uint256 marketId = nextMarketId++;
+        address payable marketAddress = payable(IMPLEMENTATION.cloneDeterministic(bytes32(marketId)));
 
-        _markets.push(market);
-        isMarket[market] = true;
-        marketSizeLimit[market] = marketSize;
-        if (params.floatAmount > 0) {
-            RevealMarket(payable(market)).fundMarket{value: params.floatAmount}(params.floatAmount);
-            marketFloatAllocation[market] = params.floatAmount;
-            emit FloatSeeded(market, params.floatAmount);
-        }
+        RevealMarket(marketAddress)
+            .initialize(
+                RevealMarket.InitParams({
+                    factory: address(this),
+                    protocolPool: address(protocolPool),
+                    relayerEscrow: address(relayerEscrow),
+                    oracle: params.oracle,
+                    verifier: params.verifier,
+                    circuitHash: params.circuitHash,
+                    commitDeadline: params.commitDeadline,
+                    revealDeadline: params.revealDeadline,
+                    ticketSize: params.fixedTicketSize,
+                    maxCommitments: params.maxCommitments,
+                    authorizationSigner: params.authorizationSigner,
+                    protocolLiabilityCap: params.protocolLiabilityCap,
+                    marketId: marketId,
+                    rakeBps: appliedRakeBps
+                })
+            );
+
+        isMarket[marketAddress] = true;
+        marketForId[marketId] = marketAddress;
+
+        protocolPool.registerMarket(marketAddress, params.protocolLiabilityCap);
+        relayerEscrow.registerMarket(marketAddress);
+
+        market = marketAddress;
 
         emit MarketCreated(
-            market,
-            params.eventId,
+            marketId,
+            marketAddress,
+            params.oracle,
+            params.circuitHash,
+            params.fixedTicketSize,
             params.commitDeadline,
             params.revealDeadline,
-            params.payoutMultiplier,
-            uint8(params.payoutCurve),
-            params.floatAmount,
-            params.rakeBpsOverride,
-            marketSize
+            params.protocolLiabilityCap
         );
     }
 
-    function seedMarketFloat(address market, uint256 amount) external payable {
-        if (msg.sender != owner() && msg.sender != treasury) revert NotTreasuryOrOwner();
-        if (!isMarket[market]) revert UnknownMarket();
-        if (amount == 0 || msg.value != amount) revert InvalidFloatPayment();
-        RevealMarket(payable(market)).fundMarket{value: amount}(amount);
-        emit FloatSeeded(market, amount);
-    }
-
-    // ───────────────────────────────
-    // View functions
-    // ───────────────────────────────
-    function getMarkets() external view returns (address[] memory) {
-        return _markets;
-    }
-
-    // ───────────────────────────────
-    // Risk accounting (IMarketFactoryRisk)
-    // ───────────────────────────────
-    function syncAccounting(address market, uint256 escrow, uint256 floatBalance, uint256 liability) external override {
-        if (market != msg.sender || !isMarket[msg.sender]) revert UnknownMarket();
-        uint256 totalBalance = escrow + floatBalance;
-
-        uint256 perMarketLimit = marketSizeLimit[market];
-        if (perMarketLimit == 0) {
-            perMarketLimit = marketMaxSize;
-        }
-        if (perMarketLimit != 0 && totalBalance > perMarketLimit) revert MarketSizeExceeded();
-        if (maxMarketLiability != 0 && liability > maxMarketLiability) revert MarketLiabilityExceeded();
-
-        uint256 updatedGlobal = totalRecordedLiability - marketLiability[msg.sender] + liability;
-        _enforceGlobalLiability(updatedGlobal);
-        totalRecordedLiability = updatedGlobal;
-        marketLiability[msg.sender] = liability;
-        marketFloatAllocation[msg.sender] = floatBalance;
-    }
-
-    // ───────────────────────────────
-    // Internal helpers
-    // ───────────────────────────────
-    function _onlyGuardianOrOwner() internal view {
-        if (msg.sender != owner() && msg.sender != guardian) revert NotGuardianOrOwner();
-    }
-
-    function _enforceGlobalLiability(uint256 candidate) internal view {
-        if (maxGlobalLiability != 0 && candidate > maxGlobalLiability) revert GlobalLiabilityExceeded();
+    /// @notice Predicts the deterministic clone address for a given market id.
+    function predictMarketAddress(uint256 marketId) external view returns (address) {
+        return IMPLEMENTATION.predictDeterministicAddress(bytes32(marketId), address(this));
     }
 }

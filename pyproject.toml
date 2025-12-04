@@ -54,7 +54,7 @@ markers = [
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = ["backend", "hedger", "streamer"]
+mypy_path = ["backend", "hedger", "streamer", "relayer"]
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]

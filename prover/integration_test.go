@@ -47,19 +47,8 @@ func TestGroth16ProverIntegration(t *testing.T) {
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "9",
-		PayoutMulWad:   "900000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0x1",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerkleIndex: 0,
-			MerklePath:  []string{},
-		}},
 	}
 
 	result, err := prover.Generate(context.Background(), req)

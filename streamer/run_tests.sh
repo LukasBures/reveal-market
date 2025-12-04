@@ -5,12 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$ROOT_DIR"
 
-PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
-if [[ ! -x "$PYTHON_BIN" ]]; then
+ACTIVATE_PATH="${ROOT_DIR}/.venv/bin/activate"
+if [[ -f "$ACTIVATE_PATH" ]]; then
+  # shellcheck disable=SC1090
+  source "$ACTIVATE_PATH"
+  PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
+else
   PYTHON_BIN="$(command -v python3 || true)"
 fi
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo "Python 3.12 interpreter not found" >&2
+if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
+  echo "Python 3.12 interpreter not found (expected ${ROOT_DIR}/.venv/bin/python or python3 on PATH)" >&2
   exit 1
 fi
 

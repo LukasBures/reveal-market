@@ -48,13 +48,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock') }}
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
-          uv sync --project hedger --extra dev --no-install-project --frozen
           uv sync --project streamer --extra dev --no-install-project --frozen
+          uv sync --project relayer --group dev --no-install-project
       - name: Pre-commit checks
         run: uv run pre-commit run --all-files
 
@@ -76,14 +76,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'hedger/uv.lock', 'streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock') }}
 
       - name: Sync backend dependencies
         run: |
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
-          uv sync --project hedger --extra dev --no-install-project --frozen
           uv sync --project streamer --extra dev --no-install-project --frozen
+          uv sync --project relayer --group dev --no-install-project
 
       - name: Run backend tests
         env:
@@ -104,43 +104,6 @@ jobs:
 
       - name: OpenAPI snapshot check
         run: uv run --project backend/api -- pytest backend/api/tests/test_openapi_snapshot.py
-
-
-  hedger:
-    needs: precommit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip
-          pip install uv
-
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('hedger/uv.lock') }}
-
-      - name: Sync hedger dependencies
-        run: |
-          uv sync --project hedger --extra dev --no-install-project --frozen
-
-      - name: Lint hedger
-        working-directory: hedger
-        run: uv run --project hedger -- ruff check app tests
-
-      - name: Type check hedger (mypy)
-        run: uv run --project hedger -- mypy --config-file pyproject.toml hedger/app
-
-      - name: Hedger tests
-        env:
-          PYTEST_WORKER_COUNT: 4
-        run: ./hedger/run_tests.sh
 
 
   streamer:
@@ -175,6 +138,37 @@ jobs:
           PYTEST_WORKER_COUNT: 4
         run: ./streamer/run_tests.sh
 
+  relayer:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('relayer/uv.lock') }}
+
+      - name: Sync relayer dependencies
+        run: |
+          uv sync --project relayer --group dev --no-install-project
+
+      - name: Relayer tests
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+        run: |
+          cd relayer
+          PYTHONPATH=src uv run pytest
+
   contracts-polygon:
     needs: precommit
     runs-on: ubuntu-latest
@@ -200,44 +194,6 @@ jobs:
       - name: Polygon contracts pipeline
         working-directory: contracts/polygon
         run: ./run_tests.sh
-
-  contracts-zen:
-    needs: precommit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.4.4
-
-      - name: Install Foundry dependencies (zen)
-        working-directory: contracts/zen
-        run: |
-          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ] || [ ! -d lib/solmate ]; then
-            forge install --no-git --shallow \
-              foundry-rs/forge-std@v1.9.1 \
-              openzeppelin/openzeppelin-contracts@v5.5.0 \
-              transmissions11/solmate@89365b880c4f3c786bdd453d4b8e8fe410344a69
-          fi
-
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip
-          pip install uv
-
-      - name: Generate contract error selectors
-        run: |
-          uv run --with eth-utils --with "eth-hash[pysha3]" python scripts/generate_error_selectors.py > contracts/cache/errors.json
-          uv run --with eth-utils --with "eth-hash[pysha3]" python scripts/generate_error_selectors.py --write-frontend
-
-      - name: Zen contracts pipeline
-        working-directory: contracts/zen
-        run: ./run_tests.sh
-
 
   frontend:
     needs: precommit
@@ -348,10 +304,9 @@ jobs:
     # Only run deploy if ALL tests passed
     needs:
       - backend
-      - hedger
+      - relayer
       - streamer
       - contracts-polygon
-      - contracts-zen
       - frontend
       - prover
 

@@ -20,19 +20,8 @@ func TestValidateRequest(t *testing.T) {
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "5",
-		PayoutMulWad:   "500000000000000000",
 		RakeBps:        "100",
 		CircuitHash:    "0xdead",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerklePath:  []string{},
-			MerkleIndex: 0,
-		}},
 	}
 	if err := validateRequest(valid); err != nil {
 		t.Fatalf("expected valid request, got error: %v", err)
@@ -47,10 +36,9 @@ func TestValidateRequest(t *testing.T) {
 		{"missing_outcome", func(req *settlementProofRequest) { req.WinningOutcome = "" }},
 		{"missing_total_escrow", func(req *settlementProofRequest) { req.TotalEscrow = "" }},
 		{"missing_total_liability", func(req *settlementProofRequest) { req.TotalLiability = "" }},
-		{"missing_payout_multiplier", func(req *settlementProofRequest) { req.PayoutMulWad = "" }},
 		{"missing_rake_bps", func(req *settlementProofRequest) { req.RakeBps = "" }},
 		{"bad_pool_length", func(req *settlementProofRequest) { req.PoolTotals = []string{"1"} }},
-		{"missing_tickets", func(req *settlementProofRequest) { req.Tickets = nil }},
+		{"missing_circuit_hash", func(req *settlementProofRequest) { req.CircuitHash = "" }},
 	}
 
 	for _, tc := range cases {
@@ -72,19 +60,8 @@ func TestBuildWitnessInput(t *testing.T) {
 		PoolTotals:     []string{"7", "3"},
 		TotalEscrow:    "10",
 		TotalLiability: "14",
-		PayoutMulWad:   "2000000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0xbeef",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerklePath:  []string{},
-			MerkleIndex: 0,
-		}},
 	}
 	inputs, err := buildWitnessInput(req)
 	if err != nil {
@@ -117,25 +94,23 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 		PoolTotals:     []string{"2", "2"},
 		TotalEscrow:    "3",
 		TotalLiability: "10",
-		PayoutMulWad:   "2000000000000000000",
 		RakeBps:        "10",
 		CircuitHash:    "0x1",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerklePath:  []string{},
-			MerkleIndex: 0,
-		}},
 	}
 	if _, err := buildWitnessInput(req); err == nil {
-		t.Fatalf("expected error when pool totals do not match total escrow")
+		t.Fatalf("expected error when pool totals exceed total escrow")
 	}
 
-	req.WinningOutcome = "2"
+	req = settlementProofRequest{
+		MarketID:       "1",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "2",
+		PoolTotals:     []string{"1", "1"},
+		TotalEscrow:    "2",
+		TotalLiability: "3",
+		RakeBps:        "10",
+		CircuitHash:    "0x1",
+	}
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error for invalid winning outcome")
 	}
@@ -144,25 +119,14 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 		MarketID:       "1",
 		MerkleRoot:     "0x1",
 		WinningOutcome: "0",
-		PoolTotals:     []string{"7", "3"},
-		TotalEscrow:    "10",
-		TotalLiability: "10", // wrong: winningPool (7) * 2e18 / 1e18 = 14
-		PayoutMulWad:   "2000000000000000000",
-		RakeBps:        "10",
+		PoolTotals:     []string{"1", "1"},
+		TotalEscrow:    "2",
+		TotalLiability: "3",
+		RakeBps:        "20000",
 		CircuitHash:    "0x1",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerklePath:  []string{},
-			MerkleIndex: 0,
-		}},
 	}
 	if _, err := buildWitnessInput(req); err == nil {
-		t.Fatalf("expected error when liability mismatches payout multiplier")
+		t.Fatalf("expected error for rake bps overflow")
 	}
 }
 
@@ -186,19 +150,8 @@ func TestProofHandlerSuccess(t *testing.T) {
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "9",
-		PayoutMulWad:   "900000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0x1",
-		Tickets: []ticketProof{{
-			User:        "0x1",
-			OutcomeID:   "1",
-			Amount:      "10",
-			Salt:        "0x1",
-			TicketHash:  "0x2",
-			Leaf:        "0x2",
-			MerklePath:  []string{},
-			MerkleIndex: 0,
-		}},
 	}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
@@ -245,10 +198,8 @@ func TestProofHandlerProverError(t *testing.T) {
 		PoolTotals:     []string{"10", "0"},
 		TotalEscrow:    "10",
 		TotalLiability: "9",
-		PayoutMulWad:   "900000000000000000",
 		RakeBps:        "50",
 		CircuitHash:    "0x1",
-		Tickets:        []ticketProof{{User: "0x1", OutcomeID: "1", Amount: "10", Salt: "0x1", TicketHash: "0x2", Leaf: "0x2", MerkleIndex: 0}},
 	}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()

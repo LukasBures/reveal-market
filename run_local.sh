@@ -354,8 +354,7 @@ Internal service ports (for debugging):
   • API direct:             http://localhost:8000
   • Streamer direct:        http://localhost:8100
   • Frontend direct:        http://localhost:3000
-  • Hedger metrics:         http://localhost:8090/admin/exposures
-                            http://localhost:8090/metrics
+  • Relayer:                http://localhost:8088/healthz
 
 Datastores:
 

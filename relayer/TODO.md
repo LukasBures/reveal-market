@@ -1,0 +1,6 @@
+- Add metrics/observability (Prometheus, structured request logs).
+- Retry/backoff + queue integration for commits/claims.
+- Gas price/fee tuning (EIP-1559 support).
+- Optional bearer auth on the HTTP endpoints.
+- Health checks against chain (e.g., recent block) and escrow allowance (balance).
+- CI job to run `uv run pytest` and lint.

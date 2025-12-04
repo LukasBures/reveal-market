@@ -53,11 +53,6 @@ template SettlementCircuit() {
     poolSum.in[1] <== totalEscrow + 1;
     poolSum.out === 1;
 
-    component liabilityCheck = LessThan(252);
-    liabilityCheck.in[0] <== totalLiability;
-    liabilityCheck.in[1] <== totalEscrow + 1;
-    liabilityCheck.out === 1;
-
     // Keep the 10th public signal slot fixed at zero so the verifier enforces length without extra semantics.
     padding === 0;
 

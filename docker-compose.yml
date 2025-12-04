@@ -174,55 +174,41 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  hedger:
+  relayer:
     build:
       context: .
-      dockerfile: docker/hedger/Dockerfile
+      dockerfile: docker/relayer/Dockerfile
       args:
         BUILDKIT_INLINE_CACHE: 1
-    container_name: reveal-market-hedger
+    container_name: reveal-market-relayer
     restart: unless-stopped
-    init: true
-    mem_swappiness: 0
     environment:
-      MODE: ${MODE}
-      HEDGER_DATABASE_URL: ${HEDGER_DATABASE_URL}
-      HEDGER_REDIS_URL: ${HEDGER_REDIS_URL}
-      HEDGER_POLYMARKET_API_BASE: ${HEDGER_POLYMARKET_API_BASE}
-      HEDGER_FX_FEED_URL: ${HEDGER_FX_FEED_URL}
-      HEDGER_FX_HAIRCUT_BPS: ${HEDGER_FX_HAIRCUT_BPS}
-      HEDGER_VAULT_RPC_URL: ${HEDGER_VAULT_RPC_URL}
-      HEDGER_VAULT_PRIVATE_KEY: ${HEDGER_VAULT_PRIVATE_KEY}
-      HEDGER_VAULT_SENDER_ADDRESS: ${HEDGER_VAULT_SENDER_ADDRESS}
-      HEDGER_LP_VAULT_ADDRESS: ${HEDGER_LP_VAULT_ADDRESS}
-      HEDGER_VAULT_CHAIN_ID: ${HEDGER_VAULT_CHAIN_ID}
-      HEDGER_VAULT_GAS_PRICE_GWEI: ${HEDGER_VAULT_GAS_PRICE_GWEI}
-      HEDGER_API_HOST: 0.0.0.0
-      HEDGER_API_PORT: 8090
-      HEDGER_PROVER_BASE_URL: ${HEDGER_PROVER_BASE_URL}
-      APP_WORKERS: ${APP_WORKERS:-2}
-      UVICORN_WORKERS: 2
-      PYTHONUNBUFFERED: 1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      RPC_URL: ${RPC_URL}
+      CHAIN_ID: ${CHAIN_ID}
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY}
+      RELAYER_ESCROW_ADDRESS: ${RELAYER_ESCROW_ADDRESS}
+      RELAYER_HOST: ${RELAYER_HOST}
+      RELAYER_PORT: ${RELAYER_PORT}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-m", "app.healthcheck"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${RELAYER_PORT}/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 10s
     deploy:
       replicas: 1
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
-        reservations:
           cpus: "0.5"
           memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   frontend:
     build:

@@ -36,6 +36,7 @@ run_section() {
 run_section "backend" "${ROOT_DIR}/backend/run_tests.sh"
 run_section "hedger" "${ROOT_DIR}/hedger/run_tests.sh"
 run_section "streamer" "${ROOT_DIR}/streamer/run_tests.sh"
+run_section "relayer" "${ROOT_DIR}/relayer/run_tests.sh"
 run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"

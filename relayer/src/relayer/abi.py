@@ -1,0 +1,40 @@
+COMMIT_ABI = [
+    {
+        "inputs": [
+            {"internalType": "address", "name": "user", "type": "address"},
+            {"internalType": "address", "name": "market", "type": "address"},
+            {
+                "components": [
+                    {"internalType": "bytes32", "name": "commitment", "type": "bytes32"},
+                    {"internalType": "uint256", "name": "nonce", "type": "uint256"},
+                    {"internalType": "uint256", "name": "expiry", "type": "uint256"},
+                ],
+                "internalType": "struct IRevealMarket.CommitAuth",
+                "name": "auth",
+                "type": "tuple",
+            },
+            {"internalType": "bytes", "name": "signature", "type": "bytes"},
+        ],
+        "name": "commitOnBehalf",
+        "outputs": [],
+        "stateMutability": "payable",
+        "type": "function",
+    }
+]
+
+CLAIM_ABI = [
+    {
+        "inputs": [
+            {"internalType": "address", "name": "user", "type": "address"},
+            {"internalType": "uint256", "name": "ticketId", "type": "uint256"},
+            {"internalType": "uint256", "name": "outcomeId", "type": "uint256"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "bytes32", "name": "salt", "type": "bytes32"},
+            {"internalType": "bytes32[]", "name": "merkleProof", "type": "bytes32[]"},
+        ],
+        "name": "claim",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    }
+]

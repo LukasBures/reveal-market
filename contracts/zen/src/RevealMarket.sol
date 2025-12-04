@@ -4,229 +4,115 @@ pragma solidity ^0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {IMarketFactoryRisk} from "./interfaces/IMarketFactoryRisk.sol";
-import {IMarketFactoryStatus} from "./interfaces/IMarketFactoryStatus.sol";
-import {IRakeManager} from "./interfaces/IRakeManager.sol";
+import {IProtocolPool} from "./interfaces/IProtocolPool.sol";
+import {IRelayerEscrow} from "./interfaces/IRelayerEscrow.sol";
+import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
+import {RelayerEscrow} from "./RelayerEscrow.sol";
 
-/// @title RevealMarket
-/// @notice ZEN-denominated commit/reveal market with liability-aware accounting and float support.
-contract RevealMarket is ReentrancyGuard {
-    enum Phase {
-        Commit,
-        Locked,
-        Settled,
-        Cancelled
-    }
+/// @notice Minimal commit/reveal market using fixed-size tickets and ZK-verified settlement.
+contract RevealMarket is IRevealMarket, ReentrancyGuard {
+    using ECDSA for bytes32;
 
-    enum PayoutCurve {
-        FixedOdds,
-        ConstantMultiplier
-    }
-
-    struct Ticket {
-        bytes32 commitHash;
-        uint256 amount;
-        bool revealed;
-        bool claimed;
-    }
-
-    struct SignedQuote {
-        bytes32 quoteId;
-        uint256 stakeZen;
-        uint256 zenUsd;
-        uint256 expiry;
-        uint256 outcomeId;
-        address expectedUser;
-        bytes signature;
-    }
-
-    struct InitConfig {
-        string eventId;
-        uint256 commitDeadline;
-        uint256 revealDeadline;
+    struct InitParams {
+        address factory;
+        address protocolPool;
+        address relayerEscrow;
         address oracle;
         address verifier;
-        address rakeManager;
-        address treasury;
-        address guardian;
-        uint256 rakeBpsOverride;
-        uint256 payoutMultiplier;
-        PayoutCurve payoutCurve;
-        uint256 maxMarketSize;
-        address pricingSigner;
-        uint256 minCommitmentSize;
-        uint256 maxTicketsPerUser;
-        uint256 maxCommitments;
-    }
-
-    struct SettlementSignals {
-        bytes32 commitmentsRoot;
-        uint256 marketId;
-        uint256 winningOutcomeId;
-        uint256 totalEscrow;
-        uint256 totalLiability;
-        uint256 rakeBps;
-        uint256 poolTotalYes;
-        uint256 poolTotalNo;
         bytes32 circuitHash;
-        uint256 padding;
+        uint256 commitDeadline;
+        uint256 revealDeadline;
+        uint256 ticketSize;
+        uint256 maxCommitments;
+        address authorizationSigner;
+        uint256 protocolLiabilityCap;
+        uint256 marketId;
+        uint256 rakeBps;
     }
 
-    event Initialized(
-        string indexed eventId,
-        address indexed oracle,
-        uint256 commitDeadline,
-        uint256 revealDeadline,
-        address guardian,
-        uint256 payoutMultiplier,
-        PayoutCurve curve,
-        uint256 maxMarketSize
-    );
-    event Commit(address indexed user, bytes32 indexed positionHash, uint256 stake, uint256 timestamp);
-    event Committed(address indexed user, bytes32 indexed ticketHash, uint256 amount);
-    event Locked();
-    event ResultPosted(uint256 indexed outcomeId);
-    event ProofVerified(bool success);
-    event ProofReceipt(bytes32 indexed nonce, address indexed verifier, bool success);
-    event MarketSettled(uint256 indexed winningOutcome);
-    event MarketResolved(
-        bytes32 indexed outcomeHash,
-        uint256 winningStake,
-        uint256 totalLiability,
-        uint256 netPool,
-        uint256 rakePaid,
-        uint256 settledAt
-    );
-    event Claimed(address indexed user, uint256 payout);
-    event Refunded(address indexed user, uint256 amount);
-    event MaxLiabilityUpdated(uint256 value);
-    event FloatAdded(uint256 amount);
-    event FloatUsed(uint256 amount);
-    event FloatWithdrawn(address indexed to, uint256 amount);
-    event GuardianUpdated(address indexed newGuardian);
-    event CommitPauseSet(bool paused, address indexed triggeredBy);
-    event ClaimPauseSet(bool paused, address indexed triggeredBy);
-    event QuoteCommitted(
-        address indexed user, uint256 indexed outcomeId, uint256 amount, bytes32 indexed quoteId, uint256 marketId
-    );
-    event MarketCancelled(address indexed triggeredBy, string reason);
-    event EmergencySettled(bytes32 outcomeHash, uint256 winningPool, address indexed triggeredBy);
-    event OracleUpdated(address indexed previousOracle, address indexed newOracle);
-    event RakeConfigured(uint256 rakeBps);
-
-    error AlreadyInitialized();
-    error SettlementInProgress();
-    error InvalidPhase(Phase expected, Phase current);
-    error InvalidTimestamp();
-    error InvalidOracle();
-    error InvalidVerifier();
-    error InvalidRakeManager();
-    error InvalidTreasury();
-    error InvalidAmount();
-    error TicketNotFound();
-    error TicketAlreadyClaimed();
-    error TicketLoses();
-    error WinningPoolNotSet();
-    error NothingToRefund();
-    error AlreadySettled();
-    error OutcomeAlreadySet();
-    error InvalidPayment();
-    error InvalidGuardian();
-    error InvalidPricingSigner();
-    error InvalidOutcome();
-    error CommitPaused();
-    error ClaimPaused();
-    error NotAuthorized();
-    error MarketAlreadyCancelled();
-    error InvalidRakeBps();
-    error ProofVerificationFailed();
-    error ProofOutcomeMismatch();
-    error ProofTotalsMismatch();
-    error CircuitHashMismatch();
-    error InvalidMarketAddress();
-    error InvalidPayoutMultiplier();
-    error LiabilityExceedsCoverage(uint256 required, uint256 available);
-    error ExceedsMarketSize();
-    error OutstandingClaims();
-    error InvalidProofLayout();
-    error InvalidMerkleProof();
-    error CommitmentNotFound();
-    error InvalidQuote();
-    error QuoteAlreadyUsed();
-    error InvalidExpectedInputs(uint256 provided, uint256 required);
-    error CommitmentTooSmall(uint256 minimum);
-    error CommitLimitReached();
-    error UserCommitLimitReached(uint256 limit);
-    error InvalidMaxCommitments();
-
-    uint256 public constant WAD = 1e18;
-    uint256 public constant MAX_PAYOUT_MULTIPLIER = 5e18; // 5x cap for odds to avoid extreme exposure.
-    address public constant ZEN = address(0);
-    uint256 private constant EXPECTED_PUBLIC_INPUTS = 10;
-    uint256 private constant DEFAULT_MAX_COMMITMENTS = 4096;
-    uint256 private constant MIN_COMMITMENT_FLOOR = 0.01 ether;
-
-    string public eventId;
-    Phase public phase;
-
-    uint256 public commitDeadline;
-    uint256 public revealDeadline;
-
+    address public factory;
+    address public protocolPool;
+    address public relayerEscrow;
     address public oracle;
     address public verifier;
-    address public rakeManager;
-    address public treasury;
-    address public factory;
-    address public guardian;
+    bytes32 public circuitHash;
+    uint256 public override commitDeadline;
+    uint256 public revealDeadline;
+    uint256 public ticketSize;
+    uint256 public maxCommitments;
+    address public override authorizationSigner;
+    uint256 public protocolLiabilityCap;
+    uint256 public override marketId;
+    uint256 public rakeBps;
+
+    Phase public override phase;
+    bytes32 public commitmentsRoot;
+    uint256 public totalEscrow;
+    uint256 public totalLiability;
+    uint256 public rakeAmount;
+    uint256 public rakeCollected;
     bool public commitsPaused;
     bool public claimsPaused;
-    uint256 public cancellationTimestamp;
-    uint256 public maxMarketSize;
-    bytes32 public circuitHash;
-    uint256 public marketId;
-
-    string private _cancellationReason;
-
-    uint256 public userEscrow;
-    uint256 public houseFloat;
-    uint256 public totalLiability;
-    uint256 public maxLiability;
-    uint256 public winningPool;
-    uint256 public winningOutcomeId;
-    bool public outcomeSet;
-    uint256 public settledAt;
-    uint256 public rakePaid;
-    uint256 public paidOut;
-    uint256 public claimedWinningStake;
-    bytes32 public commitmentsRoot;
-    bytes32 public winningCommitmentsRoot;
-    uint256 public commitmentsCount;
-    uint256 public rakeBpsOverride;
-    uint256 public floatReservedAtSettlement;
-    address public pricingSigner;
     uint256 public poolTotalYes;
     uint256 public poolTotalNo;
-    uint256 public minCommitmentSize;
-    uint256 public maxTicketsPerUser;
-    uint256 public maxCommitments;
+    uint256 public claimedLiability;
+    uint256 public protocolTopUp;
+    uint256 public winningOutcomeId;
+    bool public resultPosted;
+    bool private initialized;
 
-    PayoutCurve public payoutCurve;
-    uint256 public payoutMultiplier;
+    bytes32[] private commitments;
+    mapping(uint256 => bool) public usedCommitNonces;
+    mapping(uint256 => bool) public claimedTickets;
 
-    bool private _initialized;
-    bool private _settlementInProgress;
-    mapping(bytes32 => bool) public commitmentExists;
-    mapping(address => Ticket[]) public userTickets;
-    bytes32[] private _commitments;
-    mapping(bytes32 => bool) public usedQuoteIds;
-    uint256 public expectedVerifierInputs;
+    event Committed(uint256 indexed ticketId, bytes32 commitment, uint256 totalEscrow);
+    event Locked(bytes32 commitmentsRoot, uint256 ticketCount);
+    event ResultPosted(uint256 indexed winningOutcomeId);
+    event Settled(uint256 totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
+    event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
+    event Finished(uint256 leftoverToProtocol);
+    event AuthorizationSignerUpdated(address indexed signer);
+    event OracleUpdated(address indexed oracle);
+    event RelayerEscrowUpdated(address indexed relayer);
+    event ProtocolLiabilityCapUpdated(uint256 newCap);
 
-    modifier onlyPhase(Phase expected) {
-        _onlyPhase(expected);
+    error AlreadyInitialized();
+    error NotRelayer();
+    error NotOracle();
+    error InvalidPhase();
+    error CommitWindowClosed();
+    error CommitExpired();
+    error CommitReplay();
+    error InvalidSignature();
+    error InvalidPayment();
+    error MaxCommitmentsReached();
+    error NothingToLock();
+    error ResultMissing();
+    error InvalidProof();
+    error CircuitHashMismatch();
+    error TotalsMismatch();
+    error PaddingMismatch();
+    error LiabilityExceedsCoverage();
+    error InsufficientCoverage();
+    error ClaimWindowClosed();
+    error WrongOutcome();
+    error TicketAlreadyClaimed();
+    error InvalidMerkleProof();
+    error OverClaimed();
+    error InvalidOutcome();
+    error ResultAlreadyPosted();
+    error InvalidInit();
+    error RakeMismatch();
+    error NotFactory();
+    error CommitsPaused();
+    error ClaimsPaused();
+    error DeadlineExtendOnly();
+    error InvalidAddress();
+
+    modifier onlyRelayer() {
+        _onlyRelayer();
         _;
     }
 
@@ -235,590 +121,294 @@ contract RevealMarket is ReentrancyGuard {
         _;
     }
 
-    modifier onlyAfter(uint256 timestamp) {
-        _onlyAfter(timestamp);
+    modifier onlyFactory() {
+        _onlyFactory();
         _;
     }
 
-    modifier ifNotSettled() {
-        _ifNotSettled();
-        _;
-    }
-
-    uint256 private constant MAX_COMMITMENTS = 4096;
-
-    /// @notice Initializes the market clone (ZEN-only collateral).
-    function initialize(InitConfig calldata cfg) external {
-        if (_initialized) revert AlreadyInitialized();
-        if (cfg.oracle == address(0)) revert InvalidOracle();
-        if (cfg.verifier == address(0)) revert InvalidVerifier();
-        if (cfg.rakeManager == address(0)) revert InvalidRakeManager();
-        if (cfg.treasury == address(0)) revert InvalidTreasury();
-        if (cfg.guardian == address(0)) revert InvalidGuardian();
-        if (cfg.pricingSigner == address(0)) revert InvalidPricingSigner();
-        if (cfg.payoutMultiplier == 0 || cfg.payoutMultiplier > MAX_PAYOUT_MULTIPLIER) {
-            revert InvalidPayoutMultiplier();
-        }
-        if (cfg.commitDeadline <= block.timestamp) revert InvalidTimestamp();
-        if (cfg.revealDeadline <= cfg.commitDeadline) revert InvalidTimestamp();
-        if (cfg.rakeBpsOverride > IRakeManager(cfg.rakeManager).maxRakeBps()) revert InvalidRakeBps();
-        uint256 verifierInputs = IVerifier(cfg.verifier).expectedInputs();
-        if (verifierInputs != EXPECTED_PUBLIC_INPUTS) {
-            revert InvalidExpectedInputs(verifierInputs, EXPECTED_PUBLIC_INPUTS);
-        }
-        if (cfg.minCommitmentSize != 0 && cfg.minCommitmentSize < MIN_COMMITMENT_FLOOR) {
-            revert CommitmentTooSmall(MIN_COMMITMENT_FLOOR);
-        }
-        uint256 maxCommitConfig = cfg.maxCommitments;
-        if (maxCommitConfig == 0) {
-            maxCommitConfig = DEFAULT_MAX_COMMITMENTS;
-        }
-        if (maxCommitConfig > DEFAULT_MAX_COMMITMENTS) {
-            revert InvalidMaxCommitments();
-        }
-        if (cfg.minCommitmentSize > 0 && cfg.maxMarketSize > 0 && cfg.minCommitmentSize > cfg.maxMarketSize) {
-            revert InvalidAmount();
-        }
-        if (cfg.maxTicketsPerUser > 0 && cfg.maxTicketsPerUser > MAX_COMMITMENTS) {
-            revert CommitLimitReached();
-        }
-
-        eventId = cfg.eventId;
-        commitDeadline = cfg.commitDeadline;
-        revealDeadline = cfg.revealDeadline;
-        oracle = cfg.oracle;
-        verifier = cfg.verifier;
-        expectedVerifierInputs = verifierInputs;
-        rakeManager = cfg.rakeManager;
-        treasury = cfg.treasury;
-        factory = msg.sender;
-        guardian = cfg.guardian;
-        rakeBpsOverride = cfg.rakeBpsOverride;
-        payoutMultiplier = cfg.payoutMultiplier;
-        payoutCurve = cfg.payoutCurve;
-        maxMarketSize = cfg.maxMarketSize;
-        circuitHash = IVerifier(cfg.verifier).circuitHash();
-        marketId = uint256(uint160(address(this)));
-        pricingSigner = cfg.pricingSigner;
-        minCommitmentSize = cfg.minCommitmentSize;
-        maxTicketsPerUser = cfg.maxTicketsPerUser;
-        maxCommitments = maxCommitConfig;
-
-        phase = Phase.Commit;
-        _initialized = true;
-
-        emit Initialized(
-            eventId, oracle, commitDeadline, revealDeadline, guardian, payoutMultiplier, payoutCurve, maxMarketSize
-        );
-        if (cfg.rakeBpsOverride > 0) {
-            emit RakeConfigured(cfg.rakeBpsOverride);
-        }
-    }
-
-    /// @notice Allows users to commit a ticket hash with ZEN during the commit phase.
-    function commit(uint256 outcomeId, uint256 amount, bytes32 salt)
-        external
-        payable
-        nonReentrant
-        onlyPhase(Phase.Commit)
-    {
-        if (msg.value != amount) revert InvalidPayment();
-        _commitInternal(msg.sender, outcomeId, amount, salt);
-    }
-
-    /// @notice Allows users to commit with a backend-signed quote to prevent client tampering.
-    function commitWithQuote(uint256 outcomeId, uint256 amount, bytes32 salt, SignedQuote calldata quote)
-        external
-        payable
-        nonReentrant
-        onlyPhase(Phase.Commit)
-    {
-        if (msg.value != amount) revert InvalidPayment();
-        _validateQuote(quote, msg.sender, amount, outcomeId);
-        emit QuoteCommitted(msg.sender, outcomeId, amount, quote.quoteId, marketId);
-        _commitInternal(msg.sender, outcomeId, amount, salt);
-    }
-
-    function _commitInternal(address user, uint256 outcomeId, uint256 amount, bytes32 salt) internal {
-        if (block.timestamp >= commitDeadline) revert InvalidTimestamp();
-        if (amount == 0) revert InvalidAmount();
-        if (minCommitmentSize > 0 && amount < minCommitmentSize) revert CommitmentTooSmall(minCommitmentSize);
-        if (commitmentsCount >= maxCommitments) revert CommitLimitReached();
-        if (_factoryCommitPaused()) revert CommitPaused();
-        if (commitsPaused) revert CommitPaused();
-        if (outcomeId > 1) revert InvalidOutcome();
-        uint256 userTicketLimit = maxTicketsPerUser;
-        if (userTicketLimit > 0 && userTickets[user].length + 1 > userTicketLimit) {
-            revert UserCommitLimitReached(userTicketLimit);
-        }
-
-        uint256 potentialPayout = _estimatePayout(amount);
-        (uint256 newLiability, uint256 newEscrow, uint256 coverage) =
-            _estimateMaxPayoutAfterCommit(amount, potentialPayout);
-        if (newLiability > coverage) revert LiabilityExceedsCoverage(newLiability, coverage);
-        _enforceMarketSize(newEscrow, houseFloat);
-        _syncFactoryAccounting(newEscrow, houseFloat, newLiability);
-
-        userEscrow = newEscrow;
-        maxLiability = newLiability;
-        commitmentsCount += 1;
-        if (outcomeId == 0) {
-            poolTotalYes += amount;
-        } else {
-            poolTotalNo += amount;
-        }
-        emit MaxLiabilityUpdated(newLiability);
-
-        bytes32 ticketHash = _hashCommit(user, outcomeId, amount, salt);
-        // Keccak is the canonical hash for circuit + off-chain builder compatibility.
-        // forge-lint: disable-next-line(asm-keccak256)
-        bytes32 leaf = keccak256(abi.encodePacked(ticketHash));
-        _commitments.push(leaf);
-        userTickets[user].push(Ticket({commitHash: ticketHash, amount: amount, revealed: false, claimed: false}));
-        commitmentExists[ticketHash] = true;
-
-        emit Commit(user, ticketHash, amount, block.timestamp);
-        emit Committed(user, ticketHash, amount);
-    }
-
-    function _validateQuote(SignedQuote calldata quote, address sender, uint256 amount, uint256 outcomeId) internal {
-        if (quote.expiry <= block.timestamp) revert InvalidTimestamp();
-        if (quote.stakeZen != amount) revert InvalidAmount();
-        if (quote.outcomeId != outcomeId) revert InvalidOutcome();
-        if (quote.expectedUser == address(0) || quote.expectedUser != sender) revert NotAuthorized();
-        if (quote.zenUsd == 0) revert InvalidQuote();
-        if (quote.quoteId == bytes32(0)) revert InvalidQuote();
-        if (usedQuoteIds[quote.quoteId]) revert QuoteAlreadyUsed();
-
-        bytes memory digestPayload = abi.encodePacked(
-            "QUOTE_V1",
-            block.chainid,
-            address(this),
-            quote.expectedUser,
-            quote.outcomeId,
-            quote.stakeZen,
-            quote.zenUsd,
-            quote.expiry,
-            quote.quoteId
-        );
-        // Keccak is canonical for off-chain signing compatibility; assembly variant would not change gas materially here.
-        // forge-lint: disable-next-line(asm-keccak256)
-        bytes32 digest = keccak256(digestPayload);
-        bytes32 wrapped = MessageHashUtils.toEthSignedMessageHash(digest);
-        address recovered = ECDSA.recover(wrapped, quote.signature);
-        if (recovered != pricingSigner) revert NotAuthorized();
-
-        usedQuoteIds[quote.quoteId] = true;
-    }
-
-    /// @notice Adds house float liquidity for enhanced payouts.
-    function fundMarket(uint256 amount) external payable nonReentrant {
-        if (msg.sender != treasury && msg.sender != factory && msg.sender != guardian) revert NotAuthorized();
-        if (amount == 0 || msg.value != amount) revert InvalidPayment();
-        uint256 newFloat = houseFloat + amount;
-        _enforceMarketSize(userEscrow, newFloat);
-        houseFloat = newFloat;
-        emit FloatAdded(amount);
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-    }
-
-    /// @notice Locks the market once the commit deadline has elapsed and stores the canonical commitments root.
-    function lock() external onlyPhase(Phase.Commit) onlyAfter(commitDeadline) {
-        if (msg.sender != oracle && msg.sender != guardian && msg.sender != factory) revert NotAuthorized();
-        if (commitmentsCount == 0) revert InvalidProofLayout();
-        commitmentsRoot = _computeMerkleRoot(_commitments);
-        winningCommitmentsRoot = commitmentsRoot;
-        phase = Phase.Locked;
-        emit Locked();
-    }
-
-    /// @notice Oracle posts the resulting outcome hash after commits are locked.
-    function postResult(uint256 outcomeId) external onlyOracle onlyPhase(Phase.Locked) {
-        if (outcomeSet) revert OutcomeAlreadySet();
-        winningOutcomeId = outcomeId;
-        outcomeSet = true;
-        emit ResultPosted(outcomeId);
-    }
-
-    /// @notice Verifies a zero-knowledge proof and settles the market atomically.
-    function verifyAndSettle(bytes calldata proof, uint256[10] calldata pubSignals)
-        external
-        onlyPhase(Phase.Locked)
-        nonReentrant
-    {
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
-        if (!outcomeSet) revert WinningPoolNotSet();
-        if (commitmentsRoot == bytes32(0) || commitmentsCount == 0) revert InvalidProofLayout();
-
-        SettlementSignals memory signals = _decodeSignals(pubSignals);
-        if (signals.commitmentsRoot != commitmentsRoot) revert InvalidProofLayout();
-        if (signals.marketId != marketId) revert InvalidMarketAddress();
-        if (signals.circuitHash != circuitHash) revert CircuitHashMismatch();
-        if (signals.padding != 0) revert InvalidProofLayout();
-
-        if (signals.winningOutcomeId != winningOutcomeId) revert ProofOutcomeMismatch();
-
-        uint256 expectedPool = signals.poolTotalYes + signals.poolTotalNo;
-        if (expectedPool != signals.totalEscrow) revert ProofTotalsMismatch();
-        if (signals.totalEscrow != userEscrow) revert ProofTotalsMismatch();
-        if (signals.poolTotalYes != poolTotalYes || signals.poolTotalNo != poolTotalNo) revert ProofTotalsMismatch();
-        if (poolTotalYes + poolTotalNo != userEscrow) revert ProofTotalsMismatch();
-        uint256 appliedRake = appliedRakeBps();
-        if (signals.rakeBps != appliedRake) revert InvalidRakeBps();
-
-        uint256 expectedRakeAmount = (signals.totalEscrow * signals.rakeBps) / 10_000;
-        uint256 netEscrow = signals.totalEscrow - expectedRakeAmount;
-        uint256 netPool = netEscrow + houseFloat;
-        if (signals.totalLiability > netPool) revert LiabilityExceedsCoverage(signals.totalLiability, netPool);
-        uint256 winningPoolSignal = signals.winningOutcomeId == 0 ? poolTotalYes : poolTotalNo;
-        uint256 expectedLiability = _estimatePayout(winningPoolSignal);
-        if (signals.totalLiability != expectedLiability) revert ProofTotalsMismatch();
-
-        bool success = IVerifier(verifier).verifyProof(proof, pubSignals);
-        emit ProofVerified(success);
-        emit ProofReceipt(signals.commitmentsRoot, verifier, success);
-        if (!success) revert ProofVerificationFailed();
-
-        _settlementInProgress = true;
-
-        rakePaid = expectedRakeAmount;
-        if (rakePaid > userEscrow) revert ProofTotalsMismatch();
-        if (rakePaid > 0) {
-            SafeTransferLib.safeTransferETH(treasury, rakePaid);
-        }
-
-        userEscrow = netEscrow;
-        winningCommitmentsRoot = commitmentsRoot;
-        winningPool = winningPoolSignal;
-        totalLiability = signals.totalLiability;
-        maxLiability = signals.totalLiability;
-        floatReservedAtSettlement = 0;
-        settledAt = block.timestamp;
-        phase = Phase.Settled;
-
-        uint256 newNetPool = userEscrow + houseFloat;
-        if (newNetPool != netPool) revert ProofTotalsMismatch();
-        _settlementInProgress = false;
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-
-        emit MaxLiabilityUpdated(signals.totalLiability);
-        emit MarketSettled(winningOutcomeId);
-        emit MarketResolved(bytes32(winningOutcomeId), winningPool, totalLiability, newNetPool, rakePaid, settledAt);
-    }
-
-    /// @notice Claims winnings by revealing the committed outcome.
-    function claim(uint256 ticketId, uint256 outcomeId, bytes32 salt, uint256 leafIndex, bytes32[] calldata merkleProof)
-        external
-        nonReentrant
-        onlyPhase(Phase.Settled)
-    {
-        if (totalLiability == 0) revert WinningPoolNotSet();
-        if (_factoryClaimPaused()) revert ClaimPaused();
-        if (claimsPaused) revert ClaimPaused();
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
-
-        Ticket storage ticket = _getTicket(msg.sender, ticketId);
-        if (ticket.claimed) revert TicketAlreadyClaimed();
-
-        if (!outcomeSet || outcomeId != winningOutcomeId) revert TicketLoses();
-
-        bytes32 reconstructed = _hashCommit(msg.sender, outcomeId, ticket.amount, salt);
-        if (reconstructed != ticket.commitHash) revert TicketLoses();
-        if (!commitmentExists[reconstructed]) revert CommitmentNotFound();
-        if (winningCommitmentsRoot == bytes32(0)) revert InvalidProofLayout();
-        // Keccak kept for deterministic leaf reconstruction matching circuit/off-chain tree.
-        // forge-lint: disable-next-line(asm-keccak256)
-        bytes32 leaf = keccak256(abi.encodePacked(reconstructed));
-        if (commitmentsCount == 1) {
-            if (merkleProof.length != 0 || leaf != winningCommitmentsRoot) revert InvalidMerkleProof();
-        } else {
-            if (merkleProof.length == 0) revert InvalidMerkleProof();
-            if (leafIndex >= commitmentsCount) revert InvalidMerkleProof();
-            if (!_verifyMerkle(leaf, winningCommitmentsRoot, merkleProof, leafIndex)) {
-                revert InvalidMerkleProof();
-            }
-        }
-
-        ticket.claimed = true;
-        ticket.revealed = true;
-
-        uint256 payout = _estimatePayout(ticket.amount);
-        uint256 newPaidOut = paidOut + payout;
-        if (newPaidOut > totalLiability) revert LiabilityExceedsCoverage(newPaidOut, totalLiability);
-        if (payout > _collateralBalance()) revert LiabilityExceedsCoverage(payout, _collateralBalance());
-
-        paidOut = newPaidOut;
-        claimedWinningStake += ticket.amount;
-        _applyPayoutAccounting(payout);
-        maxLiability = totalLiability - paidOut;
-        emit MaxLiabilityUpdated(maxLiability);
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-
-        SafeTransferLib.safeTransferETH(msg.sender, payout);
-        emit Claimed(msg.sender, payout);
-    }
-
-    /// @notice Refunds all tickets if the market was not settled before reveal deadline or got cancelled.
-    function refund() external nonReentrant ifNotSettled {
-        if (phase != Phase.Cancelled) {
-            if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase);
-            if (block.timestamp <= revealDeadline) revert InvalidTimestamp();
-        }
-        Ticket[] storage tickets = userTickets[msg.sender];
-        uint256 length = tickets.length;
-        uint256 refundAmount;
-
-        for (uint256 i = 0; i < length; ++i) {
-            Ticket storage ticket = tickets[i];
-            if (!ticket.claimed && ticket.amount > 0) {
-                uint256 ticketPayout = _estimatePayout(ticket.amount);
-                refundAmount += ticket.amount;
-                ticket.claimed = true;
-                ticket.amount = 0;
-                if (ticketPayout <= maxLiability) {
-                    maxLiability -= ticketPayout;
-                } else {
-                    maxLiability = 0;
-                }
-            }
-        }
-
-        if (refundAmount == 0) revert NothingToRefund();
-
-        userEscrow -= refundAmount;
-        SafeTransferLib.safeTransferETH(msg.sender, refundAmount);
-        emit Refunded(msg.sender, refundAmount);
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-    }
-
-    /// @notice Withdraws leftover float after all claims are satisfied.
-    function withdrawFloat(address recipient, uint256 amount) external nonReentrant {
-        if (msg.sender != treasury && msg.sender != factory) {
-            bool isFactoryOwner;
-            if (factory.code.length > 0) {
-                try Ownable(factory).owner() returns (address owner) {
-                    isFactoryOwner = msg.sender == owner;
-                } catch {
-                    isFactoryOwner = false;
-                }
-            }
-            if (!isFactoryOwner) revert NotAuthorized();
-        }
-        if (phase != Phase.Settled) revert InvalidPhase(Phase.Settled, phase);
-        if (paidOut < totalLiability) revert OutstandingClaims();
-        if (amount == 0 || amount > houseFloat) revert InvalidAmount();
-        if (amount > _collateralBalance()) revert LiabilityExceedsCoverage(amount, _collateralBalance());
-
-        houseFloat -= amount;
-        SafeTransferLib.safeTransferETH(recipient, amount);
-        emit FloatWithdrawn(recipient, amount);
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-    }
-
-    /// @notice Returns the number of tickets a user holds.
-    function ticketCount(address user) external view returns (uint256) {
-        return userTickets[user].length;
-    }
-
-    /// @notice Returns the details of a specific ticket.
-    function ticketInfo(address user, uint256 ticketId) external view returns (Ticket memory) {
-        Ticket storage ticket = _getTicket(user, ticketId);
-        return Ticket({
-            commitHash: ticket.commitHash, amount: ticket.amount, revealed: ticket.revealed, claimed: ticket.claimed
-        });
-    }
-
-    /// @notice Computes the payout a ticket would receive if claimed with provided reveal data.
-    function payoutPreview(address user, uint256 ticketId, uint256 outcomeId, bytes32 salt)
-        external
-        view
-        returns (uint256 payout, bool claimable)
-    {
-        if (phase != Phase.Settled || totalLiability == 0) return (0, false);
-
-        Ticket storage ticket = _getTicket(user, ticketId);
-        if (ticket.claimed) return (0, false);
-
-        if (!outcomeSet || outcomeId != winningOutcomeId) return (0, false);
-
-        bytes32 reconstructed = _hashCommit(user, outcomeId, ticket.amount, salt);
-        if (reconstructed != ticket.commitHash) return (0, false);
-
-        payout = _estimatePayout(ticket.amount);
-        if (payout + paidOut > totalLiability) return (0, false);
-        if (payout > _collateralBalance()) return (0, false);
-        return (payout, true);
-    }
-
-    function remainingPayoutPool() external view returns (uint256) {
-        return _collateralBalance();
-    }
-
-    /// @notice Returns settlement metadata for indexers/dashboards.
-    function resolutionSummary()
-        external
-        view
-        returns (
-            bytes32 outcomeHash,
-            uint256 winningStake,
-            uint256 liability,
-            uint256 netPool,
-            uint256 rakeAmount,
-            uint256 settledTimestamp
-        )
-    {
-        return (bytes32(winningOutcomeId), winningPool, totalLiability, _collateralBalance(), rakePaid, settledAt);
-    }
-
-    function appliedRakeBps() public view returns (uint256) {
-        uint256 overrideBps = rakeBpsOverride;
-        if (overrideBps == 0) {
-            return IRakeManager(rakeManager).rakeBps();
-        }
-        return overrideBps;
-    }
-
-    function setGuardian(address newGuardian) external {
-        _checkController();
-        if (newGuardian == address(0)) revert InvalidGuardian();
-        guardian = newGuardian;
-        emit GuardianUpdated(newGuardian);
-    }
-
-    function setCommitPaused(bool paused) external {
-        _checkController();
-        commitsPaused = paused;
-        emit CommitPauseSet(paused, msg.sender);
-    }
-
-    function setClaimPaused(bool paused) external {
-        _checkController();
-        claimsPaused = paused;
-        emit ClaimPauseSet(paused, msg.sender);
-    }
-
-    function cancelMarket(string calldata reason) external {
-        _checkController();
-        if (phase == Phase.Settled) revert AlreadySettled();
-        if (phase == Phase.Cancelled) revert MarketAlreadyCancelled();
-        phase = Phase.Cancelled;
-        cancellationTimestamp = block.timestamp;
-        _cancellationReason = reason;
-        winningOutcomeId = 0;
-        outcomeSet = false;
-        winningPool = 0;
-        commitsPaused = true;
-        claimsPaused = true;
-        emit MarketCancelled(msg.sender, reason);
-    }
-
-    function emergencySettle(uint256 outcomeId, uint256 declaredWinningPool) external nonReentrant {
-        _checkController();
-        if (phase != Phase.Locked) revert InvalidPhase(Phase.Locked, phase);
-        winningOutcomeId = outcomeId;
-        outcomeSet = true;
-        uint256 requiredLiability = _estimatePayout(declaredWinningPool);
-        uint256 netEscrow = IRakeManager(rakeManager).takeRake(ZEN, userEscrow, rakeBpsOverride);
-        rakePaid = userEscrow - netEscrow;
-        uint256 coverage = netEscrow + houseFloat;
-        if (requiredLiability > coverage) revert LiabilityExceedsCoverage(requiredLiability, coverage);
-        if (rakePaid > 0) {
-            SafeTransferLib.safeTransferETH(treasury, rakePaid);
-        }
-        userEscrow = netEscrow;
-        totalLiability = requiredLiability;
-        maxLiability = requiredLiability;
-        winningPool = declaredWinningPool;
-        winningCommitmentsRoot = commitmentsRoot;
-        settledAt = block.timestamp;
-        phase = Phase.Settled;
-        _syncFactoryAccounting(userEscrow, houseFloat, maxLiability);
-        emit MaxLiabilityUpdated(maxLiability);
-        emit EmergencySettled(bytes32(outcomeId), declaredWinningPool, msg.sender);
-        emit MarketSettled(outcomeId);
-        emit MarketResolved(
-            bytes32(outcomeId), declaredWinningPool, totalLiability, _collateralBalance(), rakePaid, settledAt
-        );
-    }
-
-    function updateOracle(address newOracle) external {
-        _checkController();
-        if (newOracle == address(0)) revert InvalidOracle();
-        address previous = oracle;
-        oracle = newOracle;
-        emit OracleUpdated(previous, newOracle);
-    }
-
-    function cancellationReason() external view returns (string memory) {
-        return _cancellationReason;
-    }
-
-    /// @notice Estimate future liability for a new commit (for dashboards/testing).
-    function previewMaxLiability(uint256 amount) public view returns (uint256) {
-        uint256 potentialPayout = _estimatePayout(amount);
-        (uint256 newLiability,,) = _estimateMaxPayoutAfterCommit(amount, potentialPayout);
-        return newLiability;
-    }
-
-    receive() external payable {
-        revert InvalidPhase(Phase.Commit, phase);
-    }
-
-    // ----------------------- internal utils -----------------------
-
-    function _onlyPhase(Phase expected) internal view {
-        if (phase != expected) revert InvalidPhase(expected, phase);
+    function _onlyRelayer() internal view {
+        address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
+        if (msg.sender != relayerEscrow && msg.sender != relayerOwner) revert NotRelayer();
     }
 
     function _onlyOracle() internal view {
-        if (msg.sender != oracle) revert InvalidOracle();
+        if (msg.sender != oracle) revert NotOracle();
     }
 
-    function _onlyAfter(uint256 timestamp) internal view {
-        if (block.timestamp <= timestamp) revert InvalidTimestamp();
+    function _onlyFactory() internal view {
+        if (msg.sender != factory) revert NotFactory();
     }
 
-    function _ifNotSettled() internal view {
-        if (phase == Phase.Settled) revert AlreadySettled();
+    function initialize(InitParams calldata params) external {
+        if (initialized) revert AlreadyInitialized();
+        if (
+            params.factory == address(0) || params.protocolPool == address(0) || params.relayerEscrow == address(0)
+                || params.oracle == address(0) || params.verifier == address(0)
+                || params.authorizationSigner == address(0) || params.ticketSize == 0 || params.commitDeadline == 0
+                || params.revealDeadline <= params.commitDeadline
+        ) revert InvalidInit();
+        if (params.rakeBps > 10_000) revert InvalidInit();
+        initialized = true;
+        factory = params.factory;
+        protocolPool = params.protocolPool;
+        relayerEscrow = params.relayerEscrow;
+        oracle = params.oracle;
+        verifier = params.verifier;
+        circuitHash = params.circuitHash;
+        commitDeadline = params.commitDeadline;
+        revealDeadline = params.revealDeadline;
+        ticketSize = params.ticketSize;
+        maxCommitments = params.maxCommitments;
+        authorizationSigner = params.authorizationSigner;
+        protocolLiabilityCap = params.protocolLiabilityCap;
+        marketId = params.marketId;
+        rakeBps = params.rakeBps;
+        phase = Phase.Commit;
     }
 
-    function _hashCommit(address user, uint256 outcomeId, uint256 amount, bytes32 salt)
-        internal
-        view
-        returns (bytes32 result)
+    /// @notice Relayer-only commit entrypoint; verifies backend authorization and pushes the sealed commitment.
+    function commitWithAuthorization(CommitAuth calldata auth, bytes calldata signature)
+        external
+        payable
+        override
+        onlyRelayer
+        nonReentrant
     {
-        result = keccak256(abi.encodePacked(address(this), user, outcomeId, amount, salt));
+        if (phase != Phase.Commit) revert InvalidPhase();
+        if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
+        if (commitsPaused) revert CommitsPaused();
+        if (msg.value != ticketSize) revert InvalidPayment();
+        if (maxCommitments != 0 && commitments.length >= maxCommitments) revert MaxCommitmentsReached();
+        if (auth.expiry < block.timestamp) revert CommitExpired();
+        if (usedCommitNonces[auth.nonce]) revert CommitReplay();
+
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(this), marketId, auth.commitment, auth.nonce, auth.expiry))
+        );
+        if (digest.recover(signature) != authorizationSigner) revert InvalidSignature();
+
+        usedCommitNonces[auth.nonce] = true;
+        commitments.push(auth.commitment);
+        uint256 rake = (ticketSize * rakeBps) / 10_000;
+        uint256 net = ticketSize - rake;
+        totalEscrow += net;
+        rakeCollected += rake;
+        if (rake > 0) {
+            _send(protocolPool, rake);
+        }
+        emit Committed(commitments.length - 1, auth.commitment, totalEscrow);
     }
 
-    function _decodeSignals(uint256[10] calldata pubSignals) internal pure returns (SettlementSignals memory signals) {
-        signals.commitmentsRoot = bytes32(pubSignals[0]);
-        signals.marketId = pubSignals[1];
-        signals.winningOutcomeId = pubSignals[2];
-        signals.totalEscrow = pubSignals[3];
-        signals.totalLiability = pubSignals[4];
-        signals.rakeBps = pubSignals[5];
-        signals.poolTotalYes = pubSignals[6];
-        signals.poolTotalNo = pubSignals[7];
-        signals.circuitHash = bytes32(pubSignals[8]);
-        signals.padding = pubSignals[9];
+    /// @notice Locks the market and stores the Merkle root over commitments.
+    function lock() external onlyOracle {
+        if (phase != Phase.Commit) revert InvalidPhase();
+        if (block.timestamp < commitDeadline) revert CommitWindowClosed();
+        if (commitments.length == 0) revert NothingToLock();
+
+        commitmentsRoot = _computeCommitmentsRoot();
+        phase = Phase.Locked;
+        emit Locked(commitmentsRoot, commitments.length);
     }
 
-    function _getTicket(address user, uint256 ticketId) private view returns (Ticket storage) {
-        Ticket[] storage tickets = userTickets[user];
-        if (ticketId >= tickets.length) revert TicketNotFound();
-        return tickets[ticketId];
+    /// @notice Oracle posts the winning outcome (0 or 1).
+    function postResult(uint256 outcomeId) external onlyOracle {
+        if (phase != Phase.Locked) revert InvalidPhase();
+        if (resultPosted) revert ResultAlreadyPosted();
+        if (outcomeId > 1) revert InvalidOutcome();
+        winningOutcomeId = outcomeId;
+        resultPosted = true;
+        emit ResultPosted(outcomeId);
     }
 
-    function _collateralBalance() internal view returns (uint256) {
-        return address(this).balance;
+    /// @notice Verifies Groth16 proof and moves market into the Settled phase.
+    function verifyAndSettle(bytes calldata proof, uint256[10] calldata publicSignals)
+        external
+        onlyOracle
+        nonReentrant
+    {
+        if (phase != Phase.Locked) revert InvalidPhase();
+        if (!resultPosted) revert ResultMissing();
+
+        if (
+            publicSignals[0] != uint256(commitmentsRoot) || publicSignals[1] != marketId
+                || publicSignals[2] != winningOutcomeId || publicSignals[3] != totalEscrow
+        ) revert TotalsMismatch();
+        if (publicSignals[5] != rakeBps) revert RakeMismatch();
+        if (publicSignals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
+        if (publicSignals[9] != 0) revert PaddingMismatch();
+
+        bool ok = IVerifier(verifier).verifyProof(proof, publicSignals);
+        if (!ok) revert InvalidProof();
+
+        totalLiability = publicSignals[4];
+        poolTotalYes = publicSignals[6];
+        poolTotalNo = publicSignals[7];
+
+        rakeAmount = rakeCollected;
+        uint256 required = totalLiability;
+        if (required > totalEscrow + protocolLiabilityCap) revert LiabilityExceedsCoverage();
+
+        if (required > address(this).balance) {
+            uint256 deficit = required - address(this).balance;
+            protocolTopUp = deficit;
+            IProtocolPool(protocolPool).draw(address(this), deficit);
+        }
+
+        if (required > address(this).balance) revert InsufficientCoverage();
+
+        // forward any surplus immediately; keep only what is needed for claims
+        uint256 surplus = address(this).balance > totalLiability ? address(this).balance - totalLiability : 0;
+        if (surplus > 0) {
+            _send(protocolPool, surplus);
+        }
+
+        phase = Phase.Settled;
+        emit Settled(totalLiability, rakeAmount, protocolTopUp, poolTotalYes, poolTotalNo);
     }
 
-    function _verifyMerkle(bytes32 leaf, bytes32 root, bytes32[] calldata proof, uint256 index)
+    /// @notice Winning tickets reveal and route payouts back to the relayer escrow.
+    function claim(
+        address user,
+        uint256 ticketId,
+        uint256 outcomeId,
+        uint256 amount,
+        bytes32 salt,
+        bytes32[] calldata merkleProof
+    ) external onlyRelayer nonReentrant {
+        if (phase != Phase.Settled) revert InvalidPhase();
+        if (block.timestamp > revealDeadline) revert ClaimWindowClosed();
+        if (claimsPaused) revert ClaimsPaused();
+        if (outcomeId != winningOutcomeId) revert WrongOutcome();
+        if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt);
+        if (!_verifyLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
+
+        claimedTickets[ticketId] = true;
+        claimedLiability += amount;
+        if (claimedLiability > totalLiability) revert OverClaimed();
+
+        IRelayerEscrow(relayerEscrow).creditFromMarket{value: amount}(user);
+        emit Claimed(msg.sender, user, ticketId, amount);
+
+        if (claimedLiability == totalLiability) {
+            _finish();
+        }
+    }
+
+    /// @notice Returns the sealed commitment stored at an index (for off-chain auditing).
+    function commitmentAt(uint256 index) external view returns (bytes32) {
+        return commitments[index];
+    }
+
+    function _finish() internal {
+        uint256 leftover = address(this).balance;
+        if (leftover > 0) {
+            _send(protocolPool, leftover);
+        }
+        phase = Phase.Finished;
+        emit Finished(leftover);
+    }
+
+    /// @notice Factory hook to update rake for existing markets (keeps all markets aligned to global rake).
+    function setRakeBps(uint256 newRakeBps) external onlyFactory {
+        if (newRakeBps > 10_000) revert InvalidInit();
+        rakeBps = newRakeBps;
+    }
+
+    /// @notice Rotate authorization signer (only during commit phase to keep auth coherent).
+    function setAuthorizationSigner(address newSigner) external onlyFactory {
+        if (newSigner == address(0)) revert InvalidAddress();
+        if (phase != Phase.Commit) revert InvalidPhase();
+        authorizationSigner = newSigner;
+        emit AuthorizationSignerUpdated(newSigner);
+    }
+
+    /// @notice Rotate oracle; allowed until settlement to handle provider changes.
+    function setOracle(address newOracle) external onlyFactory {
+        if (newOracle == address(0)) revert InvalidAddress();
+        if (phase == Phase.Settled || phase == Phase.Finished) revert InvalidPhase();
+        oracle = newOracle;
+        emit OracleUpdated(newOracle);
+    }
+
+    /// @notice Rotate the relayer escrow (e.g., in response to relayer compromise).
+    function setRelayerEscrow(address newRelayerEscrow) external onlyFactory {
+        if (newRelayerEscrow == address(0)) revert InvalidAddress();
+        relayerEscrow = newRelayerEscrow;
+        emit RelayerEscrowUpdated(newRelayerEscrow);
+    }
+
+    /// @notice Adjust the per-market protocol liability cap before settlement.
+    function setProtocolLiabilityCap(uint256 newCap) external onlyFactory {
+        if (phase == Phase.Settled || phase == Phase.Finished) revert InvalidPhase();
+        protocolLiabilityCap = newCap;
+        emit ProtocolLiabilityCapUpdated(newCap);
+    }
+
+    /// @notice Owner/factory controls to pause commits or claims in emergencies.
+    function setCommitsPaused(bool paused) external onlyFactory {
+        commitsPaused = paused;
+    }
+
+    function setClaimsPaused(bool paused) external onlyFactory {
+        claimsPaused = paused;
+    }
+
+    /// @notice Extend-only deadline updates. Cannot shorten.
+    function extendCommitDeadline(uint256 newDeadline) external onlyFactory {
+        if (newDeadline <= commitDeadline) revert DeadlineExtendOnly();
+        if (phase != Phase.Commit) revert InvalidPhase();
+        commitDeadline = newDeadline;
+    }
+
+    function extendRevealDeadline(uint256 newDeadline) external onlyFactory {
+        if (newDeadline <= revealDeadline) revert DeadlineExtendOnly();
+        if (phase == Phase.Finished) revert InvalidPhase();
+        revealDeadline = newDeadline;
+    }
+
+    function _computeCommitmentsRoot() internal view returns (bytes32) {
+        uint256 count = commitments.length;
+        bytes32[] memory nodes = new bytes32[](count);
+        for (uint256 i = 0; i < count; ++i) {
+            nodes[i] = commitments[i];
+        }
+        while (count > 1) {
+            uint256 next = 0;
+            for (uint256 i = 0; i < count; i += 2) {
+                if (i + 1 == count) {
+                    nodes[next] = keccak256(abi.encodePacked(nodes[i], nodes[i]));
+                } else {
+                    nodes[next] = keccak256(abi.encodePacked(nodes[i], nodes[i + 1]));
+                }
+                next++;
+            }
+            count = next;
+        }
+        return nodes[0];
+    }
+
+    function _computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt)
         internal
         pure
-        returns (bool)
+        returns (bytes32 hash)
     {
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, ticketId)
+            mstore(add(ptr, 0x20), outcomeId)
+            mstore(add(ptr, 0x40), amount)
+            mstore(add(ptr, 0x60), salt)
+            hash := keccak256(ptr, 0x80)
+            mstore(0x40, add(ptr, 0x80))
+        }
+    }
+
+    function _verifyLeaf(uint256 ticketId, bytes32 leaf, bytes32[] calldata proof) internal view returns (bool) {
+        if (ticketId >= commitments.length) return false;
+        if (commitments[ticketId] != leaf) return false;
         bytes32 computed = leaf;
+        uint256 index = ticketId;
         for (uint256 i = 0; i < proof.length; ++i) {
             bytes32 sibling = proof[i];
             if ((index & 1) == 1) {
@@ -828,95 +418,13 @@ contract RevealMarket is ReentrancyGuard {
             }
             index >>= 1;
         }
-        return computed == root;
+        return computed == commitmentsRoot;
     }
 
-    function _computeMerkleRoot(bytes32[] memory leaves) internal pure returns (bytes32) {
-        uint256 n = leaves.length;
-        if (n == 0) return bytes32(0);
-        while (n > 1) {
-            uint256 nextN = (n + 1) >> 1;
-            for (uint256 i = 0; i < nextN; ++i) {
-                uint256 idx = i << 1;
-                bytes32 left = leaves[idx];
-                bytes32 right = idx + 1 < n ? leaves[idx + 1] : left;
-                leaves[i] = keccak256(abi.encodePacked(left, right));
-            }
-            n = nextN;
-        }
-        return leaves[0];
+    function _send(address to, uint256 amount) private {
+        (bool sent,) = to.call{value: amount}("");
+        require(sent, "transfer failed");
     }
 
-    function _estimatePayout(uint256 stake) internal view returns (uint256) {
-        return (stake * payoutMultiplier) / WAD;
-    }
-
-    function _estimateMaxPayoutAfterCommit(uint256 amount, uint256 potentialPayout)
-        internal
-        view
-        returns (uint256 newLiability, uint256 newEscrow, uint256 coverage)
-    {
-        newLiability = maxLiability + potentialPayout;
-        newEscrow = userEscrow + amount;
-        coverage = _netCoverage(newEscrow, houseFloat);
-    }
-
-    function _rakeFor(uint256 amount) internal view returns (uint256) {
-        return (amount * appliedRakeBps()) / 10_000;
-    }
-
-    function _netCoverage(uint256 escrow, uint256 floatBalance) internal view returns (uint256) {
-        uint256 rakeShare = _rakeFor(escrow);
-        return escrow - rakeShare + floatBalance;
-    }
-
-    function _applyPayoutAccounting(uint256 payout) internal {
-        uint256 poolBefore = _collateralBalance();
-        if (payout > poolBefore) revert LiabilityExceedsCoverage(payout, poolBefore);
-        if (poolBefore == 0) revert LiabilityExceedsCoverage(payout, 0);
-
-        uint256 floatPortion = (houseFloat * payout) / poolBefore;
-        if (floatPortion > houseFloat) {
-            floatPortion = houseFloat;
-        }
-        if (floatPortion > 0) {
-            houseFloat -= floatPortion;
-            emit FloatUsed(floatPortion);
-        }
-        userEscrow = userEscrow - (payout - floatPortion);
-    }
-
-    function _factoryCommitPaused() internal view returns (bool) {
-        if (factory.code.length == 0) return false;
-        try IMarketFactoryStatus(factory).globalCommitPaused() returns (bool paused) {
-            return paused;
-        } catch {
-            return false;
-        }
-    }
-
-    function _factoryClaimPaused() internal view returns (bool) {
-        if (factory.code.length == 0) return false;
-        try IMarketFactoryStatus(factory).globalClaimPaused() returns (bool paused) {
-            return paused;
-        } catch {
-            return false;
-        }
-    }
-
-    function _checkController() internal view {
-        if (_settlementInProgress) revert SettlementInProgress();
-        if (msg.sender != factory && msg.sender != guardian) revert NotAuthorized();
-    }
-
-    function _enforceMarketSize(uint256 escrowBalance, uint256 floatBalance) internal view {
-        uint256 cap = maxMarketSize;
-        if (cap == 0) return;
-        if (escrowBalance + floatBalance > cap) revert ExceedsMarketSize();
-    }
-
-    function _syncFactoryAccounting(uint256 escrowBalance, uint256 floatBalance, uint256 liability) internal {
-        if (factory.code.length == 0) return;
-        IMarketFactoryRisk(factory).syncAccounting(address(this), escrowBalance, floatBalance, liability);
-    }
+    receive() external payable {}
 }

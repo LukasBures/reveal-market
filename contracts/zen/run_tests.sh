@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# Run Foundry build/tests for the contracts workspace. We keep build + test
-# separate so `forge test` does not have to recompile everything when cached.
-
+#!/usr/bin/env bash
 set -euo pipefail
+
+# ----------------------------------------------------------------------
+# Local Dev Runner for Forge (Zen contracts)
+# ----------------------------------------------------------------------
+# Steps:
+#  1) Build contracts
+#  2) Run tests with gas report
+#  3) Validate gas snapshot (regression guard)
+#  4) Optional: fuzz/coverage when called with "full"
+# ----------------------------------------------------------------------
 
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
@@ -25,17 +33,34 @@ fi
 
 pushd "${CONTRACTS_DIR}" >/dev/null
 
-# Prevent Forge from trying to inspect macOS system proxy settings (which can
-# crash in sandboxed environments), disable remote signature lookups, and run
-# fully offline.
+# Keep Forge offline and deterministic.
 export FOUNDRY_SIG_PROVIDER=none
 export FOUNDRY_OFFLINE=true
-export HTTP_PROXY= HTTPS_PROXY= ALL_PROXY=
+export HTTP_PROXY=
+export HTTPS_PROXY=
+export ALL_PROXY=
 
-log_step "forge build"
+log_step "Step 1: forge build"
 forge build
-log_step "forge test"
-forge test
+
+log_step "Step 2: forge test (gas report, fail-fast)"
+forge test --gas-report --fail-fast
+
+log_step "Step 3: forge snapshot --check"
+if forge snapshot --check; then
+  log_step "Gas snapshot matches baseline"
+else
+  log_warn "Gas snapshot changed — review .gas-snapshot diffs (run 'forge snapshot' to update)"
+fi
+
+if [[ "${1:-}" == "full" ]]; then
+  log_step "Step 4: extended fuzz tests"
+  FOUNDRY_PROFILE=ci.fuzz forge test --match-test testFuzz --gas-report || log_warn "Fuzz suite exited non-zero"
+
+  log_step "Step 5: coverage summary"
+  forge coverage --report summary || log_warn "Coverage run exited non-zero"
+fi
+
 popd >/dev/null
 
-log_step "Contracts tests completed successfully"
+log_step "Contracts tests completed"

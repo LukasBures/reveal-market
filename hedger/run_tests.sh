@@ -19,6 +19,21 @@ log_error() {
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 
+activate_venv() {
+  local venv_path="${ROOT_DIR}/.venv"
+  local activate_path="${venv_path}/bin/activate"
+  if [[ ! -x "${venv_path}/bin/python" ]]; then
+    log_error "Expected virtualenv at ${venv_path}. Run 'uv sync --project hedger --extra dev --no-install-project' first."
+    exit 1
+  fi
+  if [[ ! -f "${activate_path}" ]]; then
+    log_error "Activate script missing at ${activate_path}"
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "${activate_path}"
+}
+
 calc_pytest_workers() {
   local override="${PYTEST_WORKER_COUNT:-}"
   if [[ -n "${override}" ]]; then
@@ -37,10 +52,7 @@ run_py_tests() {
   local venv_path="${ROOT_DIR}/.venv"
   local python_bin="${venv_path}/bin/python"
   local ruff_bin="${venv_path}/bin/ruff"
-  if [[ ! -x "${python_bin}" ]]; then
-    log_error "Expected virtualenv at ${venv_path}. Run 'uv sync --project hedger --extra dev --no-install-project' first."
-    exit 1
-  fi
+  activate_venv
 
   # Ensure dev deps (including xdist) are present.
   if ! "${python_bin}" -c "import pytest, pytest_asyncio, importlib.util; importlib.util.find_spec('xdist')" >/dev/null 2>&1; then
@@ -68,11 +80,7 @@ PY
   fi
 
   log_step "pytest (hedger) args=${pytest_args[*]:-single}"
-  (
-    export VIRTUAL_ENV="${venv_path}"
-    PATH="${venv_path}/bin:${PATH}"
-    "${python_bin}" -m pytest "${pytest_args[@]}"
-  )
+  "${python_bin}" -m pytest "${pytest_args[@]}"
 }
 
 run_py_tests

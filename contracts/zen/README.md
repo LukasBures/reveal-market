@@ -1,48 +1,41 @@
-# Reveal Market – ZEN Contracts
+# Reveal Market – Zen Contracts
 
-Native ZEN commit/reveal markets with liability-aware accounting, house float, and ZK-settlement hooks. This folder contains only the Horizen (ZEN-native) deployment flow.
+Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets with a trusted relayer and protocol-capped liability.
 
-## Contracts
-- `RevealMarket.sol`
-  - Phases: Commit → Locked → Settled/Cancelled.
-  - Native ZEN only (no ERC20).
-  - Tracks user escrow vs house float; max liability must be covered by escrow + float (post-rake).
-  - Payout multipliers (capped at 5x) enforced against settlement proofs; rake deducted via `RakeManager`.
-  - `commitWithQuote` verifies backend-signed pricing quotes: `keccak256("QUOTE_V1", chainid, address(this), expectedUser, outcomeId, stakeZen, zenUsd, expiry, quoteId)` (wrapped in `toEthSignedMessageHash`), recovered signer must match `pricingSigner`, `expectedUser == msg.sender`, and `usedQuoteIds` prevents replay.
-  - Settlement validates: commitments root, market id, winning outcome id, total/gross pool, rake, and circuit hash. Liability is bound to the market’s payout multiplier/winning pool before the proof is accepted.
-  - Commitments root uses a keccak-based Merkle tree for claim proofs.
-  - Claims require inclusion in winning commitments root, correct reveal, and solvency.
-  - NonReentrant on commit/settle/claim; pause/guardian controls enforced.
-- `MarketFactory.sol`
-  - Deploys markets via EIP-1167 clones.
-  - Enforces per-market/global liability/size caps; tracks float allocation and liability.
-  - Guardian/owner controls: global commit/claim pauses, per-market pauses/guardian update.
-- `RakeManager.sol`
-  - Holds rake bps (max 2%) and treasury; computes net pools.
-- `Verifier.sol` / `VerifierStub.sol`
-  - Interface uses 10 public signals (commitments root, market id, winning outcome id, totalEscrow, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding=0) with `expectedInputs` enforced during market init.
+## Components
+- `RelayerEscrow`: holds all user funds, exposes `deposit/withdraw`, and forwards fixed-size tickets to markets via `commitOnBehalf` using backend-signed auth. Markets return winnings via `creditFromMarket`.
+- `ProtocolPool`: protocol bankroll that enforces per-market liability caps and collects rake/surplus. Only markets registered by the factory may draw.
+- `MarketFactory`: owner-only EIP-1167 clone deployer for `RevealMarket`, wiring oracle, verifier, circuit hash, deadlines, fixed ticket size, max commitments, authorization signer, and protocol liability cap. Registers markets with escrow/pool; `syncFactoryHooks` sets itself on both. Rake is global (default 2%) and can be updated/synced to all markets.
+- `RevealMarket`: per-event contract storing sealed commitments and minimal settlement state. Relayer-only commits, rake skimmed upfront to `ProtocolPool`, oracle-driven lock/result, Groth16 proof (`verifyAndSettle`) enforcing solvency + circuit hash, relayer-routed `claim`, and final surplus push to `ProtocolPool`.
+- `Verifier`: configurable Groth16 verifier (10 public signals) with circuit hash.
 
-## Testing
-`cd contracts/zen && forge test`
-- Unit suites: market lifecycle, risk limits, rake, verifier shape.
-- Invariants: liability coverage and pause enforcement (`test/RevealMarketInvariant.t.sol`).
-- Smoke: end-to-end deploy/commit/settle/claim (`test/Smoke.t.sol`).
+## Flow
+1) Users `deposit` into `RelayerEscrow`.
+2) Backend issues `CommitAuth` signature; relayer calls `commitOnBehalf` → `market.commitWithAuthorization` with fixed ticket value; per-commit rake is forwarded immediately to `ProtocolPool`, net ticket value stays in-market, only commitments are stored.
+3) After `commitDeadline`, oracle `lock()` (sets Merkle root) then `postResult`.
+4) Oracle calls `verifyAndSettle(proof, pubSignals)`; market enforces `totalLiability <= totalEscrow + protocolCap`, draws from `ProtocolPool` if needed, asserts proof rakeBps matches current config (rake already collected), pushes any surplus to the pool, moves to `Settled`.
+5) Relayer reveals winners via `claim(...)` with Merkle proof; payouts route to escrow, losers stay hidden. Once all liability claimed, market finishes and sends leftover to `ProtocolPool`.
 
-## Deployment
-- Native-only deployment; `script/Deploy.s.sol` uses the 10-signal verifier and current `MarketFactory` ctor (implementation, rakeManager, treasury, verifier, pricingSigner).
-- Set `PRICING_SIGNER_ADDRESS` before running the deploy script so markets inherit the expected signer for `commitWithQuote`.
-- Update vk path/envs and `circuitHash` binding when rotating circuits/keys.
-- Env template lives at `contracts/zen/.env.example`. Required vars for `forge script script/Deploy.s.sol`: `DEPLOYER_KEY`, `ORACLE_ADDRESS`, `TREASURY_ADDRESS`, `RAKE_BPS`, `PRICING_SIGNER_ADDRESS`, and `SETTLEMENT_VK_PATH` (or `USE_STUB_VERIFIER=1` for dev only). Ensure the verifier JSON has `expectedInputs=10` and the circuitHash matches your prover artifacts.
-- Common deploy tweaks:
-  - `minCommitmentSize` must be >= 0.01 ZEN (on-chain floor) and is set per market via the factory params.
-  - `maxCommitments` caps total tickets per market (default 4096, configurable per market), and `maxTicketsPerUser` throttles per-user spam; set these in `MarketFactory.CreateMarketParams`.
-  - Keep `expectedInputs` and `circuitHash` in sync with the prover artifacts—circuits with a different public-signal layout will be rejected on init.
+## Admin Controls
+- Factory owner rotates `authorizationSigner`, `oracle`, or `relayerEscrow` on existing markets; new relayers must set `marketFactory` before rotation so hooks succeed.
+- Per-market `protocolLiabilityCap` is adjustable until settlement; global rake is mutable and can be pushed to markets.
+- Commit/reveal deadlines can only be extended (never shortened) while in the matching phase.
+- Pauses: `pauseFactory` stops new markets; `setCommitsPaused`/`setClaimsPaused` freeze activity per-market in emergencies.
 
-## Operational Notes
-- Quotes: off-chain signer must match `PRICING_SIGNER_ADDRESS` and use `QUOTE_V1` digest `(chainid, market, user, outcome, stake, zenUsd, expiry, quoteId)`. Replay is blocked on-chain via `usedQuoteIds`.
-- Proofs: verifier enforces 10 public signals and circuit hash. On-chain settlement recomputes liability from on-chain pools + payout multiplier, so fabricated pool totals/liability in proofs are rejected.
-- Risk limits: `minCommitmentSize`, `maxTicketsPerUser`, `maxCommitments`, and `maxMarketSize` are all enforced on-chain; configure them per market at creation time via the factory.
+## Public Signal Order (10)
+`[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]`
 
-## Known Gaps (see TODO.md for details)
-- Settlement circuit remains minimal (range checks, no inclusion proofs) and should be upgraded alongside the Merkle accumulator if/when fuller proofs are needed.
-- Docs/runbooks need refresh for native-only + 10-signal flow.
+## Commit Authorization Digest
+`keccak256(abi.encode(address(market), marketId, commitment, nonce, expiry))` → `eth_sign` by `authorizationSigner`.
+
+## Build & Test
+```bash
+cd contracts/zen
+forge fmt
+forge test
+```
+
+## Deploy Notes
+- Deploy `ProtocolPool`, `RelayerEscrow`, `RevealMarket` implementation, `Verifier` (with regenerated vk), then `MarketFactory`.
+- Call `syncFactoryHooks()` so pool/escrow accept factory registrations.
+- Use `MarketFactory.createMarket` with desired parameters; fixed ticket size + max commitments enforce anonymity set sizing.

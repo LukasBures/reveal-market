@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Test} from "forge-std/Test.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+
+import {MarketFactory} from "../src/MarketFactory.sol";
+import {ProtocolPool} from "../src/ProtocolPool.sol";
+import {RelayerEscrow} from "../src/RelayerEscrow.sol";
+import {RevealMarket} from "../src/RevealMarket.sol";
+import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
+import {MockVerifier} from "./mocks/MockVerifier.sol";
+
+contract RevealMarketFlowTest is Test {
+    RelayerEscrow private relayerEscrow;
+    ProtocolPool private protocolPool;
+    MarketFactory private factory;
+    RevealMarket private implementation;
+    MockVerifier private verifier;
+
+    address private relayer = makeAddr("relayer");
+    address private oracle = makeAddr("oracle");
+    uint256 private authKey = 0xA11CE;
+    address private authSigner = vm.addr(authKey);
+    address private user = makeAddr("user");
+    bytes32 private circuitHash = keccak256("settlement");
+    uint256 private ticketSize = 1 ether;
+    uint256 private protocolCap = 3 ether;
+    uint256 private maxCommitments = 8;
+    uint256 private rakeBps = 100; // 1%
+    uint256 private commitDeadline;
+    uint256 private revealDeadline;
+    RevealMarket private market;
+
+    function setUp() external {
+        relayerEscrow = new RelayerEscrow(relayer);
+        protocolPool = new ProtocolPool(address(this));
+        verifier = new MockVerifier(circuitHash);
+        implementation = new RevealMarket();
+        factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(this));
+        factory.setGlobalRakeBps(rakeBps);
+
+        protocolPool.setMarketFactory(address(factory));
+        vm.prank(relayer);
+        relayerEscrow.setMarketFactory(address(factory));
+
+        commitDeadline = block.timestamp + 1 days;
+        revealDeadline = commitDeadline + 1 days;
+
+        MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
+            oracle: oracle,
+            verifier: address(verifier),
+            circuitHash: circuitHash,
+            commitDeadline: commitDeadline,
+            revealDeadline: revealDeadline,
+            fixedTicketSize: ticketSize,
+            maxCommitments: maxCommitments,
+            authorizationSigner: authSigner,
+            protocolLiabilityCap: protocolCap
+        });
+
+        market = RevealMarket(payable(factory.createMarket(params)));
+        vm.deal(address(protocolPool), 5 ether);
+    }
+
+    function testFullLifecycleWithTopUpAndClaim() external {
+        uint256 depositAmount = 3 ether;
+        vm.deal(user, depositAmount);
+        vm.prank(user);
+        relayerEscrow.deposit{value: depositAmount}();
+
+        bytes32 salt = keccak256("salt");
+        uint256 payoutAmount = 2 ether;
+        uint256 outcome = 1;
+        bytes32 leaf = keccak256(abi.encodePacked(uint256(0), outcome, payoutAmount, salt));
+        IRevealMarket.CommitAuth memory auth =
+            IRevealMarket.CommitAuth({commitment: leaf, nonce: 1, expiry: block.timestamp + 12 hours});
+
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), uint256(1), leaf, auth.nonce, auth.expiry))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.prank(relayer);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
+
+        assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "user balance debited");
+        uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
+        uint256 netTicket = ticketSize - rakePerTicket;
+        assertEq(market.totalEscrow(), netTicket, "escrow matches net ticket");
+
+        vm.warp(commitDeadline + 1);
+        vm.prank(oracle);
+        market.lock();
+
+        vm.prank(oracle);
+        market.postResult(outcome);
+
+        uint256[10] memory signals = [
+            uint256(market.commitmentsRoot()),
+            uint256(1),
+            outcome,
+            ticketSize - (ticketSize * rakeBps) / 10_000,
+            payoutAmount,
+            rakeBps,
+            payoutAmount,
+            uint256(0),
+            uint256(circuitHash),
+            uint256(0)
+        ];
+
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
+        uint256 expectedDraw = payoutAmount - netTicket;
+        assertApproxEqAbs(protocolPool.consumedLiability(address(market)), expectedDraw, 1);
+
+        vm.prank(relayer);
+        market.claim(user, 0, outcome, payoutAmount, salt, new bytes32[](0));
+
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Finished));
+        assertEq(relayerEscrow.balances(user), depositAmount - ticketSize + payoutAmount, "winnings credited");
+
+        // protocol pool retains rake and any unused bankroll
+        uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
+        assertEq(protocolPool.consumedLiability(address(market)), expectedDraw, "top-up tracked");
+        assertApproxEqAbs(address(protocolPool).balance, 5 ether - expectedDraw + expectedRake, 2);
+    }
+}

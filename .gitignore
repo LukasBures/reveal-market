@@ -923,3 +923,8 @@ cython_debug/
 .idea/
 
 prover/.gocache
+
+
+scripts/pks.txt
+
+scripts/generated/

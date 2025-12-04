@@ -32,31 +32,15 @@ func init() {
 	logLevelName, logLevelValue = resolveLogLevel()
 }
 
-// ticketProof captures a single commitment input used by the prover.
-type ticketProof struct {
-	User        string   `json:"user"`
-	OutcomeID   string   `json:"outcomeId"`
-	Amount      string   `json:"amount"`
-	Salt        string   `json:"salt"`
-	TicketHash  string   `json:"ticketHash"`
-	Leaf        string   `json:"leaf"`
-	MerklePath  []string `json:"merklePath"`
-	MerkleIndex uint64   `json:"merkleIndex"`
-}
-
-// settlementProofRequest mirrors the worker payload for settlement proofs.
 type settlementProofRequest struct {
-	MarketID       string            `json:"marketId"`
-	MerkleRoot     string            `json:"merkleRoot"`
-	WinningOutcome string            `json:"winningOutcomeId"`
-	PoolTotals     []string          `json:"poolTotals"`
-	TotalEscrow    string            `json:"totalEscrow"`
-	TotalLiability string            `json:"totalLiability"`
-	PayoutMulWad   string            `json:"payoutMultiplierWad"`
-	RakeBps        string            `json:"rakeBps"`
-	CircuitHash    string            `json:"circuitHash"`
-	Tickets        []ticketProof     `json:"tickets"`
-	Metadata       map[string]string `json:"metadata"`
+	MarketID       string   `json:"marketId"`
+	MerkleRoot     string   `json:"merkleRoot"`
+	WinningOutcome string   `json:"winningOutcomeId"`
+	PoolTotals     []string `json:"poolTotals"`
+	TotalEscrow    string   `json:"totalEscrow"`
+	TotalLiability string   `json:"totalLiability"`
+	RakeBps        string   `json:"rakeBps"`
+	CircuitHash    string   `json:"circuitHash"`
 }
 
 // settlementProofResponse is returned to callers after Groth16 generation.
@@ -153,12 +137,6 @@ func main() {
 		"backend":     prover.Backend(),
 		"version":     cfg.Version,
 		"circuit":     server.circuitHash,
-		"fees": map[string]float64{
-			"rake_percent":       cfg.RakePercent,
-			"haircut_percent":    cfg.HaircutPercent,
-			"worsen_percent":     cfg.WorsenPercent,
-			"total_monetisation": cfg.TotalMonetisation,
-		},
 	})
 
 	if err := http.ListenAndServe(cfg.ListenAddr, server.routes()); err != nil {
@@ -228,12 +206,6 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"last_proof_at":   formatMillis(lastProof),
 		"max_concurrency": a.cfg.MaxConcurrency,
 		"ready":           a.prover.Ready(),
-		"fees": map[string]float64{
-			"rake_percent":       a.cfg.RakePercent,
-			"haircut_percent":    a.cfg.HaircutPercent,
-			"worsen_percent":     a.cfg.WorsenPercent,
-			"total_monetisation": a.cfg.TotalMonetisation,
-		},
 		"artifacts_ok":      artifactsOk,
 		"missing_artifacts": missing,
 	}
@@ -387,14 +359,12 @@ func validateRequest(req settlementProofRequest) error {
 		return errors.New("totalEscrow required")
 	case strings.TrimSpace(req.TotalLiability) == "":
 		return errors.New("totalLiability required")
-	case strings.TrimSpace(req.PayoutMulWad) == "":
-		return errors.New("payoutMultiplierWad required")
 	case strings.TrimSpace(req.RakeBps) == "":
 		return errors.New("rakeBps required")
 	case len(req.PoolTotals) != 2:
 		return errors.New("poolTotals must contain two entries (YES and NO)")
-	case len(req.Tickets) == 0:
-		return errors.New("tickets required")
+	case strings.TrimSpace(req.CircuitHash) == "":
+		return errors.New("circuitHash required")
 	default:
 		return nil
 	}

@@ -41,6 +41,9 @@ test:
 format:
 	pre-commit run --all-files
 
+gen-address:
+	python scripts/gen_address.py --mode random --count 1
+
 local:
 	./run_local.sh
 

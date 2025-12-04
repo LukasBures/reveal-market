@@ -22,7 +22,13 @@ import requests
 
 API_URL = "https://horizen-testnet.hub.caldera.xyz/api/trpc/faucet.requestFaucetFunds"
 EXPLORER_BASE = "https://horizen-testnet.explorer.caldera.xyz/tx"
-DEFAULT_ADDRESS = "0x33c65aac00ace0b48876d9b87990e0c44f780708"
+
+# DEFAULT_ADDRESS = "0x33c65aac00ace0b48876d9b87990e0c44f780708"
+# DEFAULT_ADDRESS = "0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369" # testnet oracle
+# DEFAULT_ADDRESS = "0x65CeDe1252B614ae9fb05e5620EBCbC471DF1627"  # testnet deployer
+# DEFAULT_ADDRESS = "0x38C57472479fe7bB4C87e7A4BB23c7AAf10595Fd" # testnet auth signer
+DEFAULT_ADDRESS = "0xdAdEbecf077cdA5f86F60a91f76B238F675204f9"  # testnet relayer
+
 DEFAULT_ROLLUP = "horizen-testnet"
 DRIP_AMOUNT_ETH = Decimal("0.01")
 TURNSTILE_TOKEN =<REDACTED>

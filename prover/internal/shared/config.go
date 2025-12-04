@@ -33,10 +33,6 @@ type Config struct {
 	ProofTimeout      time.Duration
 	MaxConcurrency    int
 	RequestTimeout    time.Duration
-	RakePercent       float64
-	HaircutPercent    float64
-	WorsenPercent     float64
-	TotalMonetisation float64
 }
 
 // LoadConfig builds the config struct from environment variables (with sane defaults).
@@ -58,11 +54,7 @@ func LoadConfig() Config {
 		ProofTimeout:      durationEnv("PROVER_PROOF_TIMEOUT_SECONDS", 120),
 		MaxConcurrency:    max(1, intEnv("PROVER_MAX_CONCURRENCY", runtime.NumCPU())),
 		RequestTimeout:    durationEnv("PROVER_REQUEST_TIMEOUT_SECONDS", 90),
-		RakePercent:       floatEnv("PROVER_RAKE_PERCENT", 0.02),
-		HaircutPercent:    floatEnv("PROVER_HAIRCUT_PERCENT", 0.12),
-		WorsenPercent:     floatEnv("PROVER_WORSEN_PERCENT", 0.03),
 	}
-	conf.TotalMonetisation = conf.RakePercent + conf.HaircutPercent + conf.WorsenPercent
 	return conf
 }
 

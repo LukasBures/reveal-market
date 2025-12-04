@@ -11,10 +11,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKER_DIR="${ROOT}/worker"
 VENV="${WORKER_DIR}/.venv"
 
-if [[ ! -x "${VENV}/bin/python" ]]; then
-  err "Expected virtualenv at ${VENV}. Run 'uv sync --project backend/worker --extra dev --no-install-project' first."
-  exit 1
-fi
+activate_venv() {
+  if [[ ! -x "${VENV}/bin/python" ]]; then
+    err "Expected virtualenv at ${VENV}. Run 'uv sync --project backend/worker --extra dev --no-install-project' first."
+    exit 1
+  fi
+  if [[ ! -f "${VENV}/bin/activate" ]]; then
+    err "Activate script missing at ${VENV}/bin/activate"
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "${VENV}/bin/activate"
+}
 
 calc_workers() {
   local override="${PYTEST_WORKER_COUNT:-}"
@@ -33,8 +41,7 @@ fi
 
 log "pytest worker (workers=${args[*]:-1})"
 (
-  export VIRTUAL_ENV="${VENV}"
-  PATH="${VENV}/bin:${PATH}"
+  activate_venv
   export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
   pushd "${WORKER_DIR}" >/dev/null
   python -m pytest "${args[@]}"

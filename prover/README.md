@@ -4,7 +4,7 @@ Go microservice that turns settlement payloads into Groth16 proof receipts using
 
 The service now boots a rapidsnark-backed pipeline by default:
 
-1. Write witness inputs to disk (derived from the worker request).
+1. Write witness inputs to disk (derived from the worker request; now just the 10 public signals, no ticket details).
 2. Execute the Circom-generated `generate_witness.js` with Node to create `witness.wtns`.
 3. Call `rapidsnark` with the mounted `settlement_final.zkey` to emit `proof.json` + `public.json`.
 4. Convert the proof + public signals into Solidity calldata directly inside Go—no `snarkjs` roundtrips.
@@ -85,20 +85,7 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
   "totalEscrow": "10000000000000000000",
   "totalLiability": "9000000000000000000",
   "rakeBps": "100",
-  "circuitHash": "0xdead...",
-  "tickets": [
-    {
-      "user": "0x111...",
-      "outcomeId": "1",
-      "amount": "1000000000000000000",
-      "salt": "0x1",
-      "ticketHash": "0x2",
-      "leaf": "0x2",
-      "merklePath": [],
-      "merkleIndex": 0
-    }
-  ],
-  "metadata": {}
+  "circuitHash": "0xdead..."
 }
 ```
 
@@ -144,11 +131,11 @@ Errors are returned as JSON with `error` and `message` fields (`invalid_request`
 
 4. Submit a sample payload:
 
-   ```bash
-   curl -X POST http://localhost:8085/api/v1/proofs/settlement \
-     -H "Content-Type: application/json" \
-     -d '{"marketId":"0x123","merkleRoot":"0xbeef","winningOutcomeId":"1","poolTotals":["70","30"],"totalEscrow":"100","totalLiability":"90","rakeBps":"100","circuitHash":"0xdead","tickets":[{"user":"0x1","outcomeId":"1","amount":"10","salt":"0x1","ticketHash":"0x2","leaf":"0x2","merklePath":[],"merkleIndex":0}]}'
-   ```
+```bash
+curl -X POST http://localhost:8085/api/v1/proofs/settlement \
+  -H "Content-Type: application/json" \
+  -d '{"marketId":"0x123","merkleRoot":"0xbeef","winningOutcomeId":"1","poolTotals":["70","30"],"totalEscrow":"100","totalLiability":"90","rakeBps":"100","circuitHash":"0xdead"}'
+```
 
 If the artifacts are missing or the Groth16 toolchain fails, the service exits with a non-zero status so orchestrators can alert immediately—no mock mode is available.
 

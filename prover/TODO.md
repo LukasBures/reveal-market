@@ -1,20 +1,8 @@
-# Proover MVP Checklist
+# Prover TODO (post-simplification)
 
-Only two things block us from trusting the prover in MVP environments:
-
-1. **Artifact validation helper**
-   - Ship a CLI/env command (e.g., `prover verify-artifacts`) that confirms `settlement_final.zkey` + `settlement_js` exist and match the expected hash before the service boots outside Docker.
-   - Fail fast (with actionable messaging) when artifacts are missing or stale.
-
-2. **Prometheus metrics**
-   - Export latency histograms and concurrency gauges via `/metrics` so ops can alert on slow proofs or stalled queues.
-   - Include a build/version label so dashboards know exactly which prover binary is running.
-
-3. **Ops hygiene**
-   - Ensure prover debug endpoints stay reachable behind whatever CORS/ingress rules are applied in staging/prod; document expected origins in ops runbooks.
-   - Keep circuit hash + envs aligned to Horizen Testnet defaults (chain id `2651420`) and warn when switched networks require new artifacts.
-
-4. **Quote-aware proofs (if needed)**
-   - If settlement proofs ever include priced quote fields, document required public inputs and ensure the pricing signer/chain bindings stay outside the proving payload; otherwise keep proofs independent to avoid coupling to quote flow.
-
-Deliver these and the prover is MVP-ready.
+- **Regenerate artifacts** after the settlement circuit change (liability cap removed; still 10 public signals) and publish the new verifying key hash for on-chain verifier updates.
+- **Request schema**: confirm all callers have dropped ticket/payoutMultiplier fields; keep docs/examples aligned.
+- **Metrics**: current expvar is minimal—add Prometheus histograms/gauges (latency, in-flight jobs, errors) on `/metrics` if ops needs more visibility.
+- **Artifact guardrails**: `check_artifacts.sh`/startup checks exist; optionally add hash verification to prevent stale/poisoned zkeys.
+- **Production hardening**: document allowed origins/ingress for `/healthz` vs `/api/v1/proofs/settlement`, and pin `PROVER_RAPIDSNARK_BINARY`/Node versions in deployment manifests.
+- **Optional**: CLI to fetch/report circuit hash and artifact presence (`go run ./cmd/verify-artifacts`) for CI/CD gates.
