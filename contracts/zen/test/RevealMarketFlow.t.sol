@@ -10,6 +10,8 @@ import {RelayerEscrow} from "../src/RelayerEscrow.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract RevealMarketFlowTest is Test {
     RelayerEscrow private relayerEscrow;
@@ -17,6 +19,7 @@ contract RevealMarketFlowTest is Test {
     MarketFactory private factory;
     RevealMarket private implementation;
     MockVerifier private verifier;
+    MockERC20 private token;
 
     address private relayer = makeAddr("relayer");
     address private oracle = makeAddr("oracle");
@@ -33,11 +36,12 @@ contract RevealMarketFlowTest is Test {
     RevealMarket private market;
 
     function setUp() external {
-        relayerEscrow = new RelayerEscrow(relayer);
-        protocolPool = new ProtocolPool(address(this));
+        token = new MockERC20();
+        relayerEscrow = new RelayerEscrow(relayer, IERC20(address(token)));
+        protocolPool = new ProtocolPool(address(this), IERC20(address(token)));
         verifier = new MockVerifier(circuitHash);
         implementation = new RevealMarket();
-        factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(this));
+        factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(token), address(this));
         factory.setGlobalRakeBps(rakeBps);
 
         protocolPool.setMarketFactory(address(factory));
@@ -60,14 +64,18 @@ contract RevealMarketFlowTest is Test {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
-        vm.deal(address(protocolPool), 5 ether);
+        token.mint(address(this), 5 ether);
+        token.approve(address(protocolPool), 5 ether);
+        protocolPool.deposit(5 ether);
     }
 
     function testFullLifecycleWithTopUpAndClaim() external {
         uint256 depositAmount = 3 ether;
-        vm.deal(user, depositAmount);
+        token.mint(user, depositAmount);
         vm.prank(user);
-        relayerEscrow.deposit{value: depositAmount}();
+        token.approve(address(relayerEscrow), depositAmount);
+        vm.prank(user);
+        relayerEscrow.deposit(depositAmount);
 
         bytes32 salt = keccak256("salt");
         uint256 payoutAmount = 2 ether;
@@ -126,6 +134,6 @@ contract RevealMarketFlowTest is Test {
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
         assertEq(protocolPool.consumedLiability(address(market)), expectedDraw, "top-up tracked");
-        assertApproxEqAbs(address(protocolPool).balance, 5 ether - expectedDraw + expectedRake, 2);
+        assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether - expectedDraw + expectedRake, 2);
     }
 }

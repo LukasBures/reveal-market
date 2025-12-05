@@ -9,9 +9,9 @@ import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
-import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { formatDateTime } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
+import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -156,16 +156,7 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">
-              <StakeQuoteCard
-                marketAddress={market.marketAddress}
-                marketId={market.eventId}
-                outcomes={market.outcomes ?? []}
-                outcomePrices={market.outcomePrices ?? []}
-                initialOutcomeId={0}
-                marketTitle={market.title}
-                marketStatus={market.status}
-                isResolved={market.resolution?.resolved ?? null}
-              />
+              <MarketDetailOutcomes market={market} />
             </div>
           </div>
         </div>

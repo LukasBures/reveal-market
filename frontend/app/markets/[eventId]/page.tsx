@@ -6,13 +6,13 @@ import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
-import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
 import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
 import { formatDateTime } from "@/lib/formatters";
+import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -294,16 +294,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">
-              <StakeQuoteCard
-                marketAddress={market.marketAddress}
-                marketId={canonicalEventId}
-                outcomes={market.outcomes ?? []}
-                outcomePrices={market.outcomePrices ?? []}
-                initialOutcomeId={0}
-                marketTitle={market.title}
-                marketStatus={market.status}
-                isResolved={market.resolution?.resolved ?? null}
-              />
+              <MarketDetailOutcomes market={{ ...market, eventId: canonicalEventId }} />
             </div>
           </div>
         </div>

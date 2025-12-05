@@ -10,6 +10,8 @@ import {RelayerEscrow} from "../src/RelayerEscrow.sol";
 import {RevealMarket} from "../src/RevealMarket.sol";
 import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract MarketAdminTest is Test {
     RelayerEscrow private relayerEscrow;
@@ -17,6 +19,7 @@ contract MarketAdminTest is Test {
     MarketFactory private factory;
     RevealMarket private implementation;
     MockVerifier private verifier;
+    MockERC20 private token;
     RevealMarket private market;
 
     address private relayerOwner = makeAddr("relayer");
@@ -32,11 +35,12 @@ contract MarketAdminTest is Test {
     uint256 private revealDeadline;
 
     function setUp() external {
-        relayerEscrow = new RelayerEscrow(relayerOwner);
-        protocolPool = new ProtocolPool(address(this));
+        token = new MockERC20();
+        relayerEscrow = new RelayerEscrow(relayerOwner, IERC20(address(token)));
+        protocolPool = new ProtocolPool(address(this), IERC20(address(token)));
         verifier = new MockVerifier(circuitHash);
         implementation = new RevealMarket();
-        factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(this));
+        factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(token), address(this));
 
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
@@ -70,9 +74,11 @@ contract MarketAdminTest is Test {
         IRevealMarket.CommitAuth memory auth =
             IRevealMarket.CommitAuth({commitment: keccak256("leaf"), nonce: 1, expiry: block.timestamp + 4 hours});
 
-        vm.deal(user, ticketSize);
+        token.mint(user, ticketSize);
         vm.prank(user);
-        relayerEscrow.deposit{value: ticketSize}();
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
 
         bytes memory badSig = _signAuth(auth, authKey);
         vm.expectRevert(RelayerEscrow.CommitFailed.selector);
@@ -88,9 +94,11 @@ contract MarketAdminTest is Test {
     function testOracleRotation() external {
         IRevealMarket.CommitAuth memory auth =
             IRevealMarket.CommitAuth({commitment: keccak256("leaf2"), nonce: 2, expiry: block.timestamp + 4 hours});
-        vm.deal(user, ticketSize);
+        token.mint(user, ticketSize);
         vm.prank(user);
-        relayerEscrow.deposit{value: ticketSize}();
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -110,7 +118,7 @@ contract MarketAdminTest is Test {
     }
 
     function testRelayerRotationAllowsNewRelayer() external {
-        RelayerEscrow newRelayer = new RelayerEscrow(makeAddr("newRelayerOwner"));
+        RelayerEscrow newRelayer = new RelayerEscrow(makeAddr("newRelayerOwner"), IERC20(address(token)));
         vm.prank(newRelayer.owner());
         newRelayer.setMarketFactory(address(factory));
 
@@ -120,19 +128,20 @@ contract MarketAdminTest is Test {
 
         IRevealMarket.CommitAuth memory auth =
             IRevealMarket.CommitAuth({commitment: keccak256("leaf3"), nonce: 3, expiry: block.timestamp + 4 hours});
-        vm.deal(user, ticketSize);
+        token.mint(user, ticketSize);
         vm.prank(user);
-        newRelayer.deposit{value: ticketSize}();
+        token.approve(address(newRelayer), ticketSize);
+        vm.prank(user);
+        newRelayer.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
 
         vm.prank(newRelayer.owner());
         newRelayer.commitOnBehalf(user, address(market), auth, sig);
         assertEq(market.totalEscrow(), ticketSize - (ticketSize * market.rakeBps()) / 10_000);
 
-        vm.deal(address(relayerEscrow), ticketSize);
         vm.expectRevert(RevealMarket.NotRelayer.selector);
-        vm.prank(address(relayerEscrow));
-        market.commitWithAuthorization{value: ticketSize}(auth, sig);
+        vm.prank(makeAddr("stranger"));
+        market.commitWithAuthorization(auth, sig);
     }
 
     function testProtocolLiabilityCapUpdateStopsAfterSettlement() external {
@@ -144,9 +153,11 @@ contract MarketAdminTest is Test {
 
         IRevealMarket.CommitAuth memory auth =
             IRevealMarket.CommitAuth({commitment: keccak256("leaf4"), nonce: 4, expiry: block.timestamp + 4 hours});
-        vm.deal(user, ticketSize);
+        token.mint(user, ticketSize);
         vm.prank(user);
-        relayerEscrow.deposit{value: ticketSize}();
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);

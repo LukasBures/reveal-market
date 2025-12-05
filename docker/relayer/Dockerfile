@@ -5,6 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app/relayer
 
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends build-essential gcc \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv
 
 COPY relayer/pyproject.toml relayer/README.md ./

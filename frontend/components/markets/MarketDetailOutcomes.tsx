@@ -5,18 +5,21 @@ import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-clie
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId, useSwitchChain } from "wagmi";
-import { BaseError, type Address } from "viem";
+import { useAccount, useChainId, useSwitchChain, useReadContract, useWriteContract, usePublicClient } from "wagmi";
+import { BaseError, erc20Abi, maxUint256, type Address, type Hex } from "viem";
 import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 import { fetchPriceHistory } from "@/lib/pricing-client";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime } from "@/lib/formatters";
+import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 
 type Props = {
   market: MarketDetail;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 0.1;
+const DEFAULT_MAX_STAKE_ZEN = 10;
+const MIN_STAKE_ZEN = 0.1;
+const DEFAULT_STAKE_ZEN = 1;
 
 const formatZen = (value: number | undefined): string => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -42,7 +45,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   );
   const liveStore = usePriceStreamStore(market.eventId, tokenIds);
   const [selectedOutcome, setSelectedOutcome] = useState(0);
-  const [stakeZen, setStakeZen] = useState(0.1);
+  const [stakeZen, setStakeZen] = useState(DEFAULT_STAKE_ZEN);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
@@ -57,11 +60,31 @@ export function MarketDetailOutcomes({ market }: Props) {
   const isTradable = !isResolved && !isLocked && !tradingHaltedByStream;
   const { address } = useAccount();
   const chainId = useChainId();
+  const missingZenToken = !ZEN_TOKEN_ADDRESS;
   const { switchChain } = useSwitchChain();
   const { commitWithQuote, isPending: txPending, error: wagmiError } = useCommitWithQuote(
     (market.marketAddress ?? "") as Address,
   );
+  const publicClient = usePublicClient({ chainId });
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenTokenAddress = ZEN_TOKEN_ADDRESS;
+  const allowanceEnabled = Boolean(address && market.marketAddress && zenTokenAddress);
+  const {
+    data: allowance,
+    isFetching: allowanceLoading,
+    refetch: refetchAllowance,
+  } = useReadContract({
+    address: allowanceEnabled ? (zenTokenAddress as Address) : undefined,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: allowanceEnabled ? ([address as Address, market.marketAddress as Address] as const) : undefined,
+    query: { enabled: allowanceEnabled, refetchInterval: 15_000 },
+  });
+  const {
+    writeContractAsync: writeApprovalAsync,
+    error: approvalError,
+  } = useWriteContract();
+  const [approvalHash, setApprovalHash] = useState<Hex | null>(null);
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
@@ -75,7 +98,7 @@ export function MarketDetailOutcomes({ market }: Props) {
       .filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v))
       .map((v) => Math.max(0, v));
     if (!caps.length) return DEFAULT_MAX_STAKE_ZEN;
-    return Math.max(0.01, Math.min(...caps));
+    return Math.max(MIN_STAKE_ZEN, Math.min(...caps));
   }, [quote]);
   const maxCapRef = useRef<number>(DEFAULT_MAX_STAKE_ZEN);
   useEffect(() => {
@@ -185,6 +208,17 @@ export function MarketDetailOutcomes({ market }: Props) {
       .slice(-1)[0];
   const fxBadge = fxStaleCombined ? "FX stale" : fxValue ? `FX 1 ZEN = $${fxValue} USD` : "FX connecting";
 
+  const requiredAllowance = useMemo(() => {
+    if (!quote?.stake_wei) return 0n;
+    try {
+      return BigInt(quote.stake_wei);
+    } catch {
+      return 0n;
+    }
+  }, [quote?.stake_wei]);
+  const hasAllowance = allowance !== undefined && allowance !== null && allowance >= requiredAllowance;
+  const needsApproval = allowanceEnabled && requiredAllowance > 0n && !hasAllowance;
+
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
     let cancelled = false;
@@ -252,8 +286,26 @@ export function MarketDetailOutcomes({ market }: Props) {
       setTxError(`Switch to chain ${quote.chain_id} to commit.`);
       return;
     }
+    if (missingZenToken) {
+      setTxError("ZEN token address is not configured.");
+      return;
+    }
+    setTxLoading(true);
     try {
-      setTxLoading(true);
+      if (needsApproval) {
+        const hash = await writeApprovalAsync({
+          address: zenTokenAddress as Address,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [market.marketAddress as Address, maxUint256],
+          chainId,
+        });
+        setApprovalHash(hash as Hex);
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash: hash as Hex });
+          await refetchAllowance();
+        }
+      }
       const params = buildSignedQuoteParams({
         quote,
         outcomeId: selectedOutcome,
@@ -477,7 +529,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           />
                         </label>
                         <div className="flex flex-wrap gap-2 text-[11px]">
-                          {[0.01, 0.1].map((preset) => (
+                          {[MIN_STAKE_ZEN, 1].map((preset) => (
                             <button
                               key={preset}
                               type="button"
@@ -486,13 +538,13 @@ export function MarketDetailOutcomes({ market }: Props) {
                               disabled={!isTradable}
                             >
                               {preset} ZEN
-                          </button>
-                        ))}
-                        <span className="rounded-full bg-white/5 px-3 py-1 text-white/60">
-                          Max per stake: {effectiveMaxStake.toFixed(3)} ZEN
-                        </span>
+                            </button>
+                          ))}
+                          <span className="rounded-full bg-white/5 px-3 py-1 text-white/60">
+                            Max per stake: {effectiveMaxStake.toFixed(3)} ZEN
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
                     <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                         <PayoutRow label="Stake" value={`${stakeZenFromQuote.toFixed(3)} ZEN`} />
@@ -566,6 +618,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                             txPending ||
                             !quote ||
                             fxStaleCombined ||
+                            missingZenToken ||
                             !isTradable ||
                             Boolean(quote?.chain_id && chainId && Number(quote.chain_id) !== chainId)
                           }
@@ -574,6 +627,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                             txPending ||
                             !quote ||
                             fxStaleCombined ||
+                            missingZenToken ||
                             (quote?.chain_id && chainId && Number(quote.chain_id) !== chainId)
                               ? "cursor-not-allowed bg-white/20 text-white/60"
                               : "bg-emerald-500 text-white hover:bg-emerald-400"
@@ -614,20 +668,36 @@ export function MarketDetailOutcomes({ market }: Props) {
                         </p>
                       )}
                       {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}
+                      {needsApproval && (
+                        <p className="mt-1 text-xs text-amber-200">Wallet will request ZEN approval before trading.</p>
+                      )}
+                      {missingZenToken && (
+                        <p className="mt-1 text-xs text-rose-200">
+                          ZEN token address missing. Set NEXT_PUBLIC_ZEN_TOKEN_ADDRESS to continue.
+                        </p>
+                      )}
+                      {allowanceLoading && <p className="mt-1 text-xs text-slate-400">Checking ZEN allowance…</p>}
                       {error && (
                         <p className="mt-2 text-xs text-rose-300">
                           {error}. Pricing uses live odds + FX from the streamer; if stale, retry.
                         </p>
                       )}
-                      {(txError || wagmiError) && (
+                      {(txError || wagmiError || approvalError) && (
                         <p className="mt-1 text-xs text-rose-300">
                           {txError ??
                             (wagmiError instanceof BaseError
                               ? wagmiError.shortMessage
                               : wagmiError instanceof Error
                                 ? wagmiError.message
-                                : "Transaction failed")}
+                                : approvalError instanceof Error
+                                  ? approvalError.message
+                                  : "Transaction failed")}
                           . Ensure chain and quote are valid.
+                        </p>
+                      )}
+                      {approvalHash && (
+                        <p className="mt-1 text-[11px] text-emerald-200">
+                          Approval tx: {`${approvalHash.slice(0, 10)}…${approvalHash.slice(-6)}`}
                         </p>
                       )}
                     </div>

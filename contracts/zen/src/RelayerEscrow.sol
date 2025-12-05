@@ -3,12 +3,16 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 
 /// @notice Trusted relayer escrow that holds all user balances and forwards fixed-size commits to markets.
-/// Users deposit/withdraw natively; only the relayer (owner) may initiate commits on their behalf.
+/// Users deposit/withdraw ERC20 collateral; only the relayer (owner) may initiate commits on their behalf.
 contract RelayerEscrow is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+    IERC20 public immutable collateralToken;
     mapping(address => uint256) public balances;
     mapping(address => bool) public allowedMarket;
 
@@ -27,7 +31,9 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
     error CommitFailed();
     error InvalidRelayerOwner();
 
-    constructor(address owner_) Ownable(owner_) {}
+    constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
+        collateralToken = collateralToken_;
+    }
 
     /// @notice Sets the factory allowed to register new markets.
     function setMarketFactory(address factory) external onlyOwner {
@@ -43,24 +49,25 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
         emit MarketRegistered(market);
     }
 
-    /// @notice Users deposit native ZEN into their escrow balance.
-    function deposit() external payable {
-        balances[msg.sender] += msg.value;
-        emit Deposited(msg.sender, msg.value);
+    /// @notice Users deposit ERC20 collateral into their escrow balance (requires prior approval).
+    function deposit(uint256 amount) external {
+        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        balances[msg.sender] += amount;
+        emit Deposited(msg.sender, amount);
     }
 
     /// @notice Owner can deposit on behalf of a user (e.g., when funding via off-chain rails).
-    function depositFor(address user) external payable onlyOwner {
-        balances[user] += msg.value;
-        emit Deposited(user, msg.value);
+    function depositFor(address user, uint256 amount) external onlyOwner {
+        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        balances[user] += amount;
+        emit Deposited(user, amount);
     }
 
     /// @notice Withdraw caller balance to their wallet.
     function withdraw(uint256 amount) external nonReentrant {
         if (balances[msg.sender] < amount) revert InsufficientBalance();
         balances[msg.sender] -= amount;
-        (bool sent,) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
+        collateralToken.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -76,23 +83,18 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
         if (balances[user] < ticket) revert InsufficientBalance();
 
         balances[user] -= ticket;
-        (bool success,) = market.call{value: ticket}(
-            abi.encodeWithSelector(IRevealMarket.commitWithAuthorization.selector, auth, signature)
-        );
+        collateralToken.safeTransfer(market, ticket);
+        (bool success,) =
+            market.call(abi.encodeWithSelector(IRevealMarket.commitWithAuthorization.selector, auth, signature));
         if (!success) revert CommitFailed();
 
         emit CommitForwarded(market, auth.commitment, ticket);
     }
 
     /// @notice Markets pay winnings back into escrow, crediting the target user without exposing them on-market.
-    function creditFromMarket(address user) external payable {
+    function creditFromMarket(address user, uint256 amount) external {
         if (!allowedMarket[msg.sender]) revert UnknownMarket();
-        balances[user] += msg.value;
-        emit CreditReceived(msg.sender, user, msg.value);
-    }
-
-    receive() external payable {
-        balances[msg.sender] += msg.value;
-        emit Deposited(msg.sender, msg.value);
+        balances[user] += amount;
+        emit CreditReceived(msg.sender, user, amount);
     }
 }

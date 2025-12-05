@@ -25,6 +25,7 @@ contract MarketFactory is Ownable {
     }
 
     address public immutable IMPLEMENTATION;
+    address public immutable collateralToken;
     RelayerEscrow public relayerEscrow;
     ProtocolPool public protocolPool;
 
@@ -57,6 +58,7 @@ contract MarketFactory is Ownable {
     error InvalidImplementation();
     error InvalidRelayer();
     error InvalidProtocolPool();
+    error InvalidCollateralToken();
     error InvalidOracle();
     error InvalidVerifier();
     error InvalidSigner();
@@ -66,15 +68,23 @@ contract MarketFactory is Ownable {
     error UnknownMarket();
     error FactoryPausedErr();
 
-    constructor(address implementation_, ProtocolPool protocolPool_, RelayerEscrow relayerEscrow_, address owner_)
+    constructor(
+        address implementation_,
+        ProtocolPool protocolPool_,
+        RelayerEscrow relayerEscrow_,
+        address collateralToken_,
+        address owner_
+    )
         Ownable(owner_)
     {
         if (implementation_ == address(0)) revert InvalidImplementation();
         if (address(protocolPool_) == address(0)) revert InvalidProtocolPool();
         if (address(relayerEscrow_) == address(0)) revert InvalidRelayer();
+        if (collateralToken_ == address(0)) revert InvalidCollateralToken();
         IMPLEMENTATION = implementation_;
         protocolPool = protocolPool_;
         relayerEscrow = relayerEscrow_;
+        collateralToken = collateralToken_;
     }
 
     /// @notice Owner can update the relayer escrow address (e.g., when rotating relayers).
@@ -175,6 +185,7 @@ contract MarketFactory is Ownable {
                     oracle: params.oracle,
                     verifier: params.verifier,
                     circuitHash: params.circuitHash,
+                    collateralToken: collateralToken,
                     commitDeadline: params.commitDeadline,
                     revealDeadline: params.revealDeadline,
                     ticketSize: params.fixedTicketSize,

@@ -5,20 +5,26 @@ import {Test} from "forge-std/Test.sol";
 
 import {RelayerEscrow} from "../src/RelayerEscrow.sol";
 import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract RelayerEscrowTest is Test {
     RelayerEscrow private escrow;
+    MockERC20 private token;
     address private owner = makeAddr("relayer");
     address private user = makeAddr("user");
 
     function setUp() external {
-        escrow = new RelayerEscrow(owner);
+        token = new MockERC20();
+        escrow = new RelayerEscrow(owner, IERC20(address(token)));
     }
 
     function testDepositAndWithdraw() external {
-        vm.deal(user, 2 ether);
+        token.mint(user, 2 ether);
         vm.prank(user);
-        escrow.deposit{value: 2 ether}();
+        token.approve(address(escrow), 2 ether);
+        vm.prank(user);
+        escrow.deposit(2 ether);
         assertEq(escrow.balances(user), 2 ether);
 
         vm.prank(user);
@@ -27,12 +33,14 @@ contract RelayerEscrowTest is Test {
     }
 
     function testCommitFailsForUnknownMarket() external {
-        vm.deal(user, 1 ether);
-        vm.prank(user);
-        escrow.deposit{value: 1 ether}();
-
         IRevealMarket.CommitAuth memory auth =
             IRevealMarket.CommitAuth({commitment: bytes32(uint256(1)), nonce: 1, expiry: block.timestamp + 1});
+
+        token.mint(user, 1 ether);
+        vm.prank(user);
+        token.approve(address(escrow), 1 ether);
+        vm.prank(user);
+        escrow.deposit(1 ether);
 
         vm.prank(owner);
         vm.expectRevert(RelayerEscrow.UnknownMarket.selector);

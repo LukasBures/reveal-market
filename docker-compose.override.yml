@@ -47,6 +47,7 @@ services:
       - ./backend/migrations:/worker/migrations
 
   hedger:
+    profiles: ["hedger"]
     environment:
       HEDGER_ENVIRONMENT: dev
       HEDGER_LOG_LEVEL: DEBUG

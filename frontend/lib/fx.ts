@@ -6,3 +6,6 @@ export const formatZenUsd = (zenUsd: number | null | undefined, decimals = 4): s
   const trimmed = fixed.replace(/\.?0+$/, "");
   return trimmed.length ? trimmed : fixed;
 };
+
+// Legacy alias for earlier ETH naming.
+export const formatEthUsd = formatZenUsd;

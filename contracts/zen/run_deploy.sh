@@ -10,6 +10,7 @@ set -euo pipefail
 #   RPC_URL                Target RPC URL
 #   ORACLE_ADDRESS         Oracle address to wire into the factory
 #   AUTHORIZATION_SIGNER   Backend commit auth signer
+#   ZEN_TOKEN_ADDRESS      ERC20 collateral token address
 # Optional:
 #   USE_STUB_VERIFIER=1    Use stub verifier (skips SETTLEMENT_VK_JSON)
 #   SETTLEMENT_VK_JSON     Full verifying key JSON when USE_STUB_VERIFIER=0
@@ -48,6 +49,7 @@ require_env "DEPLOYER_KEY"
 require_env "RPC_URL"
 require_env "ORACLE_ADDRESS"
 require_env "AUTHORIZATION_SIGNER"
+require_env "ZEN_TOKEN_ADDRESS"
 
 USE_STUB_VERIFIER="${USE_STUB_VERIFIER:-0}"
 if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
@@ -69,6 +71,7 @@ export DEPLOYER_KEY
 export RPC_URL
 export ORACLE_ADDRESS
 export AUTHORIZATION_SIGNER
+export ZEN_TOKEN_ADDRESS
 export USE_STUB_VERIFIER
 export SETTLEMENT_VK_JSON
 export CHAIN_ID

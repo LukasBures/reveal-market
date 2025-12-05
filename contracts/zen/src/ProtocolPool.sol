@@ -3,9 +3,14 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @notice Protocol-owned bankroll that caps per-market liability exposure and collects rake/surplus.
 contract ProtocolPool is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    IERC20 public immutable collateralToken;
     address public marketFactory;
 
     mapping(address => bool) public allowedMarket;
@@ -28,7 +33,9 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
 
     uint256 public capacity; // optional global risk budget across markets
 
-    constructor(address owner_) Ownable(owner_) {}
+    constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
+        collateralToken = collateralToken_;
+    }
 
     modifier onlyFactory() {
         _onlyFactory();
@@ -67,22 +74,22 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
         uint256 newConsumed = consumedLiability[market] + amount;
         if (newConsumed > liabilityCap[market]) revert CapExceeded();
         if (capacity != 0 && amount > capacity) revert CapacityExceeded();
-        if (amount > address(this).balance) revert InsufficientPool();
+        uint256 balance = collateralToken.balanceOf(address(this));
+        if (amount > balance) revert InsufficientPool();
 
         consumedLiability[market] = newConsumed;
         if (capacity != 0) {
             capacity -= amount;
         }
-        (bool sent,) = market.call{value: amount}("");
-        require(sent, "transfer failed");
+        collateralToken.safeTransfer(market, amount);
         emit LiabilityDrawn(market, amount, newConsumed);
     }
 
     /// @notice Owner can withdraw idle funds (e.g., to re-seed the pool elsewhere).
     function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
-        if (amount > address(this).balance) revert InsufficientPool();
-        (bool sent,) = to.call{value: amount}("");
-        require(sent, "transfer failed");
+        uint256 balance = collateralToken.balanceOf(address(this));
+        if (amount > balance) revert InsufficientPool();
+        collateralToken.safeTransfer(to, amount);
         emit Withdrawn(to, amount);
     }
 
@@ -92,7 +99,8 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
         emit CapacityUpdated(newCapacity);
     }
 
-    receive() external payable {
-        emit FundsReceived(msg.sender, msg.value);
+    function deposit(uint256 amount) external nonReentrant {
+        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit FundsReceived(msg.sender, amount);
     }
 }

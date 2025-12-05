@@ -8,7 +8,7 @@ const revealMarketAbi = [
   {
     "type": "function",
     "name": "commitWithQuote",
-    "stateMutability": "payable",
+    "stateMutability": "nonpayable",
     "inputs": [
       { "name": "outcomeId", "type": "uint256" },
       { "name": "amount", "type": "uint256" },
@@ -27,8 +27,7 @@ const revealMarketAbi = [
         ]
       }
     ],
-    "outputs": [],
-    "payable": true
+    "outputs": []
   }
 ] as const;
 
@@ -89,8 +88,7 @@ export function useCommitWithQuote(contractAddress: Address) {
       abi: revealMarketAbi,
       functionName: "commitWithQuote",
       args: [params.outcomeId, params.amountWei, params.salt, params.quote],
-      chainId,
-      value: params.amountWei,
+      chainId
     });
   }
 

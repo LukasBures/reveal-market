@@ -19,9 +19,10 @@ type Props = {
   tradingHalted?: boolean | null;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 1.0;
+const DEFAULT_MAX_STAKE_ZEN = 10.0;
 const MIN_STAKE_ZEN = 0.1;
 const MAX_STAKE_ZEN = 10.0;
+const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${MAX_STAKE_ZEN} ZEN`;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -29,7 +30,7 @@ const formatNumber = (value: number, decimals = 4) => {
 };
 
 export function StakeQuoteCard({
-  defaultStakeZen = 0.1,
+  defaultStakeZen = 1,
   marketAddress,
   marketId,
   outcomes = [],
@@ -78,7 +79,7 @@ export function StakeQuoteCard({
       .filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v))
       .map((v) => Math.max(0, v));
     if (!caps.length) return DEFAULT_MAX_STAKE_ZEN;
-    return Math.max(0.01, Math.min(...caps));
+    return Math.max(MIN_STAKE_ZEN, Math.min(...caps));
   }, [quote]);
 
   useEffect(() => {
@@ -317,20 +318,20 @@ export function StakeQuoteCard({
               setStakeInput(raw);
               if (normalized === "") {
                 setStakeZen(0);
-                setStakeError("Enter between 0.01 and 0.1 ZEN");
+                setStakeError(STAKE_RANGE_ERROR);
                 return;
               }
               const next = Number(normalized);
               if (Number.isNaN(next)) {
                 setStakeZen(0);
-                setStakeError("Enter between 0.01 and 0.1 ZEN");
+                setStakeError(STAKE_RANGE_ERROR);
                 return;
               }
               const rounded = Math.round(next * 100) / 100;
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
               if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                setStakeError("Enter between 0.01 and 0.1 ZEN");
+                setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
               }
@@ -341,7 +342,7 @@ export function StakeQuoteCard({
               if (Number.isNaN(next)) {
                 setStakeInput("0.00");
                 setStakeZen(0);
-                setStakeError("Enter between 0.01 and 0.1 ZEN");
+                setStakeError(STAKE_RANGE_ERROR);
                 return;
               }
               const rounded = Math.round(next * 100) / 100;
@@ -349,7 +350,7 @@ export function StakeQuoteCard({
               setStakeZen(capped);
               setStakeInput(capped.toFixed(2));
               if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                setStakeError("Enter between 0.01 and 0.1 ZEN");
+                setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
               }
@@ -360,7 +361,7 @@ export function StakeQuoteCard({
             placeholder="0.00 ZEN"
           />
           <div className="grid grid-cols-4 gap-2 text-[11px] text-slate-500">
-            {[0.01, 0.1].map((preset) => (
+            {[MIN_STAKE_ZEN, 1].map((preset) => (
               <button
                 key={preset}
                 type="button"
@@ -369,7 +370,7 @@ export function StakeQuoteCard({
                   setStakeZen(capped);
                   setStakeInput(capped.toFixed(2));
                   if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
-                    setStakeError("Enter between 0.01 and 0.1 ZEN");
+                    setStakeError(STAKE_RANGE_ERROR);
                   } else {
                     setStakeError(null);
                   }

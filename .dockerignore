@@ -6,6 +6,7 @@
 !frontend/
 !hedger/
 !streamer/
+!relayer/
 !contracts/cache/
 !shared/
 !pyproject.toml

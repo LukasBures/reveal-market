@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IProtocolPool} from "./interfaces/IProtocolPool.sol";
 import {IRelayerEscrow} from "./interfaces/IRelayerEscrow.sol";
@@ -13,6 +15,7 @@ import {RelayerEscrow} from "./RelayerEscrow.sol";
 
 /// @notice Minimal commit/reveal market using fixed-size tickets and ZK-verified settlement.
 contract RevealMarket is IRevealMarket, ReentrancyGuard {
+    using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 
     struct InitParams {
@@ -22,6 +25,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         address oracle;
         address verifier;
         bytes32 circuitHash;
+        address collateralToken;
         uint256 commitDeadline;
         uint256 revealDeadline;
         uint256 ticketSize;
@@ -38,6 +42,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     address public oracle;
     address public verifier;
     bytes32 public circuitHash;
+    address public collateralToken;
     uint256 public override commitDeadline;
     uint256 public revealDeadline;
     uint256 public ticketSize;
@@ -145,7 +150,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             params.factory == address(0) || params.protocolPool == address(0) || params.relayerEscrow == address(0)
                 || params.oracle == address(0) || params.verifier == address(0)
                 || params.authorizationSigner == address(0) || params.ticketSize == 0 || params.commitDeadline == 0
-                || params.revealDeadline <= params.commitDeadline
+                || params.revealDeadline <= params.commitDeadline || params.collateralToken == address(0)
         ) revert InvalidInit();
         if (params.rakeBps > 10_000) revert InvalidInit();
         initialized = true;
@@ -155,6 +160,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         oracle = params.oracle;
         verifier = params.verifier;
         circuitHash = params.circuitHash;
+        collateralToken = params.collateralToken;
         commitDeadline = params.commitDeadline;
         revealDeadline = params.revealDeadline;
         ticketSize = params.ticketSize;
@@ -177,7 +183,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (phase != Phase.Commit) revert InvalidPhase();
         if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
         if (commitsPaused) revert CommitsPaused();
-        if (msg.value != ticketSize) revert InvalidPayment();
+        if (msg.value != 0) revert InvalidPayment();
+        uint256 requiredBalance = totalEscrow + rakeCollected + ticketSize;
+        if (IERC20(collateralToken).balanceOf(address(this)) < requiredBalance) revert InvalidPayment();
         if (maxCommitments != 0 && commitments.length >= maxCommitments) revert MaxCommitmentsReached();
         if (auth.expiry < block.timestamp) revert CommitExpired();
         if (usedCommitNonces[auth.nonce]) revert CommitReplay();
@@ -194,7 +202,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         totalEscrow += net;
         rakeCollected += rake;
         if (rake > 0) {
-            _send(protocolPool, rake);
+            IERC20(collateralToken).safeTransfer(protocolPool, rake);
         }
         emit Committed(commitments.length - 1, auth.commitment, totalEscrow);
     }
@@ -248,18 +256,20 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 required = totalLiability;
         if (required > totalEscrow + protocolLiabilityCap) revert LiabilityExceedsCoverage();
 
-        if (required > address(this).balance) {
-            uint256 deficit = required - address(this).balance;
+        uint256 balance = IERC20(collateralToken).balanceOf(address(this));
+        if (required > balance) {
+            uint256 deficit = required - balance;
             protocolTopUp = deficit;
             IProtocolPool(protocolPool).draw(address(this), deficit);
         }
 
-        if (required > address(this).balance) revert InsufficientCoverage();
+        if (required > IERC20(collateralToken).balanceOf(address(this))) revert InsufficientCoverage();
 
         // forward any surplus immediately; keep only what is needed for claims
-        uint256 surplus = address(this).balance > totalLiability ? address(this).balance - totalLiability : 0;
+        uint256 tokenBalance = IERC20(collateralToken).balanceOf(address(this));
+        uint256 surplus = tokenBalance > totalLiability ? tokenBalance - totalLiability : 0;
         if (surplus > 0) {
-            _send(protocolPool, surplus);
+            IERC20(collateralToken).safeTransfer(protocolPool, surplus);
         }
 
         phase = Phase.Settled;
@@ -287,7 +297,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         claimedLiability += amount;
         if (claimedLiability > totalLiability) revert OverClaimed();
 
-        IRelayerEscrow(relayerEscrow).creditFromMarket{value: amount}(user);
+        IERC20(collateralToken).safeTransfer(relayerEscrow, amount);
+        IRelayerEscrow(relayerEscrow).creditFromMarket(user, amount);
         emit Claimed(msg.sender, user, ticketId, amount);
 
         if (claimedLiability == totalLiability) {
@@ -301,9 +312,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     function _finish() internal {
-        uint256 leftover = address(this).balance;
+        uint256 leftover = IERC20(collateralToken).balanceOf(address(this));
         if (leftover > 0) {
-            _send(protocolPool, leftover);
+            IERC20(collateralToken).safeTransfer(protocolPool, leftover);
         }
         phase = Phase.Finished;
         emit Finished(leftover);
@@ -421,10 +432,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         return computed == commitmentsRoot;
     }
 
-    function _send(address to, uint256 amount) private {
-        (bool sent,) = to.call{value: amount}("");
-        require(sent, "transfer failed");
+    receive() external payable {
+        revert("Native transfers disabled");
     }
-
-    receive() external payable {}
 }
