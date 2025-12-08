@@ -49,33 +49,58 @@ export function GroupedMarketSelector({
       const formatted = value ? formatDate(value, { dateStyle: "medium" }) : "—";
       return formatted !== "—" ? formatted : null;
     };
-    const labeled = siblings.map((sibling, index) => {
-      const options = [
-        sibling.title?.trim(),
-        sibling.groupItemTitle?.trim(),
-        formatDay(sibling.commitDeadline),
-        formatDay(sibling.closesAt),
-        formatDay(sibling.startsAt),
-        sibling.groupPosition !== null && sibling.groupPosition !== undefined ? `Day ${sibling.groupPosition}` : null,
-        sibling.groupItemThreshold !== null && sibling.groupItemThreshold !== undefined
-          ? String(sibling.groupItemThreshold)
-          : null,
-        sibling.title,
-        `Market ${index + 1}`,
-      ].filter((opt): opt is string => Boolean(opt));
+    const labeled = siblings
+      .filter((s) => (s.status ?? "").toLowerCase() !== "settled" && (s.status ?? "").toLowerCase() !== "resolved")
+      .map((sibling, index) => {
+        const options = [
+          sibling.title?.trim(),
+          sibling.groupItemTitle?.trim(),
+          formatDay(sibling.commitDeadline),
+          formatDay(sibling.closesAt),
+          formatDay(sibling.startsAt),
+          sibling.groupPosition !== null && sibling.groupPosition !== undefined ? `Day ${sibling.groupPosition}` : null,
+          sibling.groupItemThreshold !== null && sibling.groupItemThreshold !== undefined
+            ? String(sibling.groupItemThreshold)
+            : null,
+          sibling.title,
+          `Market ${index + 1}`,
+        ].filter((opt): opt is string => Boolean(opt));
 
-      let label = options.find((opt) => !used.has(opt)) ?? options[0] ?? `Market ${index + 1}`;
-      if (used.has(label)) {
-        label = `${label} #${index + 1}`;
+        let label = options.find((opt) => !used.has(opt)) ?? options[0] ?? `Market ${index + 1}`;
+        if (used.has(label)) {
+          label = `${label} #${index + 1}`;
+        }
+        used.add(label);
+
+        return { ...sibling, _label: label };
+      });
+    const parseDate = (value?: string | null) => {
+      if (!value) return null;
+      const ts = Date.parse(value);
+      return Number.isNaN(ts) ? null : ts;
+    };
+    const score = (sibling: MarketSibling & { _label?: string }) => {
+      if (typeof sibling.groupPosition === "number" && Number.isFinite(sibling.groupPosition)) {
+        return { rank: 0, value: sibling.groupPosition };
       }
-      used.add(label);
-
-      return { ...sibling, _label: label };
-    });
+      if (typeof sibling.groupItemThreshold === "number" && Number.isFinite(sibling.groupItemThreshold)) {
+        return { rank: 1, value: sibling.groupItemThreshold };
+      }
+      const dates = [sibling.commitDeadline, sibling.closesAt, sibling.startsAt]
+        .map((d) => parseDate(d))
+        .filter((d): d is number => d !== null);
+      if (dates.length) {
+        return { rank: 2, value: Math.min(...dates) };
+      }
+      const label = sibling._label ?? "";
+      return { rank: 3, value: label.toLowerCase() };
+    };
     return labeled.sort((a, b) => {
-      const aLabel = (a as MarketSibling & { _label?: string })._label ?? "";
-      const bLabel = (b as MarketSibling & { _label?: string })._label ?? "";
-      return aLabel.localeCompare(bLabel);
+      const sa = score(a as MarketSibling & { _label?: string });
+      const sb = score(b as MarketSibling & { _label?: string });
+      if (sa.rank !== sb.rank) return sa.rank - sb.rank;
+      if (typeof sa.value === "number" && typeof sb.value === "number") return sa.value - sb.value;
+      return String(sa.value).localeCompare(String(sb.value));
     });
   }, [siblings]);
 

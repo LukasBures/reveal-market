@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatTime } from "@/lib/formatters";
+import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
+import { erc20Abi, maxUint256, type Address, type Hex } from "viem";
+import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 
 type Props = {
   defaultStakeZen?: number;
@@ -53,6 +56,19 @@ export function StakeQuoteCard({
   const fxStale = status === "stale";
   const fxLive = status === "live" && !fx?.stale;
   const { address } = useAccount();
+  const chainId = useChainId();
+  const { commitWithQuote, isPending: txPending, error: commitError } = useCommitWithQuote(
+    (marketAddress ?? "") as Address,
+  );
+  const publicClient = usePublicClient({ chainId });
+  const {
+    writeContractAsync: writeApprovalAsync,
+    error: approvalError,
+  } = useWriteContract();
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [approvalHash, setApprovalHash] = useState<Hex | null>(null);
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
   const isBinary = outcomeOptions.length === 2;
@@ -101,6 +117,19 @@ export function StakeQuoteCard({
       : isLocked
         ? "Market locked"
         : null;
+  const missingZenToken = !ZEN_TOKEN_ADDRESS;
+  const allowanceEnabled = Boolean(address && marketAddress && ZEN_TOKEN_ADDRESS);
+  const {
+    data: allowance,
+    isFetching: allowanceLoading,
+    refetch: refetchAllowance,
+  } = useReadContract({
+    address: allowanceEnabled ? (ZEN_TOKEN_ADDRESS as Address) : undefined,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: allowanceEnabled ? ([address as Address, marketAddress as Address] as const) : undefined,
+    query: { enabled: allowanceEnabled, refetchInterval: 15_000 },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +205,8 @@ export function StakeQuoteCard({
     const expires = new Date(quote.expires_at).getTime();
     const delay = expires - Date.now() - 1_000;
     const timer = setTimeout(() => {
-      setQuote(null); // trigger refetch via effect above
+      setQuote(null);
+      setRefreshNonce((prev) => prev + 1);
     }, Math.max(delay, 0));
     return () => clearTimeout(timer);
   }, [quote]);
@@ -200,6 +230,16 @@ export function StakeQuoteCard({
     if (baseStake === null) return null;
     return profitZen !== null ? baseStake + profitZen : baseStake;
   }, [profitUsd, quote]);
+  const requiredAllowance = useMemo(() => {
+    if (!quote?.stake_wei) return 0n;
+    try {
+      return BigInt(quote.stake_wei);
+    } catch {
+      return 0n;
+    }
+  }, [quote?.stake_wei]);
+  const hasAllowance = allowance !== undefined && allowance !== null && allowance >= requiredAllowance;
+  const needsApproval = allowanceEnabled && requiredAllowance > 0n && !hasAllowance;
   const currentPrice = priceForOutcome(selectedOutcome);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const ctaLabel = loading
@@ -210,6 +250,80 @@ export function StakeQuoteCard({
     selectedOutcome === 0
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
+
+  const handleTrade = async () => {
+    setTxError(null);
+    setTxHash(null);
+    if (tradingDisabled) {
+      setTxError(tradingReason ?? "Trading disabled");
+      return;
+    }
+    if (!address) {
+      setError("Connect wallet to request a quote");
+      setTxError("Connect wallet before trading.");
+      return;
+    }
+    if (!marketAddress) {
+      setTxError("Market contract address missing.");
+      return;
+    }
+    if (!quote) {
+      setError("Requesting quote before trading…");
+      setRefreshNonce((prev) => prev + 1);
+      return;
+    }
+    if (stakeZen < MIN_STAKE_ZEN || stakeZen > MAX_STAKE_ZEN) {
+      setTxError(STAKE_RANGE_ERROR);
+      return;
+    }
+    if (stakeZen !== quote.stake_zen) {
+      setTxError("Stake changed. Refresh the quote.");
+      return;
+    }
+    const expiresTs = new Date(quote.expires_at).getTime();
+    if (expiresTs <= Date.now()) {
+      setTxError("Quote expired. Refreshing…");
+      setRefreshNonce((prev) => prev + 1);
+      return;
+    }
+    if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
+      setTxError(`Switch to chain ${quote.chain_id} to trade.`);
+      return;
+    }
+    if (missingZenToken) {
+      setTxError("ZEN token address is not configured.");
+      return;
+    }
+    setTxLoading(true);
+    try {
+      if (needsApproval) {
+        const hash = await writeApprovalAsync({
+          address: ZEN_TOKEN_ADDRESS as Address,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [marketAddress as Address, maxUint256],
+          chainId,
+        });
+        setApprovalHash(hash as Hex);
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash: hash as Hex });
+          await refetchAllowance();
+        }
+      }
+      const params = buildSignedQuoteParams({
+        quote,
+        outcomeId: selectedOutcome,
+        walletAddress: address as Address,
+        amountWei: BigInt(quote.stake_wei),
+      });
+      const tx = await commitWithQuote(params);
+      setTxHash(typeof tx === "string" ? tx : (tx as any)?.hash ?? null);
+    } catch (err) {
+      setTxError(err instanceof Error ? err.message : "Trade failed");
+    } finally {
+      setTxLoading(false);
+    }
+  };
 
   return (
     <div
@@ -360,8 +474,8 @@ export function StakeQuoteCard({
             aria-label="Stake in ZEN"
             placeholder="0.00 ZEN"
           />
-          <div className="grid grid-cols-4 gap-2 text-[11px] text-slate-500">
-            {[MIN_STAKE_ZEN, 1].map((preset) => (
+          <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
+            {[MIN_STAKE_ZEN, 1, MAX_STAKE_ZEN].map((preset) => (
               <button
                 key={preset}
                 type="button"
@@ -394,6 +508,11 @@ export function StakeQuoteCard({
             {tradingReason ?? "Trading is unavailable for this market."}
           </div>
         )}
+        {quote && (
+          <p className="text-xs text-slate-300">
+            Stake {formatNumber(quote.stake_zen, 3)} ZEN → Win {formatNumber(toWinZen ?? NaN, 3)} ZEN
+          </p>
+        )}
         <button
           type="button"
           disabled={
@@ -404,16 +523,19 @@ export function StakeQuoteCard({
             !address ||
             stakeZen < MIN_STAKE_ZEN ||
             stakeZen > MAX_STAKE_ZEN ||
-            tradingDisabled
+            tradingDisabled ||
+            txLoading ||
+            txPending
           }
-          onClick={() => setRefreshNonce((prev) => prev + 1)}
+          onClick={handleTrade}
           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
-            loading || fxStale || fxUnavailable || !address || !marketAddress || tradingDisabled
+            loading || fxStale || fxUnavailable || !address || !marketAddress || tradingDisabled || txLoading || txPending
               ? "cursor-not-allowed bg-white/20 text-white/60"
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}
         >
-          {tradingReason ?? ctaLabel}
+          {tradingReason ??
+            (txLoading || txPending ? "Submitting…" : ctaLabel)}
         </button>
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
@@ -428,12 +550,41 @@ export function StakeQuoteCard({
           </p>
         )}
         {error && <p className="text-xs text-rose-300">{error}</p>}
+        {txError && <p className="text-xs text-rose-300">{txError}</p>}
         {stakeError && <p className="text-xs text-rose-300">{stakeError}</p>}
         {fxStale && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
             Pricing paused due to stale FX. Please retry in a moment.
           </p>
         )}
+        {quote && needsApproval && !txLoading && !txPending && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+            Wallet will request ZEN approval before trading.
+          </p>
+        )}
+        {missingZenToken && (
+          <p className="text-xs text-rose-200">
+            ZEN token address missing. Set NEXT_PUBLIC_ZEN_TOKEN_ADDRESS to continue.
+          </p>
+        )}
+        {(approvalHash || txHash) && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
+            {approvalHash ? `Approval tx: ${approvalHash.slice(0, 10)}…${approvalHash.slice(-6)}` : null}
+            {approvalHash && txHash ? " · " : ""}
+            {txHash ? `Commit tx: ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : null}
+          </p>
+        )}
+        {commitError && !txError && (
+          <p className="text-xs text-rose-300">
+            {commitError instanceof Error ? commitError.message : "Commit failed. Check wallet and quote."}
+          </p>
+        )}
+        {approvalError && !txError && (
+          <p className="text-xs text-rose-300">
+            {approvalError instanceof Error ? approvalError.message : "Approval failed. Try again."}
+          </p>
+        )}
+        {allowanceLoading && <p className="text-xs text-slate-400">Checking ZEN allowance…</p>}
       </div>
       {quote && (
         <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3 text-xs text-slate-300">

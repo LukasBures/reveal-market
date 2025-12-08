@@ -127,6 +127,7 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
           return {
             eventId: coerceId(sibling.event_id ?? sibling.eventId ?? ""),
             title: sibling.title ?? undefined,
+            status: sibling.status ?? sibling.extra_data?.status ?? undefined,
             groupItemTitle: sibling.group_item_title ?? sibling.groupItemTitle ?? null,
             groupItemThreshold: siblingThreshold ?? null,
             groupPosition: siblingPosition ?? null,

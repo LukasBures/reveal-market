@@ -1,6 +1,7 @@
 export type MarketSibling = {
   eventId: string;
   title?: string;
+  status?: string;
   groupItemTitle?: string | null;
   groupItemThreshold?: number | null;
   groupPosition?: number | null;

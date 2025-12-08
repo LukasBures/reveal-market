@@ -19,7 +19,8 @@ Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to t
 ```bash
 cd relayer
 uv sync
-uv run uvicorn relayer.main:app --reload --host 0.0.0.0 --port 8088
+PYTHONPATH=src uv run uvicorn relayer.main:app --reload --host 0.0.0.0 --port 8088
+# or: make run
 ```
 
 ## Docker

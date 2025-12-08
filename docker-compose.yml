@@ -281,6 +281,7 @@ services:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
         NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
         NEXT_PUBLIC_WALLET_CHAINS: ${NEXT_PUBLIC_WALLET_CHAINS}
+        NEXT_PUBLIC_ZEN_TOKEN_ADDRESS: ${NEXT_PUBLIC_ZEN_TOKEN_ADDRESS}
         NEXT_DISABLE_MINIFY: ${NEXT_DISABLE_MINIFY:-false}
     container_name: reveal-market-frontend
     restart: unless-stopped
@@ -291,6 +292,7 @@ services:
       NODE_OPTIONS: --max-old-space-size=256
       RUNNING_IN_DOCKER: "true"
       LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE}
+      NEXT_PUBLIC_ZEN_TOKEN_ADDRESS: ${NEXT_PUBLIC_ZEN_TOKEN_ADDRESS}
     depends_on:
       api:
         condition: service_healthy

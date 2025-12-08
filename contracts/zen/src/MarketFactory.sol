@@ -25,7 +25,7 @@ contract MarketFactory is Ownable {
     }
 
     address public immutable IMPLEMENTATION;
-    address public immutable collateralToken;
+    address public immutable COLLATERAL_TOKEN;
     RelayerEscrow public relayerEscrow;
     ProtocolPool public protocolPool;
 
@@ -84,7 +84,7 @@ contract MarketFactory is Ownable {
         IMPLEMENTATION = implementation_;
         protocolPool = protocolPool_;
         relayerEscrow = relayerEscrow_;
-        collateralToken = collateralToken_;
+        COLLATERAL_TOKEN = collateralToken_;
     }
 
     /// @notice Owner can update the relayer escrow address (e.g., when rotating relayers).
@@ -185,7 +185,7 @@ contract MarketFactory is Ownable {
                     oracle: params.oracle,
                     verifier: params.verifier,
                     circuitHash: params.circuitHash,
-                    collateralToken: collateralToken,
+                    collateralToken: COLLATERAL_TOKEN,
                     commitDeadline: params.commitDeadline,
                     revealDeadline: params.revealDeadline,
                     ticketSize: params.fixedTicketSize,

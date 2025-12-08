@@ -12,7 +12,7 @@ import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 /// Users deposit/withdraw ERC20 collateral; only the relayer (owner) may initiate commits on their behalf.
 contract RelayerEscrow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
-    IERC20 public immutable collateralToken;
+    IERC20 public immutable COLLATERAL_TOKEN;
     mapping(address => uint256) public balances;
     mapping(address => bool) public allowedMarket;
 
@@ -32,7 +32,7 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
     error InvalidRelayerOwner();
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
-        collateralToken = collateralToken_;
+        COLLATERAL_TOKEN = collateralToken_;
     }
 
     /// @notice Sets the factory allowed to register new markets.
@@ -51,14 +51,14 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
 
     /// @notice Users deposit ERC20 collateral into their escrow balance (requires prior approval).
     function deposit(uint256 amount) external {
-        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        COLLATERAL_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
         balances[msg.sender] += amount;
         emit Deposited(msg.sender, amount);
     }
 
     /// @notice Owner can deposit on behalf of a user (e.g., when funding via off-chain rails).
     function depositFor(address user, uint256 amount) external onlyOwner {
-        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        COLLATERAL_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
         balances[user] += amount;
         emit Deposited(user, amount);
     }
@@ -67,7 +67,7 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
     function withdraw(uint256 amount) external nonReentrant {
         if (balances[msg.sender] < amount) revert InsufficientBalance();
         balances[msg.sender] -= amount;
-        collateralToken.safeTransfer(msg.sender, amount);
+        COLLATERAL_TOKEN.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -83,7 +83,7 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
         if (balances[user] < ticket) revert InsufficientBalance();
 
         balances[user] -= ticket;
-        collateralToken.safeTransfer(market, ticket);
+        COLLATERAL_TOKEN.safeTransfer(market, ticket);
         (bool success,) =
             market.call(abi.encodeWithSelector(IRevealMarket.commitWithAuthorization.selector, auth, signature));
         if (!success) revert CommitFailed();

@@ -10,7 +10,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract ProtocolPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable collateralToken;
+    IERC20 public immutable COLLATERAL_TOKEN;
     address public marketFactory;
 
     mapping(address => bool) public allowedMarket;
@@ -34,7 +34,7 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
     uint256 public capacity; // optional global risk budget across markets
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
-        collateralToken = collateralToken_;
+        COLLATERAL_TOKEN = collateralToken_;
     }
 
     modifier onlyFactory() {
@@ -74,22 +74,22 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
         uint256 newConsumed = consumedLiability[market] + amount;
         if (newConsumed > liabilityCap[market]) revert CapExceeded();
         if (capacity != 0 && amount > capacity) revert CapacityExceeded();
-        uint256 balance = collateralToken.balanceOf(address(this));
+        uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
 
         consumedLiability[market] = newConsumed;
         if (capacity != 0) {
             capacity -= amount;
         }
-        collateralToken.safeTransfer(market, amount);
+        COLLATERAL_TOKEN.safeTransfer(market, amount);
         emit LiabilityDrawn(market, amount, newConsumed);
     }
 
     /// @notice Owner can withdraw idle funds (e.g., to re-seed the pool elsewhere).
     function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
-        uint256 balance = collateralToken.balanceOf(address(this));
+        uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
-        collateralToken.safeTransfer(to, amount);
+        COLLATERAL_TOKEN.safeTransfer(to, amount);
         emit Withdrawn(to, amount);
     }
 
@@ -100,7 +100,7 @@ contract ProtocolPool is Ownable, ReentrancyGuard {
     }
 
     function deposit(uint256 amount) external nonReentrant {
-        collateralToken.safeTransferFrom(msg.sender, address(this), amount);
+        COLLATERAL_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
         emit FundsReceived(msg.sender, amount);
     }
 }

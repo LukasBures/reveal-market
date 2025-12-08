@@ -149,3 +149,8 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via the contact form on the site.
 
 Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `prover/circuits/build` are missing or invalid. Run `prover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.
+
+
+
+
+https://horizen-testnet.explorer.caldera.xyz/address/0xe928a273C83c80445adF89a880D0c7cc8Ee089b0?tab=tokens
