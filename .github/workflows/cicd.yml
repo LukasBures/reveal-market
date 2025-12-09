@@ -15,17 +15,25 @@ jobs:
     env:
       ARTIFACTS_DEPLOY_KEY: ${{ secrets.ARTIFACTS_DEPLOY_KEY || '' }}
     steps:
-      - name: Checkout (with artifacts key)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          ssh-key: ${{ env.ARTIFACTS_DEPLOY_KEY }}
-      - name: Checkout (no private submodules)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
+      - name: Checkout (main only)
         uses: actions/checkout@v4
         with:
           submodules: false
+
+      - name: Checkout submodules (with artifacts key)
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
+          chmod 600 ~/.ssh/id_artifacts
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
+
+      - name: Checkout submodules (skip artifacts if no key)
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
+        run: |
+          git config submodule.prover/artifacts.update none
+          git submodule update --init --recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
