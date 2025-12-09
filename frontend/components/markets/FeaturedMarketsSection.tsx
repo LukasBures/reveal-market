@@ -26,6 +26,7 @@ export async function FeaturedMarketsSection({
     category: categoryFilter,
     status: "active",
     trending: false,
+    coalesceGroups: true,
   });
 
   if (initialMarkets.length === 0) {

@@ -12,6 +12,7 @@ export async function CategoryMarkets({ slug }: { slug: string }) {
     status: "active",
     trending: false,
     onlyFeatured: false,
+    coalesceGroups: true,
   });
 
   return (

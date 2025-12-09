@@ -336,6 +336,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
   }
   try {
     const onlyFeatured = options?.onlyFeatured ?? false;
+    const coalesceGroups = options?.coalesceGroups ?? true;
     let endpoint = "/markets";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
@@ -346,6 +347,9 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     params.set("order_by", "volume_24h_usd");
     if (onlyFeatured) {
       params.set("only_featured", "1");
+    }
+    if (coalesceGroups) {
+      params.set("coalesce_groups", "1");
     }
     const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {

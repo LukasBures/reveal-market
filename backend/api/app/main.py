@@ -1245,6 +1245,45 @@ def _sum_sibling_liquidity(siblings: list[schemas.MarketSibling]) -> float | Non
     return total if any_value else None
 
 
+def _coalesce_grouped_markets(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
+    grouped: dict[str, schemas.MarketResponse] = {}
+    standalone: list[schemas.MarketResponse] = []
+
+    def _prefer_candidate(candidate: schemas.MarketResponse, incumbent: schemas.MarketResponse) -> bool:
+        cand_volume = _safe_float(getattr(candidate, "volume_24h_usd", None)) or 0.0
+        inc_volume = _safe_float(getattr(incumbent, "volume_24h_usd", None)) or 0.0
+        if cand_volume > inc_volume:
+            return True
+        if cand_volume < inc_volume:
+            return False
+        cand_pos_raw = getattr(candidate, "group_position", None)
+        inc_pos_raw = getattr(incumbent, "group_position", None)
+        cand_pos = _safe_float(cand_pos_raw)
+        inc_pos = _safe_float(inc_pos_raw)
+        if cand_pos is not None and inc_pos is not None:
+            if cand_pos < inc_pos:
+                return True
+            if cand_pos > inc_pos:
+                return False
+        elif cand_pos is not None:
+            return True
+        elif inc_pos is not None:
+            return False
+        cand_event = getattr(candidate, "event_id", "") or ""
+        inc_event = getattr(incumbent, "event_id", "") or ""
+        return cand_event < inc_event
+
+    for market in markets:
+        slug = getattr(market, "group_slug", None)
+        if not slug:
+            standalone.append(market)
+            continue
+        existing = grouped.get(slug)
+        if existing is None or _prefer_candidate(market, existing):
+            grouped[slug] = market
+    return standalone + list(grouped.values())
+
+
 def _attach_group_fields(
     session: Session, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
 ) -> None:
@@ -2539,8 +2578,12 @@ def list_markets(
     order_by: Annotated[str | None, Query(description="Order results (popularity|recent|volume_24h_usd)")] = None,
     trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
     featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
+    coalesce_groups: Annotated[
+        bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
+    ] = None,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
+    coalesce_mode = bool(coalesce_groups)
     popularity_mode = order_by == "popularity" or bool(trending)
     volume_mode = order_by == "volume_24h_usd"
     if popularity_mode and not status:
@@ -2561,6 +2604,7 @@ def list_markets(
         order_by=order_by or ("popularity" if popularity_mode else None),
         trending=trending,
         featured=featured,
+        coalesce_groups=coalesce_groups,
     )
     cache = get_cache_client()
     log_event(
@@ -2578,6 +2622,7 @@ def list_markets(
         order_by=order_by,
         trending=bool(trending),
         featured=featured,
+        coalesce_groups=coalesce_mode,
     )
     start = time.perf_counter()
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, normalized_search)
@@ -2589,6 +2634,10 @@ def list_markets(
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
             duration = (time.perf_counter() - start) * 1000
+            cached_models = _filter_markets_for_visibility(hydrated)
+            if coalesce_mode and cached_models:
+                cached_models = _coalesce_grouped_markets(cached_models)
+                cached_models = cached_models[offset : offset + limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -2603,10 +2652,10 @@ def list_markets(
                 search=normalized_search,
                 limit=limit,
                 offset=offset,
-                result_count=len(hydrated),
+                result_count=len(cached_models),
                 featured=featured,
+                coalesce_groups=coalesce_mode,
             )
-            cached_models = _filter_markets_for_visibility(hydrated)
             return cached_models
         MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*", category=category or "*").inc()
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:list")
@@ -2622,6 +2671,9 @@ def list_markets(
     elif volume_mode:
         query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
         query_offset = 0
+    if coalesce_mode:
+        query_limit = min(settings.max_page_size, max(query_limit, limit * 3, limit + offset))
+        query_offset = 0
     markets = crud.get_markets(
         session,
         status=status,
@@ -2634,6 +2686,8 @@ def list_markets(
     )
     market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
+    if coalesce_mode and market_models:
+        market_models = _coalesce_grouped_markets(market_models)
     if popularity_mode:
         popularity_scores = {m.event_id: _compute_market_popularity(m) for m in market_models}
         selected = market_models
@@ -2648,7 +2702,7 @@ def list_markets(
             ),
             reverse=True,
         )
-        market_models = selected[:limit]
+        market_models = selected if coalesce_mode else selected[:limit]
     elif order_by == "volume_24h_usd":
         market_models.sort(
             key=lambda m: (
@@ -2657,6 +2711,8 @@ def list_markets(
             ),
             reverse=True,
         )
+    if coalesce_mode:
+        market_models = market_models[offset : offset + limit]
     if not market_models:
         log_event(
             logger,
@@ -2733,10 +2789,14 @@ def list_markets_by_category(
         Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
+    coalesce_groups: Annotated[
+        bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
+    ] = None,
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     order_by = request.query_params.get("order_by")
     volume_mode = order_by == "volume_24h_usd"
+    coalesce_mode = bool(coalesce_groups)
     start = time.perf_counter()
     cache = get_cache_client()
     log_event(
@@ -2748,6 +2808,7 @@ def list_markets_by_category(
         limit=limit,
         offset=offset,
         order_by=order_by,
+        coalesce_groups=bool(coalesce_groups),
     )
     category_value = _decode_slug(category_slug)
     lookup = _canonical_category_lookup(category_value)
@@ -2762,7 +2823,9 @@ def list_markets_by_category(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
-    cache_key = category_cache_key(category_slug_key, limit, offset, order_by=order_by)
+    cache_key = category_cache_key(
+        category_slug_key, limit, offset, order_by=order_by, coalesce_groups=coalesce_groups
+    )
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)
@@ -2771,6 +2834,9 @@ def list_markets_by_category(
             hydrated = _enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
             models_from_cache = _filter_markets_for_visibility(hydrated)
+            if coalesce_mode and models_from_cache:
+                models_from_cache = _coalesce_grouped_markets(models_from_cache)
+                models_from_cache = models_from_cache[offset : offset + limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -2780,6 +2846,7 @@ def list_markets_by_category(
                 limit=limit,
                 result_count=len(models_from_cache),
                 duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                coalesce_groups=coalesce_mode,
             )
             return models_from_cache
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
@@ -2787,6 +2854,11 @@ def list_markets_by_category(
         update_cache_context(request, cache_key=None, hit=False, source="markets:category")
 
     trending_category = category_slug_key == "trending"
+    fetch_limit = limit
+    fetch_offset = offset
+    if coalesce_mode:
+        fetch_limit = min(settings.max_page_size, max(limit * 3, limit + offset))
+        fetch_offset = 0
     log_event(
         logger,
         logging.DEBUG,
@@ -2795,14 +2867,14 @@ def list_markets_by_category(
         category_slug=category_slug_key,
         category_label=category_label,
         trending=trending_category,
-        limit=limit,
-        offset=offset,
+        limit=fetch_limit,
+        offset=fetch_offset,
         order_by=order_by,
     )
     if trending_category:
-        markets = crud.get_markets(session, limit=limit, offset=offset)
+        markets = crud.get_markets(session, limit=fetch_limit, offset=fetch_offset)
     else:
-        markets = crud.get_markets(session, category=category_label, limit=limit, offset=offset)
+        markets = crud.get_markets(session, category=category_label, limit=fetch_limit, offset=fetch_offset)
     market_models = _filter_markets_for_visibility(
         _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     )
@@ -2810,6 +2882,8 @@ def list_markets_by_category(
         fallback_matches = _fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
             market_models = _filter_markets_for_visibility(_enrich_market_models(session, fallback_matches))
+    if coalesce_mode and market_models:
+        market_models = _coalesce_grouped_markets(market_models)
     if volume_mode and market_models:
         market_models.sort(
             key=lambda m: (
@@ -2818,6 +2892,8 @@ def list_markets_by_category(
             ),
             reverse=True,
         )
+    if coalesce_mode:
+        market_models = market_models[offset : offset + limit]
     if not market_models:
         log_event(
             logger,

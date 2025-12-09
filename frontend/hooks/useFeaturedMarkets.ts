@@ -15,9 +15,17 @@ export function useFeaturedMarkets({ limit, searchQuery, category, status, trend
   return useQuery({
     queryKey: [
       "featuredMarkets",
-      { limit, searchQuery: searchQuery ?? null, category: category ?? null, status: normalizedStatus, trending: trending ?? null },
+      {
+        limit,
+        searchQuery: searchQuery ?? null,
+        category: category ?? null,
+        status: normalizedStatus,
+        trending: trending ?? null,
+        coalesceGroups: true,
+      },
     ],
-    queryFn: () => loadFeaturedMarketsAction(limit, { searchQuery, category, status: normalizedStatus, trending }),
+    queryFn: () =>
+      loadFeaturedMarketsAction(limit, { searchQuery, category, status: normalizedStatus, trending, coalesceGroups: true }),
     initialData,
     staleTime: 30_000,
     refetchOnWindowFocus: false,

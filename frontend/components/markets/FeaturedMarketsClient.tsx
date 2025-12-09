@@ -76,6 +76,20 @@ export function FeaturedMarketsClient({
         : items,
     [onlyActive],
   );
+  const normalizeMarkets = useCallback(
+    (items: MarketSummary[]) => {
+      const seen = new Set<string>();
+      const filtered = filterByStatus(items).filter((item) => {
+        if (!item.eventId || seen.has(item.eventId)) {
+          return false;
+        }
+        seen.add(item.eventId);
+        return true;
+      });
+      return filtered.sort(sortByVolumeDesc).slice(0, maxItems);
+    },
+    [filterByStatus, sortByVolumeDesc, maxItems],
+  );
 
   const { data: refreshedMarkets } = useFeaturedMarkets({
     limit: pageSize,
@@ -88,31 +102,22 @@ export function FeaturedMarketsClient({
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
-    const seeded = filterByStatus([...initialMarkets]);
-    setMarkets(seeded.sort(sortByVolumeDesc));
-    setHasMore(seeded.length >= pageSize);
+    const seeded = normalizeMarkets([...initialMarkets]);
+    const initialLikelyMore = initialMarkets.length >= pageSize || seeded.length >= pageSize;
+    setMarkets(seeded);
+    setHasMore(initialLikelyMore && seeded.length < maxItems);
     setAutoLoadCount(0);
-  }, [initialMarkets, pageSize, filterSignature, filterByStatus, sortByVolumeDesc]);
+  }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
   useEffect(() => {
     if (!refreshedMarkets) {
       return;
     }
     setMarkets((prev) => {
-      const seen = new Set<string>();
-      const merged: MarketSummary[] = [];
-      const pushUnique = (item: MarketSummary) => {
-        if (!item.eventId || seen.has(item.eventId)) {
-          return;
-        }
-        seen.add(item.eventId);
-        merged.push(item);
-      };
-      filterByStatus(refreshedMarkets || []).forEach(pushUnique);
-      filterByStatus(prev).forEach(pushUnique);
-      return merged.sort(sortByVolumeDesc).slice(0, maxItems);
+      const merged = normalizeMarkets([...(refreshedMarkets || []), ...prev]);
+      return merged;
     });
-  }, [refreshedMarkets, maxItems, filterByStatus, sortByVolumeDesc]);
+  }, [refreshedMarkets, normalizeMarkets]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -126,27 +131,18 @@ export function FeaturedMarketsClient({
             offset: markets.length,
             status,
             trending,
+            coalesceGroups: true,
           });
-          const activeAdditions = filterByStatus(additions);
-          if (activeAdditions.length === 0) {
+          const merged = normalizeMarkets([...markets, ...additions]);
+          if (normalizeMarkets(additions).length === 0) {
             setHasMore(false);
             return;
           }
-          const seen = new Set(markets.map((m) => m.eventId));
-          const filtered: MarketSummary[] = [];
-          for (const item of activeAdditions) {
-            if (!item.eventId || seen.has(item.eventId)) continue;
-            seen.add(item.eventId);
-            filtered.push(item);
-          }
-          const allowed = Math.max(0, maxItems - markets.length);
-          const nextItems = allowed > 0 ? filtered.slice(0, allowed) : [];
-          const merged = [...markets, ...nextItems].sort(sortByVolumeDesc);
-          const computedHasMore =
-            merged.length < maxItems && nextItems.length > 0 && additions.length === nextLimit;
+          const computedHasMore = additions.length === nextLimit && merged.length < maxItems;
           setMarkets(merged);
           setHasMore(computedHasMore);
-          if (mode === "auto" && nextItems.length > 0) {
+          const newItemsAdded = merged.length - markets.length;
+          if (mode === "auto" && newItemsAdded > 0) {
             setAutoLoadCount((count) => count + 1);
           }
         } catch (error) {
@@ -167,6 +163,7 @@ export function FeaturedMarketsClient({
       filterByStatus,
       trending,
       sortByVolumeDesc,
+      normalizeMarkets,
     ],
   );
 

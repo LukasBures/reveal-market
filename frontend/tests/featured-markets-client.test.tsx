@@ -83,6 +83,7 @@ describe("FeaturedMarketsClient", () => {
       category: undefined,
       offset: 1,
       status: "active",
+      coalesceGroups: true,
     });
   });
 

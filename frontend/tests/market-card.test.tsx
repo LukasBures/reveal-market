@@ -35,6 +35,7 @@ const baseMarket = {
   status: "commit",
   commitDeadline: "2025-01-01T00:00:00.000Z",
   liquidityUsd: 125000,
+  volume24hUsd: 100000,
   outcomes: ["Yes", "No", "Maybe"],
   outcomePrices: [0.72, 0.2, 0.08],
   tags: ["BTC"],
@@ -80,5 +81,37 @@ describe("MarketCard", () => {
       />,
     );
     expect(screen.getAllByTestId("market-image")[0]).toHaveAttribute("src", "https://cdn.gamma/example.png");
+  });
+
+  it("derives missing binary probability from the complement", () => {
+    render(
+      <MarketCard
+        market={{
+          ...baseMarket,
+          outcomes: ["Yes", "No"],
+          outcomePrices: [0.6],
+        }}
+      />,
+    );
+    expect(screen.getByText("60%")).toBeInTheDocument();
+    expect(screen.getByText("40%")).toBeInTheDocument();
+  });
+
+  it("shows binary stats for volume and liquidity", () => {
+    render(
+      <MarketCard
+        market={{
+          ...baseMarket,
+          outcomes: ["Yes", "No"],
+          outcomePrices: [0.55, 0.45],
+          liquidityUsd: 250000,
+          volume24hUsd: 100000,
+        }}
+      />,
+    );
+    expect(screen.getByText(/24h vol/i)).toBeInTheDocument();
+    expect(screen.getByText("$100K")).toBeInTheDocument();
+    expect(screen.getByText(/Liquidity/i)).toBeInTheDocument();
+    expect(screen.getByText("$250K")).toBeInTheDocument();
   });
 });
