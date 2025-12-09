@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
+import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 import { formatTime } from "@/lib/formatters";
 
 type Props = {
@@ -18,7 +19,7 @@ export function MarketLiveStatusBar({ marketId, tokenIds = [] }: Props) {
   }, []);
 
   const stream = usePriceStreamStore(marketId, tokenIds);
-  const fxStream = useFxStream("/fx/zen-usdc");
+  const fxStream = useFxStream(FX_DEFAULT_PATH);
 
   const connectionPill = useMemo(() => {
     if (stream.error) {

@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { useFxStream } from "@/hooks/useFxStream";
+import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 import { PriceBanner } from "@/components/layout/PriceBanner";
 import { resolveUrlConfig } from "@/lib/env-presets";
 import { formatZenUsd } from "@/lib/fx";
@@ -31,7 +32,7 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const { fx, error: fxError, status } = useFxStream("/fx/zen-usdc");
+  const { fx, error: fxError, status } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
   const fxLabel = fxValue ? `ZEN/USD $${fxValue}` : null;

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
+import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 
 type Props = {
   marketId: string;
@@ -18,7 +19,7 @@ const formatUsdCompact = (value: number | undefined): string => {
 
 export function MarketFomoOverlay({ marketId, tokenIds = [] }: Props) {
   const stream = usePriceStreamStore(marketId, tokenIds);
-  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxRate = fx?.zen_usd ?? 1;
   const fxFresh = status === "live" && !fx?.stale;
 

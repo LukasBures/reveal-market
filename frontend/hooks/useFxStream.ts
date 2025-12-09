@@ -1,5 +1,12 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { createFxWebSocket, fetchStreamerFxQuote, shouldUseStreamerWs, type FxQuote } from "@/lib/pricing-client";
+import {
+  FX_DEFAULT_PATH,
+  createFxWebSocket,
+  fetchStreamerFxQuote,
+  normalizeFxPath,
+  shouldUseStreamerWs,
+  type FxQuote,
+} from "@/lib/pricing-client";
 
 type FxStatus = "connecting" | "live" | "stale" | "error";
 
@@ -11,6 +18,8 @@ type FxState = {
   wsConnected: boolean;
   wsDelivered: boolean;
   restFallbacks: number;
+  fxReceivedAt: string | null;
+  ageSeconds: number | null;
 };
 
 type FxConnectionState = FxState;
@@ -38,6 +47,8 @@ const initialState: FxConnectionState = {
   wsConnected: false,
   wsDelivered: false,
   restFallbacks: 0,
+  fxReceivedAt: null,
+  ageSeconds: null,
 };
 const initialFxSnapshot: FxState = { ...initialState };
 
@@ -66,6 +77,13 @@ function startFallback(path: string, conn: FxConnection, connect: () => void) {
         error: null,
         lastUpdate: Date.now(),
         restFallbacks: conn.state.restFallbacks + 1,
+        fxReceivedAt: data.received_at ?? conn.state.fxReceivedAt ?? null,
+        ageSeconds:
+          typeof data.age_seconds === "number"
+            ? data.age_seconds
+            : data.received_at
+              ? Math.max(0, (Date.now() - Date.parse(data.received_at)) / 1000)
+              : conn.state.ageSeconds,
       });
       if (data.stale) {
         console.warn("FX HTTP fallback stale", data);
@@ -96,7 +114,8 @@ function startFallback(path: string, conn: FxConnection, connect: () => void) {
 }
 
 function startConnection(path: string) {
-  const existing = connections.get(path);
+  const normalizedPath = normalizeFxPath(path);
+  const existing = connections.get(normalizedPath);
   if (existing) return existing;
 
   const conn: FxConnection = {
@@ -116,13 +135,16 @@ function startConnection(path: string) {
     if (conn.cancelled) return;
     // If WS is explicitly disabled (env or after repeated failures), rely on REST-only mode.
     const wsAllowed =
-      typeof window !== "undefined" && shouldUseStreamerWs() && "WebSocket" in window && Date.now() >= conn.wsDisabledUntil;
+      typeof window !== "undefined" &&
+      shouldUseStreamerWs() &&
+      "WebSocket" in window &&
+      Date.now() >= conn.wsDisabledUntil;
     if (!wsAllowed) {
       setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
       return;
     }
     try {
-      const ws = createFxWebSocket(path);
+      const ws = createFxWebSocket(normalizedPath);
       if (!ws) {
         conn.wsDisabledUntil = Date.now() + 60_000;
         setState(conn, { wsConnected: false, status: conn.state.fx ? conn.state.status : "stale" });
@@ -143,6 +165,9 @@ function startConnection(path: string) {
             zen_usd: Number(payload.zen_usd),
             raw_zen_usd: payload.raw_zen_usd ? Number(payload.raw_zen_usd) : undefined,
             stale: Boolean(payload.stale),
+            received_at: typeof payload.received_at === "string" ? payload.received_at : undefined,
+            age_seconds: typeof payload.age_seconds === "number" ? payload.age_seconds : undefined,
+            source: typeof payload.source === "string" ? payload.source : undefined,
           };
           setState(conn, {
             fx: nextFx,
@@ -151,6 +176,13 @@ function startConnection(path: string) {
             lastUpdate: Date.now(),
             wsDelivered: true,
             restFallbacks: 0,
+            fxReceivedAt: nextFx.received_at ?? conn.state.fxReceivedAt ?? null,
+            ageSeconds:
+              typeof nextFx.age_seconds === "number"
+                ? nextFx.age_seconds
+                : nextFx.received_at
+                  ? Math.max(0, (Date.now() - Date.parse(nextFx.received_at)) / 1000)
+                  : conn.state.ageSeconds,
           });
         } catch (err) {
           setState(conn, { error: (err as Error).message, status: "error" });
@@ -196,7 +228,7 @@ function startConnection(path: string) {
 
   startFallback(path, conn, connect);
   connect();
-  connections.set(path, conn);
+  connections.set(normalizedPath, conn);
   return conn;
 }
 
@@ -215,9 +247,10 @@ function getSnapshot(path: string): FxState {
   return conn.state;
 }
 
-export function useFxStream(path = "/fx/zen-usdc"): FxState {
-  const pathRef = useRef(path);
-  pathRef.current = path;
+export function useFxStream(path = FX_DEFAULT_PATH): FxState {
+  const normalized = normalizeFxPath(path);
+  const pathRef = useRef(normalized);
+  pathRef.current = normalized;
 
   const subscribe = (onStoreChange: () => void) => subscribeToConnection(pathRef.current, onStoreChange);
   const getSnap = () => getSnapshot(pathRef.current);
@@ -226,8 +259,8 @@ export function useFxStream(path = "/fx/zen-usdc"): FxState {
 
   useEffect(() => {
     // Ensure connection starts when path changes.
-    startConnection(path);
-  }, [path]);
+    startConnection(normalized);
+  }, [normalized]);
 
   return state;
 }

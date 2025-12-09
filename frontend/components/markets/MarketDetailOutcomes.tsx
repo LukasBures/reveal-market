@@ -1,7 +1,7 @@
 "use client";
 import type { MarketDetail } from "@/lib/api-types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH, type PricingQuote } from "@/lib/pricing-client";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
@@ -12,14 +12,15 @@ import { fetchPriceHistory } from "@/lib/pricing-client";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime } from "@/lib/formatters";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
+import { defaultChain } from "@/lib/wagmi";
 
 type Props = {
   market: MarketDetail;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 10;
-const MIN_STAKE_ZEN = 0.1;
-const DEFAULT_STAKE_ZEN = 1;
+const PER_BET_CAP_ZEN = 0.1;
+const MIN_STAKE_ZEN = 0.01;
+const DEFAULT_STAKE_ZEN = PER_BET_CAP_ZEN;
 
 const formatZen = (value: number | undefined): string => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -50,16 +51,25 @@ export function MarketDetailOutcomes({ market }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [txConfirmed, setTxConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [txLoading, setTxLoading] = useState(false);
-  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
+  const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxStaleCombined = fxStale || priceFxStale;
   const fxValue = formatZenUsd(fx?.zen_usd);
+  const fxAgeSeconds = useMemo(() => {
+    if (typeof ageSeconds === "number") return Math.max(0, ageSeconds);
+    if (fxReceivedAt) return Math.max(0, (Date.now() - Date.parse(fxReceivedAt)) / 1000);
+    return null;
+  }, [ageSeconds, fxReceivedAt]);
   const tradingHaltedByStream = liveStore.status === "closed" || liveStore.status === "halted";
   const isTradable = !isResolved && !isLocked && !tradingHaltedByStream;
   const { address } = useAccount();
   const chainId = useChainId();
+  const expectedChainId = defaultChain.id;
+  const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
   const missingZenToken = !ZEN_TOKEN_ADDRESS;
   const { switchChain } = useSwitchChain();
   const { commitWithQuote, isPending: txPending, error: wagmiError } = useCommitWithQuote(
@@ -88,7 +98,7 @@ export function MarketDetailOutcomes({ market }: Props) {
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
-      DEFAULT_MAX_STAKE_ZEN,
+      PER_BET_CAP_ZEN,
       quote?.max_stake_zen ?? null,
       quote?.remaining_user_stake_zen ?? null,
       quote?.remaining_market_stake_zen ?? null,
@@ -97,19 +107,36 @@ export function MarketDetailOutcomes({ market }: Props) {
     ]
       .filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v))
       .map((v) => Math.max(0, v));
-    if (!caps.length) return DEFAULT_MAX_STAKE_ZEN;
-    return Math.max(MIN_STAKE_ZEN, Math.min(...caps));
+    if (!caps.length) return PER_BET_CAP_ZEN;
+    const minCap = Math.min(...caps);
+    return Math.max(0, Math.min(PER_BET_CAP_ZEN, minCap));
   }, [quote]);
-  const maxCapRef = useRef<number>(DEFAULT_MAX_STAKE_ZEN);
+  const maxCapRef = useRef<number>(PER_BET_CAP_ZEN);
   useEffect(() => {
     maxCapRef.current = effectiveMaxStake;
   }, [effectiveMaxStake]);
+  const capExhausted = effectiveMaxStake <= 0;
 
   const requestQuote = useCallback(
     (_reason: string) => {
       if (quoteRefreshTimer.current) {
         clearTimeout(quoteRefreshTimer.current);
         quoteRefreshTimer.current = null;
+      }
+      if (!chainId || chainMismatch) {
+        setQuote(null);
+        setError(`Switch to ${defaultChain.name} to request a quote`);
+        return;
+      }
+      if (stakeZen < MIN_STAKE_ZEN) {
+        setQuote(null);
+        setError(`Stake must be at least ${MIN_STAKE_ZEN} ZEN`);
+        return;
+      }
+      if (capExhausted) {
+        setQuote(null);
+        setError("Stake cap exhausted for this market/user");
+        return;
       }
       if (!fx || fxStaleCombined || stakeZen <= 0) {
         if (fxStaleCombined) setError("Pricing paused (FX stale)");
@@ -140,7 +167,7 @@ export function MarketDetailOutcomes({ market }: Props) {
         .catch((err) => setError((err as Error).message))
         .finally(() => setLoading(false));
     },
-    [fx, fxStaleCombined, stakeZen, address, market.marketAddress, market.eventId, selectedOutcome],
+    [fx, fxStaleCombined, stakeZen, address, market.marketAddress, market.eventId, selectedOutcome, chainId, chainMismatch, capExhausted],
   );
 
   useEffect(() => {
@@ -151,17 +178,55 @@ export function MarketDetailOutcomes({ market }: Props) {
   }, [requestQuote]);
 
   useEffect(() => {
-    if (!quote) return;
-    const expiresTs = new Date(quote.expires_at).getTime();
-    const now = Date.now();
-    if (expiresTs <= now) {
-      setError("Quote expired. Refreshing…");
-      requestQuote("expired");
+    if (capExhausted && quote) {
+      setQuote(null);
+      setError("Stake cap exhausted for this market/user");
+    }
+  }, [capExhausted, quote]);
+
+  useEffect(() => {
+    // Avoid reusing quotes across chain/account changes.
+    setQuote(null);
+    setTxHash(null);
+    setTxError(null);
+    if (quoteRefreshTimer.current) {
+      clearTimeout(quoteRefreshTimer.current);
+      quoteRefreshTimer.current = null;
+    }
+  }, [chainId, address]);
+
+  useEffect(() => {
+    if (!quote) {
+      setQuoteCountdown(null);
       return;
     }
-    const refreshInMs = Math.max(500, expiresTs - now - 1500);
+    const expiresTs = new Date(quote.expires_at).getTime();
+    const tick = () => {
+      const remainingMs = expiresTs - Date.now();
+      if (remainingMs <= 0) {
+        setQuoteCountdown("Expired");
+        setError("Quote expired. Refreshing…");
+        if (quoteRefreshTimer.current) {
+          clearTimeout(quoteRefreshTimer.current);
+          quoteRefreshTimer.current = null;
+        }
+        requestQuote("expired");
+        return false;
+      }
+      const seconds = Math.ceil(remainingMs / 1000);
+      setQuoteCountdown(`${seconds}s`);
+      return true;
+    };
+    const initialAlive = tick();
+    if (!initialAlive) return;
+    const countdown = setInterval(() => {
+      const alive = tick();
+      if (!alive) clearInterval(countdown);
+    }, 1000);
+    const refreshInMs = Math.max(500, expiresTs - Date.now() - 1500);
     quoteRefreshTimer.current = setTimeout(() => requestQuote("expiry_refresh"), refreshInMs);
     return () => {
+      clearInterval(countdown);
       if (quoteRefreshTimer.current) clearTimeout(quoteRefreshTimer.current);
     };
   }, [quote, requestQuote]);
@@ -177,12 +242,13 @@ export function MarketDetailOutcomes({ market }: Props) {
 
   const expiresLabel = useMemo(() => {
     if (!quote) return null;
+    if (quoteCountdown) return `Quote expires in ${quoteCountdown}`;
     const expiresTs = new Date(quote.expires_at).getTime();
     const remainingMs = expiresTs - Date.now();
     if (remainingMs <= 0) return "Expired";
     const seconds = Math.ceil(remainingMs / 1000);
     return `Quote expires in ${seconds}s`;
-  }, [quote]);
+  }, [quote, quoteCountdown]);
 
   const stakeZenFromQuote =
     typeof quote?.stake_zen === "number" && !Number.isNaN(quote.stake_zen) ? quote.stake_zen : stakeZen;
@@ -206,7 +272,22 @@ export function MarketDetailOutcomes({ market }: Props) {
       .filter(Boolean)
       .sort()
       .slice(-1)[0];
-  const fxBadge = fxStaleCombined ? "FX stale" : fxValue ? `FX 1 ZEN = $${fxValue} USD` : "FX connecting";
+  const fxBadge = fxStaleCombined
+    ? "FX stale"
+    : fxValue
+      ? `FX 1 ZEN = $${fxValue} USD${fxAgeSeconds !== null ? ` (${fxAgeSeconds.toFixed(0)}s)` : ""}`
+      : "FX connecting";
+  const quoteExpired = quote ? new Date(quote.expires_at).getTime() <= Date.now() : false;
+  const stakeOutOfRange = stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
+  const submitBlockedReason =
+    (!isTradable && `Trading disabled: ${market.status ?? "closed"}`) ||
+    (chainMismatch && `Switch to ${defaultChain.name}`) ||
+    (capExhausted && "Stake cap reached") ||
+    (stakeOutOfRange && `Stake must be ≤ ${effectiveMaxStake.toFixed(3)} ZEN`) ||
+    (fxStaleCombined && "FX stale") ||
+    (fxValue ? null : "FX unavailable") ||
+    (quoteExpired && "Quote expired") ||
+    null;
 
   const requiredAllowance = useMemo(() => {
     if (!quote?.stake_wei) return 0n;
@@ -259,8 +340,13 @@ export function MarketDetailOutcomes({ market }: Props) {
   async function handleCommit() {
     setTxError(null);
     setTxHash(null);
+    setTxConfirmed(false);
     if (!address) {
       setTxError("Connect wallet before committing.");
+      return;
+    }
+    if (!chainId || chainMismatch) {
+      setTxError(`Switch to ${defaultChain.name} to trade.`);
       return;
     }
     if (!market.marketAddress) {
@@ -269,6 +355,14 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     if (!quote) {
       setTxError("Request a quote first.");
+      return;
+    }
+    if (capExhausted) {
+      setTxError("Stake cap reached for this market/user.");
+      return;
+    }
+    if (stakeOutOfRange) {
+      setTxError(`Stake must be between ${MIN_STAKE_ZEN} and ${effectiveMaxStake.toFixed(3)} ZEN.`);
       return;
     }
     if (stakeZen !== quote.stake_zen) {
@@ -284,6 +378,10 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
       setTxError(`Switch to chain ${quote.chain_id} to commit.`);
+      return;
+    }
+    if (fxStaleCombined) {
+      setTxError("FX is stale; wait for a fresh price.");
       return;
     }
     if (missingZenToken) {
@@ -313,9 +411,31 @@ export function MarketDetailOutcomes({ market }: Props) {
         amountWei: BigInt(quote.stake_wei),
       });
       const tx = await commitWithQuote(params);
-      setTxHash(typeof tx === "string" ? tx : (tx as any)?.hash ?? null);
+      const hash = (typeof tx === "string" ? tx : (tx as any)?.hash) as Hex | undefined;
+      if (hash) {
+        setTxHash(hash);
+        if (publicClient) {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash });
+          setTxConfirmed(receipt.status === "success");
+        }
+      }
     } catch (err) {
-      setTxError((err as Error).message);
+      const message =
+        err instanceof BaseError
+          ? err.shortMessage || err.message
+          : err instanceof Error
+            ? err.message
+            : "Transaction failed";
+      const normalized = message.toLowerCase();
+      if (normalized.includes("expired")) {
+        setTxError("Quote expired. Requesting a fresh quote.");
+        requestQuote("expired_commit");
+      } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
+        setTxError("Quote already consumed. Refreshing quote.");
+        requestQuote("consumed_commit");
+      } else {
+        setTxError(message);
+      }
     } finally {
       setTxLoading(false);
     }
@@ -511,7 +631,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           Stake (ZEN)
                           <input
                             type="number"
-                            min={0}
+                            min={MIN_STAKE_ZEN}
                             max={effectiveMaxStake}
                             step="0.01"
                             value={stakeZen}
@@ -529,7 +649,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           />
                         </label>
                         <div className="flex flex-wrap gap-2 text-[11px]">
-                          {[MIN_STAKE_ZEN, 1].map((preset) => (
+                          {[MIN_STAKE_ZEN, PER_BET_CAP_ZEN].map((preset) => (
                             <button
                               key={preset}
                               type="button"
@@ -579,6 +699,16 @@ export function MarketDetailOutcomes({ market }: Props) {
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
                         <span className="rounded-full bg-white/5 px-2 py-1">Quote {quote?.quote_id ?? "pending"}</span>
                         {expiresLabel && <span className="rounded-full bg-white/5 px-2 py-1">{expiresLabel}</span>}
+                        {fxReceivedAt && (
+                          <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
+                            FX {formatTime(fxReceivedAt)}{" "}
+                            {fxAgeSeconds !== null ? `(${fxAgeSeconds.toFixed(0)}s ago)` : ""}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
+                          Chain {chainId ?? "unknown"} / Quote {quote?.chain_id ?? "—"} / Signer{" "}
+                          {quote?.signer ? `${quote.signer.slice(0, 6)}…${quote.signer.slice(-4)}` : "n/a"}
+                        </span>
                         {quote?.chain_id && chainId && Number(quote.chain_id) !== chainId && (
                           <span className="rounded-full bg-rose-500/20 px-2 py-1 text-rose-100">
                             Wrong network (expected {quote.chain_id})
@@ -617,18 +747,28 @@ export function MarketDetailOutcomes({ market }: Props) {
                             txLoading ||
                             txPending ||
                             !quote ||
+                            !fx ||
                             fxStaleCombined ||
+                            stakeOutOfRange ||
+                            capExhausted ||
+                            chainMismatch ||
                             missingZenToken ||
                             !isTradable ||
-                            Boolean(quote?.chain_id && chainId && Number(quote.chain_id) !== chainId)
+                            Boolean(quote?.chain_id && chainId && Number(quote.chain_id) !== chainId) ||
+                            quoteExpired
                           }
                           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
                             txLoading ||
                             txPending ||
                             !quote ||
+                            !fx ||
                             fxStaleCombined ||
+                            stakeOutOfRange ||
+                            capExhausted ||
+                            chainMismatch ||
                             missingZenToken ||
-                            (quote?.chain_id && chainId && Number(quote.chain_id) !== chainId)
+                            (quote?.chain_id && chainId && Number(quote.chain_id) !== chainId) ||
+                            quoteExpired
                               ? "cursor-not-allowed bg-white/20 text-white/60"
                               : "bg-emerald-500 text-white hover:bg-emerald-400"
                           }`}
@@ -639,6 +779,12 @@ export function MarketDetailOutcomes({ market }: Props) {
                           <span className="text-[11px] text-emerald-200">
                             Submitted tx: {txHash.slice(0, 10)}…{txHash.slice(-6)}
                           </span>
+                        )}
+                        {txConfirmed && txHash && (
+                          <span className="text-[11px] text-emerald-200">Commit confirmed on-chain.</span>
+                        )}
+                        {submitBlockedReason && !txLoading && !txPending && (
+                          <span className="text-[11px] text-amber-200">{submitBlockedReason}</span>
                         )}
                       </div>
 
@@ -655,7 +801,7 @@ export function MarketDetailOutcomes({ market }: Props) {
                           {" · "}Max stake (API):{" "}
                           {quote.max_stake_zen !== null && quote.max_stake_zen !== undefined
                             ? `${quote.max_stake_zen.toFixed(3)} ZEN`
-                            : `${DEFAULT_MAX_STAKE_ZEN} ZEN`}
+                            : `${PER_BET_CAP_ZEN} ZEN`}
                           {quote.chain_id && chainId && Number(quote.chain_id) !== chainId && switchChain && (
                             <button
                               type="button"
@@ -665,6 +811,14 @@ export function MarketDetailOutcomes({ market }: Props) {
                               Switch network
                             </button>
                           )}
+                        </p>
+                      )}
+                      {capExhausted && (
+                        <p className="mt-1 text-xs text-amber-200">Stake cap reached for this market/user.</p>
+                      )}
+                      {chainMismatch && (
+                        <p className="mt-1 text-xs text-amber-200">
+                          Switch to {defaultChain.name} (chain {expectedChainId}) to trade.
                         </p>
                       )}
                       {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}

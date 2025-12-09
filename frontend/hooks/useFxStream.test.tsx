@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { useFxStream } from "./useFxStream";
+import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 
 class WebSocketMock {
   static instances: WebSocketMock[] = [];
@@ -47,7 +48,7 @@ describe("useFxStream", () => {
   });
 
   it("hydrates from websocket and marks stale", () => {
-    const { result } = renderHook(() => useFxStream("/fx/zen-usdc"));
+    const { result } = renderHook(() => useFxStream(FX_DEFAULT_PATH));
     expect(WebSocketMock.instances).toHaveLength(1);
     const socket = WebSocketMock.instances[0];
 
@@ -64,7 +65,7 @@ describe("useFxStream", () => {
   });
 
   it("reconnects on close with backoff", () => {
-    renderHook(() => useFxStream("/fx/zen-usdc"));
+    renderHook(() => useFxStream(FX_DEFAULT_PATH));
     expect(WebSocketMock.instances).toHaveLength(1);
     act(() => {
       WebSocketMock.instances[0].onclose?.({});
@@ -80,7 +81,7 @@ describe("useFxStream", () => {
       ok: true,
       json: async () => ({ zen_usd: 9.1, raw_zen_usd: 9.4, stale: false }),
     });
-    const { result } = renderHook(() => useFxStream("/fx/zen-usdc"));
+    const { result } = renderHook(() => useFxStream(FX_DEFAULT_PATH));
     await act(async () => {
       vi.advanceTimersByTime(6000);
     });

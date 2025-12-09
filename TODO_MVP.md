@@ -7,6 +7,12 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 - CORS/CSP/connect-src: align API + streamer + frontend origins; update defaults and dev warnings when blocked. Ensure pricing FX endpoint passes CORS smoke test.
 - Migrations/backfill: apply Alembic head (`0001_initial_schema.py`) and backfill normalized tables (outcomes, tags, clob tokens, market_gamma_metadata, gamma_raw). Confirm health probes see schema.
 - Gamma stats exposure: surface bestBid/bestAsk/spread/volume/openInterest from Gamma into API schemas (MarketSummary/MarketDetail) and worker serialization; ensure cache tags update.
+- Current gaps to close:
+  - Defaults: `RM_PRICING_CHAIN_ID`/RPC/signer are unset (`None`) and .env still points at Polygon; pin Horizen defaults and derive signer address for checks.
+  - Health: pricing signer check only degrades on missing envs; add a hard fail for missing/mismatched chain id, signer key/address, and RPC alignment; assert `PRICING_SIGNER_ADDRESS` presence.
+  - CORS/CSP: API CORS only warns on wildcard; CSP connect-src still `self` so origin drift goes undetected. Streamer logs mismatches but has no smoke for frontend origin; frontend lacks dev warnings. Add a CORS/CSP smoke that proves `/pricing/fx` is reachable from the configured origin.
+  - Schema/backfill: health only does `SELECT 1`; it never asserts Alembic head or schema version key. Add revision check and make sure markets are backfilled into normalized tables (outcomes/tags/clob tokens/gamma metadata/gamma_raw) with cache tags invalidated.
+  - Gamma metrics: worker doesn’t populate bestBid/bestAsk/spread/openInterest; API schemas and cache enrichment don’t expose them; frontend types/mappers ignore them. Map them through ingestion → models → API responses → cache tags and update frontend types/mapper consumers.
 
 ## 2) Backend pricing, quotes, caps
 - Quote issuance: `/pricing/quote` must ABI-pack QUOTE_V1 (chainId, market, wallet, outcomeId, stake_wei, fx_scaled 1e8, expiry, quoteId), sign with pricing key, and persist quotes durably (status, expiry, consumed_at). Reject missing/mismatched fields; log request_id and quoteId.

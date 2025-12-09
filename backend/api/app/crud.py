@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from shared import repository as shared_repository
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models, schemas
@@ -29,10 +29,11 @@ def get_markets(
     elif status:
         stmt = stmt.where(models.Market.status == status)
     if category:
-        stmt = stmt.where(func.lower(models.Market.category) == category.lower())
+        normalized_category = category.lower()
+        stmt = stmt.where(func.lower(models.Market.category) == literal(normalized_category))
     if oracle:
         stmt = stmt.where(models.Market.oracle == oracle)
-    if featured is True:
+    if featured:
         stmt = stmt.where(models.Market.featured.is_(True))
     stmt = _apply_text_search(session, stmt, search)
     stmt = stmt.order_by(models.Market.created_at.desc())
@@ -117,6 +118,7 @@ def patch_market(session: Session, market: models.Market, update: schemas.Market
             continue
         if hasattr(market, field):
             setattr(market, field, value)
+    session.add(market)
     return market
 
 

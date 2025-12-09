@@ -158,7 +158,8 @@ class RateLimitMiddleware:
         RATE_LIMIT_COUNTER.labels(outcome="allowed").inc()
         await self._call_with_headers(scope, receive, send, headers)
 
-    def _extract_identifier(self, request: Request) -> str | None:
+    @staticmethod
+    def _extract_identifier(request: Request) -> str | None:
         forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
         candidate = None
         if forwarded:

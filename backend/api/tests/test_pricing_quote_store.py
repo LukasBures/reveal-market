@@ -43,6 +43,8 @@ def _configure_signer():
 def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     _configure_signer()
     _mock_fx(monkeypatch, price=1.5)
+    settings = get_settings()
+    settings.max_stake_zen = 10
 
     payload = {
         "stake_zen": 5.0,

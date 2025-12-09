@@ -83,6 +83,11 @@ class MarketBase(BaseModel):
     volume_24h_usd: float | None = None
     orderbook_volume_usd: float | None = None
     trades_quantity: int | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    spread: float | None = None
+    volume: float | None = None
+    open_interest: float | None = None
 
 
 class MarketCreate(MarketBase):
@@ -234,11 +239,11 @@ class ProofReceipt(BaseModel):
 
 class PricingQuoteRequest(BaseModel):
     stake_zen: Decimal = Field(..., gt=0)
-    market_id: str | None = Field(default=None, description="Market ID for cap tracking")
-    user_id: str | None = Field(default=None, description="User identifier for per-market caps")
-    wallet_address: str | None = Field(default=None, description="User wallet to bind quote to")
-    outcome_id: int | None = Field(default=None, ge=0, description="Outcome id to bind quote to")
-    market_address: str | None = Field(default=None, description="Market contract address")
+    market_id: str = Field(..., description="Market ID for cap tracking")
+    user_id: str = Field(..., description="User identifier for per-market caps")
+    wallet_address: str = Field(..., description="User wallet to bind quote to")
+    outcome_id: int = Field(..., ge=0, description="Outcome id to bind quote to")
+    market_address: str = Field(..., description="Market contract address")
 
 
 class PricingQuoteResponse(BaseModel):
@@ -246,6 +251,8 @@ class PricingQuoteResponse(BaseModel):
     stake_wei: int = 0
     zen_usd: Decimal
     zen_usd_scaled: int = 0
+    fx_received_at: datetime | None = None
+    fx_stale: bool = False
     displayed_odds_multiplier: Decimal
     rake_zen: Decimal
     refund_zen: Decimal
@@ -295,6 +302,7 @@ class PricingQuoteResponse(BaseModel):
 class FxQuoteResponse(BaseModel):
     zen_usd: Decimal
     stale: bool = False
+    received_at: datetime | None = None
 
     @field_serializer("zen_usd")
     def _serialize_fx(self, value: Decimal) -> float:

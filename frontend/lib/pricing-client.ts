@@ -33,9 +33,14 @@ export type FxQuote = {
   zen_usd: number;
   raw_zen_usd?: number;
   stale: boolean;
+  received_at?: string;
+  age_seconds?: number;
+  source?: string;
 };
 
 import { resolveUrlConfig } from "@/lib/env-presets";
+
+const FX_DEFAULT_PATH = "/fx/zen-usd";
 
 const urls = resolveUrlConfig();
 const apiBase = urls.apiBaseInternal || urls.apiBaseUrl;
@@ -110,10 +115,19 @@ if (typeof console !== "undefined") {
   }
 }
 
+const normalizeFxPath = (path: string) => {
+  if (!path) return FX_DEFAULT_PATH;
+  if (path.includes("zen-usdc")) return path.replace("zen-usdc", "zen-usd");
+  return path;
+};
+
 const mapFxPayload = (payload: any): FxQuote => ({
   zen_usd: Number(payload.zen_usd),
   raw_zen_usd: payload.raw_zen_usd !== undefined ? Number(payload.raw_zen_usd) : undefined,
   stale: Boolean(payload.stale),
+  received_at: typeof payload.received_at === "string" ? payload.received_at : undefined,
+  age_seconds: typeof payload.age_seconds === "number" ? payload.age_seconds : undefined,
+  source: typeof payload.source === "string" ? payload.source : undefined,
 });
 
 const getApiBases = (): string[] => {
@@ -155,13 +169,14 @@ const fetchApiFxQuote = async (): Promise<FxQuote> => {
   throw lastError || new Error("API FX fetch failed");
 };
 
-export async function fetchStreamerFxQuote(path = "/fx/zen-usdc"): Promise<FxQuote> {
+export async function fetchStreamerFxQuote(path = FX_DEFAULT_PATH): Promise<FxQuote> {
+  const normalizedPath = normalizeFxPath(path);
   if (mixedContentBlocked) {
     // Browser would block streamer over http on an https page; use API endpoint instead.
     return fetchApiFxQuote();
   }
   try {
-    const res = await fetch(getStreamerEndpoint(path, true), { cache: "no-store" });
+    const res = await fetch(getStreamerEndpoint(normalizedPath, true), { cache: "no-store" });
     if (!res.ok) {
       throw new Error(`FX fetch failed: ${res.status}`);
     }
@@ -263,14 +278,17 @@ export function createMarketWebSocket(marketId: string, tokenIds?: string[]): We
   }
 }
 
-export function createFxWebSocket(path = "/fx/zen-usdc"): WebSocket | null {
+export function createFxWebSocket(path = FX_DEFAULT_PATH): WebSocket | null {
+  const normalizedPath = normalizeFxPath(path);
   if (!shouldUseStreamerWs()) {
     return null;
   }
   try {
-    const url = getStreamerWsEndpoint(path, true);
+    const url = getStreamerWsEndpoint(normalizedPath, true);
     return new WebSocket(url);
   } catch {
     return null;
   }
 }
+
+export { FX_DEFAULT_PATH, normalizeFxPath };

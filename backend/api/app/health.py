@@ -6,11 +6,13 @@ import os
 import time
 from datetime import UTC, datetime
 from inspect import isawaitable
+from urllib.parse import urlparse
 
 import httpx
 from redis.exceptions import RedisError
 from shared.cache import get_stats_client
 from shared.logging import log_event
+from shared.migrations import get_current_revision, get_head_revision
 from shared.onchain.client import load_account
 from shared.polymarket import build_polymarket_markets_url
 from sqlalchemy import text
@@ -30,7 +32,6 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     settings = get_settings()
     components: ComponentMap = {}
     component_states: list[str] = []
-    cache_stats: dict[str, float] | None = None
 
     checks: list[tuple[str, schemas.HealthComponent]] = [
         _check_database(session),
@@ -39,6 +40,8 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
         await _check_polymarket_api(settings),
         _check_pricing_signer(settings),
         _check_cors(settings),
+        _check_fx_cors(settings),
+        _check_schema_revision(settings),
     ]
 
     for key, component in checks:
@@ -159,38 +162,49 @@ def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
 
     status: schemas.HealthState = "ok"
     details: list[str] = []
-    is_prod = (settings.environment or "").lower() == "production"
+    derived_chain = settings.pricing_chain_id
+    derived_address: str | None = None
 
     if settings.pricing_chain_id is None:
-        status = "error" if is_prod else "degraded"
+        status = "error"
         details.append("RM_PRICING_CHAIN_ID missing")
 
     if settings.pricing_signer_private_key is None:
-        status = "error" if is_prod else "degraded"
+        status = "error"
         details.append("RM_PRICING_SIGNER_PRIVATE_KEY missing")
+    else:
+        try:
+            acct = load_account(settings.pricing_signer_private_key.get_secret_value())
+            derived_address = acct.address
+        except Exception as exc:  # pragma: no cover - defensive
+            status = "error"
+            details.append(f"signer load failed: {exc}")
 
     env_chain = os.getenv("RM_PRICING_CHAIN_ID")
-    if env_chain and settings.pricing_chain_id is not None:
+    if env_chain and derived_chain is not None:
         try:
-            if int(env_chain) != int(settings.pricing_chain_id):
+            if int(env_chain) != int(derived_chain):
                 status = "error"
                 details.append("RM_PRICING_CHAIN_ID mismatch with env")
         except ValueError:  # pragma: no cover - defensive
             status = "error"
             details.append("RM_PRICING_CHAIN_ID env malformed")
 
-    env_addr = os.getenv("PRICING_SIGNER_ADDRESS")
-    if env_addr and settings.pricing_signer_private_key:
-        try:
-            acct = load_account(settings.pricing_signer_private_key.get_secret_value())
-            if acct.address.lower() != env_addr.lower():
-                status = "error"
-                details.append("PRICING_SIGNER_ADDRESS mismatch with derived key")
-        except Exception as exc:  # pragma: no cover - defensive
-            status = "error"
-            details.append(f"signer load failed: {exc}")
+    if settings.rpc_url is None:
+        status = "error"
+        details.append("RPC_URL missing")
 
-    detail_text = "; ".join(details) if details else "pricing signer configured"
+    env_addr = os.getenv("PRICING_SIGNER_ADDRESS")
+    if not env_addr:
+        status = "error"
+        details.append("PRICING_SIGNER_ADDRESS missing")
+    if env_addr and derived_address:
+        if derived_address.lower() != env_addr.lower():
+            status = "error"
+            details.append("PRICING_SIGNER_ADDRESS mismatch with derived key")
+
+    summary = f"derived_chain_id={derived_chain}; derived_signer={derived_address or 'unknown'}"
+    detail_text = summary if not details else f"{summary} | " + "; ".join(details)
     return "pricing_signer", schemas.HealthComponent(status=status, detail=detail_text)
 
 
@@ -212,4 +226,53 @@ def _check_cors(settings) -> tuple[str, schemas.HealthComponent]:
         if origins
         else "cors_allow_origins wildcard; set explicit origins for production"
     )
-    return ("cors", schemas.HealthComponent(status="ok", detail=detail))
+    return "cors", schemas.HealthComponent(status="ok", detail=detail)
+
+
+def _check_fx_cors(settings) -> tuple[str, schemas.HealthComponent]:
+    """Warn when FX endpoint host is not covered by CORS origins."""
+
+    origins = settings.cors_allow_origins or []
+    fx_url = settings.fx_feed_url
+    parsed = urlparse(str(fx_url))
+    fx_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
+    if not fx_origin:
+        return "fx_cors", schemas.HealthComponent(status="error", detail="FX feed URL invalid")
+    if not origins or origins == ["*"]:
+        return (
+            "fx_cors",
+            schemas.HealthComponent(
+                status="degraded",
+                detail="CORS origins wildcard; streamer FX origin not explicitly allowed",
+            ),
+        )
+    if fx_origin not in origins:
+        return (
+            "fx_cors",
+            schemas.HealthComponent(
+                status="degraded",
+                detail=f"FX origin {fx_origin} not in CORS allowlist",
+            ),
+        )
+    return "fx_cors", schemas.HealthComponent(status="ok", detail="FX origin allowed by CORS")
+
+
+def _check_schema_revision(settings) -> tuple[str, schemas.HealthComponent]:
+    """Ensure the DB is at Alembic head so normalized tables exist."""
+
+    try:
+        current = get_current_revision(settings.database_url)
+        head = get_head_revision()
+        if head is None:
+            return "schema", schemas.HealthComponent(status="degraded", detail="Alembic head unknown")
+        if current != head:
+            return (
+                "schema",
+                schemas.HealthComponent(
+                    status="degraded",
+                    detail=f"schema revision mismatch (current={current}, head={head})",
+                ),
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        return "schema", schemas.HealthComponent(status="error", detail=str(exc))
+    return "schema", schemas.HealthComponent(status="ok", detail="schema at head")

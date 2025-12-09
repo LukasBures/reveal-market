@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from time import monotonic
 
@@ -10,7 +11,7 @@ from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
-_FX_CACHE: dict[str, Decimal | bool | float] = {}
+_FX_CACHE: dict[str, Decimal | bool | float | str | None] = {}
 
 # FX source is pinned to the streamer; override in code if the streamer host changes.
 STREAMER_FX_URL = "http://streamer:8100/fx/zen-usd"
@@ -19,6 +20,7 @@ STREAMER_FX_URL = "http://streamer:8100/fx/zen-usd"
 def _resolved_fx_url(settings: Settings) -> str:
     """Use the streamer FX endpoint as the single source of truth."""
 
+    _ = settings  # settings kept for future host overrides without API breakage
     return STREAMER_FX_URL
 
 
@@ -77,6 +79,23 @@ def _coerce_decimal(value) -> Decimal | None:
         return None
 
 
+def _parse_received_at(payload: dict) -> datetime | None:
+    ts = None
+    for key in ("received_at", "receivedAt", "fetched_at", "fetchedAt"):
+        if isinstance(payload.get(key), str):
+            ts = payload.get(key)
+            break
+    if ts is None:
+        return None
+    try:
+        # Support Z suffix and naive timestamps by normalizing to UTC.
+        normalized = ts.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract_fx_price(payload: dict) -> Decimal | None:
     """Extract a USD price from common FX payload shapes."""
     if not isinstance(payload, dict):
@@ -129,34 +148,65 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
         data = await _request()
         stale = bool(data.get("fx_stale") or data.get("stale"))
         raw = _extract_fx_price(data)
+        received_at = _parse_received_at(data)
         if raw is None:
             raise ValueError("FX feed response missing zen_usd/price")
         zen_usd = raw
-        _FX_CACHE.update({"zen_usd": zen_usd, "stale": stale, "expires_at": now + cache_ttl})
-        return FxQuoteResponse(zen_usd=zen_usd, stale=stale)
+        _FX_CACHE.update(
+            {
+                "zen_usd": zen_usd,
+                "stale": stale,
+                "expires_at": now + cache_ttl,
+                "received_at": received_at.isoformat() if received_at else None,
+            }
+        )
+        return FxQuoteResponse(zen_usd=zen_usd, stale=stale, received_at=received_at)
     except (httpx.HTTPError, ValueError, InvalidOperation, TypeError):
         if use_cache_on_error and "zen_usd" in _FX_CACHE:
             _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
             fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-            return FxQuoteResponse(zen_usd=Decimal(str(_FX_CACHE["zen_usd"])), stale=True)
+            cached_ts = _FX_CACHE.get("received_at")
+            parsed_ts = datetime.fromisoformat(str(cached_ts)) if cached_ts else None
+            return FxQuoteResponse(
+                zen_usd=Decimal(str(_FX_CACHE["zen_usd"])),
+                stale=True,
+                received_at=parsed_ts,
+            )
 
         _FX_CACHE.update(
-            {"zen_usd": Decimal(str(settings.fx_fallback_price)), "stale": True, "expires_at": now + cache_ttl}
+            {
+                "zen_usd": Decimal(str(settings.fx_fallback_price)),
+                "stale": True,
+                "expires_at": now + cache_ttl,
+                "received_at": datetime.now(tz=UTC).isoformat(),
+            }
         )
         fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-        return FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)
+        return FxQuoteResponse(
+            zen_usd=Decimal(str(settings.fx_fallback_price)),
+            stale=True,
+            received_at=datetime.now(tz=UTC),
+        )
 
 
-def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool]:
+def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool, datetime | None]:
     """Synchronous FX fetch with bounded retries and stale flag."""
 
     now = monotonic()
     url = _resolved_fx_url(settings)
-    expires_at = _FX_CACHE.get("expires_at")
+    expires_at_raw = _FX_CACHE.get("expires_at")
+    expires_at = float(expires_at_raw) if isinstance(expires_at_raw, (int, float)) else None
     if expires_at and expires_at > now and "zen_usd" in _FX_CACHE:
         price = _FX_CACHE.get("zen_usd")
         stale = bool(_FX_CACHE.get("stale"))
-        return Decimal(str(price)) if price is not None else None, stale
+        ts_raw = _FX_CACHE.get("received_at")
+        parsed_ts = None
+        if ts_raw:
+            try:
+                parsed_ts = datetime.fromisoformat(str(ts_raw))
+            except (TypeError, ValueError):
+                parsed_ts = None
+        return Decimal(str(price)) if price is not None else None, stale, parsed_ts
 
     retryer = Retrying(
         stop=stop_after_attempt(3),
@@ -172,11 +222,17 @@ def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool]:
                 response.raise_for_status()
                 data = response.json()
                 stale = bool(data.get("fx_stale") or data.get("stale"))
+                received_at = _parse_received_at(data)
                 raw = _extract_fx_price(data)
                 if raw is None:
                     raise ValueError("FX feed response missing zen_usd/price")
                 _FX_CACHE.update(
-                    {"zen_usd": raw, "stale": stale, "expires_at": now + float(settings.fx_cache_ttl_seconds)}
+                    {
+                        "zen_usd": raw,
+                        "stale": stale,
+                        "expires_at": now + float(settings.fx_cache_ttl_seconds),
+                        "received_at": received_at.isoformat() if received_at else None,
+                    }
                 )
-                return raw, stale
-    return None, True
+                return raw, stale, received_at
+    return None, True, None

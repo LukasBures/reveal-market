@@ -4,7 +4,6 @@ import csv
 import os
 from collections.abc import Iterable
 from functools import lru_cache
-from typing import cast
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -51,7 +50,7 @@ class Settings(BaseSettings):
     market_implementation_address: str | None = Field(default=None)
     rake_manager_address: str | None = Field(default=None)
     verifier_address: str | None = Field(default=None)
-    rpc_url: AnyUrl | None = Field(default=None)
+    rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen-testnet.rpc.caldera.xyz/http"))
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
     gas_price_gwei: float | None = Field(default=None, ge=0)
@@ -74,9 +73,7 @@ class Settings(BaseSettings):
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
-    fx_feed_url: AnyHttpUrl = Field(
-        default=cast(AnyHttpUrl, "https://api.coingecko.com/api/v3/simple/price?ids=horizen&vs_currencies=usd")
-    )
+    fx_feed_url: AnyHttpUrl = Field(default=AnyHttpUrl("http://streamer:8100/fx/zen-usd"))
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=1.0, gt=0)
     fx_cache_ttl_seconds: float = Field(default=60.0, ge=1.0)
@@ -91,7 +88,7 @@ class Settings(BaseSettings):
         default=60, ge=15, description="Interval for sweeping expired quotes from the ledger"
     )
 
-    polymarket_api_base: AnyHttpUrl = Field(default=cast(AnyHttpUrl, "https://gamma-api.polymarket.com"))
+    polymarket_api_base: AnyHttpUrl = Field(default=AnyHttpUrl("https://gamma-api.polymarket.com"))
     polymarket_timeout_seconds: float = Field(default=5.0)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
@@ -121,7 +118,7 @@ class Settings(BaseSettings):
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
     run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
-    pricing_chain_id: int | None = Field(default=None, ge=1, description="Chain id used for quote signatures")
+    pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
     pricing_quote_ttl_seconds: int = Field(default=120, ge=30, le=600)
 
     @field_validator("max_page_size")

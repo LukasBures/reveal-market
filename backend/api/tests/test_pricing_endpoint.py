@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from decimal import Decimal
+
 import httpx
 from pydantic import SecretStr
 
@@ -30,14 +33,19 @@ class _DummyResponse:
 
 
 def test_pricing_fx_parses_nested_payload(client, monkeypatch):
-    payload = {"horizen": {"usd": 7.5}, "stale": True}
+    payload = {
+        "horizen": {"usd": 7.5},
+        "stale": False,
+        "received_at": "2024-01-01T00:00:00Z",
+    }
     monkeypatch.setattr("app.pricing.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientSuccess(payload))
 
     resp = client.get("/pricing/fx")
     assert resp.status_code == 200
     data = resp.json()
     assert data["zen_usd"] == 7.5
-    assert data["stale"] is True
+    assert data["stale"] is False
+    assert data["received_at"].startswith("2024-01-01")
 
 
 def test_pricing_fx_falls_back_on_http_error(client, monkeypatch):
@@ -55,14 +63,19 @@ def test_pricing_fx_falls_back_on_http_error(client, monkeypatch):
             raise httpx.HTTPError("boom")
 
     monkeypatch.setattr("app.pricing.httpx.AsyncClient", FailingAsyncClient)
-    from app.config import get_settings
-
-    settings = get_settings()
     resp = client.get("/pricing/fx")
-    assert resp.status_code == 200
+    assert resp.status_code == 503
     data = resp.json()
-    assert data["stale"] is True
-    assert data["zen_usd"] == settings.fx_fallback_price
+    assert data["detail"]["error"] == "fx_unavailable"
+
+
+def test_pricing_fx_rejects_stale_payload(client, monkeypatch):
+    payload = {"price": 7.0, "stale": True, "received_at": "2024-02-02T00:00:00Z"}
+    monkeypatch.setattr("app.pricing.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientSuccess(payload))
+
+    resp = client.get("/pricing/fx")
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "fx_stale"
 
 
 def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
@@ -75,8 +88,9 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
     monkeypatch.setattr("app.main.settings", settings, raising=False)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False))
+    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False, None))
 
     class DummySyncResponse:
         def raise_for_status(self):
@@ -120,8 +134,9 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
     monkeypatch.setattr("app.main.settings", settings, raising=False)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False))
+    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False, None))
 
     class DummySyncResponse:
         def raise_for_status(self):
@@ -156,3 +171,30 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     )
     recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote["signature"])
     assert recovered.lower() == signer.address.lower()
+
+
+def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
+    from app.config import get_settings
+    from eth_account import Account
+
+    signer = Account.create()
+    user = Account.create()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    now_ts = datetime.now(tz=UTC)
+    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (Decimal("10"), True, now_ts))
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": "0x2222222222222222222222222222222222222222",
+        "outcome_id": 0,
+        "market_id": "stale-mkt",
+        "user_id": "stale-user",
+    }
+    resp = client.post("/pricing/quote", json=payload)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "fx_stale"

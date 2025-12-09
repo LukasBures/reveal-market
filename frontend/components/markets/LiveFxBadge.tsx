@@ -1,10 +1,11 @@
 "use client";
 
 import { useFxStream } from "@/hooks/useFxStream";
+import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 import { formatZenUsd } from "@/lib/fx";
 
 export function LiveFxBadge() {
-  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const stale = status === "stale" || fx?.stale;
   const unavailable = status === "error";
   const live = status === "live" && !stale && !unavailable;

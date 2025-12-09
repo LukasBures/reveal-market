@@ -141,6 +141,43 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
         })
         .filter((sib: MarketSibling) => Boolean(sib.eventId))
     : undefined;
+  const bestBid = coerceNumber(
+    payload.best_bid ??
+      payload.bestBid ??
+      payload.extra_data?.gamma?.best_bid ??
+      payload.extra_data?.gamma?.bestBid ??
+      payload.extra_data?.best_bid ??
+      payload.extra_data?.bestBid,
+  );
+  const bestAsk = coerceNumber(
+    payload.best_ask ??
+      payload.bestAsk ??
+      payload.extra_data?.gamma?.best_ask ??
+      payload.extra_data?.gamma?.bestAsk ??
+      payload.extra_data?.best_ask ??
+      payload.extra_data?.bestAsk,
+  );
+  const spread = coerceNumber(
+    payload.spread ??
+      payload.extra_data?.gamma?.spread ??
+      payload.extra_data?.spread ??
+      (bestBid !== undefined && bestAsk !== undefined ? bestAsk - bestBid : undefined),
+  );
+  const volume = coerceNumber(
+    payload.volume ??
+      payload.extra_data?.gamma?.volume ??
+      payload.extra_data?.volume ??
+      payload.extra_data?.gamma?.volume_num ??
+      payload.extra_data?.gamma?.volumeNum,
+  );
+  const openInterest = coerceNumber(
+    payload.open_interest ??
+      payload.openInterest ??
+      payload.extra_data?.gamma?.open_interest ??
+      payload.extra_data?.gamma?.openInterest ??
+      payload.extra_data?.open_interest ??
+      payload.extra_data?.openInterest,
+  );
 
   return {
     eventId: eventIdValue,
@@ -284,6 +321,11 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
       coerceNumber(payload.trades_quantity) ??
       coerceNumber(payload.tradesQuantity) ??
       coerceNumber(payload.extra_data?.trades_quantity),
+    bestBid: bestBid ?? null,
+    bestAsk: bestAsk ?? null,
+    spread: spread ?? null,
+    volume: volume ?? null,
+    openInterest: openInterest ?? null,
   };
 };
 

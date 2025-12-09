@@ -104,6 +104,8 @@ EXPECTED_SCHEMAS = {
             "displayed_odds_multiplier",
             "expires_at",
             "expiry_ts",
+            "fx_received_at",
+            "fx_stale",
             "haircut_percent",
             "hedge_usdc",
             "market_address",

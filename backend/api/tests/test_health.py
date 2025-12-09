@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 from app.config import get_settings
+from eth_account import Account
 from pydantic import SecretStr
 
 
@@ -37,6 +38,7 @@ def _configure_signer(settings):
     settings.pricing_signer_private_key = SecretStr(
         "0x59c6995e998f97a5a004497e5a61829cb0d9bf5f7f19f6cbe9a6a5e4f6b9f9f5"
     )
+    settings.rpc_url = "http://localhost:8545"
     return settings
 
 
@@ -46,6 +48,8 @@ def test_health_endpoint_reports_ok(client, monkeypatch):
             return b'{"markets_processed": 10}'
 
     settings = _configure_signer(get_settings())
+    signer_address = Account.from_key(settings.pricing_signer_private_key.get_secret_value()).address
+    monkeypatch.setenv("PRICING_SIGNER_ADDRESS", signer_address)
     settings.cors_allow_origins = ["https://example.com"]
 
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
@@ -70,6 +74,8 @@ def test_health_endpoint_marks_worker_degraded_when_heartbeat_missing(client, mo
             return None
 
     settings = _configure_signer(get_settings())
+    signer_address = Account.from_key(settings.pricing_signer_private_key.get_secret_value()).address
+    monkeypatch.setenv("PRICING_SIGNER_ADDRESS", signer_address)
     monkeypatch.setattr("app.health.get_settings", lambda: settings)
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
@@ -91,6 +97,8 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
             return b'{"markets_processed": 5}'
 
     settings = _configure_signer(get_settings())
+    signer_address = Account.from_key(settings.pricing_signer_private_key.get_secret_value()).address
+    monkeypatch.setenv("PRICING_SIGNER_ADDRESS", signer_address)
     monkeypatch.setattr("app.health.get_settings", lambda: settings)
 
     class TimeoutAsyncClient:
@@ -214,6 +222,8 @@ def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
 
 def test_readiness_and_liveness_endpoints(client, monkeypatch):
     settings = _configure_signer(get_settings())
+    signer_address = Account.from_key(settings.pricing_signer_private_key.get_secret_value()).address
+    monkeypatch.setenv("PRICING_SIGNER_ADDRESS", signer_address)
     monkeypatch.setattr("app.health.get_settings", lambda: settings)
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
 

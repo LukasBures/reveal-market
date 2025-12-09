@@ -43,6 +43,7 @@ from shared.categories import canonical_category_from_slug
 from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import GoldskyClient
 from shared.logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
+from shared.migrations import get_current_revision
 from shared.onchain import OnChainConfigurationError
 from shared.onchain.client import load_account
 from sqlalchemy import func, select
@@ -57,7 +58,7 @@ from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
-from app.pricing import PricingEngine, _resolved_fx_url, fetch_fx_price_sync, fetch_fx_quote
+from app.pricing import PricingEngine, fetch_fx_price_sync, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
 
@@ -146,6 +147,7 @@ RESOLUTION_CACHE_COUNTER = Counter(
 async def lifespan(app: FastAPI):
     global _heartbeat_stop_event, _metrics_stop_event, _cache_refresh_stop_event, _quote_sweeper_stop_event
     run_migrations()
+    _record_schema_revision_tag()
     _heartbeat_stop_event = start_heartbeat_logger(
         logger,
         settings.app_name,
@@ -201,6 +203,23 @@ if cors_origins and cors_origins != ["*"] and is_production:
 # Keep settings in sync with the middleware payload so /health reflects reality.
 settings.cors_allow_origins = cors_origins
 
+_connect_sources = {"'self'"}
+for origin in cors_origins:
+    sanitized = origin.rstrip("/")
+    if sanitized:
+        _connect_sources.add(sanitized)
+        if sanitized.startswith("http://") or sanitized.startswith("https://"):
+            ws_variant = sanitized.replace("http://", "ws://").replace("https://", "wss://")
+            _connect_sources.add(ws_variant)
+# Include preset streamer hosts explicitly so FX/connect-src stay aligned even if CORS is narrowed.
+for preset_origin in (preset.get("streamer_public"), preset.get("streamer_internal")):
+    if isinstance(preset_origin, str) and preset_origin:
+        sanitized = preset_origin.rstrip("/")
+        _connect_sources.add(sanitized)
+        if sanitized.startswith("http://") or sanitized.startswith("https://"):
+            ws_variant = sanitized.replace("http://", "ws://").replace("https://", "wss://")
+            _connect_sources.add(ws_variant)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -210,13 +229,16 @@ app.add_middleware(
 )
 
 if settings.enable_security_headers:
-    api_csp = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'; connect-src 'self';"
+    connect_src = " ".join(sorted(_connect_sources))
+    api_csp = (
+        f"default-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'; connect-src {connect_src};"
+    )
     docs_csp = (
         "default-src 'none'; "
         "frame-ancestors 'none'; "
         "form-action 'none'; "
         "base-uri 'none'; "
-        "connect-src 'self'; "
+        f"connect-src {connect_src}; "
         "img-src 'self' data: https://fastapi.tiangolo.com; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -520,6 +542,55 @@ def _load_heartbeat_payload(key: str) -> dict[str, Any] | None:
             key=key,
         )
         return None
+
+
+def _record_schema_revision_tag() -> None:
+    """Persist the current Alembic revision to DB and Redis for cache tagging/health."""
+
+    cache = get_cache_client()
+    try:
+        revision = get_current_revision(settings.database_url)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="schema.revision.resolve_failed",
+            message="failed to resolve schema revision after migrations",
+            error=str(exc),
+        )
+        return
+    if revision is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="schema.revision.missing",
+            message="schema revision missing after migrations",
+        )
+        return
+    try:
+        with session_scope() as session:
+            shared_repository.record_schema_version(session, revision, key=settings.schema_version_key)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="schema.revision.persist_failed",
+            message="failed to record schema revision",
+            revision=revision,
+            error=str(exc),
+        )
+    if cache is not None:
+        try:
+            cache.set(settings.schema_version_key, revision)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="schema.revision.cache_failed",
+                message="failed to write schema revision cache tag",
+                revision=revision,
+                error=str(exc),
+            )
 
 
 def _build_worker_dashboard(now: datetime) -> schemas.HeartbeatMetrics | None:
@@ -964,7 +1035,7 @@ def _parse_group_threshold(value: Any) -> float | None:
     if isinstance(value, (int, float, Decimal)):
         try:
             return float(value)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return None
     if isinstance(value, str):
         cleaned = value.strip().lower().replace(",", "").replace("$", "")
@@ -984,7 +1055,7 @@ def _parse_group_threshold(value: Any) -> float | None:
             return None
         try:
             return float(match.group(0)) * multiplier
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return None
     return None
 
@@ -1006,7 +1077,7 @@ def _parse_threshold_from_title(title: str | None) -> float | None:
         multiplier = 1_000_000_000.0
     try:
         return float(match.group(0)) * multiplier
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -1129,7 +1200,7 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
             else float("inf")
         )
         close_ts = closes_at or datetime.max.replace(tzinfo=UTC)
-        return (primary, close_ts, slug_value or sibling.event_id)
+        return primary, close_ts, slug_value or sibling.event_id
 
     siblings_raw.sort(key=_sort_key)
     siblings = [item[0] for item in siblings_raw]
@@ -1307,6 +1378,20 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         if mid_int is None:
             continue
         meta_map[mid_int] = meta_row
+    event_rows = session.execute(
+        select(models.MarketGammaEvent).where(models.MarketGammaEvent.market_id.in_(market_ids))
+    ).scalars()
+    event_map: dict[int, models.MarketGammaEvent] = {}
+    event_iter: Iterable[models.MarketGammaEvent] = cast(Iterable[models.MarketGammaEvent], event_rows)
+    for event_row in event_iter:
+        mid = getattr(event_row, "market_id", None)
+        try:
+            mid_int = int(mid) if mid is not None else None
+        except (TypeError, ValueError):
+            mid_int = None
+        if mid_int is None or mid_int in event_map:
+            continue
+        event_map[mid_int] = event_row
     for mid, target in id_map.items():
         meta = meta_map.get(mid)
         if not meta:
@@ -1329,6 +1414,17 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
             target.order_min_size = Decimal(str(meta.order_min_size))
         if meta.enable_order_book is not None:
             target.enable_order_book = meta.enable_order_book
+        if meta.best_bid is not None:
+            target.best_bid = float(meta.best_bid)
+        if meta.best_ask is not None:
+            target.best_ask = float(meta.best_ask)
+        if meta.spread is not None:
+            target.spread = float(meta.spread)
+        try:
+            if meta.volume is not None:
+                target.volume = float(meta.volume)
+        except (TypeError, ValueError):
+            target.volume = target.volume if hasattr(target, "volume") else None
         # Basic liquidity/volume hints from Gamma metadata for popularity scoring.
         try:
             if meta.liquidity_clob is not None:
@@ -1370,6 +1466,12 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
                 target.group_position = int(threshold_value)
             except (TypeError, ValueError, OverflowError):
                 target.group_position = None
+        event_meta = event_map.get(mid)
+        if event_meta is not None and event_meta.open_interest is not None:
+            try:
+                target.open_interest = float(event_meta.open_interest)
+            except (TypeError, ValueError):
+                target.open_interest = target.open_interest if hasattr(target, "open_interest") else None
 
 
 def _attach_resolution_to_market(
@@ -1487,10 +1589,10 @@ def _normalize_bigint(value: Any) -> str | None:
         if isinstance(value, Decimal):
             return str(int(value))
         return str(int(value))
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         try:
             return str(value)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
 
@@ -1510,7 +1612,7 @@ def _parse_public_signals(signals: list[Any] | None) -> dict[str, str | None]:
         return parsed
     try:
         normalized = [str(entry) for entry in signals]
-    except Exception:
+    except (TypeError, ValueError):
         return parsed
     fields = [
         "merkle_root",
@@ -1917,19 +2019,26 @@ def _enforce_caps(
     market_total = None
     user_total = None
     if market_id:
-        market_total = float(shared_repository.sum_quote_stakes(session, market_id=market_id, window_seconds=window))
+        market_existing = float(shared_repository.sum_quote_stakes(session, market_id=market_id, window_seconds=window))
         if exclude_quote and exclude_quote.market_id == market_id:
-            market_total = max(0.0, market_total - float(exclude_quote.stake_zen))
-        if include_stake:
-            market_total += float(stake_zen)
-        if market_total > settings.max_market_stake_zen:
+            market_existing = max(0.0, market_existing - float(exclude_quote.stake_zen))
+        projected_market = market_existing + (float(stake_zen) if include_stake else 0.0)
+        if projected_market > settings.max_market_stake_zen:
+            remaining = max(0.0, settings.max_market_stake_zen - market_existing)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Market stake cap exceeded ({settings.max_market_stake_zen} ZEN)",
+                detail={
+                    "error": "market_cap_exceeded",
+                    "max_market_stake_zen": settings.max_market_stake_zen,
+                    "remaining_market_stake_zen": remaining,
+                    "stake_zen": float(stake_zen),
+                    "market_id": market_id,
+                },
             )
+        market_total = projected_market
 
     if market_id and user_id:
-        user_total = float(
+        user_existing = float(
             shared_repository.sum_quote_stakes(
                 session,
                 market_id=market_id,
@@ -1938,21 +2047,29 @@ def _enforce_caps(
             )
         )
         if exclude_quote and exclude_quote.market_id == market_id and exclude_quote.user_id == user_id:
-            user_total = max(0.0, user_total - float(exclude_quote.stake_zen))
-        if include_stake:
-            user_total += float(stake_zen)
-        if user_total > settings.max_user_stake_per_market_zen:
+            user_existing = max(0.0, user_existing - float(exclude_quote.stake_zen))
+        projected_user = user_existing + (float(stake_zen) if include_stake else 0.0)
+        if projected_user > settings.max_user_stake_per_market_zen:
+            remaining_user_cap = max(0.0, settings.max_user_stake_per_market_zen - user_existing)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"User stake cap exceeded ({settings.max_user_stake_per_market_zen} ZEN)",
+                detail={
+                    "error": "user_market_cap_exceeded",
+                    "max_user_stake_per_market_zen": settings.max_user_stake_per_market_zen,
+                    "remaining_user_stake_zen": remaining_user_cap,
+                    "stake_zen": float(stake_zen),
+                    "market_id": market_id,
+                    "user_id": user_id,
+                },
             )
+        user_total = projected_user
 
     remaining_market = None
     remaining_user = None
     if market_total is not None:
-        remaining_market = settings.max_market_stake_zen - market_total
+        remaining_market = max(0.0, settings.max_market_stake_zen - market_total)
     if user_total is not None:
-        remaining_user = settings.max_user_stake_per_market_zen - user_total
+        remaining_user = max(0.0, settings.max_user_stake_per_market_zen - user_total)
     return market_total, user_total, remaining_market, remaining_user
 
 
@@ -1966,7 +2083,11 @@ def pricing_quote(
     if payload.stake_zen > settings.max_stake_zen:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Stake exceeds max of {settings.max_stake_zen} ZEN",
+            detail={
+                "error": "stake_above_cap",
+                "stake_zen": float(payload.stake_zen),
+                "max_stake_zen": settings.max_stake_zen,
+            },
         )
     if payload.market_id:
         market_record = shared_repository.get_market_by_event_id(session, payload.market_id)
@@ -1981,14 +2102,24 @@ def pricing_quote(
             )
     # Always source FX server-side; ignore client-provided zen_usd.
     try:
-        zen_usd_raw, stale = fetch_fx_price_sync(settings)
+        zen_usd_raw, stale, fx_received_at = fetch_fx_price_sync(settings)
         if stale:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price stale")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "fx_stale",
+                    "message": "FX price stale",
+                    "fx_received_at": fx_received_at.isoformat() if fx_received_at else None,
+                },
+            )
         zen_usd = float(zen_usd_raw) if zen_usd_raw is not None else None
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable") from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        ) from exc
 
     # Enforce durable per-user and per-market caps using persisted quotes.
     market_total = None
@@ -2004,13 +2135,14 @@ def pricing_quote(
         )
 
     if zen_usd is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX price unavailable")
-    if settings.pricing_chain_id is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
-    if payload.wallet_address is None or payload.market_address is None or payload.outcome_id is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="wallet_address, market_address, and outcome_id are required for signed quotes",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        )
+    if settings.pricing_chain_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
         )
 
     stake_wei = _to_wei_amount(payload.stake_zen)
@@ -2027,7 +2159,9 @@ def pricing_quote(
     quote_id = token_hex(32)
     if settings.pricing_signer_private_key is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable", headers=None
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "pricing_signer_unavailable", "message": "Pricing signer unavailable"},
+            headers=None,
         )
     raw_signer_key = settings.pricing_signer_private_key
     signer_key: str | None
@@ -2064,6 +2198,8 @@ def pricing_quote(
             "quote_id": quote_id,
             "expires_at": expires_at,
             "expiry_ts": expiry_ts,
+            "fx_stale": False,
+            "fx_received_at": fx_received_at,
             "signature": signed.signature.hex(),
             "signer": signer_account.address,
             "market_id": payload.market_id,
@@ -2233,18 +2369,19 @@ def pricing_submit(
     current_fx: Decimal | None = None
     if payload.max_fx_diff_percent is not None:
         try:
-            fx = httpx.get(_resolved_fx_url(settings), timeout=settings.fx_timeout_seconds)
-            fx.raise_for_status()
-            data = fx.json()
-            raw_fx = (
-                data.get("price")
-                or data.get("zen_usd")
-                or data.get("zenUSD")
-                or data.get("fx_zen_usd")
-                or data.get("fx", {}).get("zen_usd")
-            )
-            if raw_fx is not None:
-                current_fx = Decimal(str(raw_fx))
+            raw_fx_price, fx_stale, fx_received_at = fetch_fx_price_sync(settings)
+            if raw_fx_price is not None:
+                current_fx = Decimal(str(raw_fx_price))
+            if fx_stale:
+                PRICING_COUNTER.labels(event="submit", result="fx_stale").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error": "fx_stale",
+                        "message": "FX price stale during submit",
+                        "fx_received_at": fx_received_at.isoformat() if fx_received_at else None,
+                    },
+                )
             fx_diff_percent = (
                 (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
                 if current_fx is not None and quote.zen_usd
@@ -2253,7 +2390,8 @@ def pricing_submit(
             if current_fx is None:
                 PRICING_COUNTER.labels(event="submit", result="fx_missing").inc()
                 raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FX check failed: missing price"
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "fx_missing", "message": "FX check failed: missing price"},
                 )
             if fx_diff_percent > payload.max_fx_diff_percent:
                 PRICING_COUNTER.labels(event="submit", result="fx_drift").inc()
@@ -2266,7 +2404,8 @@ def pricing_submit(
         except Exception as exc:
             PRICING_COUNTER.labels(event="submit", result="fx_error").inc()
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"FX check failed: {exc}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "fx_check_failed", "message": f"FX check failed: {exc}"},
             ) from exc
     else:
         current_fx = quote.zen_usd
@@ -2320,7 +2459,24 @@ def pricing_quote_state(quote_id: str, session: Session = Depends(get_session)) 
 @app.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])
 async def pricing_fx() -> schemas.FxQuoteResponse:
     try:
-        return await fetch_fx_quote(settings, use_cache_on_error=False)
+        fx_quote = await fetch_fx_quote(settings, use_cache_on_error=False)
+        if fx_quote.stale:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="pricing.fx.stale",
+                message="FX feed stale",
+                fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "fx_stale",
+                    "message": "FX price stale",
+                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+                },
+            )
+        return fx_quote
     except httpx.HTTPError as exc:
         log_event(
             logger,
@@ -2329,7 +2485,10 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="failed to fetch FX feed",
             error=str(exc),
         )
-        return schemas.FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
         log_event(
             logger,
@@ -2338,7 +2497,10 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="unexpected FX parsing error",
             error=str(exc),
         )
-        return schemas.FxQuoteResponse(zen_usd=Decimal(str(settings.fx_fallback_price)), stale=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        ) from exc
 
 
 @app.get("/treasury/snapshots", response_model=list[schemas.TreasurySnapshot], tags=["treasury"])
@@ -2738,9 +2900,9 @@ def list_grouped_markets(
 
 @app.get("/markets/onchain", tags=["markets"])
 async def list_onchain_markets():
-    settings = get_settings()
+    cfg = get_settings()
     try:
-        addresses = await fetch_factory_markets(settings)
+        addresses = await fetch_factory_markets(cfg)
     except OnChainConfigurationError as exc:
         log_event(
             logger,

@@ -55,7 +55,7 @@ repos:
       - id: refresh-settlement-vk-json
         name: refresh settlement vk json constant
         description: "Regenerate contracts/zen/test/generated/SettlementVkJson.sol from the cached VK JSON"
-        entry: bash -c 'cd contracts/zen && python scripts/generate_settlement_vk_json.py'
+        entry: bash -c 'cd contracts/zen && python3 scripts/generate_settlement_vk_json.py'
         language: system
         pass_filenames: false
         always_run: true

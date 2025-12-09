@@ -102,7 +102,7 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast while still respecting backend invalidation tags that the worker publishes.
 
 ### Trading flow (FX + quotes)
-- FX hook prefers WS/WSS (`/fx/zen-usdc`) with periodic HTTP fallback; after a few fallbacks it re-attempts WS automatically.
+- FX hook prefers WS/WSS (`/fx/zen-usd`, aliased from `/fx/zen-usdc`) with periodic HTTP fallback; after a few fallbacks it re-attempts WS automatically.
 - Quote requests include wallet, market address, and outcome id; the backend signs the on-chain digest. Client components surface expiry and call `commitWithQuote` with the signed payload via wagmi/viem. Ensure the connected chain matches the quote’s `chain_id`.
 
 ### Lazy loading & pagination
@@ -178,7 +178,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 ## Streaming & FX
 
-- **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usdc` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
+- **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
 - **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
 - **WSS/TLS** – Set `NEXT_PUBLIC_PRICE_STREAMER_URL` to your HTTPS streamer host (e.g., `https://stream.revealmarket.xyz`). The client auto-switches to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
 - **Env summary** – `NEXT_PUBLIC_PRICE_STREAMER_URL`, `STREAMER_INTERNAL_URL` (SSR), `NEXT_PUBLIC_API_BASE_URL`, and streamer-side `STREAMER_WORSEN_PERCENT` (controls applied dampening) must be set consistently across frontend and streamer.

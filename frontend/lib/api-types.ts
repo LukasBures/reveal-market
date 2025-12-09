@@ -41,6 +41,11 @@ export type MarketSummary = {
   orderbookVolumeUsd?: number;
   tradesQuantity?: number;
   openInterestUsd?: number;
+  bestBid?: number | null;
+  bestAsk?: number | null;
+  spread?: number | null;
+  volume?: number | null;
+  openInterest?: number | null;
   groupSlug?: string | null;
   groupItemTitle?: string | null;
   groupItemThreshold?: number | null;

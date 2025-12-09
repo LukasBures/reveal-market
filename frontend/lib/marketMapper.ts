@@ -44,6 +44,34 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
       : typeof item.tradesQuantity === "number"
         ? item.tradesQuantity
         : undefined;
+  const bestBid = Number.isFinite(Number(item.best_bid ?? item.bestBid))
+    ? Number(item.best_bid ?? item.bestBid)
+    : Number.isFinite(Number(item.extra_data?.gamma?.best_bid ?? item.extra_data?.gamma?.bestBid))
+      ? Number(item.extra_data?.gamma?.best_bid ?? item.extra_data?.gamma?.bestBid)
+      : undefined;
+  const bestAsk = Number.isFinite(Number(item.best_ask ?? item.bestAsk))
+    ? Number(item.best_ask ?? item.bestAsk)
+    : Number.isFinite(Number(item.extra_data?.gamma?.best_ask ?? item.extra_data?.gamma?.bestAsk))
+      ? Number(item.extra_data?.gamma?.best_ask ?? item.extra_data?.gamma?.bestAsk)
+      : undefined;
+  const spread = Number.isFinite(Number(item.spread ?? item.extra_data?.gamma?.spread))
+    ? Number(item.spread ?? item.extra_data?.gamma?.spread)
+    : bestBid !== undefined && bestAsk !== undefined
+      ? bestAsk - bestBid
+      : undefined;
+  const volume = Number.isFinite(Number(item.volume ?? item.extra_data?.gamma?.volume ?? item.extra_data?.volume))
+    ? Number(item.volume ?? item.extra_data?.gamma?.volume ?? item.extra_data?.volume)
+    : undefined;
+  const openInterest = Number.isFinite(
+    Number(item.open_interest ?? item.openInterest ?? item.extra_data?.gamma?.open_interest ?? item.extra_data?.gamma?.openInterest),
+  )
+    ? Number(
+        item.open_interest ??
+          item.openInterest ??
+          item.extra_data?.gamma?.open_interest ??
+          item.extra_data?.gamma?.openInterest,
+      )
+    : undefined;
   const gammaImage =
     item.extra_data?.image_url ??
     item.extra_data?.gamma?.image_url ??
@@ -135,6 +163,11 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     volume24hUsd,
     orderbookVolumeUsd,
     tradesQuantity,
+    bestBid: bestBid ?? null,
+    bestAsk: bestAsk ?? null,
+    spread: spread ?? null,
+    volume: volume ?? null,
+    openInterest: openInterest ?? null,
     groupSlug,
     groupItemTitle: item.group_item_title ?? item.groupItemTitle ?? null,
     groupItemThreshold,

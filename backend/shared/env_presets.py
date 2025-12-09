@@ -28,6 +28,7 @@ PRESETS: dict[str, dict[str, object]] = {
             "http://127.0.0.1",
             "http://127.0.0.1:3000",
             "http://localhost:8100",
+            "http://streamer:8100",
             "http://api.localhost",
             "http://stream.localhost",
         ],

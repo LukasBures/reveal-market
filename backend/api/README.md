@@ -73,7 +73,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_CORS_ALLOW_*` | Origins/methods/headers/credentials for CORS. |
 | `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
-| `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 100 ZEN max; quotes above this return 400). |
+| `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 0.1 ZEN max; quotes above this return 400). |
 | FX feed | Hardcoded to the streamer `/fx/zen-usd`; env vars no longer switch FX sources. Quotes reject when FX is stale/unavailable. |
 | `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. API signs the ABI-packed digest used by `RevealMarket.commitWithQuote`, bound to chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId. |
 

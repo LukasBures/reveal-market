@@ -121,11 +121,12 @@ def test_fetch_fx_price_sync_retries_and_caches(monkeypatch):
     payload = {"price": "5.0"}
     monkeypatch.setattr("httpx.Client", lambda *a, **k: _SyncClient([error, payload]))
     settings = Settings(fx_feed_url="http://example.com", fx_cache_ttl_seconds=10)
-    price, stale = fetch_fx_price_sync(settings)
+    price, stale, received_at = fetch_fx_price_sync(settings)
     assert price == Decimal("5.0")
     assert stale is False
+    assert received_at is None
     # cached path should hit without HTTP call when ttl active
     monkeypatch.setattr("httpx.Client", lambda *a, **k: _SyncClient([error]))
-    cached_price, cached_stale = fetch_fx_price_sync(settings)
+    cached_price, cached_stale, _ = fetch_fx_price_sync(settings)
     assert cached_price == Decimal("5.0")
     assert cached_stale is False

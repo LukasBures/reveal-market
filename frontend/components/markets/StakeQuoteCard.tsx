@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchPricingQuoteWithMeta, type PricingQuote } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH, type PricingQuote } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatTime } from "@/lib/formatters";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
-import { erc20Abi, maxUint256, type Address, type Hex } from "viem";
+import { BaseError, erc20Abi, maxUint256, type Address, type Hex } from "viem";
 import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
+import { defaultChain } from "@/lib/wagmi";
 
 type Props = {
   defaultStakeZen?: number;
@@ -22,10 +23,9 @@ type Props = {
   tradingHalted?: boolean | null;
 };
 
-const DEFAULT_MAX_STAKE_ZEN = 10.0;
-const MIN_STAKE_ZEN = 0.1;
-const MAX_STAKE_ZEN = 10.0;
-const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${MAX_STAKE_ZEN} ZEN`;
+const PER_BET_CAP_ZEN = 0.1;
+const MIN_STAKE_ZEN = 0.01;
+const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${PER_BET_CAP_ZEN} ZEN (per bet cap)`;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -33,7 +33,7 @@ const formatNumber = (value: number, decimals = 4) => {
 };
 
 export function StakeQuoteCard({
-  defaultStakeZen = 1,
+  defaultStakeZen = PER_BET_CAP_ZEN,
   marketAddress,
   marketId,
   outcomes = [],
@@ -52,11 +52,13 @@ export function StakeQuoteCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxLive = status === "live" && !fx?.stale;
   const { address } = useAccount();
   const chainId = useChainId();
+  const expectedChainId = defaultChain.id;
+  const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
   const { commitWithQuote, isPending: txPending, error: commitError } = useCommitWithQuote(
     (marketAddress ?? "") as Address,
   );
@@ -69,6 +71,8 @@ export function StakeQuoteCard({
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [approvalHash, setApprovalHash] = useState<Hex | null>(null);
+  const [txConfirmed, setTxConfirmed] = useState(false);
+  const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
   const isBinary = outcomeOptions.length === 2;
@@ -85,7 +89,7 @@ export function StakeQuoteCard({
   const debouncedStake = useDebounce(stakeZen, 200);
   const effectiveMaxStake = useMemo(() => {
     const caps = [
-      DEFAULT_MAX_STAKE_ZEN,
+      PER_BET_CAP_ZEN,
       quote?.max_stake_zen ?? null,
       quote?.remaining_user_stake_zen ?? null,
       quote?.remaining_market_stake_zen ?? null,
@@ -94,9 +98,16 @@ export function StakeQuoteCard({
     ]
       .filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v))
       .map((v) => Math.max(0, v));
-    if (!caps.length) return DEFAULT_MAX_STAKE_ZEN;
-    return Math.max(MIN_STAKE_ZEN, Math.min(...caps));
+    if (!caps.length) return PER_BET_CAP_ZEN;
+    const minCap = Math.min(...caps);
+    return Math.max(0, Math.min(PER_BET_CAP_ZEN, minCap));
   }, [quote]);
+  const capExhausted = effectiveMaxStake <= 0;
+  const fxAgeSeconds = useMemo(() => {
+    if (typeof ageSeconds === "number") return Math.max(0, ageSeconds);
+    if (fxReceivedAt) return Math.max(0, (Date.now() - Date.parse(fxReceivedAt)) / 1000);
+    return null;
+  }, [ageSeconds, fxReceivedAt]);
 
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
@@ -144,9 +155,24 @@ export function StakeQuoteCard({
         setError("Connect wallet to request a quote");
         return;
       }
+      if (!chainId || chainMismatch) {
+        setQuote(null);
+        setError(`Switch to ${defaultChain.name} to trade`);
+        return;
+      }
+      if (debouncedStake < MIN_STAKE_ZEN) {
+        setQuote(null);
+        setError(STAKE_RANGE_ERROR);
+        return;
+      }
       if (!marketAddress) {
         setQuote(null);
         setError("Missing market address for quote");
+        return;
+      }
+      if (capExhausted) {
+        setQuote(null);
+        setError("Stake cap exhausted for this market/user");
         return;
       }
       if (fxUnavailable) {
@@ -198,18 +224,45 @@ export function StakeQuoteCard({
     effectiveMaxStake,
     tradingDisabled,
     tradingReason,
+    chainId,
+    chainMismatch,
+    capExhausted,
   ]);
 
   useEffect(() => {
-    if (!quote) return;
+    if (!quote) {
+      setQuoteCountdown(null);
+      return;
+    }
     const expires = new Date(quote.expires_at).getTime();
-    const delay = expires - Date.now() - 1_000;
-    const timer = setTimeout(() => {
-      setQuote(null);
-      setRefreshNonce((prev) => prev + 1);
-    }, Math.max(delay, 0));
-    return () => clearTimeout(timer);
+    const updateCountdown = () => {
+      const remainingMs = expires - Date.now();
+      if (remainingMs <= 0) {
+        setQuoteCountdown("Expired");
+        setQuote(null);
+        setRefreshNonce((prev) => prev + 1);
+        return false;
+      }
+      const seconds = Math.ceil(remainingMs / 1000);
+      setQuoteCountdown(`${seconds}s`);
+      return true;
+    };
+    const ok = updateCountdown();
+    if (!ok) return;
+    const timer = setInterval(() => {
+      const alive = updateCountdown();
+      if (!alive) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
   }, [quote]);
+
+  useEffect(() => {
+    // Clear quotes on account or chain changes to avoid reusing stale signatures.
+    setQuote(null);
+    setRefreshNonce((prev) => prev + 1);
+    setTxHash(null);
+    setTxConfirmed(false);
+  }, [chainId, address]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;
@@ -250,10 +303,23 @@ export function StakeQuoteCard({
     selectedOutcome === 0
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
+  const quoteExpired = quote ? new Date(quote.expires_at).getTime() <= Date.now() : false;
+  const stakeOutOfRange =
+    !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
+  const submitBlockedReason =
+    tradingReason ??
+    (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
+    (capExhausted ? "Stake cap reached" : null) ??
+    (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
+    (fxUnavailable ? "FX unavailable" : null) ??
+    (fxStale ? "FX stale" : null) ??
+    (quoteExpired ? "Quote expired" : null) ??
+    null;
 
   const handleTrade = async () => {
     setTxError(null);
     setTxHash(null);
+    setTxConfirmed(false);
     if (tradingDisabled) {
       setTxError(tradingReason ?? "Trading disabled");
       return;
@@ -272,7 +338,11 @@ export function StakeQuoteCard({
       setRefreshNonce((prev) => prev + 1);
       return;
     }
-    if (stakeZen < MIN_STAKE_ZEN || stakeZen > MAX_STAKE_ZEN) {
+    if (capExhausted) {
+      setTxError("Stake cap reached for this market/user.");
+      return;
+    }
+    if (stakeOutOfRange) {
       setTxError(STAKE_RANGE_ERROR);
       return;
     }
@@ -288,6 +358,14 @@ export function StakeQuoteCard({
     }
     if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
       setTxError(`Switch to chain ${quote.chain_id} to trade.`);
+      return;
+    }
+    if (!chainId || chainMismatch) {
+      setTxError(`Switch to ${defaultChain.name} to trade.`);
+      return;
+    }
+    if (fxStale || fxUnavailable || !fxLive) {
+      setTxError("FX is stale or unavailable; retry once fresh.");
       return;
     }
     if (missingZenToken) {
@@ -317,9 +395,31 @@ export function StakeQuoteCard({
         amountWei: BigInt(quote.stake_wei),
       });
       const tx = await commitWithQuote(params);
-      setTxHash(typeof tx === "string" ? tx : (tx as any)?.hash ?? null);
+      const hash = (typeof tx === "string" ? tx : (tx as any)?.hash) as Hex | undefined;
+      if (hash) {
+        setTxHash(hash);
+        if (publicClient) {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash });
+          setTxConfirmed(receipt.status === "success");
+        }
+      }
     } catch (err) {
-      setTxError(err instanceof Error ? err.message : "Trade failed");
+      const message =
+        err instanceof BaseError
+          ? err.shortMessage || err.message
+          : err instanceof Error
+            ? err.message
+            : "Trade failed";
+      const normalized = message.toLowerCase();
+      if (normalized.includes("expired")) {
+        setTxError("Quote expired. Refreshing…");
+        setRefreshNonce((prev) => prev + 1);
+      } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
+        setTxError("Quote already consumed. Requesting a new one.");
+        setRefreshNonce((prev) => prev + 1);
+      } else {
+        setTxError(message);
+      }
     } finally {
       setTxLoading(false);
     }
@@ -339,13 +439,22 @@ export function StakeQuoteCard({
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
-              Quote {quote.quote_id.slice(0, 6)}… expires {formatTime(quote.expires_at)}
+              Quote {quote.quote_id.slice(0, 6)}… expires {quoteCountdown ?? formatTime(quote.expires_at)}
             </span>
           )}
           {quote && (
             <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
               Caps — user {quote.remaining_user_stake_zen?.toFixed(2) ?? "n/a"} ZEN · market{" "}
               {quote.remaining_market_stake_zen?.toFixed(2) ?? "n/a"} ZEN
+            </span>
+          )}
+          <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
+            Chain: {chainId ?? "unknown"} / Quote: {quote?.chain_id ?? "—"} / Signer:{" "}
+            {quote?.signer ? `${quote.signer.slice(0, 6)}…${quote.signer.slice(-4)}` : "n/a"}
+          </span>
+          {fxReceivedAt && (
+            <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
+              FX {formatTime(fxReceivedAt)} ({fxAgeSeconds !== null ? `${fxAgeSeconds.toFixed(0)}s ago` : "fresh"})
             </span>
           )}
         </div>
@@ -444,7 +553,7 @@ export function StakeQuoteCard({
               const rounded = Math.round(next * 100) / 100;
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
-              if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+              if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
                 setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
@@ -463,7 +572,7 @@ export function StakeQuoteCard({
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
               setStakeZen(capped);
               setStakeInput(capped.toFixed(2));
-              if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+              if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
                 setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
@@ -475,7 +584,7 @@ export function StakeQuoteCard({
             placeholder="0.00 ZEN"
           />
           <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
-            {[MIN_STAKE_ZEN, 1, MAX_STAKE_ZEN].map((preset) => (
+            {[MIN_STAKE_ZEN, PER_BET_CAP_ZEN / 2, PER_BET_CAP_ZEN].map((preset) => (
               <button
                 key={preset}
                 type="button"
@@ -483,7 +592,7 @@ export function StakeQuoteCard({
                   const capped = Math.min(preset, effectiveMaxStake);
                   setStakeZen(capped);
                   setStakeInput(capped.toFixed(2));
-                  if (capped < MIN_STAKE_ZEN || capped > MAX_STAKE_ZEN) {
+                  if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
                     setStakeError(STAKE_RANGE_ERROR);
                   } else {
                     setStakeError(null);
@@ -519,23 +628,36 @@ export function StakeQuoteCard({
             loading ||
             fxStale ||
             fxUnavailable ||
+            !fxLive ||
             !marketAddress ||
             !address ||
-            stakeZen < MIN_STAKE_ZEN ||
-            stakeZen > MAX_STAKE_ZEN ||
+            stakeOutOfRange ||
             tradingDisabled ||
+            capExhausted ||
+            chainMismatch ||
             txLoading ||
-            txPending
+            txPending ||
+            quoteExpired
           }
           onClick={handleTrade}
           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
-            loading || fxStale || fxUnavailable || !address || !marketAddress || tradingDisabled || txLoading || txPending
+            loading ||
+            fxStale ||
+            fxUnavailable ||
+            !fxLive ||
+            !address ||
+            !marketAddress ||
+            tradingDisabled ||
+            capExhausted ||
+            chainMismatch ||
+            txLoading ||
+            txPending ||
+            quoteExpired
               ? "cursor-not-allowed bg-white/20 text-white/60"
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}
         >
-          {tradingReason ??
-            (txLoading || txPending ? "Submitting…" : ctaLabel)}
+          {submitBlockedReason ?? (txLoading || txPending ? "Submitting…" : ctaLabel)}
         </button>
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
@@ -557,6 +679,16 @@ export function StakeQuoteCard({
             Pricing paused due to stale FX. Please retry in a moment.
           </p>
         )}
+        {capExhausted && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+            Stake cap reached for this market/user. Try again later.
+          </p>
+        )}
+        {chainMismatch && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+            Switch to {defaultChain.name} (chain {expectedChainId}) to trade.
+          </p>
+        )}
         {quote && needsApproval && !txLoading && !txPending && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
             Wallet will request ZEN approval before trading.
@@ -572,6 +704,11 @@ export function StakeQuoteCard({
             {approvalHash ? `Approval tx: ${approvalHash.slice(0, 10)}…${approvalHash.slice(-6)}` : null}
             {approvalHash && txHash ? " · " : ""}
             {txHash ? `Commit tx: ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : null}
+          </p>
+        )}
+        {txConfirmed && txHash && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
+            Commit confirmed on-chain.
           </p>
         )}
         {commitError && !txError && (

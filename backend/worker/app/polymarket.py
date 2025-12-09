@@ -63,6 +63,11 @@ class MarketPayload(BaseModel):
     enable_order_book: bool | None = None
     image_variants: list[str] | None = None
     featured: bool = False
+    best_bid: float | None = None
+    best_ask: float | None = None
+    spread: float | None = None
+    open_interest: float | None = None
+    volume: float | None = None
     closes_at: datetime | None = None
     liquidity_usd: float | None = None
     volume_24h_usd: float | None = None
@@ -141,16 +146,32 @@ class MarketPayload(BaseModel):
             "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
             "group_slug": group_slug,
             "featured": featured,
+            "best_bid": None,
+            "best_ask": None,
+            "spread": None,
+            "volume": None,
         }
         gamma_events = []
+        open_interest = _coerce_float(raw.get("openInterest") or raw.get("open_interest"))
         for event in raw.get("events") or []:
             if isinstance(event, dict):
                 gamma_events.append(event)
+        if open_interest is not None and not gamma_events:
+            gamma_events.append({"open_interest": open_interest})
 
         liquidity_usd = _extract_liquidity(raw)
         volume_24h_usd = _extract_volume_24h(raw)
         orderbook_volume_usd = _extract_orderbook_volume(raw)
         trades_quantity = _extract_trades_quantity(raw)
+        best_bid = _coerce_float(raw.get("bestBid") or raw.get("bestBidYes") or raw.get("best_bid"))
+        best_ask = _coerce_float(raw.get("bestAsk") or raw.get("bestAskYes") or raw.get("best_ask"))
+        spread = _coerce_float(raw.get("spread"))
+        volume_total = _coerce_float(raw.get("volume"))
+        if gamma_metadata is not None:
+            gamma_metadata["best_bid"] = best_bid
+            gamma_metadata["best_ask"] = best_ask
+            gamma_metadata["spread"] = spread
+            gamma_metadata["volume"] = volume_total
 
         market = cls(
             event_id=str(event_id),
@@ -191,6 +212,11 @@ class MarketPayload(BaseModel):
             volume_24h_usd=volume_24h_usd,
             orderbook_volume_usd=orderbook_volume_usd,
             trades_quantity=trades_quantity,
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread=spread,
+            open_interest=open_interest,
+            volume=volume_total,
             group_slug=group_slug,
             group_position=group_position,
             group_item_title=group_item_title,
@@ -951,6 +977,11 @@ def _build_market_hash_payload(market: MarketPayload) -> dict[str, Any]:
         "group_position": market.group_position,
         "group_item_title": market.group_item_title,
         "group_item_threshold": market.group_item_threshold,
+        "best_bid": market.best_bid,
+        "best_ask": market.best_ask,
+        "spread": market.spread,
+        "open_interest": market.open_interest,
+        "volume": market.volume,
     }
 
 

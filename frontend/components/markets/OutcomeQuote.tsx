@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchPricingQuoteWithMeta } from "@/lib/pricing-client";
+import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
@@ -17,7 +17,7 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
   const [refundZen, setRefundZen] = useState<string>("—");
   const [profitZen, setProfitZen] = useState<string>("—");
   const [error, setError] = useState<string | null>(null);
-  const { fx, status } = useFxStream("/fx/zen-usdc");
+  const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
   const fxLabel = fxValue ? `FX: 1 ZEN ≈ $${fxValue}${fxStale ? " (stale)" : ""}` : "FX: loading…";
