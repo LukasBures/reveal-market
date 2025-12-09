@@ -16,13 +16,15 @@ def create_app(relayer_service: RelayerService, chain_id: int, rpc_url: str) -> 
 
     @app.get("/healthz")
     def healthz():
-        return {
+        payload = {
             "status": "ok",
             "relayer": relayer_service.account.address,
             "escrow": relayer_service.escrow.address,
             "chainId": chain_id,
             "rpc": rpc_url,
         }
+        logger.info("health_check", **payload)
+        return payload
 
     @app.post("/commit")
     def commit(req: CommitRequest, svc: RelayerService = Depends(get_service)):

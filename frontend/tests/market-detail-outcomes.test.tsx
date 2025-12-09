@@ -11,6 +11,19 @@ const baseDetail: MarketDetail = {
   outcomePrices: [0.6, 0.4],
 };
 
+vi.mock("@/lib/wagmi", () => ({
+  defaultChain: { id: 2651420, name: "Horizen Testnet" },
+}));
+
+vi.mock("wagmi", () => ({
+  useAccount: () => ({ address: undefined }),
+  useChainId: () => 2651420,
+  useSwitchChain: () => ({ switchChain: vi.fn(), chains: [{ id: 2651420 }], isPending: false, error: null }),
+  useReadContract: () => ({ data: undefined, isFetching: false, refetch: vi.fn() }),
+  useWriteContract: () => ({ writeContractAsync: vi.fn(), error: null }),
+  usePublicClient: () => undefined,
+}));
+
 class EventSourceMock {
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;

@@ -21,4 +21,4 @@ ENV PYTHONPATH=/app/relayer/src
 ENV HOST=0.0.0.0
 ENV PORT=8088
 
-CMD ["uv", "run", "uvicorn", "relayer.main:app", "--host", "0.0.0.0", "--port", "8088"]
+CMD ["/bin/sh", "-c", "uv run uvicorn relayer.main:app --host \"${RELAYER_HOST:-0.0.0.0}\" --port \"${RELAYER_PORT:-8088}\""]
