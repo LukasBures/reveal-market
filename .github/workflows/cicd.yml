@@ -349,6 +349,7 @@ jobs:
               exit 1
             fi
             git pull --rebase
+            git submodule update --init --recursive
 
             echo ">>> Run production deployment script"
             chmod +x run_prod.sh

@@ -34,10 +34,16 @@ DEFAULT_ENV_FILE="${ROOT_DIR}/.env.prod"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
+PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_REQUIRED_FILES=(
-  "settlement_js/generate_witness.js"
-  "settlement_js/settlement.wasm"
-  "settlement_final.zkey"
+  "prover/circuits/build/settlement_js/generate_witness.js"
+  "prover/circuits/build/settlement_js/settlement.wasm"
+  "prover/circuits/build/settlement_final.zkey"
+  "prover/circuits/build/settlement_vk.json"
+  "prover/circuits/build/settlement_hashes.json"
+  "prover/circuits/build/settlement_deploy.json"
+  "contracts/cache/settlement-vk.json"
+  "contracts/zen/cache/settlement-vk.json"
 )
 TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 
@@ -108,25 +114,62 @@ check_prover_artifacts() {
     log_warn "Skipping Groth16 prover artifact validation (per flag)."
     return
   fi
+  log_step "Syncing prover artifacts from submodule"
+
+  if command -v git >/dev/null 2>&1; then
+    if ! git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null; then
+      log_warn "Failed to update prover/artifacts submodule; ensure it is cloned and accessible."
+    fi
+  else
+    log_warn "git not found; ensure prover/artifacts is populated before running."
+  fi
+
+  if [[ ! -d "${PROVER_ARTIFACTS_DIR}" ]]; then
+    log_warn "Artifacts submodule directory missing at ${PROVER_ARTIFACTS_DIR}; cannot continue."
+    exit 1
+  fi
+
+  local missing=()
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    local src="${PROVER_ARTIFACTS_DIR}/${rel_path}"
+    local dest="${ROOT_DIR}/${rel_path}"
+    if [[ ! -f "${src}" ]]; then
+      missing+=("${rel_path} (source)")
+      continue
+    fi
+    mkdir -p "$(dirname "${dest}")"
+    cp "${src}" "${dest}"
+  done
+
+  if (( ${#missing[@]} > 0 )); then
+    log_warn "Missing prover artifacts in submodule: ${missing[*]}"
+    log_warn "Populate prover/artifacts (private repo) before running deploy."
+    exit 1
+  fi
+
+  # Verify copies landed.
+  local missing_dest=()
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    local dest="${ROOT_DIR}/${rel_path}"
+    if [[ ! -f "${dest}" ]]; then
+      missing_dest+=("${rel_path}")
+    fi
+  done
+  if (( ${#missing_dest[@]} > 0 )); then
+    log_warn "Failed to stage prover artifacts into repo paths: ${missing_dest[*]}"
+    exit 1
+  fi
+
   # Prefer the Go-based verifier when available.
   if command -v go >/dev/null 2>&1; then
     if (cd "${ROOT_DIR}/prover" && go run ./cmd/verify-artifacts >/dev/null 2>&1); then
       return
     fi
+    log_warn "Go-based artifact verification failed. Aborting."
+    exit 1
   fi
 
-  local missing=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    local full_path="${PROVER_BUILD_DIR}/${rel_path}"
-    if [[ ! -f "${full_path}" ]]; then
-      missing+=("${rel_path}")
-    fi
-  done
-
-  if (( ${#missing[@]} > 0 )); then
-    log_warn "Groth16 artifacts missing; running prover/circuits/generate_keys.sh ..."
-    (cd "${ROOT_DIR}/prover/circuits" && bash generate_keys.sh)
-  fi
+  log_warn "Skipping Go-based artifact verification (Go not installed)."
 }
 
 check_caddyfile() {
