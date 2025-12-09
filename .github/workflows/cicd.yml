@@ -12,15 +12,17 @@ jobs:
 
   precommit:
     runs-on: ubuntu-latest
+    env:
+      ARTIFACTS_DEPLOY_KEY: ${{ secrets.ARTIFACTS_DEPLOY_KEY || '' }}
     steps:
       - name: Checkout (with artifacts key)
-        if: ${{ secrets.ARTIFACTS_DEPLOY_KEY != '' }}
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          ssh-key: ${{ secrets.ARTIFACTS_DEPLOY_KEY }}
+          ssh-key: ${{ env.ARTIFACTS_DEPLOY_KEY }}
       - name: Checkout (no private submodules)
-        if: ${{ secrets.ARTIFACTS_DEPLOY_KEY == '' }}
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
         uses: actions/checkout@v4
         with:
           submodules: false
