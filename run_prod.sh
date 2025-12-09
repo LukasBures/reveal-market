@@ -35,6 +35,7 @@ ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
+PROVER_ARTIFACTS_SSH_KEY_PATH="${PROVER_ARTIFACTS_SSH_KEY_PATH:-}"
 PROVER_REQUIRED_FILES=(
   "prover/circuits/build/settlement_js/generate_witness.js"
   "prover/circuits/build/settlement_js/settlement.wasm"
@@ -117,7 +118,12 @@ check_prover_artifacts() {
   log_step "Syncing prover artifacts from submodule"
 
   if command -v git >/dev/null 2>&1; then
-    if ! git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null; then
+    # Allow overriding SSH identity for the private artifacts repo (e.g., deploy key on production host).
+    local submodule_env=()
+    if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+      submodule_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+    fi
+    if ! "${submodule_env[@]}" git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null; then
       log_warn "Failed to update prover/artifacts submodule; ensure it is cloned and accessible."
     fi
   else

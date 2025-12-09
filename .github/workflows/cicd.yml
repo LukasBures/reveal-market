@@ -370,6 +370,7 @@ jobs:
             git submodule update --init --recursive
 
             echo ">>> Run production deployment script"
+            export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH || '~/.ssh/reveal-market-gh-deploy-artifacts' }}"
             chmod +x run_prod.sh
             ./run_prod.sh
 
