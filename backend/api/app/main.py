@@ -3388,7 +3388,12 @@ def read_market(
     return response
 
 
-@app.get("/clob/orderbook/{token_id}", response_model=schemas.ClobOrderBookResponse, tags=["markets"], include_in_schema=False)
+@app.get(
+    "/clob/orderbook/{token_id}",
+    response_model=schemas.ClobOrderBookResponse,
+    tags=["markets"],
+    include_in_schema=False,
+)
 def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
     if not settings.clob_host:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="clob_unavailable")
