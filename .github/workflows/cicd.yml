@@ -13,9 +13,17 @@ jobs:
   precommit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (with artifacts key)
+        if: ${{ secrets.ARTIFACTS_DEPLOY_KEY != '' }}
+        uses: actions/checkout@v4
         with:
           submodules: recursive
+          ssh-key: ${{ secrets.ARTIFACTS_DEPLOY_KEY }}
+      - name: Checkout (no private submodules)
+        if: ${{ secrets.ARTIFACTS_DEPLOY_KEY == '' }}
+        uses: actions/checkout@v4
+        with:
+          submodules: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
