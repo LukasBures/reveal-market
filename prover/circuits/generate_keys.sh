@@ -18,6 +18,7 @@ USE_SYSTEM_SNARKJS="${USE_SYSTEM_SNARKJS:-true}"
 CONTRIBUTOR_NAME="${CONTRIBUTOR_NAME:-initial contribution}"
 NODE_VERSION="${NODE_VERSION:-v20.18.0}"
 NODE_CACHE_DIR="${BUILD_DIR}/.node-runtime"
+ETHERS_VERSION="${ETHERS_VERSION:-6.13.4}"
 generate_entropy() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -117,17 +118,14 @@ export VK_PATH="$BUILD_DIR/settlement_vk.json"
 export CIRCUIT_NAME="reveal_settlement_v1"
 export CIRCUIT_VERSION="1.0.0"
 export HASH_OUT="$BUILD_DIR/settlement_hashes.json"
-if ! command -v cast >/dev/null 2>&1; then
-  echo "cast is required to compute keccak hashes; install Foundry (foundryup) and retry." >&2
-  exit 1
-fi
-pk_hex="$(xxd -p "${ZKEY_PATH}" | tr -d '\n')"
-vk_hex="$(xxd -p "${VK_PATH}" | tr -d '\n')"
-pk_hash="$(cast keccak "0x${pk_hex}")"
-vk_hash="$(cast keccak "0x${vk_hex}")"
-encoded="$(cast abi-encode 'f(string,string,bytes32,bytes32)' "${CIRCUIT_NAME}" "${CIRCUIT_VERSION}" "${pk_hash}" "${vk_hash}")"
-circuit_hash="$(cast keccak "${encoded}")"
-cat > "${HASH_OUT}" <<EOF
+if command -v cast >/dev/null 2>&1; then
+  pk_hex="$(xxd -p "${ZKEY_PATH}" | tr -d '\n')"
+  vk_hex="$(xxd -p "${VK_PATH}" | tr -d '\n')"
+  pk_hash="$(cast keccak "0x${pk_hex}")"
+  vk_hash="$(cast keccak "0x${vk_hex}")"
+  encoded="$(cast abi-encode 'f(string,string,bytes32,bytes32)' "${CIRCUIT_NAME}" "${CIRCUIT_VERSION}" "${pk_hash}" "${vk_hash}")"
+  circuit_hash="$(cast keccak "${encoded}")"
+  cat > "${HASH_OUT}" <<EOF
 {
   "provingKeyHash": "${pk_hash}",
   "verificationKeyHash": "${vk_hash}",
@@ -136,6 +134,53 @@ cat > "${HASH_OUT}" <<EOF
   "circuitVersion": "${CIRCUIT_VERSION}"
 }
 EOF
+else
+  echo "cast not found; using node + ethers@${ETHERS_VERSION} to compute hashes..."
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js is required to compute keccak hashes; install Node.js (>=20) and retry." >&2
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to download ethers; install Node.js (includes npm) and retry." >&2
+    exit 1
+  fi
+  HASH_NODE_DIR="${BUILD_DIR}/.hash-node"
+  HASH_NODE_MODULES="${HASH_NODE_DIR}/node_modules"
+  if [[ ! -d "${HASH_NODE_MODULES}/ethers" ]]; then
+    echo "Installing ethers@${ETHERS_VERSION} for hash computation..."
+    mkdir -p "${HASH_NODE_DIR}"
+    npm install --prefix "${HASH_NODE_DIR}" --no-save --no-package-lock --no-audit --no-fund "ethers@${ETHERS_VERSION}"
+  fi
+  NODE_PATH="${HASH_NODE_MODULES}${NODE_PATH:+:${NODE_PATH}}" node <<'NODE'
+const { readFileSync, writeFileSync } = require('fs');
+const { keccak256, AbiCoder, getBytes } = require('ethers');
+
+const { ZKEY_PATH, VK_PATH, CIRCUIT_NAME, CIRCUIT_VERSION, HASH_OUT } = process.env;
+
+const pkBytes = readFileSync(ZKEY_PATH);
+const vkBytes = readFileSync(VK_PATH);
+
+const pkHash = keccak256(pkBytes);
+const vkHash = keccak256(vkBytes);
+
+const encoded = AbiCoder.defaultAbiCoder().encode(
+  ["string", "string", "bytes32", "bytes32"],
+  [CIRCUIT_NAME, CIRCUIT_VERSION, pkHash, vkHash]
+);
+const circuitHash = keccak256(getBytes(encoded));
+
+const hashes = {
+  provingKeyHash: pkHash,
+  verificationKeyHash: vkHash,
+  circuitHash,
+  circuitName: CIRCUIT_NAME,
+  circuitVersion: CIRCUIT_VERSION,
+};
+
+writeFileSync(HASH_OUT, JSON.stringify(hashes, null, 2));
+console.log(`Computed hashes written to ${HASH_OUT}`);
+NODE
+fi
 echo "Circuit hashes written to ${HASH_OUT}"
 
 python3 - <<'PY'
