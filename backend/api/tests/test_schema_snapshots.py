@@ -8,6 +8,8 @@ EXPECTED_SCHEMAS = {
     "MarketResponse": {
         "required": ["event_id", "title", "oracle", "id", "created_at", "updated_at"],
         "properties": [
+            "best_ask",
+            "best_bid",
             "caps",
             "category",
             "clob_pair_id",
@@ -31,6 +33,7 @@ EXPECTED_SCHEMAS = {
             "market_address",
             "market_maker",
             "metadata_uri",
+            "open_interest",
             "oracle",
             "order_min_size",
             "orderbook_volume_usd",
@@ -44,6 +47,7 @@ EXPECTED_SCHEMAS = {
             "resolution_source",
             "siblings",
             "slug",
+            "spread",
             "starts_at",
             "status",
             "summary",
@@ -56,6 +60,7 @@ EXPECTED_SCHEMAS = {
             "trades_quantity",
             "uma_resolution_status",
             "updated_at",
+            "volume",
             "volume_24h_usd",
             "featured",
         ],

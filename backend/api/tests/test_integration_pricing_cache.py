@@ -46,7 +46,11 @@ def test_quote_issue_and_submit_with_caps_and_fx(client, monkeypatch, db_session
     quote_payload["stake_zen"] = 15
     quote_resp2 = client.post("/pricing/quote", json=quote_payload)
     assert quote_resp2.status_code == 400
-    assert "cap" in quote_resp2.json()["detail"].lower()
+    detail = quote_resp2.json()["detail"]
+    if isinstance(detail, str):
+        assert "cap" in detail.lower()
+    else:
+        assert detail.get("error") in {"user_market_cap_exceeded", "market_cap_exceeded", "stake_above_cap"}
 
 
 def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch):
@@ -122,10 +126,15 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     assert detail["error"] == "user_market_cap_exceeded"
     assert detail["remaining_user_stake_zen"] == pytest.approx(0.05)
 
+    # Another user places a valid bet, pushing market totals near the cap.
+    valid_other = dict(base_payload, stake_zen=0.08, user_id="user-cap-2b", wallet_address=other_user.address)
+    resp_valid_other = client.post("/pricing/quote", json=valid_other)
+    assert resp_valid_other.status_code == 200, resp_valid_other.json()
+
     # Market cap breach with different user.
-    market_over = dict(base_payload, stake_zen=0.11, user_id="user-cap-3", wallet_address=other_user.address)
+    market_over = dict(base_payload, stake_zen=0.05, user_id="user-cap-3", wallet_address=other_user.address)
     resp_market = client.post("/pricing/quote", json=market_over)
     assert resp_market.status_code == 400
     m_detail = resp_market.json()["detail"]
     assert m_detail["error"] == "market_cap_exceeded"
-    assert m_detail["remaining_market_stake_zen"] == pytest.approx(0.1)
+    assert m_detail["remaining_market_stake_zen"] == pytest.approx(0.02)

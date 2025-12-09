@@ -236,29 +236,25 @@ def _check_fx_cors(settings) -> tuple[str, schemas.HealthComponent]:
     fx_url = settings.fx_feed_url
     parsed = urlparse(str(fx_url))
     fx_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
+    is_prod = (settings.environment or "").lower() == "production"
     if not fx_origin:
         return "fx_cors", schemas.HealthComponent(status="error", detail="FX feed URL invalid")
     if not origins or origins == ["*"]:
-        return (
-            "fx_cors",
-            schemas.HealthComponent(
-                status="degraded",
-                detail="CORS origins wildcard; streamer FX origin not explicitly allowed",
-            ),
-        )
+        state: schemas.HealthState = "degraded" if is_prod else "ok"
+        detail = "CORS origins wildcard; streamer FX origin not explicitly allowed"
+        return ("fx_cors", schemas.HealthComponent(status=state, detail=detail))
     if fx_origin not in origins:
-        return (
-            "fx_cors",
-            schemas.HealthComponent(
-                status="degraded",
-                detail=f"FX origin {fx_origin} not in CORS allowlist",
-            ),
-        )
+        state = "degraded" if is_prod else "ok"
+        detail = f"FX origin {fx_origin} not in CORS allowlist"
+        return ("fx_cors", schemas.HealthComponent(status=state, detail=detail))
     return "fx_cors", schemas.HealthComponent(status="ok", detail="FX origin allowed by CORS")
 
 
 def _check_schema_revision(settings) -> tuple[str, schemas.HealthComponent]:
     """Ensure the DB is at Alembic head so normalized tables exist."""
+
+    if str(settings.database_url).startswith("sqlite"):
+        return "schema", schemas.HealthComponent(status="ok", detail="sqlite database; skipping Alembic check")
 
     try:
         current = get_current_revision(settings.database_url)

@@ -35,6 +35,11 @@ def upsert_market(
         "extra_data",
         "group_item_title",
         "group_item_threshold",
+        "best_bid",
+        "best_ask",
+        "spread",
+        "volume",
+        "open_interest",
     ):
         payload.pop(legacy, None)
     market = existing or get_market_by_event_id(session, payload["event_id"])

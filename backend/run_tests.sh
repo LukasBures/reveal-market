@@ -39,6 +39,13 @@ activate_venv() {
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
+xdist_available() {
+  python - <<'PY'
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec("xdist") else 1)
+PY
+}
+
 calc_pytest_workers() {
   local override="${PYTEST_WORKER_COUNT:-}"
   if [[ -n "${override}" ]]; then
@@ -52,15 +59,19 @@ run_py_tests() {
   local service_dir="$1"
   log_step "Running pytest in ${service_dir}"
   pushd "${service_dir}" >/dev/null
-  local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
-  local -a pytest_args=()
-  if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
-    pytest_args+=("-n" "${workers}")
-  fi
 
   (
     activate_venv "${service_dir}"
-    printf '[%s] pytest %s (workers=%s)\n' "$(timestamp)" "$(basename "${service_dir}")" "${pytest_args[*]:-1}"
+    local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
+    local -a pytest_args=()
+    if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
+      if xdist_available; then
+        pytest_args+=("-n" "${workers}")
+      else
+        printf '[%s] pytest-xdist missing; running serially\n' "$(timestamp)"
+      fi
+    fi
+    printf '[%s] pytest %s (args=%s)\n' "$(timestamp)" "$(basename "${service_dir}")" "${pytest_args[*]:-1}"
     python -m pytest "${pytest_args[@]}"
   )
   popd >/dev/null
@@ -76,10 +87,14 @@ run_shared_tests() {
     local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
     local -a pytest_args=()
     if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
-      pytest_args+=("-n" "${workers}")
+      if xdist_available; then
+        pytest_args+=("-n" "${workers}")
+      else
+        printf '[%s] pytest-xdist missing; running serially\n' "$(timestamp)"
+      fi
     fi
     pushd "${REPO_ROOT}" >/dev/null
-    printf '[%s] pytest shared (workers=%s)\n' "$(timestamp)" "${pytest_args[*]:-1}"
+    printf '[%s] pytest shared (args=%s)\n' "$(timestamp)" "${pytest_args[*]:-1}"
     python -m pytest "${pytest_args[@]}" "${shared_tests_path}"
     popd >/dev/null
   )

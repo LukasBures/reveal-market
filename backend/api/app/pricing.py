@@ -161,7 +161,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
             }
         )
         return FxQuoteResponse(zen_usd=zen_usd, stale=stale, received_at=received_at)
-    except (httpx.HTTPError, ValueError, InvalidOperation, TypeError):
+    except (httpx.HTTPError, ValueError, InvalidOperation, TypeError) as exc:
         if use_cache_on_error and "zen_usd" in _FX_CACHE:
             _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
             fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
@@ -172,6 +172,9 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
                 stale=True,
                 received_at=parsed_ts,
             )
+
+        if not use_cache_on_error:
+            raise exc
 
         _FX_CACHE.update(
             {

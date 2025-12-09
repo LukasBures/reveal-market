@@ -2489,6 +2489,8 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "fx_unavailable", "message": "FX price unavailable"},
         ) from exc
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
         log_event(
             logger,

@@ -5,7 +5,7 @@ import { categorySlugs } from "@/lib/slugs";
 
 const urls = resolveUrlConfig();
 const BASE_URL = urls.siteUrl;
-const API_BASE_OVERRIDE = DEFAULT_API_BASE;
+const API_BASE_OVERRIDE = (urls.apiBaseInternal || DEFAULT_API_BASE).replace(/\/$/, "");
 
 const DOC_PATHS = [
   "/docs",
