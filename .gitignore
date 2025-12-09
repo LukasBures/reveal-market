@@ -159,6 +159,7 @@ node_modules/
 jspm_packages/
 prover/circuits/build/
 prover/circuits/.node-runtime/
+!prover/artifacts/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
@@ -408,6 +409,7 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+!/prover/artifacts/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

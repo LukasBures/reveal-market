@@ -22,3 +22,6 @@
 [submodule "contracts/zen/lib/solmate"]
 	path = contracts/zen/lib/solmate
 	url = https://github.com/transmissions11/solmate
+[submodule "prover/artifacts"]
+	path = prover/artifacts
+	url = git@github.com:RevealMarket/artifacts.git
