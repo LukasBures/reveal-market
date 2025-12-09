@@ -1991,7 +1991,6 @@ def liveness_check() -> dict[str, str]:
 
 
 @app.get("/healthz/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
-@app.get("/health/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
 def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
     now = datetime.now(tz=UTC)
     worker_status = _build_worker_dashboard(now)
@@ -2900,7 +2899,7 @@ def list_grouped_markets(
     )
 
 
-@app.get("/markets/onchain", tags=["markets"])
+@app.get("/markets/onchain", tags=["markets"], include_in_schema=False)
 async def list_onchain_markets():
     cfg = get_settings()
     try:
@@ -3056,7 +3055,7 @@ def suggest_markets(
     return filtered
 
 
-@app.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"])
+@app.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"], include_in_schema=False)
 def list_proof_receipts(
     request: Request,
     limit: Annotated[
@@ -3389,7 +3388,7 @@ def read_market(
     return response
 
 
-@app.get("/clob/orderbook/{token_id}", response_model=schemas.ClobOrderBookResponse, tags=["markets"])
+@app.get("/clob/orderbook/{token_id}", response_model=schemas.ClobOrderBookResponse, tags=["markets"], include_in_schema=False)
 def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
     if not settings.clob_host:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="clob_unavailable")
@@ -3416,7 +3415,13 @@ def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
     return schemas.ClobOrderBookResponse.from_summary(summary)
 
 
-@app.post("/markets", response_model=schemas.MarketResponse, tags=["markets"], status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/markets",
+    response_model=schemas.MarketResponse,
+    tags=["markets"],
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
 def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(get_session)) -> schemas.MarketResponse:
     start = time.perf_counter()
     log_event(
@@ -3453,7 +3458,12 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
     return response
 
 
-@app.patch("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])
+@app.patch(
+    "/markets/{event_id}",
+    response_model=schemas.MarketResponse,
+    tags=["markets"],
+    include_in_schema=False,
+)
 def update_market(
     event_id: str, update: schemas.MarketUpdate, session: Session = Depends(get_session)
 ) -> schemas.MarketResponse:

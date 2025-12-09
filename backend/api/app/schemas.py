@@ -299,6 +299,10 @@ class PricingQuoteResponse(BaseModel):
         return float(value) if value is not None else None
 
 
+class PricingQuotePayload(PricingQuoteResponse):
+    model_config = ConfigDict(title="PricingQuotePayload")
+
+
 class FxQuoteResponse(BaseModel):
     zen_usd: Decimal
     stale: bool = False
@@ -310,7 +314,7 @@ class FxQuoteResponse(BaseModel):
 
 
 class PricingSubmitRequest(BaseModel):
-    quote: PricingQuoteResponse
+    quote: PricingQuotePayload
     max_fx_diff_percent: Decimal | None = Field(default=None, ge=0, description="Optional max FX drift percent vs live")
 
 

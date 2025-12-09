@@ -107,7 +107,13 @@ services:
       - "prometheus.port=8000"
       - "prometheus.path=/metrics"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://api:8000/live')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request; port=os.getenv('API_PORT','8000'); urllib.request.urlopen(f'http://127.0.0.1:{port}/live')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -247,15 +253,16 @@ services:
       CHAIN_ID: ${CHAIN_ID}
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY}
       RELAYER_ESCROW_ADDRESS: ${RELAYER_ESCROW_ADDRESS}
-      RELAYER_HOST: ${RELAYER_HOST}
-      RELAYER_PORT: ${RELAYER_PORT}
+      RELAYER_HOST: ${RELAYER_HOST:-0.0.0.0}
+      RELAYER_PORT: ${RELAYER_PORT:-8088}
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${RELAYER_PORT}/healthz || exit 1"]
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${RELAYER_PORT:-8088}/healthz')"]
       interval: 20s
       timeout: 5s
       retries: 3
@@ -298,7 +305,7 @@ services:
         condition: service_healthy
     healthcheck:
       # Prefer IPv4 loopback to avoid IPv6-only DNS resolutions inside Alpine.
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/healthz || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok) process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -376,6 +383,12 @@ services:
         reservations:
           cpus: "0.5"
           memory: 192M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   streamer:
     build:

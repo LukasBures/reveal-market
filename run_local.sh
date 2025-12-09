@@ -342,19 +342,30 @@ cat <<EOF
 ------------------------------------------------------------
 Stack ready. Useful URLs:
 
-  • Frontend:               http://localhost
-  • API docs:               http://localhost:8000/docs
-  • API health:             http://localhost:8000/healthz
-  • API heartbeats:         http://localhost:8000/health/heartbeats
-  • Streamer health:        http://localhost:8100/healthz
-  • Streamer history:       http://localhost:8100/history?market_id=...&outcome=0
+  Apps:
+    • Frontend:             http://localhost:${FRONTEND_PORT}
+    • API docs:             http://localhost:${API_PORT}/docs
+    • API health:           http://localhost:${API_PORT}/healthz
+    • API heartbeats:       http://localhost:${API_PORT}/health/heartbeats
+    • Streamer health:      http://localhost:${STREAMER_PORT}/healthz
+    • Streamer history:     http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
+  Infra:
+    • Relayer health:       http://localhost:${RELAYER_PORT:-8088}/healthz
+    • Hedger health:        http://localhost:${HEDGER_PORT:-8079}/healthz
+    • Prover health:        http://localhost:8085/healthz
+    • Caddy admin:          http://localhost:2019/config/
 
 Internal service ports (for debugging):
 
-  • API direct:             http://localhost:8000
-  • Streamer direct:        http://localhost:8100
-  • Frontend direct:        http://localhost:3000
-  • Relayer:                http://localhost:8088/healthz
+  Apps:
+    • API direct:           http://localhost:${API_PORT}
+    • Streamer direct:      http://localhost:${STREAMER_PORT}
+    • Frontend direct:      http://localhost:${FRONTEND_PORT}
+  Infra:
+    • Relayer (internal):   http://relayer:${RELAYER_PORT:-8088}/healthz
+    • Hedger (internal):    http://hedger:${HEDGER_PORT:-8079}/healthz
+    • Prover (internal):    http://prover:8085/healthz
+    • Caddy (internal):     http://caddy:2019/config/
 
 Datastores:
 
@@ -405,19 +416,10 @@ for svc in items:
     print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
 )"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python3 -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
-if [[ "${DETACH_MODE}" == "false" ]]; then
-  cat <<'EOF'
-📜 Streaming logs (Ctrl+C to stop):
-------------------------------------------------------------
+cat <<EOF
+✅ Services started successfully.
+   Compose command: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} ${UP_ARGS[*]}
 EOF
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} logs -f"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" logs -f
-else
-  cat <<EOF
-📜 Services are running in the background (started with --detach).
-    View logs with: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} logs -f ${UP_ARGS[*]}
-EOF
-fi

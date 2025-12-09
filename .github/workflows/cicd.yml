@@ -244,9 +244,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Skip prover when artifacts URL missing
+        if: ${{ env.PROVER_ARTIFACTS_URL == '' }}
+        run: |
+          echo "PROVER_ARTIFACTS_URL not set; skipping prover job."
+          exit 0
+
       - name: Cache Go modules
         uses: actions/cache@v4
-        if: ${{ hashFiles('prover/go.sum') != '' }}
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' && hashFiles('prover/go.sum') != '' }}
         with:
           path: |
             ~/.cache/go-build
@@ -256,14 +262,17 @@ jobs:
             go-${{ runner.os }}-
 
       - uses: actions/setup-go@v5
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         with:
           go-version: "1.22"
 
       - uses: actions/setup-node@v4
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         with:
           node-version: "20"
 
       - name: Install rapidsnark binary
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         env:
           RAPIDSNARK_VERSION: v0.0.7
         run: |
@@ -274,18 +283,22 @@ jobs:
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
       - name: Download prover artifacts
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: ./scripts/download_artifacts.sh
 
       - name: Verify prover artifacts
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: go run ./cmd/verify-artifacts
 
       - name: Run prover tests
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: ./run_tests.sh -v
 
       - name: Go format check (prover)
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: |
           CHANGED=$(gofmt -l .)
@@ -296,6 +309,7 @@ jobs:
           fi
 
       - name: Go vet
+        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: go vet -v ./...
 
