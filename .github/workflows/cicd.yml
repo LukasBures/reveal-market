@@ -261,16 +261,12 @@ jobs:
       PROVER_ARTIFACTS_SHA256: ${{ secrets.PROVER_ARTIFACTS_SHA256 || vars.PROVER_ARTIFACTS_SHA256 || '' }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Skip prover when artifacts URL missing
-        if: ${{ env.PROVER_ARTIFACTS_URL == '' }}
-        run: |
-          echo "PROVER_ARTIFACTS_URL not set; skipping prover job."
-          exit 0
+        with:
+          submodules: true
 
       - name: Cache Go modules
         uses: actions/cache@v4
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' && hashFiles('prover/go.sum') != '' }}
+        if: ${{ hashFiles('prover/go.sum') != '' }}
         with:
           path: |
             ~/.cache/go-build
@@ -280,12 +276,10 @@ jobs:
             go-${{ runner.os }}-
 
       - uses: actions/setup-go@v5
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         with:
           go-version: "1.22"
 
       - uses: actions/setup-node@v4
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         with:
           node-version: "20"
 
