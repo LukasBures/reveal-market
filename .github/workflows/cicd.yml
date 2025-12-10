@@ -280,27 +280,16 @@ jobs:
           git config submodule.prover/artifacts.update none
           git submodule update --init --recursive
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        if: ${{ hashFiles('prover/go.sum') != '' }}
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('prover/go.sum') }}
-          restore-keys: |
-            go-${{ runner.os }}-
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: prover/go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install rapidsnark binary
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         env:
           RAPIDSNARK_VERSION: v0.0.7
         run: |
@@ -310,23 +299,42 @@ jobs:
           echo "${RS_DIR}/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
-      - name: Download prover artifacts
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
-        working-directory: prover
-        run: ./scripts/download_artifacts.sh
+      - name: Prepare prover artifacts
+        run: |
+          set -euo pipefail
+          ROOT_DIR="$(pwd)"
+          SUBMODULE_BUILD="${ROOT_DIR}/prover/artifacts/prover/circuits/build"
+          if [ -n "${PROVER_ARTIFACTS_URL}" ]; then
+            cd "${ROOT_DIR}/prover"
+            ./scripts/download_artifacts.sh
+          elif [ -f "${SUBMODULE_BUILD}/settlement_final.zkey" ]; then
+            echo "Seeding prover artifacts from submodule..."
+            rm -rf "${ROOT_DIR}/prover/circuits/build"
+            mkdir -p "${ROOT_DIR}/prover/circuits"
+            cp -a "${SUBMODULE_BUILD}" "${ROOT_DIR}/prover/circuits/"
+            # Copy cached verifier files when present
+            if [ -d "${ROOT_DIR}/prover/artifacts/contracts/cache" ]; then
+              mkdir -p "${ROOT_DIR}/contracts"
+              cp -a "${ROOT_DIR}/prover/artifacts/contracts/cache" "${ROOT_DIR}/contracts/"
+            fi
+            if [ -d "${ROOT_DIR}/prover/artifacts/contracts/zen/cache" ]; then
+              mkdir -p "${ROOT_DIR}/contracts/zen"
+              cp -a "${ROOT_DIR}/prover/artifacts/contracts/zen/cache" "${ROOT_DIR}/contracts/zen/"
+            fi
+          else
+            echo "No PROVER_ARTIFACTS_URL provided and prover/artifacts submodule missing expected files." >&2
+            exit 1
+          fi
 
       - name: Verify prover artifacts
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: go run ./cmd/verify-artifacts
 
       - name: Run prover tests
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: ./run_tests.sh -v
 
       - name: Go format check (prover)
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: |
           CHANGED=$(gofmt -l .)
@@ -337,7 +345,6 @@ jobs:
           fi
 
       - name: Go vet
-        if: ${{ env.PROVER_ARTIFACTS_URL != '' }}
         working-directory: prover
         run: go vet -v ./...
 
