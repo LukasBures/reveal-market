@@ -10,7 +10,7 @@ ARG APK_FALLBACK_URL
 
 WORKDIR /app
 COPY prover/go.mod ./
-RUN --network=host go mod download
+RUN go mod download
 COPY prover/. .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /usr/bin/prover
 
@@ -40,7 +40,7 @@ FROM node:20-alpine
 ARG APK_REPO_URL
 ARG APK_FALLBACK_URL
 
-RUN --network=host --mount=type=cache,target=/var/cache/apk set -eux; \
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \

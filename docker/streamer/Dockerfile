@@ -11,7 +11,7 @@ ARG APK_FALLBACK_URL
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN --network=host --mount=type=cache,target=/var/cache/apk set -eux; \
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
@@ -34,7 +34,7 @@ ARG APK_REPO_URL
 ARG APK_FALLBACK_URL
 WORKDIR /app
 
-RUN --network=host --mount=type=cache,target=/var/cache/apk set -eux; \
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
@@ -56,7 +56,7 @@ COPY streamer/pyproject.toml /app/pyproject.toml
 COPY streamer/README.md /app/README.md
 COPY streamer/app /app/app
 
-RUN --network=host --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --prefix /install hatchling "uvicorn[standard]" .
 RUN apk del .build-deps
 

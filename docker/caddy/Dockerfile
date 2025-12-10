@@ -6,7 +6,7 @@ FROM caddy:${CADDY_VERSION}-builder AS builder
 ARG GOPROXY_URL
 ENV GOPROXY=${GOPROXY_URL}
 
-RUN --network=host set -eux; \
+RUN set -eux; \
     xcaddy_with_retry() { \
       for i in 1 2 3 4 5; do \
         if xcaddy build \
@@ -29,7 +29,7 @@ ARG CADDY_TLS_PROFILE=tls_local
 # Default to local TLS so build-time validation succeeds even when no env is provided.
 ENV CADDY_TLS_PROFILE=${CADDY_TLS_PROFILE}
 
-RUN --network=host set -eux; \
+RUN set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
