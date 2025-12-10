@@ -43,16 +43,18 @@ PRESETS: dict[str, dict[str, object]] = {
             "revealmarket.xyz",
             "api.revealmarket.xyz",
             "stream.revealmarket.xyz",
+            "api",
+            "api:8000",
         ],
         "api_cors_origins": [
             "https://revealmarket.xyz",
             "https://api.revealmarket.xyz",
             "https://stream.revealmarket.xyz",
         ],
-        "api_internal_base_url": "https://api.revealmarket.xyz",
+        "api_internal_base_url": "http://api:8000",
         "api_public_base_url": "https://api.revealmarket.xyz",
         "streamer_public": "https://stream.revealmarket.xyz",
-        "streamer_internal": "https://stream.revealmarket.xyz",
+        "streamer_internal": "http://streamer:8100",
     },
 }
 

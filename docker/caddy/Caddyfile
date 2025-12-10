@@ -75,6 +75,9 @@
 (proxy_api) {
   reverse_proxy api:8000 {
     health_uri /healthz
+    health_headers {
+      Host api.revealmarket.xyz
+    }
     health_interval 10s
     health_timeout 3s
     max_fails 2
@@ -84,12 +87,16 @@
       keepalive_idle_conns 64
       read_timeout 60s
     }
+    header_up Host api.revealmarket.xyz
   }
 }
 
 (proxy_streamer) {
   reverse_proxy streamer:8100 {
     health_uri /healthz
+    health_headers {
+      Host stream.revealmarket.xyz
+    }
     health_interval 10s
     health_timeout 3s
     max_fails 2
@@ -99,6 +106,7 @@
       keepalive_idle_conns 64
       read_timeout 60s
     }
+    header_up Host stream.revealmarket.xyz
   }
 }
 
