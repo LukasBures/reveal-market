@@ -10,7 +10,7 @@ ARG APK_FALLBACK_URL
 
 WORKDIR /app
 COPY prover/go.mod ./
-RUN go mod download
+RUN --network=host go mod download
 COPY prover/. .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /usr/bin/prover
 
@@ -40,7 +40,7 @@ FROM node:20-alpine
 ARG APK_REPO_URL
 ARG APK_FALLBACK_URL
 
-RUN --mount=type=cache,target=/var/cache/apk set -eux; \
+RUN --network=host --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
@@ -49,7 +49,7 @@ RUN --mount=type=cache,target=/var/cache/apk set -eux; \
       echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
     fi; \
     apk_with_retry() { \
-      for i in 1 2 3; do \
+      for i in 1 2 3 4 5; do \
         if apk add --no-cache "$@"; then return 0; fi; \
         echo "apk add failed (attempt ${i}), retrying..." >&2; \
         sleep "${i}"; \

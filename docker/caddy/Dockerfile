@@ -6,9 +6,9 @@ FROM caddy:${CADDY_VERSION}-builder AS builder
 ARG GOPROXY_URL
 ENV GOPROXY=${GOPROXY_URL}
 
-RUN set -eux; \
+RUN --network=host set -eux; \
     xcaddy_with_retry() { \
-      for i in 1 2 3; do \
+      for i in 1 2 3 4 5; do \
         if xcaddy build \
             --with github.com/caddy-dns/cloudflare@v0.2.2 \
             --output /usr/bin/caddy; then \
@@ -29,7 +29,7 @@ ARG CADDY_TLS_PROFILE=tls_local
 # Default to local TLS so build-time validation succeeds even when no env is provided.
 ENV CADDY_TLS_PROFILE=${CADDY_TLS_PROFILE}
 
-RUN set -eux; \
+RUN --network=host set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
@@ -38,7 +38,7 @@ RUN set -eux; \
       echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
     fi; \
     apk_with_retry() { \
-      for i in 1 2 3; do \
+      for i in 1 2 3 4 5; do \
         if apk add --no-cache "$@"; then return 0; fi; \
         echo "apk add failed (attempt ${i}), retrying..." >&2; \
         sleep "${i}"; \

@@ -9,7 +9,7 @@ ARG APK_FALLBACK_URL=https://mirror.leaseweb.net/alpine
 FROM node:20-alpine AS deps
 ARG APK_REPO_URL
 ARG APK_FALLBACK_URL
-RUN --mount=type=cache,target=/var/cache/apk set -eux; \
+RUN --network=host --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apk set -eux; \
       echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
     fi; \
     apk_with_retry() { \
-      for i in 1 2 3; do \
+      for i in 1 2 3 4 5; do \
         if apk add --no-cache "$@"; then return 0; fi; \
         echo "apk add failed (attempt ${i}), retrying..." >&2; \
         sleep "${i}"; \
@@ -30,7 +30,7 @@ WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 # Cache npm modules between builds when BuildKit is enabled.
-RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit
+RUN --network=host --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit
 RUN apk del .build-deps
 
 # 2) Build stage – all NEXT_PUBLIC_* must be passed as build args
@@ -60,7 +60,7 @@ ENV NEXT_DISABLE_MINIFY=${NEXT_DISABLE_MINIFY}
 # Optional: if you use this in next.config.mjs
 # ENV RUNNING_IN_DOCKER=true
 
-RUN npm run build
+RUN --network=host npm run build
 
 # 3) Runtime stage
 FROM node:20-alpine AS runner
