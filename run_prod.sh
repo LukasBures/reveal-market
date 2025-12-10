@@ -413,7 +413,7 @@ for svc in items:
     print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
 )"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python -c "${HEALTH_SUMMARY_SCRIPT}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python3 -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
 log_step "Deployment complete"
