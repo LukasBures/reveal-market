@@ -197,15 +197,15 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 		artifactsStatus.Set(0)
 	}
 	payload := map[string]any{
-		"status":          "ok",
-		"backend":         a.prover.Backend(),
-		"version":         a.cfg.Version,
-		"circuit_hash":    a.circuitHash,
-		"uptime_seconds":  int(time.Since(a.startedAt).Seconds()),
-		"last_heartbeat":  formatMillis(lastHeartbeat),
-		"last_proof_at":   formatMillis(lastProof),
-		"max_concurrency": a.cfg.MaxConcurrency,
-		"ready":           a.prover.Ready(),
+		"status":            "ok",
+		"backend":           a.prover.Backend(),
+		"version":           a.cfg.Version,
+		"circuit_hash":      a.circuitHash,
+		"uptime_seconds":    int(time.Since(a.startedAt).Seconds()),
+		"last_heartbeat":    formatMillis(lastHeartbeat),
+		"last_proof_at":     formatMillis(lastProof),
+		"max_concurrency":   a.cfg.MaxConcurrency,
+		"ready":             a.prover.Ready(),
 		"artifacts_ok":      artifactsOk,
 		"missing_artifacts": missing,
 	}

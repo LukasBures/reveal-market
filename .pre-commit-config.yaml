@@ -52,6 +52,12 @@ repos:
         types_or: [python]
         pass_filenames: false
         require_serial: true
+      - id: gofmt-prover
+        name: gofmt (prover)
+        description: "Format Go files under prover/"
+        entry: bash -c 'set -euo pipefail; files=$(git ls-files -- ''prover/*.go'' ''prover/**/*.go''); if [ -z "$files" ]; then echo "No Go files under prover/"; exit 0; fi; echo "$files" | xargs gofmt -w'
+        language: system
+        pass_filenames: false
       - id: forge-snapshot
         name: forge snapshot (contracts/* workspaces)
         description: "Regenerate gas snapshots when contracts change"
