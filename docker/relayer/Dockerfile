@@ -21,7 +21,7 @@ RUN apt-get update -qq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-COPY ${RELAYER_DIR}/pyproject.toml ${RELAYER_DIR}/uv.lock ./ 
+COPY ${RELAYER_DIR}/pyproject.toml ${RELAYER_DIR}/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --frozen --no-install-project
 
 COPY ${RELAYER_DIR}/src ./src
