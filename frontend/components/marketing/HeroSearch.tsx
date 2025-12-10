@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useRef, useState, useTransition } from "react";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
 import type { MarketSummary } from "@/lib/api-types";
+import { MarketArtwork } from "@/components/markets/MarketArtwork";
 
 const SUGGESTION_CACHE = new Map<string, { data: MarketSummary[]; expiresAt: number }>();
 const CACHE_LIMIT = 50;
@@ -135,7 +136,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Search markets" className="relative w-full max-w-5xl">
+    <form onSubmit={handleSubmit} aria-label="Search markets" className="relative w-full">
       <label htmlFor="hero-market-search" className="sr-only">
         Search markets
       </label>
@@ -193,6 +194,13 @@ export function HeroSearch({ initialSearch = "" }: Props) {
                   index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"
                 }`}
               >
+                <MarketArtwork
+                  src={suggestion.imageUrl ?? null}
+                  alt={`${suggestion.title} artwork`}
+                  sizeClass="w-10"
+                  roundedClass="rounded-lg"
+                  borderClass="border border-white/10"
+                />
                 <div className="flex flex-col">
                   <span className="font-semibold leading-snug text-white">{suggestion.title}</span>
                   <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-500">

@@ -67,14 +67,6 @@ export default async function HomePage({ searchParams }: PageProps) {
     <div className="relative text-white">
       <Hero stats={callouts} />
       <div className="mx-auto flex max-w-7xl flex-col gap-10 px-4 pb-12">
-        <section className="glass-panel p-4 sm:p-6">
-          <MarketFilters
-            initialSearch={rawSearchQuery}
-            liveMarketsCount={liveMarkets}
-            finalizedMarketsCount={finalizedMarkets}
-            totalMarketsCount={totalMarkets}
-          />
-        </section>
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
         </Suspense>
