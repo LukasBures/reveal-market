@@ -3,14 +3,20 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_FALLBACK_URL=https://mirror.leaseweb.net/alpine
 
 # 1) Install dependencies
 FROM node:20-alpine AS deps
 ARG APK_REPO_URL
+ARG APK_FALLBACK_URL
 RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    if [ -n "${APK_FALLBACK_URL}" ]; then \
+      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/main" >> /etc/apk/repositories; \
+      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    fi; \
     apk_with_retry() { \
       for i in 1 2 3; do \
         if apk add --no-cache "$@"; then return 0; fi; \

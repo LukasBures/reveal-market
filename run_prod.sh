@@ -36,6 +36,7 @@ SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_SSH_KEY_PATH="${PROVER_ARTIFACTS_SSH_KEY_PATH:-}"
 APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
+APK_FALLBACK_URL="${APK_FALLBACK_URL:-https://mirror.leaseweb.net/alpine}"
 ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
 PROVER_REQUIRED_FILES=(
   "prover/circuits/build/settlement_js/generate_witness.js"
@@ -98,6 +99,9 @@ check_apk_mirror() {
     log_info "APK mirror reachable at ${APK_REPO_URL} for tested Alpine bases."
   else
     log_warn "APK mirror preflight encountered errors. Consider overriding APK_REPO_URL to a known-good mirror (e.g., https://dl-cdn.alpinelinux.org/alpine)."
+    if [[ -n "${APK_FALLBACK_URL}" ]]; then
+      log_info "Fallback mirror configured: ${APK_FALLBACK_URL}"
+    fi
   fi
 }
 
@@ -265,6 +269,7 @@ export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 # Production runs default to real certificates unless explicitly overridden.
 export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_prod}"
 export APK_REPO_URL
+export APK_FALLBACK_URL
 
 RUN_BUILD="true"
 RUN_PRUNE="false"
@@ -347,8 +352,8 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
   log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull --build-arg APK_REPO_URL=${APK_REPO_URL}"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull --build-arg "APK_REPO_URL=${APK_REPO_URL}"
+  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull --build-arg APK_REPO_URL=${APK_REPO_URL} --build-arg APK_FALLBACK_URL=${APK_FALLBACK_URL}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}"
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi

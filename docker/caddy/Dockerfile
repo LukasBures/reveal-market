@@ -1,5 +1,6 @@
 ARG CADDY_VERSION=2
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_FALLBACK_URL=https://mirror.leaseweb.net/alpine
 ARG GOPROXY_URL=direct
 FROM caddy:${CADDY_VERSION}-builder AS builder
 ARG GOPROXY_URL
@@ -22,6 +23,7 @@ RUN set -eux; \
 
 FROM caddy:${CADDY_VERSION}-alpine
 ARG APK_REPO_URL
+ARG APK_FALLBACK_URL
 
 ARG CADDY_TLS_PROFILE=tls_local
 # Default to local TLS so build-time validation succeeds even when no env is provided.
@@ -31,6 +33,10 @@ RUN set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    if [ -n "${APK_FALLBACK_URL}" ]; then \
+      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/main" >> /etc/apk/repositories; \
+      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    fi; \
     apk_with_retry() { \
       for i in 1 2 3; do \
         if apk add --no-cache "$@"; then return 0; fi; \

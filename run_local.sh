@@ -46,6 +46,7 @@ PROVER_REQUIRED_FILES=(
 )
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
+APK_FALLBACK_URL="${APK_FALLBACK_URL:-https://mirror.leaseweb.net/alpine}"
 ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
 
 prune_docker_artifacts() {
@@ -112,6 +113,9 @@ check_apk_mirror() {
     log_info "APK mirror reachable at ${APK_REPO_URL} for tested Alpine bases."
   else
     log_warn "APK mirror preflight encountered errors. Consider overriding APK_REPO_URL to a known-good mirror (e.g., https://dl-cdn.alpinelinux.org/alpine)."
+    if [[ -n "${APK_FALLBACK_URL}" ]]; then
+      log_info "Fallback mirror configured: ${APK_FALLBACK_URL}"
+    fi
   fi
 }
 
@@ -192,6 +196,7 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 export APK_REPO_URL
+export APK_FALLBACK_URL
 
 BUILD_FLAG=""
 RUN_BUILD="true"
@@ -338,7 +343,7 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
 
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
   log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  BUILD_OPTS=(--parallel --build-arg "APK_REPO_URL=${APK_REPO_URL}")
+  BUILD_OPTS=(--parallel --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi
