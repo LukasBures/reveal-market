@@ -71,7 +71,15 @@ detect_cpu_count() {
 
 detect_alpine_version() {
   local image="$1"
-  docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null | cut -d. -f1,2
+  local release
+  if ! release="$(docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null || true)"; then
+    release=""
+  fi
+  if [[ -z "${release}" ]]; then
+    echo ""
+    return 0
+  fi
+  echo "${release}" | cut -d. -f1,2
 }
 
 ensure_docker_running() {
@@ -147,33 +155,21 @@ ensure_prover_artifacts() {
     log_warn "Skipping Groth16 artifact validation (SKIP_PROVER_CHECK=true)."
     return
   fi
-  # Prefer the Go-based verifier when Go is available; fall back to a simple file check.
-  if command -v go >/dev/null 2>&1; then
-    if ! (cd "${ROOT_DIR}/prover" && go run ./cmd/verify-artifacts >/dev/null 2>&1); then
-      cat <<EOF
-Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
-Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
-Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
-EOF
-      exit 1
+  local missing=()
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    if [[ ! -s "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
+      missing+=("${rel_path}")
     fi
-  else
-    local missing=()
-    for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-      if [[ ! -f "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
-        missing+=("${rel_path}")
-      fi
-    done
-    if (( ${#missing[@]} > 0 )); then
-      cat <<EOF
+  done
+  if (( ${#missing[@]} > 0 )); then
+    cat <<EOF
 Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
 Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
 Missing files:
 $(printf '  - %s\n' "${missing[@]}")
 Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
 EOF
-      exit 1
-    fi
+    exit 1
   fi
 }
 

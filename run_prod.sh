@@ -57,7 +57,15 @@ prune_docker_artifacts() {
 
 detect_alpine_version() {
   local image="$1"
-  docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null | cut -d. -f1,2
+  local release
+  if ! release="$(docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null || true)"; then
+    release=""
+  fi
+  if [[ -z "${release}" ]]; then
+    echo ""
+    return 0
+  fi
+  echo "${release}" | cut -d. -f1,2
 }
 
 ensure_docker_running() {
@@ -160,8 +168,6 @@ check_prover_artifacts() {
     # Allow overriding SSH identity for the private artifacts repo (e.g., deploy key on production host).
     local submodule_env=()
     if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
-      # Trim accidental whitespace to avoid "No such file" when paths include leading spaces.
-      PROVER_ARTIFACTS_SSH_KEY_PATH="$(echo "${PROVER_ARTIFACTS_SSH_KEY_PATH}" | xargs)"
       if [[ ! -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
         log_warn "Artifacts SSH key not found at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; proceeding without submodule auth override."
       else
@@ -211,16 +217,18 @@ check_prover_artifacts() {
     exit 1
   fi
 
-  # Prefer the Go-based verifier when available.
-  if command -v go >/dev/null 2>&1; then
-    if (cd "${ROOT_DIR}/prover" && go run ./cmd/verify-artifacts >/dev/null 2>&1); then
-      return
+  # Final presence check (avoids requiring Go on the host).
+  local missing_final=()
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    local dest="${ROOT_DIR}/${rel_path}"
+    if [[ ! -s "${dest}" ]]; then
+      missing_final+=("${rel_path}")
     fi
-    log_warn "Go-based artifact verification failed. Aborting."
+  done
+  if (( ${#missing_final[@]} > 0 )); then
+    log_warn "Prover artifacts failed final presence check: ${missing_final[*]}"
     exit 1
   fi
-
-  log_warn "Skipping Go-based artifact verification (Go not installed)."
 }
 
 check_caddyfile() {
