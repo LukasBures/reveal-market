@@ -1,10 +1,24 @@
 ARG CADDY_VERSION=2
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
+ARG GOPROXY_URL=direct
 FROM caddy:${CADDY_VERSION}-builder AS builder
+ARG GOPROXY_URL
+ENV GOPROXY=${GOPROXY_URL}
 
-RUN xcaddy build \
-    --with github.com/caddy-dns/cloudflare@v0.2.2 \
-    --output /usr/bin/caddy
+RUN set -eux; \
+    xcaddy_with_retry() { \
+      for i in 1 2 3; do \
+        if xcaddy build \
+            --with github.com/caddy-dns/cloudflare@v0.2.2 \
+            --output /usr/bin/caddy; then \
+          return 0; \
+        fi; \
+        echo "xcaddy build failed (attempt ${i}), retrying..." >&2; \
+        sleep "${i}"; \
+      done; \
+      return 1; \
+    }; \
+    xcaddy_with_retry
 
 FROM caddy:${CADDY_VERSION}-alpine
 ARG APK_REPO_URL

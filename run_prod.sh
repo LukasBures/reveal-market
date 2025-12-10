@@ -33,9 +33,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.prod"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
-PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_SSH_KEY_PATH="${PROVER_ARTIFACTS_SSH_KEY_PATH:-}"
+APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
+ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
 PROVER_REQUIRED_FILES=(
   "prover/circuits/build/settlement_js/generate_witness.js"
   "prover/circuits/build/settlement_js/settlement.wasm"
@@ -52,6 +53,44 @@ prune_docker_artifacts() {
   log_step "Pruning unused Docker images, containers, and build cache"
   docker system prune -af >/dev/null
   docker builder prune -af >/dev/null || true
+}
+
+detect_alpine_version() {
+  local image="$1"
+  docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null | cut -d. -f1,2
+}
+
+ensure_docker_running() {
+  if ! docker info >/dev/null 2>&1; then
+    log_warn "Docker daemon is not running. Start Docker and try again."
+    exit 1
+  fi
+}
+
+check_apk_mirror() {
+  if ! command -v curl >/dev/null 2>&1; then
+    log_warn "curl not found; skipping APK mirror preflight (APK_REPO_URL=${APK_REPO_URL})."
+    return
+  fi
+  local failures=0
+  for image in "${ALPINE_BASE_IMAGES[@]}"; do
+    local version
+    version="$(detect_alpine_version "${image}")"
+    if [[ -z "${version}" ]]; then
+      log_warn "Could not detect Alpine version for ${image}; skipping mirror check for this image."
+      continue
+    fi
+    local index_url="${APK_REPO_URL}/v${version}/main/x86_64/APKINDEX.tar.gz"
+    if ! curl -fsI --max-time 8 "${index_url}" >/dev/null 2>&1; then
+      log_warn "APK mirror check failed for ${image} (version ${version}) at ${index_url}; DNS/mirror may be flaky."
+      failures=1
+    fi
+  done
+  if [[ "${failures}" -eq 0 ]]; then
+    log_info "APK mirror reachable at ${APK_REPO_URL} for tested Alpine bases."
+  else
+    log_warn "APK mirror preflight encountered errors. Consider overriding APK_REPO_URL to a known-good mirror (e.g., https://dl-cdn.alpinelinux.org/alpine)."
+  fi
 }
 
 if docker compose version >/dev/null 2>&1; then
@@ -121,7 +160,13 @@ check_prover_artifacts() {
     # Allow overriding SSH identity for the private artifacts repo (e.g., deploy key on production host).
     local submodule_env=()
     if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
-      submodule_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+      # Trim accidental whitespace to avoid "No such file" when paths include leading spaces.
+      PROVER_ARTIFACTS_SSH_KEY_PATH="$(echo "${PROVER_ARTIFACTS_SSH_KEY_PATH}" | xargs)"
+      if [[ ! -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+        log_warn "Artifacts SSH key not found at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; proceeding without submodule auth override."
+      else
+        submodule_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+      fi
     fi
     if ! "${submodule_env[@]}" git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null; then
       log_warn "Failed to update prover/artifacts submodule; ensure it is cloned and accessible."
@@ -211,6 +256,7 @@ export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 # Production runs default to real certificates unless explicitly overridden.
 export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_prod}"
+export APK_REPO_URL
 
 RUN_BUILD="true"
 RUN_PRUNE="false"
@@ -262,11 +308,12 @@ if ! command -v docker >/dev/null 2>&1; then
   log_warn "docker is required to deploy the stack"
   exit 1
 fi
+ensure_docker_running
 
 check_env_file
 check_prover_artifacts
 check_caddyfile
-disable_next_telemetry
+check_apk_mirror
 
 if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts
@@ -292,8 +339,8 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
   log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull
+  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull --build-arg APK_REPO_URL=${APK_REPO_URL}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull --build-arg "APK_REPO_URL=${APK_REPO_URL}"
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi

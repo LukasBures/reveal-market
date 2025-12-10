@@ -45,6 +45,8 @@ PROVER_REQUIRED_FILES=(
   "settlement_final.zkey"
 )
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
+APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
+ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
 
 prune_docker_artifacts() {
   log_step "Pruning unused Docker data"
@@ -64,6 +66,44 @@ detect_cpu_count() {
     echo 1
   else
     echo "${cpus}"
+  fi
+}
+
+detect_alpine_version() {
+  local image="$1"
+  docker run --rm --entrypoint=cat "${image}" /etc/alpine-release 2>/dev/null | cut -d. -f1,2
+}
+
+ensure_docker_running() {
+  if ! docker info >/dev/null 2>&1; then
+    log_warn "Docker daemon is not running. Start Docker and try again."
+    exit 1
+  fi
+}
+
+check_apk_mirror() {
+  if ! command -v curl >/dev/null 2>&1; then
+    log_warn "curl not found; skipping APK mirror preflight (APK_REPO_URL=${APK_REPO_URL})."
+    return
+  fi
+  local failures=0
+  for image in "${ALPINE_BASE_IMAGES[@]}"; do
+    local version
+    version="$(detect_alpine_version "${image}")"
+    if [[ -z "${version}" ]]; then
+      log_warn "Could not detect Alpine version for ${image}; skipping mirror check for this image."
+      continue
+    fi
+    local index_url="${APK_REPO_URL}/v${version}/main/x86_64/APKINDEX.tar.gz"
+    if ! curl -fsI --max-time 8 "${index_url}" >/dev/null 2>&1; then
+      log_warn "APK mirror check failed for ${image} (version ${version}) at ${index_url}; DNS/mirror may be flaky."
+      failures=1
+    fi
+  done
+  if [[ "${failures}" -eq 0 ]]; then
+    log_info "APK mirror reachable at ${APK_REPO_URL} for tested Alpine bases."
+  else
+    log_warn "APK mirror preflight encountered errors. Consider overriding APK_REPO_URL to a known-good mirror (e.g., https://dl-cdn.alpinelinux.org/alpine)."
   fi
 }
 
@@ -155,6 +195,7 @@ disable_next_telemetry() {
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
+export APK_REPO_URL
 
 BUILD_FLAG=""
 RUN_BUILD="true"
@@ -225,10 +266,6 @@ while [[ $# -gt 0 ]]; do
       DETACH_MODE="true"
       shift
       ;;
-    --no-cache|--without-cache)
-      BUILD_FLAG="--no-cache"
-      shift
-      ;;
     --help|-h)
       usage
       exit 0
@@ -251,6 +288,7 @@ if ! command -v docker >/dev/null 2>&1; then
     log_warn "docker is required to run the local stack"
     exit 1
 fi
+ensure_docker_running
 
 cd "${ROOT_DIR}"
 
@@ -263,7 +301,7 @@ if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
   exit 1
 fi
 ensure_prover_artifacts
-disable_next_telemetry
+check_apk_mirror
 
 # Configure env file usage
 SUPPORTS_ENV_FILE=false
@@ -304,7 +342,7 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
 
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
   log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  BUILD_OPTS=(--parallel)
+  BUILD_OPTS=(--parallel --build-arg "APK_REPO_URL=${APK_REPO_URL}")
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi
