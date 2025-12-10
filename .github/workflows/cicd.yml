@@ -257,12 +257,28 @@ jobs:
     needs: precommit
     runs-on: ubuntu-latest
     env:
+      ARTIFACTS_DEPLOY_KEY: ${{ secrets.ARTIFACTS_DEPLOY_KEY || '' }}
       PROVER_ARTIFACTS_URL: ${{ secrets.PROVER_ARTIFACTS_URL || vars.PROVER_ARTIFACTS_URL || '' }}
       PROVER_ARTIFACTS_SHA256: ${{ secrets.PROVER_ARTIFACTS_SHA256 || vars.PROVER_ARTIFACTS_SHA256 || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
+
+      - name: Checkout submodules (with artifacts key)
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
+          chmod 600 ~/.ssh/id_artifacts
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
+
+      - name: Checkout submodules (skip artifacts if no key)
+        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
+        run: |
+          git config submodule.prover/artifacts.update none
+          git submodule update --init --recursive
 
       - name: Cache Go modules
         uses: actions/cache@v4
