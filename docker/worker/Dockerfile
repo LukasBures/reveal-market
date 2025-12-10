@@ -33,7 +33,7 @@ RUN apt-get update -qq \
 COPY ${SERVICE_DIR}/pyproject.toml ./pyproject.toml
 COPY ${SERVICE_DIR}/uv.lock ./uv.lock
 
-RUN uv sync --no-dev --frozen --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --frozen --no-install-project
 
 # =============================================================================
 # Stage 2: Test — pull in dev dependencies and include full source for pytest
@@ -43,7 +43,7 @@ ARG SERVICE_DIR=backend/worker
 ARG SHARED_DIR=backend/shared
 ARG MIGRATIONS_DIR=backend/migrations
 
-RUN uv sync --extra dev --frozen
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --extra dev --frozen
 
 COPY ${SERVICE_DIR}/app ./app
 COPY ${SERVICE_DIR}/run.py ./run.py

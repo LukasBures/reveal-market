@@ -3,29 +3,16 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
-ARG APK_FALLBACK_URL=https://mirror.leaseweb.net/alpine
+ARG NODE_IMAGE=node:20-alpine
 
 # 1) Install dependencies
-FROM node:20-alpine AS deps
+FROM ${NODE_IMAGE} AS deps
 ARG APK_REPO_URL
-ARG APK_FALLBACK_URL
 RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
-    if [ -n "${APK_FALLBACK_URL}" ]; then \
-      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/main" >> /etc/apk/repositories; \
-      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
-    fi; \
-    apk_with_retry() { \
-      for i in 1 2 3 4 5; do \
-        if apk add --no-cache "$@"; then return 0; fi; \
-        echo "apk add failed (attempt ${i}), retrying..." >&2; \
-        sleep "${i}"; \
-      done; \
-      return 1; \
-    }; \
-    apk_with_retry --virtual .build-deps python3 make g++
+    apk add --no-cache --virtual .build-deps python3 make g++
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
@@ -34,7 +21,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit
 RUN apk del .build-deps
 
 # 2) Build stage – all NEXT_PUBLIC_* must be passed as build args
-FROM node:20-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app/frontend
 
 COPY --from=deps /app/frontend/node_modules ./node_modules
@@ -63,7 +50,7 @@ ENV NEXT_DISABLE_MINIFY=${NEXT_DISABLE_MINIFY}
 RUN npm run build
 
 # 3) Runtime stage
-FROM node:20-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

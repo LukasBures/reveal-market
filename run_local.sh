@@ -343,7 +343,7 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
 
   BUILD_DESC="${BUILD_FLAG:-cached layers}"
   log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  BUILD_OPTS=(--parallel --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
+  BUILD_OPTS=(--parallel)
   if [[ -n "${BUILD_FLAG}" ]]; then
     BUILD_OPTS+=("${BUILD_FLAG}")
   fi

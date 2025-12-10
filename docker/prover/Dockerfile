@@ -2,19 +2,24 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
-ARG APK_FALLBACK_URL=https://mirror.leaseweb.net/alpine
+ARG GOLANG_IMAGE=golang:1.22-alpine
+ARG NODE_IMAGE=node:20-alpine
+ARG DEBIAN_IMAGE=debian:bookworm-slim
 
-FROM golang:1.22-alpine AS builder
+FROM ${GOLANG_IMAGE} AS builder
 ARG APK_REPO_URL
-ARG APK_FALLBACK_URL
 
 WORKDIR /app
 COPY prover/go.mod ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 COPY prover/. .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /usr/bin/prover
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /usr/bin/prover
 
-FROM debian:bookworm-slim AS rapidsnark
+FROM ${DEBIAN_IMAGE} AS rapidsnark
 
 ARG RAPIDSNARK_VERSION=v0.0.7
 ARG TARGETARCH
@@ -35,28 +40,15 @@ RUN set -eux; \
     cp -r /tmp/rapidsnark/rapidsnark-linux-*-${RAPIDSNARK_VERSION}/. /opt/rapidsnark; \
     rm -rf /tmp/rapidsnark /tmp/rapidsnark.zip
 
-FROM node:20-alpine
+FROM ${NODE_IMAGE}
 
 ARG APK_REPO_URL
-ARG APK_FALLBACK_URL
 
 RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
     echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
-    if [ -n "${APK_FALLBACK_URL}" ]; then \
-      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/main" >> /etc/apk/repositories; \
-      echo "${APK_FALLBACK_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
-    fi; \
-    apk_with_retry() { \
-      for i in 1 2 3 4 5; do \
-        if apk add --no-cache "$@"; then return 0; fi; \
-        echo "apk add failed (attempt ${i}), retrying..." >&2; \
-        sleep "${i}"; \
-      done; \
-      return 1; \
-    }; \
-    apk_with_retry ca-certificates curl wget gcompat libstdc++
+    apk add --no-cache ca-certificates curl wget gcompat libstdc++
 
 RUN adduser -D -H -s /sbin/nologin prover
 WORKDIR /app

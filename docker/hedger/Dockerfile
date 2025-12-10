@@ -30,7 +30,7 @@ RUN apt-get update -qq \
 COPY ${SERVICE_DIR}/pyproject.toml ./pyproject.toml
 COPY ${SERVICE_DIR}/uv.lock ./uv.lock
 
-RUN uv sync --no-dev --frozen --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --frozen --no-install-project
 
 # =============================================================================
 # Stage 2: Test — install dev extras and run pytest
@@ -39,7 +39,7 @@ FROM builder AS test
 ARG SERVICE_DIR=hedger
 ARG SHARED_DIR=backend/shared
 
-RUN uv sync --extra dev --frozen
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --extra dev --frozen
 
 COPY ${SERVICE_DIR}/app ./app
 COPY ${SERVICE_DIR}/run.py ./run.py

@@ -54,6 +54,8 @@ services:
   caddy:
     ports:
       - "127.0.0.1:2019:2019"
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     deploy:
       resources:
         limits:
