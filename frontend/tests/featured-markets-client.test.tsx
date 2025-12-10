@@ -4,10 +4,10 @@ import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedMarketsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
-import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import { fetchFeaturedMarkets } from "@/lib/api";
 
-vi.mock("@/app/actions/markets", () => ({
-  loadFeaturedMarketsAction: vi.fn(),
+vi.mock("@/lib/api", () => ({
+  fetchFeaturedMarkets: vi.fn(),
 }));
 
 const sampleMarket = {
@@ -21,7 +21,7 @@ const sampleMarket = {
 
 describe("FeaturedMarketsClient", () => {
   beforeEach(() => {
-    vi.mocked(loadFeaturedMarketsAction).mockReset();
+    vi.mocked(fetchFeaturedMarkets).mockReset();
     class NoopIntersectionObserver {
       observe() {}
       disconnect() {}
@@ -59,7 +59,7 @@ describe("FeaturedMarketsClient", () => {
       outcomes: [],
       outcomePrices: [],
     };
-    const fetchMock = loadFeaturedMarketsAction as unknown as Mock;
+    const fetchMock = fetchFeaturedMarkets as unknown as Mock;
     fetchMock.mockResolvedValue([nextMarket]);
 
     renderWithClient(
@@ -89,7 +89,7 @@ describe("FeaturedMarketsClient", () => {
 
   it("auto-loads additional pages before showing manual button", async () => {
     let callCount = 0;
-    const fetchMock = loadFeaturedMarketsAction as unknown as Mock<number>;
+    const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;
     fetchMock.mockImplementation(() => {
       callCount += 1;
       return Promise.resolve([

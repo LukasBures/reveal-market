@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { MarketFilters } from "@/components/markets/MarketFilters";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
 import { fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
@@ -37,25 +36,6 @@ export default async function HomePage({ searchParams }: PageProps) {
     { label: "Total markets tracked", value: totalMarkets > 0 ? formatNumber(totalMarkets) : "—" },
     { label: "Access", value: "Invite only" },
   ];
-  const storyHighlights = [
-    {
-      title: "Trade without broadcasting",
-      description: "Entries stay hidden while the market runs, so your calls don't get chased or copied.",
-    },
-    {
-      title: "See the story at settle",
-      description: "When outcomes land, everyone gets a clean recap of what paid out and why.",
-    },
-    {
-      title: "Humans in the loop",
-      description: "The ops desk flags pauses, rule tweaks, and claims so you're never guessing what changed.",
-    },
-    {
-      title: "Built for curiosity",
-      description: "Markets cover sports, politics, macro catalysts, and the cultural moments investors debate.",
-    },
-  ];
-
   const resolvedParams = (await searchParams) ?? {};
   const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
   const normalizedSearch = rawSearchQuery?.trim() ?? "";

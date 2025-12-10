@@ -26,10 +26,6 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock("@/components/markets/MarketFilters", () => ({
-  MarketFilters: () => <div data-testid="filters">Filters</div>,
-}));
-
 vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
   FeaturedMarketsSection: () => <div data-testid="featured">Featured Markets</div>,
   FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading…</div>,
@@ -40,7 +36,6 @@ describe("HomePage", () => {
     const ui = await HomePage({ searchParams: Promise.resolve({}) });
     render(ui);
 
-    expect(screen.getByTestId("filters")).toBeInTheDocument();
     expect(screen.getByTestId("featured")).toBeInTheDocument();
   });
 });
