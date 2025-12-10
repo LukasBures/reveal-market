@@ -43,8 +43,6 @@ from .logging_config import setup_logging
 from .polymarket import (
     MarketPayload,
     PolymarketClient,
-    _build_market_hash_payload,
-    _compute_market_hash,
     _extract_timestamp_candidate,
     _parse_group_threshold,
     merge_clob_markets,
@@ -702,7 +700,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
     extra_params = _build_filters_from_settings(settings)
 
     def _fetch() -> list[MarketPayload]:
-        return polymarket_client.fetch_markets(
+        return polymarket_client.fetch_events_markets(
             page_size=settings.polymarket_page_size,
             max_pages=settings.polymarket_max_pages,
             order=settings.polymarket_order,
@@ -775,108 +773,6 @@ def _build_filters_from_settings(settings_obj) -> dict[str, Any]:
     if settings_obj.polymarket_archived_filter is not None:
         params["archived"] = str(settings_obj.polymarket_archived_filter).lower()
     return params
-
-
-def _enrich_popularity_from_orderbooks(markets: list[MarketPayload]) -> None:
-    if not markets:
-        return
-    token_ids = sorted({token for m in markets for token in (m.clob_token_ids or []) if token})
-    if not token_ids:
-        return
-
-    def _as_float(value: Any) -> float:
-        try:
-            numeric = float(value)
-            return numeric if numeric == numeric else 0.0
-        except (TypeError, ValueError):
-            return 0.0
-
-    def _as_int(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    aggregates: dict[str, dict[str, Any]] = {}
-    if settings.streamer_base_url:
-        aggregates = _fetch_streamer_aggregates(token_ids)
-    if not aggregates and goldsky_client is not None:
-        try:
-            aggregates = goldsky_client.orderbook_aggregates(token_ids)
-        except Exception as exc:  # pragma: no cover - network path
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.popularity.enrich_failed",
-                message="failed to fetch orderbook aggregates for popularity",
-                error=str(exc),
-            )
-            aggregates = {}
-
-    for market in markets:
-        ids = [token for token in (market.clob_token_ids or []) if token]
-        if not ids:
-            continue
-        matching = [aggregates.get(token) for token in ids if token in aggregates]
-        if not matching:
-            continue
-        volume = 0.0
-        trades = 0
-        for entry in matching:
-            if not isinstance(entry, dict):
-                continue
-            volume += _as_float(entry.get("scaledCollateralVolume") or entry.get("collateralVolume"))
-            trades += _as_int(entry.get("tradesQuantity"))
-        if volume > 0:
-            market.orderbook_volume_usd = volume
-            # Treat streamer orderbook volume as TVL source when available.
-            market.liquidity_usd = volume
-        if trades > 0:
-            market.trades_quantity = trades
-        market.content_hash = _compute_market_hash(_build_market_hash_payload(market))
-
-
-def _fetch_streamer_aggregates(token_ids: list[str]) -> dict[str, dict[str, Any]]:
-    if not token_ids or not settings.streamer_base_url:
-        return {}
-    base = str(settings.streamer_base_url).rstrip("/")
-    aggregates: dict[str, dict[str, Any]] = {}
-    chunk_size = 50
-    timeout = settings.streamer_timeout_seconds
-    for idx in range(0, len(token_ids), chunk_size):
-        batch = token_ids[idx : idx + chunk_size]
-        params = {"ids": ",".join(batch)}
-        url = f"{base}/data/subgraph/markets"
-        try:
-            res = httpx.get(url, params=params, timeout=timeout)
-            res.raise_for_status()
-            payload = res.json()
-            data = payload.get("data") if isinstance(payload, dict) else payload
-            orderbooks = []
-            if isinstance(data, list):
-                orderbooks = data
-            elif isinstance(data, dict):
-                orderbooks = data.get("orderbooks") or data.get("data") or []
-            for entry in orderbooks:
-                if not isinstance(entry, dict):
-                    continue
-                token_id = str(entry.get("id") or "").strip()
-                if not token_id:
-                    continue
-                aggregates[token_id] = entry
-        except Exception as exc:  # pragma: no cover - network path
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.popularity.streamer_failed",
-                message="failed to fetch orderbook aggregates from streamer",
-                error=str(exc),
-                url=url,
-                ids=len(batch),
-                backoff_seconds=settings.poll_interval_seconds,
-            )
-            continue
-    return aggregates
 
 
 def _slugify_token(value: str | None) -> str | None:

@@ -56,7 +56,7 @@ export function MarketCard({ market }: Props) {
   const targetHref = (market.groupSlug
     ? `/markets/group/${encodeURIComponent(market.groupSlug)}`
     : `/markets/${encodeURIComponent(market.eventId)}`) as Route;
-  const isBinary = !market.groupSlug && outcomes.length === 2;
+  const isBinary = outcomes.length === 2;
   let primaryProbabilityValue = normalizeProbability(market.outcomePrices?.[0]);
   let secondaryProbabilityValue = normalizeProbability(market.outcomePrices?.[1]);
   if (primaryProbabilityValue === undefined && secondaryProbabilityValue !== undefined) {
@@ -118,40 +118,36 @@ export function MarketCard({ market }: Props) {
           </>
         ) : (
           <>
-            {!market.groupSlug && (
-              <div className="mt-1 min-h-[86px] space-y-1 text-xs text-slate-300">
-                {visibleOutcomes.map((outcome, idx) => {
-                  const probability = formatProbability(normalizeProbability(market.outcomePrices?.[idx]));
-                  const hoverColor =
-                    idx === 0
-                      ? "transition hover:bg-emerald-900/40"
-                      : idx === 1
-                        ? "transition hover:bg-rose-900/40"
-                        : "transition hover:bg-white/10";
-                  return (
-                    <div
-                      key={outcome}
-                      className={`flex items-center justify-between rounded-lg bg-slate-900 px-3 py-1.5 ${hoverColor}`}
-                    >
-                      <span className="truncate">{outcome}</span>
-                      <span className="font-semibold text-white">{probability}</span>
-                    </div>
-                  );
-                })}
+            <div className="mt-1 min-h-[86px] space-y-1 text-xs text-slate-300">
+              {visibleOutcomes.map((outcome, idx) => {
+                const probability = formatProbability(normalizeProbability(market.outcomePrices?.[idx]));
+                const hoverColor =
+                  idx === 0
+                    ? "transition hover:bg-emerald-900/40"
+                    : idx === 1
+                      ? "transition hover:bg-rose-900/40"
+                      : "transition hover:bg-white/10";
+                return (
+                  <div
+                    key={outcome}
+                    className={`flex items-center justify-between rounded-lg bg-slate-900 px-3 py-1.5 ${hoverColor}`}
+                  >
+                    <span className="truncate">{outcome}</span>
+                    <span className="font-semibold text-white">{probability}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-auto grid grid-cols-2 gap-2 text-[11px] uppercase tracking-[0.25em] text-white/60">
+              <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
+                <span>24h vol</span>
+                <span className="font-semibold text-white/80">{formatStatValue(volumeUsd)}</span>
               </div>
-            )}
-            {!market.groupSlug && (
-              <div className="mt-auto grid grid-cols-2 gap-2 text-[11px] uppercase tracking-[0.25em] text-white/60">
-                <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
-                  <span>24h vol</span>
-                  <span className="font-semibold text-white/80">{formatStatValue(volumeUsd)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
-                  <span>Liquidity</span>
-                  <span className="font-semibold text-white/80">{formatStatValue(market.liquidityUsd)}</span>
-                </div>
+              <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
+                <span>Liquidity</span>
+                <span className="font-semibold text-white/80">{formatStatValue(market.liquidityUsd)}</span>
               </div>
-            )}
+            </div>
           </>
         )}
       </div>

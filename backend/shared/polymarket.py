@@ -32,4 +32,24 @@ def build_polymarket_markets_url(base_url: str) -> str:
     return f"{trimmed}/markets{query_suffix}"
 
 
-__all__ = ["build_polymarket_markets_url"]
+def build_polymarket_events_url(base_url: str) -> str:
+    """Return an events endpoint derived from the configured Polymarket base URL."""
+
+    normalized = (base_url or "").strip()
+    if not normalized:
+        raise ValueError("Polymarket base URL is required")
+
+    if "?" in normalized:
+        path, query = normalized.split("?", 1)
+        query_suffix = f"?{query}"
+    else:
+        path = normalized
+        query_suffix = ""
+
+    trimmed = path.rstrip("/")
+    if trimmed.lower().endswith("/events"):
+        return f"{trimmed}{query_suffix}"
+    return f"{trimmed}/events{query_suffix}"
+
+
+__all__ = ["build_polymarket_markets_url", "build_polymarket_events_url"]

@@ -115,7 +115,7 @@ def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     captured: dict[str, Any] = {}
 
     class DummyClient:
-        def fetch_markets(self, **kwargs):
+        def fetch_events_markets(self, **kwargs):
             captured.update(kwargs)
             return []
 
@@ -140,6 +140,30 @@ def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     extra = captured["extra_params"]
     assert extra["active"] == "true"
     assert extra["archived"] == "false"
+
+
+def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeypatch):
+    calls: dict[str, Any] = {"events": 0, "markets": 0}
+
+    class DummyClient:
+        def fetch_events_markets(self, **kwargs):
+            calls["events"] += 1
+            calls["kwargs"] = kwargs
+            return []
+
+        def fetch_markets(self, **_kwargs):
+            calls["markets"] += 1
+            return []
+
+    monkeypatch.setattr(app.main, "polymarket_client", DummyClient(), raising=False)
+    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
+
+    markets, _ = app.main.fetch_markets_from_polymarket()
+
+    assert markets == []
+    assert calls["events"] == 1
+    assert calls["markets"] == 0
+    assert calls["kwargs"]["order"] == app.main.settings.polymarket_order
 
 
 def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path, caplog):
@@ -476,7 +500,7 @@ def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     )
 
     monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", lambda **kwargs: [payload], raising=False)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", lambda **kwargs: [payload], raising=False)
     before = _fetch_counter("success")
 
     markets, _ = app.main.fetch_markets_from_polymarket()
@@ -490,7 +514,7 @@ def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
         raise RuntimeError("fatal failure")
 
     monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", always_fail, raising=False)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", always_fail, raising=False)
     before = _fetch_counter("error")
     with pytest.raises(RuntimeError):
         app.main.fetch_markets_from_polymarket()
@@ -519,7 +543,7 @@ def test_fetch_markets_from_polymarket_retries(monkeypatch):
     monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
     monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
     monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets", flaky_fetch, raising=False)
+    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", flaky_fetch, raising=False)
 
     markets, _ = app.main.fetch_markets_from_polymarket()
 

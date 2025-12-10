@@ -7,12 +7,12 @@ import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
-import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import { fetchFeaturedMarkets } from "@/lib/api";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import { getMarketVolume } from "@/lib/markets";
 
 /**
- * We auto-load up to three batches via IntersectionObserver to give users a lazy-loading feel
+ * We auto-load up to five batches via IntersectionObserver to give users a lazy-loading feel
  * before they need to press the button. After that the CTA becomes the explicit interaction.
  */
 export const AUTO_LOAD_BATCHES = 5;
@@ -49,7 +49,7 @@ export function FeaturedMarketsClient({
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const DEFAULT_BATCH = 40;
+  const batchSize = Math.max(pageSize, 30);
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}`;
   const sortByVolumeDesc = useCallback((a: MarketSummary, b: MarketSummary) => {
@@ -122,10 +122,10 @@ export function FeaturedMarketsClient({
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
       if (!hasMore || isPending || remainingSlots <= 0) return;
-      const nextLimit = DEFAULT_BATCH;
+      const nextLimit = batchSize;
       startTransition(async () => {
         try {
-          const additions = await loadFeaturedMarketsAction(nextLimit, {
+          const additions = await fetchFeaturedMarkets(nextLimit, {
             searchQuery,
             category: normalizedCategory,
             offset: markets.length,
@@ -138,7 +138,7 @@ export function FeaturedMarketsClient({
             setHasMore(false);
             return;
           }
-          const computedHasMore = additions.length === nextLimit && merged.length < maxItems;
+          const computedHasMore = additions.length > 0 && merged.length < maxItems;
           setMarkets(merged);
           setHasMore(computedHasMore);
           const newItemsAdded = merged.length - markets.length;
@@ -226,11 +226,6 @@ export function FeaturedMarketsClient({
             {isPending ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}
           </button>
         </div>
-      )}
-      {!hasMore && markets.length > 0 && (
-        <p className="text-center text-sm text-slate-400">
-          Looking for deeper narratives? Use the category filters above to jump into the segments that matter most.
-        </p>
       )}
     </section>
   );

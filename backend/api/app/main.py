@@ -2823,9 +2823,7 @@ def list_markets_by_category(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
-    cache_key = category_cache_key(
-        category_slug_key, limit, offset, order_by=order_by, coalesce_groups=coalesce_groups
-    )
+    cache_key = category_cache_key(category_slug_key, limit, offset, order_by=order_by, coalesce_groups=coalesce_groups)
     cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)

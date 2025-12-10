@@ -112,6 +112,7 @@ const nextConfig = (phase) => {
   return {
     reactStrictMode: true,
     output: 'standalone',
+    productionBrowserSourceMaps: false,
     images: {
       unoptimized: true,
       remotePatterns: [

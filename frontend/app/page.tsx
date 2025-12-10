@@ -67,26 +67,6 @@ export default async function HomePage({ searchParams }: PageProps) {
     <div className="relative text-white">
       <Hero stats={callouts} />
       <div className="mx-auto flex max-w-7xl flex-col gap-10 px-4 pb-12">
-        <section className="grid gap-4 rounded-[32px] border border-white/10 bg-black/40 p-6 text-slate-200 md:grid-cols-[1fr_1.1fr]">
-          <div className="space-y-3">
-            <p className="text-xs uppercase tracking-[0.4em] text-white/60">What Reveal Market is</p>
-            <p className="text-lg font-semibold text-white">Invite-only prediction markets that stay quiet while they&apos;re live.</p>
-            <p className="text-sm text-white/70">
-              Entries stay private until the story ends, then everyone gets a plain-English receipt. Already inside? Your invite cookie keeps you signed in as you explore.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {storyHighlights.map((highlight) => (
-              <div
-                key={highlight.title}
-                className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_25px_50px_rgba(0,0,0,0.3)]"
-              >
-                <p className="text-sm font-semibold text-white">{highlight.title}</p>
-                <p className="mt-2 text-sm text-white/70">{highlight.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
         <section className="glass-panel p-4 sm:p-6">
           <MarketFilters
             initialSearch={rawSearchQuery}
@@ -98,11 +78,6 @@ export default async function HomePage({ searchParams }: PageProps) {
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
           <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
         </Suspense>
-        <section className="grid gap-4 rounded-[32px] border border-white/10 bg-black/40 p-6 text-slate-200 lg:grid-cols-3">
-          <p className="col-span-full text-sm text-white/70">
-            These markets stream straight from the private board. Browse categories, filter by narrative, or check how recent stories wrapped up.
-          </p>
-        </section>
       </div>
     </div>
   );

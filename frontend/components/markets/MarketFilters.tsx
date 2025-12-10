@@ -10,7 +10,7 @@ import { MarketArtwork } from "@/components/markets/MarketArtwork";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
 import { formatNumber } from "@/lib/formatters";
 
-const categories = ["Politics", "Sports", "Finance", "Crypto", "Geopolitics", "Tech"];
+const categories = ["Crypto", "Finance", "Sports", "Politics", "Geopolitics", "Tech", "Entertainment", "Elections", "Science"];
 
 type Props = {
   initialSearch?: string;
@@ -224,7 +224,6 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
       <div className="pointer-events-none absolute -top-24 right-0 h-64 w-64 rounded-full bg-brand-400/20 blur-3xl" />
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-4 text-center lg:max-w-2xl lg:text-left">
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Explore</p>
           <div>
             <h1 className="text-3xl font-semibold text-white sm:text-4xl">Trade-ready markets curated for every narrative.</h1>
             <p className="mt-3 text-base text-slate-300">
@@ -327,25 +326,6 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
             </Link>
           );
         })}
-      </div>
-      <div className="mt-8 grid gap-4 rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-transparent p-4 text-sm text-slate-300 md:grid-cols-2">
-        <div>
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-500">UX tip</p>
-          <p className="mt-2 text-slate-200">
-            Keyboard <kbd className="rounded bg-white/10 px-1 py-0.5 text-[0.65rem]">↑/↓</kbd> navigates suggestions,
-            while <kbd className="rounded bg-white/10 px-1 py-0.5 text-[0.65rem]">Enter</kbd> opens a market instantly.
-          </p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Need a bespoke feed?</p>
-          <p className="mt-2">
-            Use the{" "}
-            <Link href="/contact" className="font-semibold text-brand-200 underline underline-offset-4">
-              contact form
-            </Link>{" "}
-            for curation tiers, design support, and API priorities.
-          </p>
-        </div>
       </div>
     </section>
   );

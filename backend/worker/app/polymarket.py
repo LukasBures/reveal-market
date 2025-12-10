@@ -18,7 +18,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.constants import END_CURSOR
 from pydantic import BaseModel, Field, ValidationError
 from shared.categories import canonical_category_from_raw
-from shared.polymarket import build_polymarket_markets_url
+from shared.polymarket import build_polymarket_events_url, build_polymarket_markets_url
 
 logger = logging.getLogger("reveal_market.worker.polymarket")
 
@@ -125,7 +125,8 @@ class MarketPayload(BaseModel):
                 group_position = int(group_item_threshold)
             except (TypeError, ValueError, OverflowError):
                 group_position = None
-        group_slug = _derive_group_slug(slug, raw.get("question"), group_item_title)
+        raw_group_slug = _clean_string(raw.get("group_slug"))
+        group_slug = raw_group_slug or _derive_group_slug(slug, raw.get("question"), group_item_title)
 
         gamma_metadata = {
             "gamma_id": str(event_id),
@@ -248,6 +249,7 @@ class PolymarketClient:
         raw_base = str(base_url)
         self.base_url = raw_base.rstrip("/")
         self._markets_url = build_polymarket_markets_url(raw_base)
+        self._events_url = build_polymarket_events_url(raw_base)
         self.timeout = timeout
         self._transport = transport
         self._request_max_attempts = max(1, int(request_max_attempts))
@@ -275,6 +277,29 @@ class PolymarketClient:
         """Walk the offset-based API, returning a list of validated markets."""
         markets: list[MarketPayload] = []
         for page in self.fetch_markets_paginated(
+            page_size=page_size,
+            max_pages=max_pages,
+            order=order,
+            ascending=ascending,
+            closed=closed,
+            extra_params=extra_params,
+        ):
+            markets.extend(page)
+        return markets
+
+    def fetch_events_markets(
+        self,
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+        order: str = "id",
+        ascending: bool = False,
+        closed: bool | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> list[MarketPayload]:
+        """Fetch markets via the /events endpoint, flattening embedded markets."""
+        markets: list[MarketPayload] = []
+        for page in self._fetch_events_paginated(
             page_size=page_size,
             max_pages=max_pages,
             order=order,
@@ -313,7 +338,13 @@ class PolymarketClient:
                 if closed is not None:
                     params["closed"] = str(closed).lower()
                 if extra_params:
-                    params.update({k: v for k, v in extra_params.items() if v is not None})
+                    for key, value in extra_params.items():
+                        if value is None:
+                            continue
+                        if isinstance(value, bool):
+                            params[key] = str(value).lower()
+                        else:
+                            params[key] = value
 
                 url = self._markets_url
                 request_callable = partial(self._request_page, client, url, params.copy())
@@ -356,6 +387,99 @@ class PolymarketClient:
                         logger.warning("skipping polymarket record: %s", exc)
 
                 yield page_payloads
+
+                offset += len(records)
+                page += 1
+
+                if max_pages is not None and page >= max_pages:
+                    break
+                if total_records is not None and offset >= total_records:
+                    break
+                if len(records) < page_size:
+                    break
+
+    def _fetch_events_paginated(
+        self,
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+        order: str = "id",
+        ascending: bool = False,
+        closed: bool | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> Iterator[list[MarketPayload]]:
+        """Yield markets derived from the /events endpoint page-by-page."""
+        offset = 0
+        page = 0
+        empty_pages = 0
+        total_records: int | None = None
+
+        with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
+            while True:
+                params: dict[str, Any] = {
+                    "limit": page_size,
+                    "offset": offset,
+                    "order": order,
+                    "ascending": str(ascending).lower(),
+                }
+                if closed is not None:
+                    params["closed"] = str(closed).lower()
+                if extra_params:
+                    params.update({k: v for k, v in extra_params.items() if v is not None})
+
+                url = self._events_url
+                request_callable = partial(self._request_page, client, url, params.copy())
+                try:
+                    response = self._send_with_retry(request_callable)
+                    payload = response.json()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("failed to fetch polymarket events offset=%s: %s", offset, exc)
+                    raise
+
+                meta_total = _extract_meta_total(payload)
+                if isinstance(meta_total, int) and meta_total >= 0:
+                    total_records = meta_total
+                records = _extract_page_records(payload)
+                if not records:
+                    empty_pages += 1
+                    self._record_empty_page()
+                    if (
+                        total_records is not None
+                        and offset < total_records
+                        and empty_pages <= self._empty_page_tolerance
+                    ):
+                        offset += page_size
+                        continue
+                    if empty_pages <= self._empty_page_tolerance:
+                        offset += page_size
+                        continue
+                    break
+                empty_pages = 0
+
+                page_payloads: list[MarketPayload] = []
+                for event in records:
+                    if not isinstance(event, dict):
+                        continue
+                    event_slug = _clean_string(event.get("slug") or event.get("ticker"))
+                    markets = event.get("markets")
+                    if not isinstance(markets, list):
+                        continue
+                    multi_market = len(markets) > 1
+                    for raw_market in markets:
+                        if not isinstance(raw_market, dict):
+                            continue
+                        if multi_market and not raw_market.get("group_slug"):
+                            raw_market["group_slug"] = event_slug
+                        existing_events = raw_market.get("events")
+                        if not existing_events:
+                            raw_market["events"] = [event]
+                        try:
+                            page_payloads.append(MarketPayload.from_gamma(raw_market))
+                        except (ValidationError, ValueError) as exc:
+                            logger.warning("skipping polymarket event-derived market: %s", exc)
+
+                if page_payloads:
+                    yield page_payloads
 
                 offset += len(records)
                 page += 1
@@ -559,8 +683,19 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
         _, remainder = base_slug.split("committed-to-the-", 1)
         base_slug = remainder or base_slug
     parts = base_slug.split("-")
-    while parts and _looks_like_range_token(parts[-1]):
-        parts.pop()
+    # Find the rightmost range-like token (numeric or range keywords) and trim everything from that token onward.
+    cutoff = None
+    for idx in range(len(parts) - 1, -1, -1):
+        if _looks_like_range_token(parts[idx]):
+            cutoff = idx
+            break
+    if cutoff is not None:
+        while cutoff >= 0 and _looks_like_range_token(parts[cutoff]):
+            cutoff -= 1
+        parts = parts[: cutoff + 1]
+    else:
+        while parts and _looks_like_range_token(parts[-1]):
+            parts.pop()
     trimmed = "-".join(parts).strip("-")
     return trimmed or base_slug
 

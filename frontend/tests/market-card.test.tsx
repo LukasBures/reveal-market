@@ -114,4 +114,24 @@ describe("MarketCard", () => {
     expect(screen.getByText(/Liquidity/i)).toBeInTheDocument();
     expect(screen.getByText("$250K")).toBeInTheDocument();
   });
+
+  it("renders grouped markets with aggregated stats and probabilities", () => {
+    render(
+      <MarketCard
+        market={{
+          ...baseMarket,
+          groupSlug: "elon-musk-of-tweets-december",
+          outcomes: ["Yes", "No"],
+          outcomePrices: [0.5, 0.5],
+          volume24hUsd: 300000,
+          liquidityUsd: 200000,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/markets/group/elon-musk-of-tweets-december");
+    expect(screen.getAllByText("50%")).toHaveLength(2);
+    expect(screen.getByText("$300K")).toBeInTheDocument();
+    expect(screen.getByText("$200K")).toBeInTheDocument();
+  });
 });

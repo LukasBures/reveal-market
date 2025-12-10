@@ -322,6 +322,139 @@ def test_polymarket_client_derives_grouping_fields():
     assert market.gamma_metadata.get("group_slug") == "makina-public-sale-total-commitments"
 
 
+def test_polymarket_client_derives_group_slug_from_embedded_range():
+    payload = [
+        {
+            "id": "grp-2",
+            "slug": "will-the-eurozones-monthly-inflation-increase-by-0pt2-in-november",
+            "question": "Will the Eurozone's monthly inflation increase by 0.2% in November?",
+            "groupItemTitle": "0.2%",
+            "outcomes": ["Yes", "No"],
+            "outcomePrices": [0.5, 0.5],
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = client.fetch_markets(page_size=1, max_pages=1)
+
+    assert len(markets) == 1
+    market = markets[0]
+    assert market.group_slug == "will-the-eurozones-monthly-inflation-increase-by"
+    assert market.group_item_title == "0.2%"
+
+
+def test_polymarket_client_fetches_events_and_flattens_markets():
+    events_payload = [
+        {
+            "id": "ev-multi",
+            "slug": "multi-event",
+            "markets": [
+                {
+                    "id": "m-1",
+                    "question": "Q1?",
+                    "outcomes": ["Yes", "No"],
+                    "outcomePrices": [0.6, 0.4],
+                },
+                {
+                    "id": "m-2",
+                    "question": "Q2?",
+                    "outcomes": ["Up", "Down"],
+                    "outcomePrices": [0.5, 0.5],
+                },
+            ],
+        },
+        {
+            "id": "ev-single",
+            "slug": "single-event",
+            "markets": [
+                {
+                    "id": "m-3",
+                    "question": "Solo?",
+                    "outcomes": ["Left", "Right"],
+                    "outcomePrices": [0.3, 0.7],
+                }
+            ],
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        if offset > 0:
+            return httpx.Response(status_code=200, json=[])
+        return httpx.Response(status_code=200, json=events_payload)
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = client.fetch_events_markets(page_size=10, max_pages=2)
+
+    assert len(markets) == 3
+    multi = [m for m in markets if m.event_id in {"m-1", "m-2"}]
+    single = [m for m in markets if m.event_id == "m-3"]
+    assert {m.group_slug for m in multi} == {"multi-event"}
+    assert single[0].group_slug is None
+    # Ensure event metadata was attached
+    assert markets[0].gamma_events and markets[0].gamma_events[0].get("slug") == "multi-event"
+
+
+def test_polymarket_client_forwards_event_filters(monkeypatch):
+    observed: dict[str, list[tuple[str, str]]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["params"] = list(request.url.params.multi_items())
+        return httpx.Response(
+            status_code=200,
+            json={
+                "data": [
+                    {
+                        "id": "e1",
+                        "markets": [
+                            {
+                                "id": "m1",
+                                "question": "Q?",
+                                "outcomes": ["Yes", "No"],
+                                "outcomePrices": [0.5, 0.5],
+                            }
+                        ],
+                    }
+                ],
+                "meta": {"total": 1},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client.fetch_events_markets(
+        page_size=1,
+        max_pages=1,
+        order="id",
+        ascending=True,
+        closed=False,
+        extra_params={
+            "tag_id": 42,
+            "exclude_tag_id": [1, 2],
+            "slug": ["a", "b"],
+            "related_tags": True,
+            "include_chat": False,
+        },
+    )
+
+    params = observed["params"]
+    assert ("limit", "1") in params
+    assert ("offset", "0") in params
+    assert ("order", "id") in params
+    assert ("ascending", "true") in params
+    assert ("closed", "false") in params
+    assert ("tag_id", "42") in params
+    assert ("exclude_tag_id", "1") in params and ("exclude_tag_id", "2") in params
+    assert ("slug", "a") in params and ("slug", "b") in params
+    assert ("related_tags", "true") in params
+    assert ("include_chat", "false") in params
+
+
 def test_merge_clob_markets_enriches_payload():
     markets = [
         MarketPayload(

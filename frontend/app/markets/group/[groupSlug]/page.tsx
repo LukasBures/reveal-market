@@ -114,6 +114,23 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
     null;
   const resolverLabel = typeof resolverSource === "string" && resolverSource.trim() ? resolverSource.trim() : "Not provided";
   const commitDeadline = market.commitDeadline ?? market.closesAt ?? market.ordersOpenedAt ?? null;
+  const selectorSiblings =
+    market.siblings?.length && market.siblings.every((s) => s.eventId)
+      ? market.siblings
+      : grouped.markets.map((item) => ({
+          eventId: item.eventId ?? "",
+          title: item.title,
+          status: item.status,
+          groupItemTitle: item.groupItemTitle ?? null,
+          groupItemThreshold: item.groupItemThreshold ?? null,
+          groupPosition: item.groupPosition ?? null,
+          outcomePrices: item.outcomePrices ?? [],
+          volume24hUsd: item.volume24hUsd ?? null,
+          liquidityUsd: item.liquidityUsd ?? null,
+          commitDeadline: item.commitDeadline ?? item.closesAt ?? item.ordersOpenedAt ?? null,
+          startsAt: item.startsAt ?? null,
+          closesAt: item.closesAt ?? null,
+        }));
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
@@ -124,9 +141,13 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
             <div className="space-y-6">
               <GroupedMarketSelector
                 groupSlug={grouped.groupSlug}
-                siblings={market.siblings ?? []}
+                siblings={selectorSiblings}
                 activeEventId={market.eventId}
                 linkToGroupPage
+                labelOverride="Grouped market"
+                titleOverride={market.title}
+                subtitleOverride="Select a threshold to jump between sub-markets."
+                forceShow
               />
               <MarketDetailChart
                 marketId={priceStreamMarketId}

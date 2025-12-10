@@ -5,6 +5,7 @@ Only the items below are required to reach MVP. Ordered by priority.
 ## High
 - **Streamer FX alignment**: API FX is hardcoded to `http://streamer:8100/fx/zen-usd` (`backend/api/app/pricing.py`). If your deployed streamer host/port differs, update the constant/env defaults and streamer docs; keep `/fx/zen-usd` stable.
 - **Postgres migration/backfill**: apply Alembic head (`0001_initial_schema.py`) to Postgres and backfill normalized tables for legacy markets (outcomes/tags/clob tokens/gamma metadata), including `gamma_raw`.
+- **Gamma ingestion via /events**: worker ingests from `/events` to aggregate grouped markets by event slug. Validate against production Gamma responses and ensure cache keys reflect `coalesce_groups`.
 
 ## Medium
 - **Cache/TTL policy**: resolved markets now expire from cache after `resolved_at + 12 hours`; document cache key/tag usage for ops and adjust if a different retention is required.
