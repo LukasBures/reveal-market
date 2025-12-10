@@ -105,6 +105,7 @@
 (tls_prod) {
   tls {
     # HTTP + TLS-ALPN ACME (default)
+    issuer acme
   }
 }
 

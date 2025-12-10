@@ -23,8 +23,6 @@ services:
       POSTGRES_USER: market_admin
       POSTGRES_PASSWORD: <REDACTED>
       POSTGRES_DB: reveal_market
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -322,6 +320,7 @@ services:
     container_name: reveal-market-caddy
     restart: unless-stopped
     mem_swappiness: 0
+    user: root
     depends_on:
       - frontend
     ports:
