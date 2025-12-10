@@ -46,8 +46,12 @@ export function FeaturedMarketsClient({
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
   const [autoLoadCount, setAutoLoadCount] = useState(0);
+  const [autoLoadTriggered, setAutoLoadTriggered] = useState(false);
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const setSentinel = useCallback((node: HTMLDivElement | null) => {
+    sentinelRef.current = node;
+  }, []);
 
   const batchSize = Math.max(pageSize, 30);
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
@@ -107,6 +111,7 @@ export function FeaturedMarketsClient({
     setMarkets(seeded);
     setHasMore(initialLikelyMore && seeded.length < maxItems);
     setAutoLoadCount(0);
+    setAutoLoadTriggered(false);
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
   useEffect(() => {
@@ -123,6 +128,9 @@ export function FeaturedMarketsClient({
     (mode: "auto" | "manual" = "manual") => {
       if (!hasMore || isPending || remainingSlots <= 0) return;
       const nextLimit = batchSize;
+      if (mode === "auto") {
+        setAutoLoadTriggered(true);
+      }
       startTransition(async () => {
         try {
           const additions = await fetchFeaturedMarkets(nextLimit, {
@@ -138,11 +146,12 @@ export function FeaturedMarketsClient({
             setHasMore(false);
             return;
           }
-          const computedHasMore = additions.length > 0 && merged.length < maxItems;
+          const computedHasMore = additions.length > 0 && merged.length < maxItems && additions.length === nextLimit;
           setMarkets(merged);
           setHasMore(computedHasMore);
           const newItemsAdded = merged.length - markets.length;
           if (mode === "auto" && newItemsAdded > 0) {
+            setAutoLoadTriggered(true);
             setAutoLoadCount((count) => count + 1);
           }
         } catch (error) {
@@ -164,10 +173,12 @@ export function FeaturedMarketsClient({
       trending,
       sortByVolumeDesc,
       normalizeMarkets,
+      batchSize,
     ],
   );
 
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
+  const showManualButton = markets.length > 0 && hasMore && (!autoLoadTriggered || autoLoadCount >= AUTO_LOAD_BATCHES);
 
   useEffect(() => {
     if (!canAutoLoad || isPending) {
@@ -214,8 +225,8 @@ export function FeaturedMarketsClient({
       ) : (
         <MarketGrid markets={markets} />
       )}
-      {canAutoLoad && <div ref={sentinelRef} aria-hidden className="h-6 w-full" />}
-      {markets.length > 0 && hasMore && (
+      {hasMore && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
+      {showManualButton && (
         <div className="flex items-center justify-center">
           <button
             type="button"
