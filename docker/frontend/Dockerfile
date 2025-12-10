@@ -2,10 +2,24 @@
 # docker/frontend/Dockerfile
 
 ARG BUILDKIT_INLINE_CACHE=1
+ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
 
 # 1) Install dependencies
 FROM node:20-alpine AS deps
-RUN --mount=type=cache,target=/var/cache/apk apk add --no-cache --virtual .build-deps python3 make g++
+ARG APK_REPO_URL
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
+    ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    apk_with_retry() { \
+      for i in 1 2 3; do \
+        if apk add --no-cache "$@"; then return 0; fi; \
+        echo "apk add failed (attempt ${i}), retrying..." >&2; \
+        sleep "${i}"; \
+      done; \
+      return 1; \
+    }; \
+    apk_with_retry --virtual .build-deps python3 make g++
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./

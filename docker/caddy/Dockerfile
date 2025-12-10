@@ -1,4 +1,5 @@
 ARG CADDY_VERSION=2
+ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
 FROM caddy:${CADDY_VERSION}-builder AS builder
 
 RUN xcaddy build \
@@ -6,12 +7,25 @@ RUN xcaddy build \
     --output /usr/bin/caddy
 
 FROM caddy:${CADDY_VERSION}-alpine
+ARG APK_REPO_URL
 
 ARG CADDY_TLS_PROFILE=tls_local
 # Default to local TLS so build-time validation succeeds even when no env is provided.
 ENV CADDY_TLS_PROFILE=${CADDY_TLS_PROFILE}
 
-RUN apk add --no-cache curl libcap
+RUN set -eux; \
+    ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    apk_with_retry() { \
+      for i in 1 2 3; do \
+        if apk add --no-cache "$@"; then return 0; fi; \
+        echo "apk add failed (attempt ${i}), retrying..." >&2; \
+        sleep "${i}"; \
+      done; \
+      return 1; \
+    }; \
+    apk_with_retry curl libcap
 
 # Ensure caddy user/group exists (some base images may omit them).
 RUN id -u caddy >/dev/null 2>&1 || (addgroup -S caddy && adduser -S -G caddy caddy)

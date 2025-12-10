@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.4
 
 ARG BUILDKIT_INLINE_CACHE=1
+ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
 
 FROM golang:1.22-alpine AS builder
+ARG APK_REPO_URL
 
 WORKDIR /app
 COPY prover/go.mod ./
@@ -33,7 +35,21 @@ RUN set -eux; \
 
 FROM node:20-alpine
 
-RUN --mount=type=cache,target=/var/cache/apk apk add --no-cache ca-certificates curl wget gcompat libstdc++
+ARG APK_REPO_URL
+
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
+    ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    apk_with_retry() { \
+      for i in 1 2 3; do \
+        if apk add --no-cache "$@"; then return 0; fi; \
+        echo "apk add failed (attempt ${i}), retrying..." >&2; \
+        sleep "${i}"; \
+      done; \
+      return 1; \
+    }; \
+    apk_with_retry ca-certificates curl wget gcompat libstdc++
 
 RUN adduser -D -H -s /sbin/nologin prover
 WORKDIR /app
