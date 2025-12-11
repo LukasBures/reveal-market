@@ -14,8 +14,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+)
+
+var (
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+	copyBufferPool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 32*1024)
+			return &b
+		},
+	}
 )
 
 // groth16Settings captures the external binaries/artifacts used during proof generation.
@@ -190,10 +205,16 @@ func runCommand(ctx context.Context, binary string, args []string, workdir strin
 	if workdir != "" {
 		cmd.Dir = workdir
 	}
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := bufferPool.Get().(*bytes.Buffer)
+	stderr := bufferPool.Get().(*bytes.Buffer)
+	stdout.Reset()
+	stderr.Reset()
+	defer func() {
+		bufferPool.Put(stdout)
+		bufferPool.Put(stderr)
+	}()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
 	return stdout.Bytes(), stderr.Bytes(), err
 }
@@ -223,18 +244,24 @@ func computeFileHash(path string) (string, error) {
 	}
 	defer file.Close()
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
+	buf := copyBufferPool.Get().(*[]byte)
+	defer copyBufferPool.Put(buf)
+	if _, err := io.CopyBuffer(hasher, file, *buf); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func writeJSONFile(path string, payload any) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(payload); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return os.WriteFile(path, buf.Bytes(), 0o600)
 }
 
 func readFileAsString(path string) (string, error) {
@@ -260,9 +287,9 @@ func readPublicSignals(path string) ([]string, error) {
 	if len(raw) != 10 {
 		return nil, newInternalError(fmt.Errorf("unexpected public signal count: got %d, expected 10", len(raw)))
 	}
-	signals := make([]string, 0, len(raw))
-	for _, item := range raw {
-		signals = append(signals, item.String())
+	signals := make([]string, len(raw))
+	for i, item := range raw {
+		signals[i] = item.String()
 	}
 	return signals, nil
 }
