@@ -3,6 +3,7 @@ import type { Config, CreateConnectorFn } from "wagmi";
 import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
 import { defineChain } from "viem";
 import { ensureLocalStorage } from "@/lib/localStoragePolyfill";
+import { resolveUrlConfig } from "@/lib/env-presets";
 
 ensureLocalStorage();
 
@@ -38,10 +39,7 @@ const walletConnectProjectId =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || (process.env.NODE_ENV === "test" ? "test" : "");
 const walletConnectEnabled = Boolean(walletConnectProjectId);
 const resolvedSiteUrl =
-  (typeof window !== "undefined" && window.location?.origin) ||
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.NEXT_PUBLIC_APP_URL ||
-  (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : "https://revealmarket.xyz");
+  (typeof window !== "undefined" && window.location?.origin) || resolveUrlConfig().siteUrl || "https://revealmarket.xyz";
 
 if (!walletConnectEnabled && typeof console !== "undefined") {
   console.warn("WalletConnect disabled: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set.");

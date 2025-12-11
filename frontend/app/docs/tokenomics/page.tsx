@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("tokenomics");
@@ -32,6 +33,7 @@ export default function TokenomicsPage() {
         investors under NDA prior to public release. Beware of impostor tokens—
         no public sale is live at this time.
       </p>
+      <DocsStructuredData slug="tokenomics" />
     </>
   );
 }

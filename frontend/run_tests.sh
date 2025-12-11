@@ -57,7 +57,12 @@ fi
 
 # Try to reach the backend API; warn if unreachable but proceed by default so
 # local runs can still build against the configured host (override with FRONTEND_REQUIRE_API=true).
-DEFAULT_API_BASE="${RM_API_BASE_URL:-${NEXT_PUBLIC_API_BASE_URL:-https://api.revealmarket.xyz}}"
+MODE_ENV="${MODE:-${NODE_ENV:-development}}"
+if [[ "${MODE_ENV,,}" == *prod* ]]; then
+  DEFAULT_API_BASE="${RM_API_BASE_URL:-https://api.revealmarket.xyz}"
+else
+  DEFAULT_API_BASE="${RM_API_BASE_URL:-http://localhost:8000}"
+fi
 CHECK_URL="${DEFAULT_API_BASE%/}/health"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
 STRICT_API_CHECK="${FRONTEND_REQUIRE_API:-false}"
@@ -73,7 +78,6 @@ else
 fi
 
 export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
-export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-${DEFAULT_API_BASE}}"
 
 # Run lint before build to fail fast on lint errors.
 log_step "Running frontend lint"

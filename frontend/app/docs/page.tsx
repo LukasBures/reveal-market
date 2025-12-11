@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("overview");
@@ -72,6 +73,7 @@ export default function DocsOverview() {
         </Link>
         .
       </p>
+      <DocsStructuredData slug="overview" />
     </>
   );
 }

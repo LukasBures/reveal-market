@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,11 +19,8 @@ class SettlementProofRequest:
     pool_totals: list[str]
     total_escrow: str
     total_liability: str
-    payout_multiplier_wad: str
     rake_bps: int
     circuit_hash: str
-    tickets: list[dict[str, Any]]
-    metadata: dict[str, str] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -33,11 +30,8 @@ class SettlementProofRequest:
             "poolTotals": self.pool_totals,
             "totalEscrow": self.total_escrow,
             "totalLiability": self.total_liability,
-            "payoutMultiplierWad": self.payout_multiplier_wad,
             "rakeBps": str(self.rake_bps),
             "circuitHash": self.circuit_hash,
-            "tickets": self.tickets,
-            "metadata": self.metadata,
         }
 
 
@@ -101,7 +95,17 @@ class ProverClient:
         if isinstance(request, SettlementProofRequest):
             payload = request.to_payload()
         else:
-            payload = request
+            allowed_fields = {
+                "marketId",
+                "merkleRoot",
+                "winningOutcomeId",
+                "poolTotals",
+                "totalEscrow",
+                "totalLiability",
+                "rakeBps",
+                "circuitHash",
+            }
+            payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
                 response = client.post(url, json=payload)

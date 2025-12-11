@@ -51,7 +51,10 @@ body::after {
   background:
     radial-gradient(circle at 80% 10%, rgba(124, 132, 255, 0.28), transparent 45%),
     radial-gradient(circle at 20% 85%, rgba(123, 240, 94, 0.2), transparent 50%),
-    url("/brand/reveal-wolf-03.png") no-repeat right -140px top -80px;
+    image-set(
+      url("/brand/reveal-wolf-03.webp") type("image/webp"),
+      url("/brand/reveal-wolf-03.png") type("image/png")
+    ) no-repeat right -140px top -80px;
   background-size: auto, auto, 820px;
   opacity: 0.25;
   mix-blend-mode: screen;

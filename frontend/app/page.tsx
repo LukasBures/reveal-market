@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { buildMetadata } from "@/lib/seo";
-import { fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
+import { fetchHealthSnapshot, fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
 import { Hero } from "@/components/marketing/Hero";
 import { formatNumber } from "@/lib/formatters";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Reveal Market | Private Prediction Markets",
+  title: "Private Prediction Markets",
   description:
     "Invite-only prediction markets where entries stay private until results post, with clear receipts when they settle.",
   path: "/",
@@ -26,7 +26,8 @@ type PageProps = {
 };
 
 export default async function HomePage({ searchParams }: PageProps) {
-  const [stats, kpis] = await Promise.all([fetchMarketStatsBreakdown(), fetchInvestorKpis()]);
+  const [stats, health] = await Promise.all([fetchMarketStatsBreakdown(), fetchHealthSnapshot()]);
+  const kpis = await fetchInvestorKpis(stats, health);
   const liveMarkets = stats.find((stat) => stat.status === "live")?.count ?? 0;
   const finalizedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
   const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;

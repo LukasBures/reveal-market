@@ -104,7 +104,7 @@ if (typeof console !== "undefined") {
     const internalHost = parseHost(streamerBaseInternal) ?? publicHost;
     if (internalHost && publicHost && internalHost !== publicHost && process.env.NODE_ENV !== "production") {
       console.warn(
-        `[pricing-client] STREAMER hosts differ (public=${publicHost}, internal=${internalHost}); align NEXT_PUBLIC_PRICE_STREAMER_URL and STREAMER_INTERNAL_URL to avoid CORS/mixed-content issues.`,
+        `[pricing-client] STREAMER hosts differ (public=${publicHost}, internal=${internalHost}); align public/internal streamer hosts to avoid CORS/mixed-content issues.`,
       );
     }
   } catch {

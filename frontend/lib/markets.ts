@@ -5,11 +5,21 @@ const sanitizeNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+export type MarketSortOption = "volume24h" | "totalVolume";
+export type VolumePreference = "24h" | "total";
+
+/**
+ * Returns a non-negative volume metric. Defaults to 24h volume; `total` uses lifetime volume first.
+ */
 export const getMarketVolume = (
-  market: Pick<MarketSummary, "volume24hUsd" | "orderbookVolumeUsd">,
+  market: Pick<MarketSummary, "volume24hUsd" | "orderbookVolumeUsd"> & { volume?: number | null },
+  preference: VolumePreference = "24h",
 ): number => {
-  const volume = market.volume24hUsd ?? market.orderbookVolumeUsd;
-  return Math.max(0, sanitizeNumber(volume));
+  const preferred =
+    preference === "total"
+      ? market.volume ?? market.orderbookVolumeUsd ?? market.volume24hUsd
+      : market.volume24hUsd ?? market.orderbookVolumeUsd ?? market.volume;
+  return Math.max(0, sanitizeNumber(preferred));
 };
 
 type CommitDeadlineSource = Pick<

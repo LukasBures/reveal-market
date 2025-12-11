@@ -2157,7 +2157,6 @@ def maybe_generate_settlement_proof(
                 if market_address is None:
                     market_address = getattr(market_record, "market_address", None)
             payload = build_prover_payload(session, numeric_market_id)
-            payload["metadata"] = _build_proof_metadata(market_payload)
             _persist_settlement_snapshot(session, numeric_market_id, payload)
             persisted_snapshot = True
             settlement_row = session.execute(
@@ -2358,7 +2357,6 @@ def _build_snapshot_payload(
 
     required_fields = [
         "commitments_root",
-        "tickets",
         "pool_totals",
         "total_escrow",
         "total_liability",
@@ -2379,22 +2377,7 @@ def _build_snapshot_payload(
         "totalLiability": str(market_snapshot["total_liability"]),
         "rakeBps": str(market_snapshot.get("rake_bps", 0)),
         "circuitHash": market_snapshot["circuit_hash"],
-        "tickets": market_snapshot.get("tickets", []),
-        "metadata": _build_proof_metadata(market_payload),
     }
-
-
-def _build_proof_metadata(market_payload: MarketPayload) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    if market_payload.status:
-        metadata["status"] = str(market_payload.status)
-    if market_payload.oracle:
-        metadata["oracle"] = str(market_payload.oracle)
-    if market_payload.category:
-        metadata["category"] = str(market_payload.category)
-    if market_payload.source_updated_at:
-        metadata["source_updated_at"] = market_payload.source_updated_at.isoformat()
-    return metadata
 
 
 def prime_markets_cache(

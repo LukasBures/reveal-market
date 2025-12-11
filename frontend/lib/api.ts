@@ -124,6 +124,17 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
             sibling.starts_at ?? sibling.startsAt ?? sibling.extra_data?.starts_at ?? sibling.extra_data?.gamma?.starts_at ?? null;
           const siblingClosesAt =
             sibling.closes_at ?? sibling.closesAt ?? sibling.extra_data?.closes_at ?? sibling.extra_data?.gamma?.closes_at ?? null;
+          const siblingVolume24h =
+            coerceNumber(sibling.volume_24h_usd ?? sibling.volume24hUsd ?? sibling.volume_24h ?? sibling.volume24h) ?? null;
+          const siblingVolume =
+            coerceNumber(
+              sibling.volume ??
+                sibling.volume_usd ??
+                sibling.extra_data?.volume ??
+                sibling.extra_data?.gamma?.volume ??
+                sibling.extra_data?.gamma?.volume_num ??
+                sibling.extra_data?.gamma?.volumeNum,
+            ) ?? null;
           return {
             eventId: coerceId(sibling.event_id ?? sibling.eventId ?? ""),
             title: sibling.title ?? undefined,
@@ -132,7 +143,8 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
             groupItemThreshold: siblingThreshold ?? null,
             groupPosition: siblingPosition ?? null,
             outcomePrices: sibling.outcome_prices ?? sibling.outcomePrices ?? undefined,
-            volume24hUsd: coerceNumber(sibling.volume_24h_usd ?? sibling.volume24hUsd) ?? null,
+            volume: siblingVolume,
+            volume24hUsd: siblingVolume24h,
             liquidityUsd: coerceNumber(sibling.liquidity_usd ?? sibling.liquidityUsd) ?? null,
             commitDeadline: siblingCommitDeadline,
             startsAt: siblingStartsAt,
@@ -344,7 +356,8 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     if (statusParam && statusParam !== "any" && statusParam !== "all") {
       params.set("status", statusParam);
     }
-    params.set("order_by", "volume_24h_usd");
+    const orderBy = options?.orderBy ?? "volume";
+    params.set("order_by", orderBy);
     if (onlyFeatured) {
       params.set("only_featured", "1");
     }
@@ -387,6 +400,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       searchQuery: options?.searchQuery,
       status: effectiveStatus,
       trending: trendingMode,
+      orderBy,
       revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS,
     });
     const response = await fetch(url.toString(), {
@@ -410,6 +424,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       category: options?.category,
       searchQuery: options?.searchQuery,
       count: items.length,
+      orderBy,
       cacheTags: fetchTags,
     });
     const mapped: MarketSummary[] = items.map((item: any) => mapApiMarketToSummary(item));
@@ -590,9 +605,17 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
   }
 }
 
+type ProofReceiptFilters = {
+  offset?: number;
+  marketId?: number;
+  eventId?: string;
+  conditionId?: string;
+  requestId?: string;
+};
+
 export async function fetchProofReceipts(
   limit = 20,
-  options?: { offset?: number },
+  options?: ProofReceiptFilters,
 ): Promise<{ receipts: ProofReceipt[]; error?: string }> {
   if (maybeShortCircuitOffline("fetchProofReceipts")) {
     return { receipts: [], error: "offline" };
@@ -604,10 +627,33 @@ export async function fetchProofReceipts(
   if (offset > 0) {
     url.searchParams.set("offset", `${offset}`);
   }
+  if (options?.marketId) {
+    url.searchParams.set("market_id", `${options.marketId}`);
+  }
+  if (options?.eventId) {
+    url.searchParams.set("event_id", options.eventId);
+  }
+  if (options?.conditionId) {
+    url.searchParams.set("condition_id", options.conditionId);
+  }
+  if (options?.requestId) {
+    url.searchParams.set("request_id", options.requestId);
+  }
 
   try {
     const endpoint = url.toString();
-    logger.info("fetchProofReceipts:request", { endpoint, limit, offset, baseUrl: DEFAULT_API_BASE });
+    logger.info("fetchProofReceipts:request", {
+      endpoint,
+      limit,
+      offset,
+      baseUrl: DEFAULT_API_BASE,
+      filters: {
+        marketId: options?.marketId,
+        eventId: options?.eventId,
+        conditionId: options?.conditionId,
+        requestId: options?.requestId,
+      },
+    });
     const response = await fetch(endpoint, {
       next: { revalidate: DEFAULT_REVALIDATE_SECONDS },
     });
@@ -632,11 +678,18 @@ export async function fetchProofReceipts(
   }
 }
 
-export async function fetchInvestorKpis(): Promise<InvestorKpis> {
-  const [statsResult, healthResult] = await Promise.allSettled([
-    fetchMarketStatsBreakdown(),
-    fetchHealthSnapshot(),
-  ]);
+export async function fetchInvestorKpis(
+  preloadedStats?: MarketStatusStat[],
+  preloadedHealth?: HealthSnapshot | null,
+): Promise<InvestorKpis> {
+  const statsPromise =
+    Array.isArray(preloadedStats) && preloadedStats.length >= 0
+      ? Promise.resolve(preloadedStats)
+      : fetchMarketStatsBreakdown();
+  const healthPromise =
+    typeof preloadedHealth !== "undefined" ? Promise.resolve(preloadedHealth) : fetchHealthSnapshot();
+
+  const [statsResult, healthResult] = await Promise.allSettled([statsPromise, healthPromise]);
 
   const stats = statsResult.status === "fulfilled" ? statsResult.value : [];
   const health = healthResult.status === "fulfilled" ? healthResult.value : null;

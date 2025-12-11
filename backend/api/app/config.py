@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     market_record_cache_ttl_seconds: int = Field(default=600, ge=30)
     cache_hydrate_on_startup: bool = Field(default=True)
     cache_hydrate_limit: int = Field(default=150, ge=1, le=250)
-    cache_hydrate_order_by: str | None = Field(default="volume_24h_usd")
+    cache_hydrate_order_by: str | None = Field(default="volume")
     cache_refresh_enabled: bool = Field(default=True)
     cache_refresh_interval_seconds: int = Field(default=180, ge=15)
     cache_refresh_limit: int = Field(default=150, ge=1, le=250)

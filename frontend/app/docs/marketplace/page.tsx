@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("marketplace");
@@ -33,6 +34,7 @@ export default function MarketplacePage() {
         This marketplace layer is the moat: once liquidity and data live atop
         Reveal, every partner benefits from network effects.
       </p>
+      <DocsStructuredData slug="marketplace" />
     </>
   );
 }

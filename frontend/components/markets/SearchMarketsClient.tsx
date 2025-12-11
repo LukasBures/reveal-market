@@ -5,11 +5,13 @@ import type { MarketSummary } from "@/lib/api-types";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
 import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "@/components/markets/constants";
+import type { MarketSortOption } from "@/lib/markets";
 
 type Props = {
   initialQuery?: string;
   initialResults: MarketSummary[];
   pageSize?: number;
+  sortBy?: MarketSortOption;
 };
 
 type CacheEntry = {
@@ -19,7 +21,12 @@ type CacheEntry = {
 
 const MIN_QUERY_LENGTH = 2;
 
-export function SearchMarketsClient({ initialQuery = "", initialResults, pageSize = DEFAULT_PAGE_SIZE }: Props) {
+export function SearchMarketsClient({
+  initialQuery = "",
+  initialResults,
+  pageSize = DEFAULT_PAGE_SIZE,
+  sortBy = "totalVolume",
+}: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [activeQuery, setActiveQuery] = useState(initialQuery.trim());
   const [seedResults, setSeedResults] = useState<MarketSummary[]>(initialResults);
@@ -27,6 +34,7 @@ export function SearchMarketsClient({ initialQuery = "", initialResults, pageSiz
   const [refreshKey, setRefreshKey] = useState(0);
   const [isPending, startTransition] = useTransition();
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
+  const orderBy = sortBy === "totalVolume" ? "volume" : "volume_24h_usd";
 
   useEffect(() => {
     const trimmed = initialQuery.trim();
@@ -58,7 +66,7 @@ export function SearchMarketsClient({ initialQuery = "", initialResults, pageSiz
         return;
       }
       try {
-        const data = await loadFeaturedMarketsAction(pageSize, { searchQuery: trimmed, status: "any" });
+        const data = await loadFeaturedMarketsAction(pageSize, { searchQuery: trimmed, status: "any", orderBy });
         cacheRef.current.set(trimmed, { data, cachedAt: Date.now() });
         setActiveQuery(trimmed);
         setSeedResults(data);
@@ -67,7 +75,7 @@ export function SearchMarketsClient({ initialQuery = "", initialResults, pageSiz
         setError((err as Error).message || "Search failed. Please retry.");
       }
     },
-    [pageSize, resetEmpty],
+    [pageSize, resetEmpty, orderBy],
   );
 
   const handleSubmit = useCallback(
@@ -82,7 +90,7 @@ export function SearchMarketsClient({ initialQuery = "", initialResults, pageSiz
 
   const effectiveStatus = activeQuery ? "any" : "active";
   const onlyActive = !activeQuery;
-  const clientKey = useMemo(() => `${activeQuery}|${refreshKey}`, [activeQuery, refreshKey]);
+  const clientKey = useMemo(() => `${activeQuery}|${refreshKey}|${sortBy}`, [activeQuery, refreshKey, sortBy]);
 
   return (
     <div className="space-y-6">
@@ -128,6 +136,7 @@ export function SearchMarketsClient({ initialQuery = "", initialResults, pageSiz
         emptyNotice={activeQuery ? "No markets matched your search." : "Start typing to see markets."}
         status={effectiveStatus}
         onlyActive={onlyActive}
+        sortBy={sortBy}
       />
     </div>
   );

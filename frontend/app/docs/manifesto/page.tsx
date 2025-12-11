@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("manifesto");
@@ -36,6 +37,7 @@ export default function ManifestoPage() {
         trusts. Partners that join now shape the governance, product roadmap, and
         future economics.
       </p>
+      <DocsStructuredData slug="manifesto" />
     </>
   );
 }

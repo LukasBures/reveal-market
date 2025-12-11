@@ -29,10 +29,18 @@ describe("fetchProofReceipts", () => {
     vi.unstubAllGlobals();
   });
 
-  it("builds the request using limit and offset", async () => {
-    const result = await fetchProofReceipts(12, { offset: 24 });
+  it("builds the request using limit, offset, and filters", async () => {
+    const result = await fetchProofReceipts(12, {
+      offset: 24,
+      marketId: 5,
+      eventId: "evt-1",
+      conditionId: "0xabc",
+      requestId: "req-1",
+    });
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/proofs?limit=12&offset=24"),
+      expect.stringContaining(
+        "/proofs?limit=12&offset=24&market_id=5&event_id=evt-1&condition_id=0xabc&request_id=req-1",
+      ),
       expect.objectContaining({
         next: expect.any(Object),
       }),

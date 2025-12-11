@@ -128,7 +128,7 @@ export function GroupedMarketSelector({
         {labeledSiblings.map((sibling) => {
           const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
           const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
-          const volume = sibling.volume24hUsd ?? null;
+          const volume = sibling.volume ?? 0;
           const active = sibling.eventId === activeEventId;
           const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
           const href: UrlObject | Route =
@@ -140,7 +140,7 @@ export function GroupedMarketSelector({
               key={`${sibling.eventId}-summary`}
               href={href}
               scroll={false}
-              className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
+              className={`flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                 active
                   ? "border-emerald-400 bg-emerald-500/10 shadow-md shadow-emerald-500/20"
                   : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
@@ -149,7 +149,7 @@ export function GroupedMarketSelector({
               <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
               <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
               <span className="text-sm text-white sm:text-right">No {noPrice}</span>
-              <span className="text-xs text-slate-200 sm:text-right">24h vol {formatUsd(volume ?? 0)}</span>
+              <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
             </Link>
           );
         })}

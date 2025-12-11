@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("core-infrastructure");
@@ -32,6 +33,7 @@ export default function CoreInfrastructurePage() {
         This is the infrastructure moat: Reveal blends the rigor institutions
         expect with the growth curves only crypto can deliver.
       </p>
+      <DocsStructuredData slug="core-infrastructure" />
     </>
   );
 }

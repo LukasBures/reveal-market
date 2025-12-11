@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("api");
@@ -37,6 +38,7 @@ export default function ApiReferencePage() {
         </Link>{" "}
         to begin due diligence.
       </p>
+      <DocsStructuredData slug="api" />
     </>
   );
 }

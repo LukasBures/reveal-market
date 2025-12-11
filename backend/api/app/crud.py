@@ -43,6 +43,16 @@ def get_markets(
             models.Market.updated_at.desc(),
             models.Market.created_at.desc(),
         )
+    elif order_by == "volume":
+        stmt = (
+            stmt.outerjoin(models.MarketGammaMetadata)
+            .order_by(
+                models.MarketGammaMetadata.volume.desc(),
+                models.Market.updated_at.desc(),
+                models.Market.created_at.desc(),
+            )
+            .options(selectinload(models.Market.gamma_metadata_rel))
+        )
     else:
         stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)

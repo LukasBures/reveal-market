@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("integrations");
@@ -38,6 +39,7 @@ export default function IntegrationsPage() {
         </Link>
         .
       </p>
+      <DocsStructuredData slug="integrations" />
     </>
   );
 }

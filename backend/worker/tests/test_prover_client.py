@@ -13,6 +13,8 @@ def test_prover_client_success():
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["marketId"] == "0x123"
+        assert "tickets" not in payload
+        assert "payoutMultiplierWad" not in payload
         return httpx.Response(
             status_code=200,
             json={
@@ -34,21 +36,8 @@ def test_prover_client_success():
         pool_totals=["70", "30"],
         total_escrow="100",
         total_liability="90",
-        payout_multiplier_wad="1000000000000000000",
         rake_bps=100,
         circuit_hash="0x1234",
-        tickets=[
-            {
-                "user": "0x1",
-                "outcomeId": "0",
-                "amount": "1",
-                "salt": "0x1",
-                "ticketHash": "0x2",
-                "leaf": "0x2",
-                "merklePath": [],
-                "merkleIndex": 0,
-            }
-        ],
     )
     response = client.generate_settlement_proof(request)
     assert response.proof == "0xdeadbeef"
@@ -71,21 +60,8 @@ def test_prover_client_raises_on_error():
         pool_totals=["10", "0"],
         total_escrow="10",
         total_liability="10",
-        payout_multiplier_wad="1000000000000000000",
         rake_bps=0,
         circuit_hash="0x1234",
-        tickets=[
-            {
-                "user": "0x1",
-                "outcomeId": "1",
-                "amount": "10",
-                "salt": "0x1",
-                "ticketHash": "0x2",
-                "leaf": "0x2",
-                "merklePath": [],
-                "merkleIndex": 0,
-            }
-        ],
     )
     try:
         client.generate_settlement_proof(request)

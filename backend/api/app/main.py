@@ -1106,17 +1106,20 @@ def _load_group_aggregates(session: Session, slugs: set[str]) -> dict[str, dict[
             models.Market.group_slug,
             func.sum(models.Market.volume_24h_usd),
             func.sum(models.Market.liquidity_usd),
+            func.sum(models.MarketGammaMetadata.volume),
         )
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
         .where(models.Market.group_slug.in_(list(slugs)))
         .group_by(models.Market.group_slug)
     )
     aggregates: dict[str, dict[str, float | None]] = {}
-    for slug, volume_sum, liquidity_sum in session.execute(stmt):
+    for slug, volume_sum, liquidity_sum, total_sum in session.execute(stmt):
         if not slug:
             continue
         aggregates[slug] = {
             "volume_24h_usd": _safe_float(volume_sum),
             "liquidity_usd": _safe_float(liquidity_sum),
+            "volume_total": _safe_float(total_sum),
         }
     return aggregates
 
@@ -1254,13 +1257,24 @@ def _sum_sibling_liquidity(siblings: list[schemas.MarketSibling]) -> float | Non
     return total if any_value else None
 
 
-def _coalesce_grouped_markets(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
+def _market_volume_value(market: schemas.MarketResponse, *, use_total: bool = False) -> float:
+    primary = getattr(market, "volume", None) if use_total else getattr(market, "volume_24h_usd", None)
+    fallback = getattr(market, "volume_24h_usd", None) if use_total else getattr(market, "volume", None)
+    value = _safe_float(primary)
+    if value is None:
+        value = _safe_float(fallback)
+    return value or 0.0
+
+
+def _coalesce_grouped_markets(
+    markets: list[schemas.MarketResponse], *, use_total_volume: bool = False
+) -> list[schemas.MarketResponse]:
     grouped: dict[str, schemas.MarketResponse] = {}
     standalone: list[schemas.MarketResponse] = []
 
     def _prefer_candidate(candidate: schemas.MarketResponse, incumbent: schemas.MarketResponse) -> bool:
-        cand_volume = _safe_float(getattr(candidate, "volume_24h_usd", None)) or 0.0
-        inc_volume = _safe_float(getattr(incumbent, "volume_24h_usd", None)) or 0.0
+        cand_volume = _market_volume_value(candidate, use_total=use_total_volume)
+        inc_volume = _market_volume_value(incumbent, use_total=use_total_volume)
         if cand_volume > inc_volume:
             return True
         if cand_volume < inc_volume:
@@ -1320,6 +1334,7 @@ def _attach_group_fields(
             siblings = _get_group_siblings(session, slug)
         aggregate = aggregates.get(slug)
         aggregate_volume = aggregate.get("volume_24h_usd") if aggregate else None
+        aggregate_volume_total = aggregate.get("volume_total") if aggregate else None
         aggregate_liquidity = aggregate.get("liquidity_usd") if aggregate else None
         if siblings is not None:
             aggregate_volume = aggregate_volume or _sum_sibling_volume(siblings)
@@ -1329,6 +1344,8 @@ def _attach_group_fields(
                 market.siblings = siblings
             if aggregate_volume is not None:
                 market.volume_24h_usd = aggregate_volume
+            if aggregate_volume_total is not None:
+                market.volume = aggregate_volume_total
             if aggregate_liquidity is not None:
                 market.liquidity_usd = aggregate_liquidity
 
@@ -2584,7 +2601,9 @@ def list_markets(
         ),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
-    order_by: Annotated[str | None, Query(description="Order results (popularity|recent|volume_24h_usd)")] = None,
+    order_by: Annotated[
+        str | None, Query(description="Order results (popularity|recent|volume_24h_usd|volume)")
+    ] = None,
     trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
     featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
     coalesce_groups: Annotated[
@@ -2594,7 +2613,9 @@ def list_markets(
 ) -> list[schemas.MarketResponse]:
     coalesce_mode = bool(coalesce_groups)
     popularity_mode = order_by == "popularity" or bool(trending)
-    volume_mode = order_by == "volume_24h_usd"
+    volume_24h_mode = order_by == "volume_24h_usd"
+    total_volume_mode = order_by == "volume"
+    volume_mode = volume_24h_mode or total_volume_mode
     if popularity_mode and not status:
         status = "active"
     normalized_search = search
@@ -2645,7 +2666,7 @@ def list_markets(
             duration = (time.perf_counter() - start) * 1000
             cached_models = _filter_markets_for_visibility(hydrated)
             if coalesce_mode and cached_models:
-                cached_models = _coalesce_grouped_markets(cached_models)
+                cached_models = _coalesce_grouped_markets(cached_models, use_total_volume=total_volume_mode)
             cached_models = cached_models[:limit]
             log_event(
                 logger,
@@ -2696,7 +2717,7 @@ def list_markets(
     market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
     if coalesce_mode and market_models:
-        market_models = _coalesce_grouped_markets(market_models)
+        market_models = _coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if popularity_mode:
         popularity_scores = {m.event_id: _compute_market_popularity(m) for m in market_models}
         selected = market_models
@@ -2712,10 +2733,10 @@ def list_markets(
             reverse=True,
         )
         market_models = selected
-    elif order_by == "volume_24h_usd":
+    elif order_by in {"volume_24h_usd", "volume"}:
         market_models.sort(
             key=lambda m: (
-                _safe_float(getattr(m, "volume_24h_usd", None)) or 0,
+                _market_volume_value(m, use_total=order_by == "volume"),
                 getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
             ),
             reverse=True,
@@ -2804,7 +2825,8 @@ def list_markets_by_category(
     session: Session = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     order_by = request.query_params.get("order_by")
-    volume_mode = order_by == "volume_24h_usd"
+    volume_mode = order_by in {"volume_24h_usd", "volume"}
+    total_volume_mode = order_by == "volume"
     coalesce_mode = bool(coalesce_groups)
     start = time.perf_counter()
     cache = get_cache_client()
@@ -2842,7 +2864,7 @@ def list_markets_by_category(
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
             models_from_cache = _filter_markets_for_visibility(hydrated)
             if coalesce_mode and models_from_cache:
-                models_from_cache = _coalesce_grouped_markets(models_from_cache)
+                models_from_cache = _coalesce_grouped_markets(models_from_cache, use_total_volume=total_volume_mode)
             models_from_cache = models_from_cache[:limit]
             log_event(
                 logger,
@@ -2891,11 +2913,11 @@ def list_markets_by_category(
         if fallback_matches:
             market_models = _filter_markets_for_visibility(_enrich_market_models(session, fallback_matches))
     if coalesce_mode and market_models:
-        market_models = _coalesce_grouped_markets(market_models)
+        market_models = _coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if volume_mode and market_models:
         market_models.sort(
             key=lambda m: (
-                _safe_float(getattr(m, "volume_24h_usd", None)) or 0,
+                _market_volume_value(m, use_total=total_volume_mode),
                 getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
             ),
             reverse=True,
@@ -3146,6 +3168,10 @@ def list_proof_receipts(
         int, Query(ge=1, le=settings.max_page_size, description="Maximum number of proof receipts to return")
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the receipts list")] = 0,
+    market_id: Annotated[int | None, Query(ge=1, description="Filter by numeric market id")] = None,
+    event_id: Annotated[str | None, Query(description="Filter by market event id")] = None,
+    condition_id: Annotated[str | None, Query(description="Filter by condition id (0x…)")] = None,
+    request_id: Annotated[str | None, Query(description="Filter by prover request id")] = None,
     session: Session = Depends(get_session),
 ) -> list[schemas.ProofReceipt]:
     start = time.perf_counter()
@@ -3153,6 +3179,9 @@ def list_proof_receipts(
     cache_available = cache is not None
     bounded_limit = min(limit, settings.max_page_size)
     bounded_offset = max(0, offset)
+    condition_filter = condition_id.strip().lower() if isinstance(condition_id, str) else None
+    request_filter = request_id.strip() if isinstance(request_id, str) else None
+    event_filter = event_id.strip() if isinstance(event_id, str) else None
     log_event(
         logger,
         logging.DEBUG,
@@ -3160,6 +3189,10 @@ def list_proof_receipts(
         message="fetching proof receipts",
         limit=bounded_limit,
         offset=bounded_offset,
+        market_id=market_id,
+        event_id=event_filter,
+        condition_id=condition_filter,
+        request_id=request_filter,
     )
     stmt = (
         select(
@@ -3184,6 +3217,17 @@ def list_proof_receipts(
         .offset(bounded_offset)
         .limit(bounded_limit)
     )
+    filters = []
+    if market_id is not None:
+        filters.append(shared_models.SettlementReceipt.market_id == market_id)
+    if request_filter:
+        filters.append(shared_models.SettlementReceipt.request_id == request_filter)
+    if event_filter:
+        filters.append(shared_models.Market.event_id == event_filter)
+    if condition_filter:
+        filters.append(func.lower(shared_models.Market.condition_id) == condition_filter)
+    if filters:
+        stmt = stmt.where(*filters)
     rows = session.execute(stmt).all()
     receipts: list[schemas.ProofReceipt] = []
     cache_hits = 0

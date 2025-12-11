@@ -35,13 +35,13 @@ type WagmiSwitchChainState = {
   switchChain?: (args: { chainId: number }) => void;
 };
 
-const createConnector = (id: string, name: string): Connector =>
+const createConnector = (id: string, name: string, ready = true): Connector =>
   ({
     id,
     name,
     uid: `${id}-uid`,
     type: "app",
-    ready: true,
+    ready,
   }) as unknown as Connector;
 
 const metaMaskConnector = createConnector("metaMask", "MetaMask");
@@ -130,7 +130,7 @@ describe("ConnectWalletButton", () => {
   it("allows managing a connected session inside the modal", () => {
     currentAccountState = {
       address: "0x1234567890abcdef1234567890abcdef12345678",
-      chain: { id: 1, name: "Other Chain" },
+      chain: hoistedDefaults.defaultChain,
       status: "connected",
     };
 
@@ -141,12 +141,6 @@ describe("ConnectWalletButton", () => {
     fireEvent.click(screen.getByRole("button", { name: /0x1234…5678/i }));
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
     expect(currentDisconnectState.disconnect).toHaveBeenCalledTimes(1);
-
-    const switchButton = screen.getByRole("button", {
-      name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i"),
-    });
-    fireEvent.click(switchButton);
-    expect(currentSwitchChainState.switchChain).toHaveBeenCalledWith({ chainId: hoistedDefaults.defaultChain.id });
 
     expect(screen.queryByRole("button", { name: /sign message/i })).not.toBeInTheDocument();
   });
@@ -188,5 +182,36 @@ describe("ConnectWalletButton", () => {
     expect(
       screen.queryByRole("button", { name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i") }),
     ).not.toBeInTheDocument();
+  });
+
+  it("surfaces a wrong network prompt when switching is unavailable", () => {
+    currentAccountState = {
+      address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      chain: { id: 1, name: "Other Chain" },
+      status: "connected",
+    };
+    currentSwitchChainState.switchChain = undefined;
+
+    render(<ConnectWalletButton />);
+    fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
+
+    expect(screen.getByText(/wrong network/i)).toBeInTheDocument();
+    expect(screen.getByText(/switch to .* to continue/i)).toBeInTheDocument();
+  });
+
+  it("hides injected wallets when the browser has no compatible providers", () => {
+    currentConnectState.connectors = [
+      createConnector("metaMask", "MetaMask", false),
+      createConnector("injected", "Injected", false),
+      createConnector("coinbaseWalletSDK", "Coinbase Wallet", false),
+      walletConnectConnector,
+    ];
+
+    render(<ConnectWalletButton />);
+    fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
+
+    expect(screen.queryByRole("button", { name: /metamask/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /rabby/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^walletconnect/i })).toBeInTheDocument();
   });
 });

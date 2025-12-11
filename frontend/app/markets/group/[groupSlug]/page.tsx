@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import dynamic from "next/dynamic";
 import { fetchGroupedMarkets } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
-import { buildMetadata } from "@/lib/seo";
+import { buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { MarketLiveStatusBar } from "@/components/markets/MarketLiveStatusBar";
@@ -12,6 +12,7 @@ import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel"
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { formatDateTime } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
+import { JsonLd } from "@/components/seo/JsonLd";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -125,12 +126,21 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
           groupItemThreshold: item.groupItemThreshold ?? null,
           groupPosition: item.groupPosition ?? null,
           outcomePrices: item.outcomePrices ?? [],
+          volume: item.volume ?? 0,
           volume24hUsd: item.volume24hUsd ?? null,
           liquidityUsd: item.liquidityUsd ?? null,
           commitDeadline: item.commitDeadline ?? item.closesAt ?? item.ordersOpenedAt ?? null,
           startsAt: item.startsAt ?? null,
           closesAt: item.closesAt ?? null,
         }));
+  const marketPath = market.eventId
+    ? `/markets/group/${groupSlug}?eventId=${encodeURIComponent(market.eventId)}`
+    : `/markets/group/${groupSlug}`;
+  const breadcrumbs = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Markets", path: "/markets" },
+    { name: market.title, path: marketPath },
+  ]);
   return (
     <>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
@@ -198,6 +208,7 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
           dangerouslySetInnerHTML={{ __html: JSON.stringify({ "@context": "https://schema.org", "@type": "Collection", name: market.title }) }}
         />
       )}
+      <JsonLd data={breadcrumbs} id="grouped-market-breadcrumbs" />
     </>
   );
 }

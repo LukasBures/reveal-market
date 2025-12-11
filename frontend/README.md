@@ -95,7 +95,7 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 - `useFeaturedMarkets({ limit, searchQuery, category, initialData })` – React Query hook that wraps the server action and provides stale-while-revalidate behavior to client components.
 - `fetchMarketByEventId(eventId)` – Loads detail data and merges backend-provided metadata with Gamma-derived extras (`clob_pair_id`, `resolution_source`, etc.).
 - `fetchMarketStatsBreakdown()` / `fetchHealthSnapshot()` – Used for KPI cards, doc callouts, and investor narratives.
-- `fetchProofReceipts(limit, { offset })` – Backed by the `/proofs` API and used by `/proofs`’ infinite scroll client to keep the page lightweight.
+- `fetchProofReceipts(limit, { offset, marketId, eventId, conditionId, requestId })` – Backed by the `/proofs` API and used by `/proofs`’ infinite scroll client to keep the page lightweight.
 - `fetchMarketSuggestions(query, limit)` – Powers `/app/api/markets/suggest` so the global search dropdown hits a cached Next.js route instead of calling the backend twice per keystroke.
 - `fetchPricingQuoteWithMeta(stakeZen, { walletAddress, marketAddress, outcomeId, marketId })` – Requests signed quotes compatible with `RevealMarket.commitWithQuote`; missing fields are rejected.
 
@@ -161,7 +161,7 @@ If you introduce new components, test at these breakpoints:
   1. `npm run lint`
   2. `npm run test`
   3. Manually inspect `/`, `/categories/politics`, `/markets/<eventId>` in responsive mode.
-  4. For CI parity run `./frontend/run_tests.sh`, which now fails fast if the API at `NEXT_PUBLIC_API_BASE_URL` can’t answer `/health`.
+  4. For CI parity run `./frontend/run_tests.sh`, which now fails fast if the configured API base can’t answer `/health`.
 
 CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
@@ -173,19 +173,19 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
 - **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API at `NEXT_PUBLIC_API_BASE_URL` responds to `/health` (set this to your TLS host, e.g., `https://api.revealmarket.xyz`, and rely on hosts/Cloudflare in dev).
+- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API base resolves and responds to `/health` (defaults come from `MODE`: prod → `https://api.revealmarket.xyz`, local → `http://localhost:8000`).
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ## Streaming & FX
 
 - **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
 - **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
-- **WSS/TLS** – Set `NEXT_PUBLIC_PRICE_STREAMER_URL` to your HTTPS streamer host (e.g., `https://stream.revealmarket.xyz`). The client auto-switches to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
-- **Env summary** – `NEXT_PUBLIC_PRICE_STREAMER_URL`, `STREAMER_INTERNAL_URL` (SSR), `NEXT_PUBLIC_API_BASE_URL`, and streamer-side `STREAMER_WORSEN_PERCENT` (controls applied dampening) must be set consistently across frontend and streamer.
+- **WSS/TLS** – Streamer defaults follow `MODE` (prod → `https://stream.revealmarket.xyz`, local → `http://localhost:8100`) and auto-switch to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
+- **Env summary** – Defaults come from `MODE` (prod/local presets). Override with `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only when needed; keep streamer-side `STREAMER_WORSEN_PERCENT` aligned.
 
 ## Deployment / Runbook
 
-- **Env vars**: `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL` (HTTPS host for WSS), `STREAMER_INTERNAL_URL` (in-cluster), `NEXT_PUBLIC_SITE_URL` (canonical), wallet provider keys, and any analytics keys (ensure CSP allows them).
+- **Env vars**: Mostly preset by `MODE`; optional overrides include `RM_API_BASE_URL`, `STREAMER_INTERNAL_URL`, wallet provider keys, and any analytics keys (ensure CSP allows them).
 - **TLS**: Terminate at Caddy/Nginx; streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
 - **Health**: API `/healthz`, streamer `/healthz`; frontend relies on a reachable API (build/tests fail fast if `/health` is down).
 - **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
@@ -207,12 +207,12 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 1. `npm install && npm run lint && npm run test`.
 2. `npm run build` (ensures there are no SSG/ISR surprises).
-3. Provide `NEXT_PUBLIC_SITE_URL` + `NEXT_PUBLIC_API_BASE_URL` secrets in your hosting platform.
+3. Ensure `MODE=production` in your hosting platform; override `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only if pointing at non-standard hosts.
 4. Serve over HTTPS so CSP/HSTS headers take effect. If you terminate TLS upstream (Cloudflare, Fastly, etc.), mirror the security headers there.
 5. Configure caching:
    - Static assets: long-lived CDN cache.
    - App routes: let Next.js handle incremental cache (the worker invalidates tags automatically).
-6. Docker tip: when using `docker/frontend/Dockerfile`, pass `--build-arg NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain` so server-side rendering + JSON-LD reference the proper host.
+6. Docker tip: when using `docker/frontend/Dockerfile`, set `MODE=production` so server-side rendering + JSON-LD reference the production presets.
 
 Docker images rely on `next build` + `next start --turbo` by default; see the repository root for compose examples.
 
@@ -222,7 +222,7 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis prover api worker`) so the API answers at `NEXT_PUBLIC_API_BASE_URL` before running `npm run build`. |
+| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis prover api worker`) so the API answers at the configured base before running `npm run build`. |
 | CSP violations in dev | Update `next.config.mjs` to include any new external domains (fonts, analytics, etc.). |
 | Scroll layouts jitter on mobile | Confirm `body` retains `scrollbar-gutter` and that new sections don’t override `overflow`. |
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |

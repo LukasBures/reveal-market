@@ -41,21 +41,18 @@ describe("serverEnv", () => {
 
   it("prefers configured API base URLs", async () => {
     process.env.RM_API_BASE_URL = "https://api.reveal.test";
-    delete process.env.NEXT_PUBLIC_API_BASE_URL;
     const module = await import("@/lib/serverEnv");
     expect(module.getServerEnv().apiBaseUrl).toBe("https://api.reveal.test");
   });
 
   it("falls back to the default hosted API when nothing is configured", async () => {
     delete process.env.RM_API_BASE_URL;
-    delete process.env.NEXT_PUBLIC_API_BASE_URL;
     const module = await import("@/lib/serverEnv");
     expect(module.getServerEnv().apiBaseUrl).toBe("http://localhost:8000");
   });
 
   it("throws when a malformed URL is configured in production", async () => {
     process.env.RM_API_BASE_URL = "not a valid url";
-    delete process.env.NEXT_PUBLIC_API_BASE_URL;
     process.env.NODE_ENV = "production";
 
     await expect(import("@/lib/serverEnv")).rejects.toThrow(/invalid/i);

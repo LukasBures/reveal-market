@@ -137,12 +137,14 @@ export function ConnectWalletButton() {
   const modalTitleId = "wallet-modal-title";
   const [isMounted, setIsMounted] = useState(false);
   const [attemptedAutoSwitch, setAttemptedAutoSwitch] = useState(false);
+  const [switchFailure, setSwitchFailure] = useState<string | null>(null);
   const [autoCloseOnConnect, setAutoCloseOnConnect] = useState(false);
   const isConnected = accountStatus === "connected" && Boolean(address);
   const activeConnectorId = activeConnector?.id;
   const connectErrorMessage = formatErrorMessage(connectError);
   const signErrorMessage = formatErrorMessage(signError);
   const switchErrorMessage = formatErrorMessage(switchError);
+  const chainMismatch = isConnected && chain?.id !== defaultChain.id;
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -162,16 +164,33 @@ export function ConnectWalletButton() {
   }, []);
 
   useEffect(() => {
-    if (!isConnected) {
+    if (!isConnected || !chain) {
       setAttemptedAutoSwitch(false);
+      setSwitchFailure(null);
       return;
     }
     const switchFn = switchChainAsync ?? switchChain;
-    if (chain?.id !== defaultChain.id && switchFn && !attemptedAutoSwitch) {
-      setAttemptedAutoSwitch(true);
-      Promise.resolve(switchFn({ chainId: defaultChain.id })).catch(() => setAttemptedAutoSwitch(false));
+    if (chain.id === defaultChain.id) {
+      setAttemptedAutoSwitch(false);
+      setSwitchFailure(null);
+      return;
     }
-  }, [attemptedAutoSwitch, chain?.id, isConnected, switchChain, switchChainAsync]);
+    if (!switchFn) {
+      setSwitchFailure(`Switch to ${defaultChain.name} in your wallet to trade.`);
+      return;
+    }
+    if (!attemptedAutoSwitch) {
+      setAttemptedAutoSwitch(true);
+      Promise.resolve(switchFn({ chainId: defaultChain.id }))
+        .then(() => setSwitchFailure(null))
+        .catch((error: unknown) => {
+          setSwitchFailure(
+            formatErrorMessage(error instanceof Error ? error : switchError) ??
+              `Switch to ${defaultChain.name} to trade.`,
+          );
+        });
+    }
+  }, [attemptedAutoSwitch, chain, isConnected, switchChain, switchChainAsync, switchError]);
 
   const connectorsById = useMemo<ConnectorMap>(() => {
     return connectors.reduce<ConnectorMap>((acc, connector) => {
@@ -204,11 +223,6 @@ export function ConnectWalletButton() {
     return { ethereum, providers };
   }, [isMounted]);
 
-  const hasInjectedProvider = useCallback(
-    (predicate: (provider: any) => boolean) => providerFlags.providers.some(predicate),
-    [providerFlags.providers],
-  );
-
   const availableOptions = useMemo(() => {
     return CONNECTOR_UI.filter((option) => {
       if (option.id === "walletconnect" && !walletConnectEnabled) {
@@ -216,43 +230,46 @@ export function ConnectWalletButton() {
       }
       const connector = connectorsById[option.connectorId];
       if (!connector) return false;
-      const ready = (connector as any).ready ?? true;
-      if (!isMounted) return true;
-      const ethereum = providerFlags.ethereum;
-      const providersAvailable = providerFlags.providers.length > 0;
+      const ready = Boolean((connector as any).ready ?? true);
 
-      // Determine if this connector is actually available in the current environment.
-      let walletAvailable = false;
-      if (!isMobileBrowser) {
-        walletAvailable = true;
-      } else if (option.connectorId === "walletConnect") {
-        walletAvailable = true;
-      } else if (option.connectorId === "metaMask") {
-        walletAvailable =
-          Boolean(ethereum?.isMetaMask) ||
-          hasInjectedProvider((provider) => Boolean(provider?.isMetaMask));
-      } else if (option.connectorId === "coinbaseWalletSDK") {
-        walletAvailable =
-          Boolean(ethereum?.isCoinbaseWallet) ||
-          hasInjectedProvider((provider) => Boolean(provider?.isCoinbaseWallet));
-      } else if (option.connectorId === "injected") {
-        const hasNonMetaMask = hasInjectedProvider(
-          (provider) => !provider?.isMetaMask && !provider?.isCoinbaseWallet,
-        );
-        walletAvailable = Boolean(
-          (ethereum && !ethereum.isMetaMask && !ethereum.isCoinbaseWallet) || hasNonMetaMask,
-        );
+      if (!isMounted) {
+        return option.connectorId === "walletConnect" ? walletConnectEnabled : ready;
       }
 
-      // If wagmi marks connector as not ready, allow it when we detected a matching provider.
-      if (!ready && !walletAvailable) return false;
+      const hasProviderMatch = (predicate: (provider: any) => boolean) =>
+        providerFlags.providers.some(predicate);
+      const hasMetaMask = hasProviderMatch((provider) => Boolean(provider?.isMetaMask));
+      const hasCoinbaseWallet = hasProviderMatch((provider) => Boolean(provider?.isCoinbaseWallet));
+      const hasOtherInjected = hasProviderMatch(
+        (provider) => Boolean(provider) && !provider?.isMetaMask && !provider?.isCoinbaseWallet,
+      );
 
-      // When no providers are present, hide injected wallets on mobile/desktop.
-      if (!walletAvailable && !providersAvailable && !ethereum) return false;
+      // Determine if this connector is actually available in the current environment.
+      let walletAvailable = ready;
+      if (option.connectorId === "walletConnect") {
+        walletAvailable = walletConnectEnabled;
+      } else if (option.connectorId === "metaMask") {
+        walletAvailable ||= hasMetaMask;
+      } else if (option.connectorId === "coinbaseWalletSDK") {
+        walletAvailable ||= hasCoinbaseWallet;
+      } else if (option.connectorId === "injected") {
+        walletAvailable ||= hasOtherInjected;
+      }
+
+      if (!walletAvailable) {
+        return false;
+      }
+
+      // On mobile browsers, only surface wallets we detected or WalletConnect.
+      if (isMobileBrowser && option.connectorId !== "walletConnect") {
+        if (option.connectorId === "metaMask") return hasMetaMask;
+        if (option.connectorId === "coinbaseWalletSDK") return hasCoinbaseWallet;
+        if (option.connectorId === "injected") return hasOtherInjected;
+      }
 
       return walletAvailable;
     });
-  }, [connectorsById, hasInjectedProvider, isMobileBrowser, isMounted, providerFlags]);
+  }, [connectorsById, isMobileBrowser, isMounted, providerFlags.providers]);
 
   useEffect(() => {
     if (!selectedOption) return;
@@ -264,6 +281,12 @@ export function ConnectWalletButton() {
   }, [availableOptions, selectedOption]);
 
   const isConnecting = connectStatus === "pending";
+
+  useEffect(() => {
+    if (!chainMismatch) {
+      setSwitchFailure(null);
+    }
+  }, [chainMismatch]);
 
   const handleConnect = (connector?: Connector) => {
     if (!connector) {
@@ -286,10 +309,18 @@ export function ConnectWalletButton() {
   };
 
   const handleSwitchChain = () => {
-    if (!switchChain) {
+    if (!switchChain && !switchChainAsync) {
+      setSwitchFailure(`Switch to ${defaultChain.name} in your wallet to continue.`);
       return;
     }
-    switchChain({ chainId: defaultChain.id });
+    setSwitchFailure(null);
+    const switchFn = switchChainAsync ?? switchChain;
+    Promise.resolve(switchFn({ chainId: defaultChain.id })).catch((error: unknown) => {
+      setSwitchFailure(
+        formatErrorMessage(error instanceof Error ? error : switchError) ??
+          `Switch to ${defaultChain.name} to trade.`,
+      );
+    });
   };
   const messageDisabled = !message.trim();
 
@@ -298,6 +329,7 @@ export function ConnectWalletButton() {
     setSelectedOption(null);
     setAcceptedTerms(false);
     setAutoCloseOnConnect(false);
+    setSwitchFailure(null);
   }, []);
   const openModal = () => {
     setModalOpen(true);
@@ -307,10 +339,10 @@ export function ConnectWalletButton() {
   };
 
   useEffect(() => {
-    if (isConnected && isModalOpen && autoCloseOnConnect) {
+    if (isConnected && isModalOpen && autoCloseOnConnect && !chainMismatch) {
       closeModal();
     }
-  }, [autoCloseOnConnect, closeModal, isConnected, isModalOpen]);
+  }, [autoCloseOnConnect, chainMismatch, closeModal, isConnected, isModalOpen]);
 
   useEffect(() => {
     if (connectStatus === "success" && isModalOpen && autoCloseOnConnect) {
@@ -490,6 +522,33 @@ export function ConnectWalletButton() {
 
               {isConnected ? (
                 <>
+                  {chainMismatch ? (
+                    <div className="rounded-2xl border border-amber-300/40 bg-amber-500/10 p-4 text-amber-100">
+                      <p className="text-sm font-semibold">Wrong network</p>
+                      <p className="text-xs text-amber-50/80">
+                        Switch to {defaultChain.name} to continue. Trading is blocked until you change networks in your
+                        wallet.
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {switchChain ? (
+                          <button
+                            type="button"
+                            onClick={handleSwitchChain}
+                            disabled={isSwitching}
+                            className="rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isSwitching ? "Switching…" : `Switch to ${defaultChain.name}`}
+                          </button>
+                        ) : null}
+                        <span className="text-[11px] text-amber-50/70">
+                          {switchChain
+                            ? "If this fails, switch inside your wallet (WalletConnect, MetaMask, Coinbase, injected) then retry."
+                            : "Open your wallet and switch networks (WalletConnect, MetaMask, Coinbase, injected) then retry."}
+                        </span>
+                      </div>
+                      {switchFailure ? <p className="mt-2 text-[11px] text-amber-50/80">{switchFailure}</p> : null}
+                    </div>
+                  ) : null}
                   <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                   <div className="flex flex-col gap-2">
                     <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Connected</p>

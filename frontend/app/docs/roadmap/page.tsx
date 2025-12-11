@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("roadmap");
@@ -76,6 +77,7 @@ export default function RoadmapPage() {
           for a tailored diligence session.
         </p>
       </div>
+      <DocsStructuredData slug="roadmap" />
     </>
   );
 }

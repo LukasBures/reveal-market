@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("tiers-fees");
@@ -29,6 +30,7 @@ export default function TiersFeesPage() {
         Pricing conversations happen with the founding team. Reach out to
         discuss volume commitments and we’ll tailor the tier to your business.
       </p>
+      <DocsStructuredData slug="tiers-fees" />
     </>
   );
 }

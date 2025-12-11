@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("architecture");
@@ -47,6 +48,7 @@ export default function ArchitecturePage() {
         partner experience turnkey—exactly what sophisticated investors require
         to scale exposure.
       </p>
+      <DocsStructuredData slug="architecture" />
     </>
   );
 }

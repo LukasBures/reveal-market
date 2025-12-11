@@ -24,17 +24,23 @@ async function importActionModule() {
 
 describe("requestLandingAccessAction", () => {
   const originalEnv = process.env.LANDING_ACCESS_CODE;
+  const originalMode = process.env.MODE;
 
   beforeEach(() => {
     mockCookies.mockReturnValue({
       get: vi.fn(),
       set: setCookieMock,
     });
+    process.env.MODE = "production";
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-    delete process.env.NEXT_PUBLIC_SITE_URL;
+    if (originalMode === undefined) {
+      delete process.env.MODE;
+    } else {
+      process.env.MODE = originalMode;
+    }
     if (originalEnv === undefined) {
       delete process.env.LANDING_ACCESS_CODE;
     } else {
@@ -70,7 +76,6 @@ describe("requestLandingAccessAction", () => {
 
   it("sets the cookie and returns success when the code matches", async () => {
     process.env.LANDING_ACCESS_CODE = "rm125";
-    process.env.NEXT_PUBLIC_SITE_URL = "https://revealmarket.xyz";
     const { requestLandingAccessAction } = await importActionModule();
     const formData = new FormData();
     formData.set("accessCode", "rm125");

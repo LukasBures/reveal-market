@@ -26,7 +26,7 @@ describe("ProofsPage", () => {
 
   it("renders the proofs client when receipts are loaded", async () => {
     fetchProofReceiptsMock.mockResolvedValue({ receipts: [{ eventId: "evt-1" }], error: undefined });
-    const ui = await ProofsPage();
+    const ui = await ProofsPage({ searchParams: {} });
     render(ui);
     expect(proofsClientMock).toHaveBeenCalledWith(
       expect.objectContaining({ initialReceipts: [{ eventId: "evt-1" }] }),
@@ -35,9 +35,29 @@ describe("ProofsPage", () => {
     expect(screen.queryByText(/Unable to load proof receipts/i)).toBeNull();
   });
 
+  it("forwards search param filters to the API and client", async () => {
+    fetchProofReceiptsMock.mockResolvedValue({ receipts: [{ eventId: "evt-2" }], error: undefined });
+    const ui = await ProofsPage({
+      searchParams: { eventId: "evt-2", requestId: "req-2", conditionId: "0xabc", marketId: "5" },
+    });
+    render(ui);
+    expect(fetchProofReceiptsMock).toHaveBeenCalledWith(24, {
+      eventId: "evt-2",
+      requestId: "req-2",
+      conditionId: "0xabc",
+      marketId: 5,
+    });
+    expect(proofsClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: { eventId: "evt-2", requestId: "req-2", conditionId: "0xabc", marketId: 5 },
+      }),
+      expect.anything(),
+    );
+  });
+
   it("shows an error notice when the API call fails", async () => {
     fetchProofReceiptsMock.mockResolvedValue({ receipts: [], error: "Not Found" });
-    const ui = await ProofsPage();
+    const ui = await ProofsPage({ searchParams: {} });
     render(ui);
     expect(screen.getByText(/Unable to load proof receipts/i)).toBeInTheDocument();
     expect(screen.getByText(/Not Found/)).toBeInTheDocument();

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("privacy-security");
@@ -31,6 +32,7 @@ export default function PrivacySecurityPage() {
         full reports under NDA. The objective is simple: own the world’s most
         trusted privacy-preserving prediction rails.
       </p>
+      <DocsStructuredData slug="privacy-security" />
     </>
   );
 }

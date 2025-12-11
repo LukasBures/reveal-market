@@ -9,7 +9,7 @@ import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
 import { fetchFeaturedMarkets } from "@/lib/api";
 import { categorySlugFromLabel } from "@/lib/slugs";
-import { getMarketVolume } from "@/lib/markets";
+import { getMarketVolume, type MarketSortOption } from "@/lib/markets";
 
 /**
  * We auto-load up to five batches via IntersectionObserver to give users a lazy-loading feel
@@ -27,6 +27,7 @@ type ClientProps = {
   status?: string;
   onlyActive?: boolean;
   trending?: boolean;
+  sortBy?: MarketSortOption;
 };
 
 /**
@@ -42,6 +43,7 @@ export function FeaturedMarketsClient({
   status = "active",
   onlyActive = true,
   trending,
+  sortBy = "totalVolume",
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
@@ -57,12 +59,17 @@ export function FeaturedMarketsClient({
 
   const batchSize = Math.max(pageSize, 30);
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
-  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}`;
-  const sortByVolumeDesc = useCallback((a: MarketSummary, b: MarketSummary) => {
-    const diff = getMarketVolume(b) - getMarketVolume(a);
-    if (diff !== 0) return diff;
-    return (a.eventId ?? "").localeCompare(b.eventId ?? "");
-  }, []);
+  const orderBy = sortBy === "totalVolume" ? "volume" : "volume_24h_usd";
+  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}`;
+  const sortByVolumeDesc = useCallback(
+    (a: MarketSummary, b: MarketSummary) => {
+      const mode = sortBy === "totalVolume" ? "total" : "24h";
+      const diff = getMarketVolume(b, mode) - getMarketVolume(a, mode);
+      if (diff !== 0) return diff;
+      return (a.eventId ?? "").localeCompare(b.eventId ?? "");
+    },
+    [sortBy],
+  );
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
@@ -103,6 +110,7 @@ export function FeaturedMarketsClient({
     category: normalizedCategory,
     status,
     trending,
+    orderBy,
     initialData: initialMarkets,
   });
 
@@ -146,6 +154,7 @@ export function FeaturedMarketsClient({
             status,
             trending,
             coalesceGroups: true,
+            orderBy,
           });
           const merged = normalizeMarkets([...markets, ...additions]);
           const newItemsAdded = merged.length - markets.length;
@@ -176,11 +185,10 @@ export function FeaturedMarketsClient({
       offset,
       searchQuery,
       status,
-      filterByStatus,
       trending,
-      sortByVolumeDesc,
       normalizeMarkets,
       batchSize,
+      orderBy,
     ],
   );
 

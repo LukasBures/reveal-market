@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("referrals");
@@ -17,6 +18,7 @@ export default function ReferralsPage() {
         direct rev share depending on the users or liquidity introduced. The
         program is live for vetted institutions—contact us to learn more.
       </p>
+      <DocsStructuredData slug="referrals" />
     </>
   );
 }

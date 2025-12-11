@@ -8,13 +8,35 @@ import { ProofReceiptList } from "./ProofReceiptList";
 type Props = {
   initialReceipts: ProofReceipt[];
   pageSize?: number;
+  filters?: {
+    marketId?: number;
+    eventId?: string;
+    conditionId?: string;
+    requestId?: string;
+  };
 };
 
-async function fetchNextReceipts(limit: number, offset: number): Promise<ProofReceipt[]> {
+async function fetchNextReceipts(
+  limit: number,
+  offset: number,
+  filters?: Props["filters"],
+): Promise<ProofReceipt[]> {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   if (offset > 0) {
     params.set("offset", String(offset));
+  }
+  if (filters?.marketId) {
+    params.set("market_id", String(filters.marketId));
+  }
+  if (filters?.eventId) {
+    params.set("event_id", filters.eventId);
+  }
+  if (filters?.conditionId) {
+    params.set("condition_id", filters.conditionId);
+  }
+  if (filters?.requestId) {
+    params.set("request_id", filters.requestId);
   }
   const response = await fetch(`/api/proofs?${params.toString()}`, { cache: "no-store" });
   if (!response.ok) {
@@ -30,12 +52,20 @@ async function fetchNextReceipts(limit: number, offset: number): Promise<ProofRe
   return [];
 }
 
-export function ProofsClient({ initialReceipts, pageSize = 24 }: Props) {
+export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props) {
   const [receipts, setReceipts] = useState(initialReceipts);
   const [hasMore, setHasMore] = useState(initialReceipts.length >= pageSize);
   const [isPending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const offsetRef = useRef(initialReceipts.length);
+  const filtersRef = useRef(filters);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+    setReceipts(initialReceipts);
+    setHasMore(initialReceipts.length >= pageSize);
+    offsetRef.current = initialReceipts.length;
+  }, [filters, initialReceipts, pageSize]);
 
   const loadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -44,7 +74,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24 }: Props) {
       }
       startTransition(async () => {
         try {
-          const next = await fetchNextReceipts(pageSize, offsetRef.current);
+          const next = await fetchNextReceipts(pageSize, offsetRef.current, filtersRef.current);
           if (!next.length) {
             setHasMore(false);
             return;

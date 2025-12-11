@@ -86,12 +86,15 @@ export function LandingGate() {
           <div className="wolf-aura flex flex-col items-center gap-4 overflow-hidden p-6 text-center lg:text-left">
             <div className="relative">
               <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/25 via-transparent to-transparent blur-3xl opacity-70" />
-              <img
-                src="/brand/reveal-wolf-03.png"
-                alt="Reveal Market wolf illustration"
-                className="relative z-10 w-64 max-w-full drop-shadow-[0_45px_90px_rgba(0,0,0,0.65)]"
-                loading="eager"
-              />
+              <picture>
+                <source srcSet="/brand/reveal-wolf-03.webp" type="image/webp" />
+                <img
+                  src="/brand/reveal-wolf-03.png"
+                  alt="Reveal Market wolf illustration"
+                  className="relative z-10 w-64 max-w-full drop-shadow-[0_45px_90px_rgba(0,0,0,0.65)]"
+                  loading="eager"
+                />
+              </picture>
             </div>
             <p className="text-sm uppercase tracking-[0.4em] text-white/60">Private board with receipts</p>
             <p className="text-base text-slate-200">The private board that shows its receipts once the story is over.</p>

@@ -78,9 +78,9 @@ def test_build_prover_payload(session):
     payload = build_prover_payload(session, 1)
     assert payload["marketId"] == "1"
     assert payload["merkleRoot"] == "0x" + root.hex()
-    assert len(payload["tickets"]) == 2
+    assert "tickets" not in payload
+    assert "payoutMultiplierWad" not in payload
     assert payload["poolTotals"] == ["100", "101"]
-    assert payload["payoutMultiplierWad"] == str((202 * 10**18) // 101)
 
 
 def test_build_prover_payload_missing_data(session):

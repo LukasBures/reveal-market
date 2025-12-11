@@ -25,6 +25,7 @@ export const dynamic = "force-dynamic";
 const font = Manrope({
   subsets: ["latin"],
   variable: "--font-sans",
+  display: "swap",
 });
 const displayFont = localFont({
   src: "./fonts/AutobusBold.ttf",
@@ -42,7 +43,7 @@ const isBrowserResolvableHost = (hostname: string) => {
   return normalized.includes(".") || normalized.includes(":");
 };
 const API_ORIGIN = (() => {
-  const candidate = process.env.NEXT_PUBLIC_API_BASE_URL ?? serverEnv.apiBaseUrl;
+  const candidate = serverEnv.apiBaseUrl;
   try {
     const url = new URL(candidate);
     return isBrowserResolvableHost(url.hostname) ? url.origin : null;
@@ -128,6 +129,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
+        <link rel="preload" as="image" href="/opengraph-image" />
+        <link rel="preload" as="image" href="/icons/favicon-96x96.png" />
         <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
         <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
         <link rel="shortcut icon" href="/icons/favicon.ico" />

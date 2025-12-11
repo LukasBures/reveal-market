@@ -11,6 +11,7 @@ export const metadata: Metadata = buildMetadata({
   description: "Search live and finalized markets with cached results and lazy loading.",
   path: "/markets/search",
   keywords: ["market search", "reveal market search", "prediction market search"],
+  robots: { index: false, follow: true },
 });
 
 type PageProps = {
@@ -23,7 +24,7 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
   const initialQuery = (rawQuery ?? "").trim();
   const initialResults =
     initialQuery.length >= 2
-      ? await fetchFeaturedMarkets(PAGE_SIZE, { searchQuery: initialQuery, status: "any" })
+      ? await fetchFeaturedMarkets(PAGE_SIZE, { searchQuery: initialQuery, status: "any", orderBy: "volume" })
       : [];
 
   return (

@@ -84,6 +84,7 @@ describe("FeaturedMarketsClient", () => {
       offset: 1,
       status: "active",
       coalesceGroups: true,
+      orderBy: "volume",
     });
   });
 
@@ -129,5 +130,19 @@ describe("FeaturedMarketsClient", () => {
     });
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(AUTO_LOAD_BATCHES);
     expect(screen.queryByRole("button", { name: /load more markets/i })).not.toBeInTheDocument();
+  });
+
+  it("allows sorting by total volume", () => {
+    const markets = [
+      { eventId: "evt-a", title: "Higher 24h", volume24hUsd: 800, volume: 1_000 },
+      { eventId: "evt-b", title: "Highest total", volume24hUsd: 100, volume: 5_000 },
+    ];
+
+    const { container } = renderWithClient(
+      <FeaturedMarketsClient initialMarkets={markets} sortBy="totalVolume" />,
+    );
+
+    const titles = Array.from(container.querySelectorAll("h3")).map((node) => node.textContent ?? "");
+    expect(titles[0]).toContain("Highest total");
   });
 });

@@ -23,7 +23,7 @@ const DOC_PATHS = [
   "/docs/faq",
 ];
 
-const STATIC_PATHS = ["/", "/about", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer"];
+const STATIC_PATHS = ["/", "/about", "/contact", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer", "/proofs"];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date().toISOString();

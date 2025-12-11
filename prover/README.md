@@ -155,7 +155,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 ## Observability
 
 - Logs follow the global format (`timestamp | LEVEL | prover | file:line | event | request_id | json`).
-- `/metrics` exposes `expvar` counters (successes, failures, last latency, artifacts_ok). Scrape it with your Prometheus sidecar or use `curl` for quick debugging.
+- `/metrics` exposes Prometheus-friendly counters/gauges plus a latency histogram: successes/failures, `prover_active_proofs`, `prover_artifacts_ok`, `prover_last_proof_latency_ms`, and `prover_request_latency_seconds` buckets. Scrape it with your Prometheus sidecar or use `curl` for quick debugging.
 - `/debug/pprof/*` ships with Go’s built-in profiling handlers so you can capture CPU/heap profiles in staging before tuning concurrency.
 - The Groth16 engine logs command output/errors when witness or proving fail, making rapidsnark issues easy to audit.
 - `/healthz` includes `ready`, `backend`, and `artifacts_ok` fields so orchestrators can alert when the prover downgrades or artifacts go missing.

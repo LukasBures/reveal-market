@@ -13,6 +13,7 @@ export async function CategoryMarkets({ slug }: { slug: string }) {
     trending: false,
     onlyFeatured: false,
     coalesceGroups: true,
+    orderBy: "volume",
   });
 
   return (
@@ -26,6 +27,7 @@ export async function CategoryMarkets({ slug }: { slug: string }) {
         status="active"
         onlyActive
         trending={false}
+        sortBy="totalVolume"
       />
     </div>
   );

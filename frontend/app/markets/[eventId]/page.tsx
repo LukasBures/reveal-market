@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
-import { absoluteUrl, buildMetadata } from "@/lib/seo";
+import { absoluteUrl, buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
@@ -13,6 +13,7 @@ import { MarketAnalyticsPanel } from "@/components/markets/MarketAnalyticsPanel"
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
 import { formatDateTime } from "@/lib/formatters";
+import { JsonLd } from "@/components/seo/JsonLd";
 
 const MarketDetailMetadataPanel = dynamic(
   () =>
@@ -220,6 +221,11 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
   const contextCopy = selectMarketCopy(market);
   const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
   const coverImage = resolveMarketImage(market);
+  const breadcrumbs = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Markets", path: "/markets" },
+    { name: market.title, path: canonicalPath },
+  ]);
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
   const priceStreamMarketId = resolvePriceStreamMarketId(market, canonicalEventId);
   const siblings = Array.isArray(market.siblings) ? market.siblings : [];
@@ -241,6 +247,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
             groupItemThreshold: market.groupItemThreshold,
             groupPosition: market.groupPosition,
             outcomePrices: market.outcomePrices ?? [],
+            volume: market.volume ?? 0,
             volume24hUsd: market.volume24hUsd ?? null,
             liquidityUsd: market.liquidityUsd ?? null,
             commitDeadline: getCommitDeadline(market) ?? market.closesAt ?? market.commitDeadline ?? null,
@@ -308,6 +315,7 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
           </div>
         </div>
       </div>
+      <JsonLd data={breadcrumbs} id="market-breadcrumbs" />
       <script
         type="application/ld+json"
         suppressHydrationWarning

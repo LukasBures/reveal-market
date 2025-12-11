@@ -5,6 +5,7 @@ import {
   LANDING_ACCESS_COOKIE_MAX_AGE_SECONDS,
   LANDING_ACCESS_COOKIE_NAME,
 } from "@/lib/access-gate";
+import { resolveUrlConfig } from "@/lib/env-presets";
 
 type LandingAccessFormState = {
   error?: string;
@@ -13,11 +14,10 @@ type LandingAccessFormState = {
 
 const resolveAccessCode = () => process.env.LANDING_ACCESS_CODE?.trim() ?? "";
 
-const resolveSiteUrl = () =>
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  process.env.RM_SITE_URL ??
-  process.env.VERCEL_URL ??
-  "https://revealmarket.xyz";
+const resolveSiteUrl = () => {
+  const config = resolveUrlConfig();
+  return config.siteUrl;
+};
 
 const shouldUseSecureCookie = (): boolean => {
   const siteUrl = resolveSiteUrl();

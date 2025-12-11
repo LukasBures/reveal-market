@@ -1,6 +1,7 @@
 import { fetchFeaturedMarkets } from "@/lib/api";
 import { logger } from "@/lib/logging";
 import { serverEnv } from "@/lib/serverEnv";
+import type { MarketSortOption } from "@/lib/markets";
 import { FeaturedMarketsClient } from "./FeaturedMarketsClient";
 import { DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./constants";
 import { MarketGridSkeleton } from "./MarketGridSkeleton";
@@ -12,6 +13,7 @@ type Props = {
   searchQuery?: string;
   categoryFilter?: string;
   emptyNotice?: string;
+  sortBy?: MarketSortOption;
 };
 
 export async function FeaturedMarketsSection({
@@ -20,13 +22,16 @@ export async function FeaturedMarketsSection({
   searchQuery,
   categoryFilter,
   emptyNotice,
+  sortBy = "totalVolume",
 }: Props = {}) {
+  const orderBy = sortBy === "totalVolume" ? "volume" : "volume_24h_usd";
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
     status: "active",
     trending: false,
     coalesceGroups: true,
+    orderBy,
   });
 
   if (initialMarkets.length === 0) {
@@ -35,7 +40,6 @@ export async function FeaturedMarketsSection({
       categoryFilter,
       searchQuery,
       apiBase: serverEnv.apiBaseUrl,
-      envApiBase: process.env.NEXT_PUBLIC_API_BASE_URL,
     });
   } else {
     logger.debug("featuredMarkets:loaded", {
@@ -57,6 +61,7 @@ export async function FeaturedMarketsSection({
       status="active"
       onlyActive
       trending={false}
+      sortBy={sortBy}
     />
   );
 }

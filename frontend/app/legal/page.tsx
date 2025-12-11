@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { buildMetadata } from "@/lib/seo";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
   title: "Reveal Market Legal Center",
@@ -34,35 +35,42 @@ const legalLinks = [
 ];
 
 export default function LegalCenterPage() {
+  const breadcrumbs = buildBreadcrumbJsonLd([
+    { name: "Home", path: "/" },
+    { name: "Legal", path: "/legal" },
+  ]);
   return (
-    <section className="mx-auto max-w-4xl space-y-6 px-4 py-12 text-slate-200">
-      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Compliance</p>
-      <h1 className="text-3xl font-semibold text-white">Reveal Market Legal Center</h1>
-      <p>
-        Review the policies, disclosures, and notices that govern participation in the Reveal Market ecosystem. Each document
-        below links to a dedicated page so compliance teams, partners, and investors can access the latest terms at any time.
-      </p>
-      <div className="space-y-4">
-        {legalLinks.map((item) => (
-          <div key={item.href} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
-            <p className="mt-2 text-slate-200">{item.description}</p>
-            <Link
-              href={item.href}
-              className="mt-3 inline-flex items-center text-sm font-semibold text-brand-200 hover:text-brand-100"
-            >
-              Read {item.label}
-            </Link>
-          </div>
-        ))}
-      </div>
-      <p className="text-sm text-slate-400">
-        For additional legal inquiries or signed agreements, submit a note through the{" "}
-        <Link href="/contact" className="text-brand-200 underline">
-          contact form
-        </Link>
-        .
-      </p>
-    </section>
+    <>
+      <section className="mx-auto max-w-4xl space-y-6 px-4 py-12 text-slate-200">
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Compliance</p>
+        <h1 className="text-3xl font-semibold text-white">Reveal Market Legal Center</h1>
+        <p>
+          Review the policies, disclosures, and notices that govern participation in the Reveal Market ecosystem. Each document
+          below links to a dedicated page so compliance teams, partners, and investors can access the latest terms at any time.
+        </p>
+        <div className="space-y-4">
+          {legalLinks.map((item) => (
+            <div key={item.href} className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <p className="text-sm uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
+              <p className="mt-2 text-slate-200">{item.description}</p>
+              <Link
+                href={item.href}
+                className="mt-3 inline-flex items-center text-sm font-semibold text-brand-200 hover:text-brand-100"
+              >
+                Read {item.label}
+              </Link>
+            </div>
+          ))}
+        </div>
+        <p className="text-sm text-slate-400">
+          For additional legal inquiries or signed agreements, submit a note through the{" "}
+          <Link href="/contact" className="text-brand-200 underline">
+            contact form
+          </Link>
+          .
+        </p>
+      </section>
+      <JsonLd data={breadcrumbs} id="legal-breadcrumbs" />
+    </>
   );
 }

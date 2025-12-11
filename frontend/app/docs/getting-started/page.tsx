@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = docsMetadata("getting-started");
@@ -45,6 +46,7 @@ export default function GettingStartedPage() {
         Fast-track slots are limited each quarter. Reach out early to secure a
         preferred role in the ecosystem.
       </div>
+      <DocsStructuredData slug="getting-started" />
     </>
   );
 }

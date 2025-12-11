@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     prime_markets_cache_enabled: bool = Field(default=True)
     markets_cache_limit: int = Field(default=30, ge=1, le=250)
     markets_cache_offset: int = Field(default=0, ge=0)
-    markets_cache_order_by: str | None = Field(default="volume_24h_usd")
+    markets_cache_order_by: str | None = Field(default="volume")
     markets_cache_prime_pages: int = Field(default=5, ge=1, le=1000)
     markets_cache_ttl_seconds: int = Field(default=300, ge=1)
     cache_prime_timeout_seconds: float = Field(default=5.0, gt=0)

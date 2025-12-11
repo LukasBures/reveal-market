@@ -86,3 +86,59 @@ def test_list_proof_receipts_returns_records(client, db_session):
     assert payload["poolTotalNo"] == "20"
     assert payload["winningPool"] == "10"
     assert payload["totalPool"] == "30"
+
+
+def test_list_proof_receipts_filters(client, db_session):
+    market_primary = models.Market(
+        event_id="evt-proof",
+        title="Proof Market",
+        category="Test",
+        oracle="polymarket",
+        status="settled",
+        condition_id="0xabc",
+        market_address="0x123",
+    )
+    market_other = models.Market(
+        event_id="evt-other",
+        title="Other Market",
+        category="Test",
+        oracle="polymarket",
+        status="settled",
+        condition_id="0xdef",
+        market_address="0x456",
+    )
+    db_session.add_all([market_primary, market_other])
+    db_session.commit()
+
+    receipt_match = shared_models.SettlementReceipt(
+        id=1,
+        market_id=market_primary.id,
+        market_address=market_primary.market_address,
+        request_id="req-keep",
+        proof_hash="0xproofhash",
+        public_signals=["0xroot", str(market_primary.id), "0", "30", "40", "50", "10", "20", "0xhash", "0"],
+        prover_version="v1",
+        circuit_hash="0xhash",
+        generated_at=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+    receipt_other = shared_models.SettlementReceipt(
+        id=2,
+        market_id=market_other.id,
+        market_address=market_other.market_address,
+        request_id="req-skip",
+        proof_hash="0xother",
+        public_signals=["0xroot", str(market_other.id), "0", "30", "40", "50", "10", "20", "0xhash", "0"],
+        prover_version="v1",
+        circuit_hash="0xhash",
+        generated_at=datetime(2024, 1, 2, tzinfo=UTC),
+    )
+    db_session.add_all([receipt_match, receipt_other])
+    db_session.commit()
+
+    response = client.get("/proofs?condition_id=0xabc&event_id=evt-proof&request_id=req-keep")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["requestId"] == "req-keep"
+    assert body[0]["eventId"] == "evt-proof"
+    assert body[0]["conditionId"] == "0xabc"

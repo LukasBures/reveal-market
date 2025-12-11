@@ -5,8 +5,8 @@ const MODE = (process.env.MODE ?? process.env.NODE_ENV ?? "development").toLower
 const IS_PROD_MODE = MODE.includes("prod");
 const DEFAULT_API_BASE = IS_PROD_MODE ? "https://api.revealmarket.xyz" : "http://localhost:8000";
 const DEFAULT_STREAMER_BASE = IS_PROD_MODE ? "https://stream.revealmarket.xyz" : "http://localhost:8100";
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE).replace(/\/$/, "");
-const STREAMER_BASE = (process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ?? DEFAULT_STREAMER_BASE).replace(/\/$/, "");
+const API_BASE = DEFAULT_API_BASE.replace(/\/$/, "");
+const STREAMER_BASE = DEFAULT_STREAMER_BASE.replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
 const DISABLE_MINIFY = process.env.NEXT_DISABLE_MINIFY === "true";
 

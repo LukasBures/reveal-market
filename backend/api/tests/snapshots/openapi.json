@@ -453,10 +453,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Order results (popularity|recent|volume_24h_usd)",
+              "description": "Order results (popularity|recent|volume_24h_usd|volume)",
               "title": "Order By"
             },
-            "description": "Order results (popularity|recent|volume_24h_usd)"
+            "description": "Order results (popularity|recent|volume_24h_usd|volume)"
           },
           {
             "name": "trending",

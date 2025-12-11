@@ -282,6 +282,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	defer cancel()
 	start := time.Now().UTC()
 	activeProofs.Add(1)
+	defer activeProofs.Add(-1)
 
 	logLine("info", "prover.request.accepted", map[string]any{
 		"market_id":   req.MarketID,
@@ -302,6 +303,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		return settlementProofResponse{}, err
 	}
 	if len(result.PublicSignals) != 10 {
+		recordProofFailure()
 		return settlementProofResponse{}, newInternalError(fmt.Errorf("unexpected public signal count: got %d, expected 10", len(result.PublicSignals)))
 	}
 	now := time.Now().UTC()

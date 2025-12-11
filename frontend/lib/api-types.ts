@@ -6,6 +6,7 @@ export type MarketSibling = {
   groupItemThreshold?: number | null;
   groupPosition?: number | null;
   outcomePrices?: number[] | null;
+  volume?: number | null;
   volume24hUsd?: number | null;
   liquidityUsd?: number | null;
   commitDeadline?: string | null;
@@ -153,4 +154,5 @@ export type FetchFeaturedMarketsOptions = {
   trending?: boolean;
   onlyFeatured?: boolean;
   coalesceGroups?: boolean;
+  orderBy?: "volume_24h_usd" | "volume";
 };
