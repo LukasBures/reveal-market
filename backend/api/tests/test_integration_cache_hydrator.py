@@ -24,7 +24,10 @@ def test_hydrator_writes_tagged_cache_and_respects_lock(client, db_session, monk
     assert summary["status"] == "hydrated"
 
     cache = api_main.get_cache_client()
-    cache_key = markets_list_cache_key(None, None, None, None, 2, 0)
+    cache_key = markets_list_cache_key(
+        None, None, None, None, 2, 0, order_by=api_main.settings.cache_hydrate_order_by
+    )
+    assert summary["cache_key"] == cache_key
     payload = cache.get(cache_key)
     assert payload is not None
     # second hydrate should detect lock and skip

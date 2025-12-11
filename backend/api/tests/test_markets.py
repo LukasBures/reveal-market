@@ -436,6 +436,28 @@ def test_category_endpoint_orders_by_volume(client, db_session):
     assert cache_key in api_main.cache_client.store
 
 
+def test_markets_volume_order_respects_offset_and_cache(client, db_session):
+    top = _make_market(
+        "evt-vol-top", "Top Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=50
+    )
+    middle = _make_market(
+        "evt-vol-mid", "Mid Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=20
+    )
+    low = _make_market(
+        "evt-vol-low", "Low Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=5
+    )
+    db_session.add_all([low, middle, top])
+    db_session.commit()
+
+    resp = client.get("/markets", params={"limit": 1, "offset": 1, "order_by": "volume_24h_usd"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 1
+    assert payload[0]["event_id"] == "evt-vol-mid"
+    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume_24h_usd")
+    assert cache_key in api_main.cache_client.store
+
+
 def test_category_endpoint_populates_trending_with_general_feed(client, db_session):
     db_session.add_all(
         [

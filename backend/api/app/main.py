@@ -157,7 +157,9 @@ async def lifespan(app: FastAPI):
     if _metrics_stop_event is None:
         _metrics_stop_event = _start_metrics_publisher()
     if settings.cache_hydrate_on_startup:
-        hydrate_markets_cache(source="startup", limit=settings.cache_hydrate_limit)
+        hydrate_markets_cache(
+            source="startup", limit=settings.cache_hydrate_limit, order_by=settings.cache_hydrate_order_by
+        )
     if _cache_refresh_stop_event is None:
         _cache_refresh_stop_event = _start_cache_refresh_worker()
     if _quote_sweeper_stop_event is None:
@@ -697,15 +699,19 @@ def get_cache_client() -> Redis | None:
     return cache_client
 
 
-def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -> dict[str, Any]:
+def hydrate_markets_cache(
+    source: str = "manual", *, limit: int | None = None, order_by: str | None = None
+) -> dict[str, Any]:
     """Populate the hottest markets into Redis directly from Postgres."""
 
     cache = get_cache_client()
     target_limit = limit or settings.cache_hydrate_limit or settings.cacheable_market_limit
+    target_order_by = order_by or settings.cache_hydrate_order_by
     summary = {
         "source": source,
         "status": "skipped",
         "limit": target_limit,
+        "order_by": target_order_by,
     }
     if cache is None:
         summary["reason"] = "redis_unavailable"
@@ -732,7 +738,7 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
         summary["reason"] = "hydrate_in_progress"
         return summary
     with session_scope() as session:
-        records = crud.get_markets(session, limit=hydrated_limit, offset=0)
+        records = crud.get_markets(session, limit=hydrated_limit, offset=0, order_by=target_order_by)
         market_models = _filter_markets_for_visibility(
             _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
         )
@@ -741,7 +747,7 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
             cache.delete(lock_key)
         summary["reason"] = "no_markets"
         return summary
-    cache_key = markets_list_cache_key(None, None, None, None, hydrated_limit, 0)
+    cache_key = markets_list_cache_key(None, None, None, None, hydrated_limit, 0, order_by=target_order_by)
     schema_tag = get_schema_tag(cache, settings.schema_version_key)
     _write_market_list_cache(cache, cache_key, market_models)
     add_tag(cache, schema_tag, cache_key)
@@ -754,6 +760,7 @@ def hydrate_markets_cache(source: str = "manual", *, limit: int | None = None) -
         message="hydrated markets cache from database",
         source=source,
         limit=hydrated_limit,
+        order_by=target_order_by,
         result_count=len(market_models),
         cache_key=cache_key,
         duration_ms=duration_ms,
@@ -796,7 +803,9 @@ def _cache_refresh_loop(stop_event: Event) -> None:
     interval = max(1, settings.cache_refresh_interval_seconds)
     while not stop_event.is_set():
         try:
-            hydrate_markets_cache(source="refresh", limit=settings.cache_refresh_limit)
+            hydrate_markets_cache(
+                source="refresh", limit=settings.cache_refresh_limit, order_by=settings.cache_hydrate_order_by
+            )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
@@ -942,10 +951,10 @@ def _resolved_cache_ttl(status: str | None, resolved_at: datetime | None) -> int
     return settings.market_record_cache_ttl_seconds
 
 
-def _should_cache_market_list(limit: int, offset: int, search_query: str | None) -> bool:
-    if offset != 0:
-        return False
+def _should_cache_market_list(limit: int, offset: int, search_query: str | None, order_by: str | None = None) -> bool:
     if search_query:
+        return False
+    if offset > settings.cacheable_market_offset_limit:
         return False
     return limit <= settings.cacheable_market_limit
 
@@ -2625,7 +2634,7 @@ def list_markets(
         coalesce_groups=coalesce_mode,
     )
     start = time.perf_counter()
-    cache_enabled = cache is not None and _should_cache_market_list(limit, offset, normalized_search)
+    cache_enabled = cache is not None and _should_cache_market_list(limit, offset, normalized_search, order_by)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
@@ -2637,7 +2646,7 @@ def list_markets(
             cached_models = _filter_markets_for_visibility(hydrated)
             if coalesce_mode and cached_models:
                 cached_models = _coalesce_grouped_markets(cached_models)
-                cached_models = cached_models[offset : offset + limit]
+            cached_models = cached_models[:limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -2669,11 +2678,10 @@ def list_markets(
         query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
         query_offset = 0
     elif volume_mode:
-        query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
-        query_offset = 0
+        query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+        query_offset = offset
     if coalesce_mode:
-        query_limit = min(settings.max_page_size, max(query_limit, limit * 3, limit + offset))
-        query_offset = 0
+        query_limit = min(settings.max_page_size, max(query_limit, limit * 3))
     markets = crud.get_markets(
         session,
         status=status,
@@ -2683,6 +2691,7 @@ def list_markets(
         featured=featured,
         limit=query_limit,
         offset=query_offset,
+        order_by=order_by,
     )
     market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
@@ -2702,7 +2711,7 @@ def list_markets(
             ),
             reverse=True,
         )
-        market_models = selected if coalesce_mode else selected[:limit]
+        market_models = selected
     elif order_by == "volume_24h_usd":
         market_models.sort(
             key=lambda m: (
@@ -2711,8 +2720,8 @@ def list_markets(
             ),
             reverse=True,
         )
-    if coalesce_mode:
-        market_models = market_models[offset : offset + limit]
+    effective_offset = offset if query_offset == 0 else 0
+    market_models = market_models[effective_offset : effective_offset + limit]
     if not market_models:
         log_event(
             logger,
@@ -2824,7 +2833,7 @@ def list_markets_by_category(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
     cache_key = category_cache_key(category_slug_key, limit, offset, order_by=order_by, coalesce_groups=coalesce_groups)
-    cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None)
+    cache_enabled = cache is not None and _should_cache_market_list(limit, offset, None, order_by)
     if cache_enabled:
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
@@ -2834,7 +2843,7 @@ def list_markets_by_category(
             models_from_cache = _filter_markets_for_visibility(hydrated)
             if coalesce_mode and models_from_cache:
                 models_from_cache = _coalesce_grouped_markets(models_from_cache)
-                models_from_cache = models_from_cache[offset : offset + limit]
+            models_from_cache = models_from_cache[:limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -2855,8 +2864,7 @@ def list_markets_by_category(
     fetch_limit = limit
     fetch_offset = offset
     if coalesce_mode:
-        fetch_limit = min(settings.max_page_size, max(limit * 3, limit + offset))
-        fetch_offset = 0
+        fetch_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
     log_event(
         logger,
         logging.DEBUG,
@@ -2870,9 +2878,11 @@ def list_markets_by_category(
         order_by=order_by,
     )
     if trending_category:
-        markets = crud.get_markets(session, limit=fetch_limit, offset=fetch_offset)
+        markets = crud.get_markets(session, limit=fetch_limit, offset=fetch_offset, order_by=order_by)
     else:
-        markets = crud.get_markets(session, category=category_label, limit=fetch_limit, offset=fetch_offset)
+        markets = crud.get_markets(
+            session, category=category_label, limit=fetch_limit, offset=fetch_offset, order_by=order_by
+        )
     market_models = _filter_markets_for_visibility(
         _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     )
@@ -2890,8 +2900,8 @@ def list_markets_by_category(
             ),
             reverse=True,
         )
-    if coalesce_mode:
-        market_models = market_models[offset : offset + limit]
+    effective_offset = offset if fetch_offset == 0 else 0
+    market_models = market_models[effective_offset : effective_offset + limit]
     if not market_models:
         log_event(
             logger,

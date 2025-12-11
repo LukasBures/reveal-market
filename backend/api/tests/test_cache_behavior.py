@@ -124,9 +124,9 @@ def test_cache_refresh_worker_disables_when_setting_false(monkeypatch):
 def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     calls: list[dict[str, int | None]] = []
 
-    def fake_hydrate(*, source: str, limit: int | None = None):
-        calls.append({"source": source, "limit": limit})
-        return {"status": "hydrated", "limit": limit}
+    def fake_hydrate(*, source: str, limit: int | None = None, order_by: str | None = None):
+        calls.append({"source": source, "limit": limit, "order_by": order_by})
+        return {"status": "hydrated", "limit": limit, "order_by": order_by}
 
     monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", True, raising=False)
     monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.05, raising=False)
@@ -143,3 +143,4 @@ def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     assert calls
     assert calls[0]["source"] == "refresh"
     assert calls[0]["limit"] == 7
+    assert calls[0]["order_by"] == api_main.settings.cache_hydrate_order_by

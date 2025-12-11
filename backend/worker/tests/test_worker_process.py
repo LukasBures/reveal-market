@@ -340,6 +340,7 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/markets"
         assert request.url.params["limit"] == "7"
+        assert request.url.params["order_by"] == "volume_24h_usd"
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
@@ -347,6 +348,8 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     monkeypatch.setattr(app.main.settings, "api_base_url", "http://api:8000", raising=False)
     monkeypatch.setattr(app.main.settings, "markets_cache_limit", 7, raising=False)
     monkeypatch.setattr(app.main.settings, "markets_cache_offset", 0, raising=False)
+    monkeypatch.setattr(app.main.settings, "markets_cache_order_by", "volume_24h_usd", raising=False)
+    monkeypatch.setattr(app.main.settings, "markets_cache_prime_pages", 2, raising=False)
     monkeypatch.setattr(app.main.settings, "markets_cache_ttl_seconds", 45, raising=False)
     monkeypatch.setattr(app.main.settings, "cache_prime_timeout_seconds", 2.0, raising=False)
     monkeypatch.setattr(app.main.settings, "prime_markets_cache_enabled", True, raising=False)
@@ -354,7 +357,10 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     summary = prime_markets_cache(dummy, transport=transport)
     assert summary["status"] == "primed"
     assert summary["result_count"] == len(payload)
-    cache_key = markets_list_cache_key(None, None, None, None, 7, 0)
+    assert summary["pages"]
+    first_page = summary["pages"][0]
+    cache_key = markets_list_cache_key(None, None, None, None, 7, 0, order_by="volume_24h_usd")
+    assert first_page["cache_key"] == cache_key
     assert cache_key in dummy.store
     assert dummy._ttls[cache_key] == 45
     cached = json.loads(dummy.store[cache_key])

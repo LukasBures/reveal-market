@@ -2404,13 +2404,17 @@ def prime_markets_cache(
     """Fetch and cache the homepage markets list so the API responds instantly."""
 
     limit = settings.markets_cache_limit
-    offset = settings.markets_cache_offset
-    cache_key = markets_list_cache_key(None, None, None, None, limit, offset)
+    base_offset = settings.markets_cache_offset
+    order_by = settings.markets_cache_order_by
+    max_pages = max(1, settings.markets_cache_prime_pages)
+    cache_key = markets_list_cache_key(None, None, None, None, limit, base_offset, order_by=order_by)
     summary: dict[str, Any] = {
         "status": "skipped",
         "limit": limit,
-        "offset": offset,
+        "offset": base_offset,
+        "order_by": order_by,
         "cache_key": cache_key,
+        "pages": [],
     }
 
     if redis_client is None:
@@ -2424,13 +2428,42 @@ def prime_markets_cache(
         return summary
 
     url = f"{settings.api_base_url.rstrip('/')}/markets"
-    params = {"limit": limit, "offset": offset}
     start = time.perf_counter()
+    page_summaries: list[dict[str, Any]] = []
     try:
         with httpx.Client(timeout=settings.cache_prime_timeout_seconds, transport=transport) as client:
-            response = client.get(url, params=params)  # type: ignore[arg-type]
-            response.raise_for_status()
-            payload = response.json()
+            for page_index in range(max_pages):
+                offset = base_offset + page_index * limit
+                params: dict[str, int | str] = {"limit": limit, "offset": offset}
+                if order_by:
+                    params["order_by"] = order_by
+                response = client.get(url, params=params)  # type: ignore[arg-type]
+                response.raise_for_status()
+                payload = response.json()
+                result_count = len(payload) if isinstance(payload, list) else 0
+                page_key = markets_list_cache_key(None, None, None, None, limit, offset, order_by=order_by)
+                page_summary = {
+                    "offset": offset,
+                    "cache_key": page_key,
+                    "result_count": result_count,
+                }
+                page_summaries.append(page_summary)
+                try:
+                    shared_cache.set_json(redis_client, page_key, payload, settings.markets_cache_ttl_seconds)
+                    schema_tag = shared_cache.get_schema_tag(redis_client, settings.schema_version_key)
+                    shared_cache.add_tag(redis_client, schema_tag, page_key)
+                    shared_cache.add_tag(redis_client, "markets:list", page_key)
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.cache.prime_write_failed",
+                        message="failed to store primed homepage cache",
+                        cache_key=page_key,
+                        error=str(exc),
+                    )
+                if result_count < limit:
+                    break
     except Exception as exc:  # pragma: no cover - defensive
         duration_ms = (time.perf_counter() - start) * 1000
         log_event(
@@ -2439,7 +2472,7 @@ def prime_markets_cache(
             event="worker.cache.prime_failed",
             message="failed to prime homepage markets cache",
             limit=limit,
-            offset=offset,
+            offset=base_offset,
             cache_key=cache_key,
             error=str(exc),
         )
@@ -2453,37 +2486,27 @@ def prime_markets_cache(
         return summary
 
     duration_ms = (time.perf_counter() - start) * 1000
-    result_count = len(payload) if isinstance(payload, list) else 0
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.cache.primed",
-        message="prefetched homepage markets via API",
-        limit=limit,
-        offset=offset,
-        cache_key=cache_key,
-        result_count=result_count,
-        duration_ms=round(duration_ms, 2),
-    )
+    total_results = sum(page.get("result_count", 0) for page in page_summaries)
     summary.update(
         {
             "status": "primed",
             "duration_ms": round(duration_ms, 2),
-            "result_count": result_count,
+            "result_count": total_results,
+            "cache_key": page_summaries[0]["cache_key"] if page_summaries else cache_key,
+            "pages": page_summaries,
         }
     )
-    # cache write best-effort; errors logged but do not fail the loop
-    try:
-        shared_cache.set_json(redis_client, cache_key, payload, settings.markets_cache_ttl_seconds)
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.cache.prime_write_failed",
-            message="failed to store primed homepage cache",
-            cache_key=cache_key,
-            error=str(exc),
-        )
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="worker.cache.primed",
+        message="prefetched markets via API",
+        limit=limit,
+        order_by=order_by,
+        pages=len(page_summaries),
+        total_result_count=total_results,
+        duration_ms=round(duration_ms, 2),
+    )
     return summary
 
 

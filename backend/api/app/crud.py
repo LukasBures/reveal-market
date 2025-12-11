@@ -17,6 +17,7 @@ def get_markets(
     featured: bool | None = None,
     limit: int = 100,
     offset: int = 0,
+    order_by: str | None = None,
 ) -> list[models.Market]:
     stmt = select(models.Market).options(
         selectinload(models.Market.outcomes_rel),
@@ -35,8 +36,15 @@ def get_markets(
         stmt = stmt.where(models.Market.oracle == oracle)
     if featured:
         stmt = stmt.where(models.Market.featured.is_(True))
-    stmt = _apply_text_search(session, stmt, search)
-    stmt = stmt.order_by(models.Market.created_at.desc())
+    stmt = _apply_text_search(session, stmt, search, apply_default_order=order_by is None)
+    if order_by == "volume_24h_usd":
+        stmt = stmt.order_by(
+            models.Market.volume_24h_usd.desc(),
+            models.Market.updated_at.desc(),
+            models.Market.created_at.desc(),
+        )
+    else:
+        stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)
     rows: list[models.Market] = list(session.execute(stmt).unique().scalars().all())
     return rows
@@ -129,10 +137,10 @@ def search_markets(session: Session, query: str, limit: int) -> list[models.Mark
     return list(session.scalars(stmt))
 
 
-def _apply_text_search(session: Session, stmt, search: str | None):
+def _apply_text_search(session: Session, stmt, search: str | None, apply_default_order: bool = True):
     search_value = (search or "").strip()
     if not search_value:
-        return stmt.order_by(models.Market.created_at.desc())
+        return stmt.order_by(models.Market.created_at.desc()) if apply_default_order else stmt
 
     pattern = f"%{search_value}%"
     fallback_clause = or_(
@@ -155,11 +163,12 @@ def _apply_text_search(session: Session, stmt, search: str | None):
         )
         query = func.websearch_to_tsquery("english", search_value)
         stmt = stmt.where(or_(vector.op("@@")(query), fallback_clause))
-        rank = func.ts_rank_cd(vector, query)
-        return stmt.order_by(rank.desc(), models.Market.created_at.desc())
-
+        if apply_default_order:
+            rank = func.ts_rank_cd(vector, query)
+            return stmt.order_by(rank.desc(), models.Market.created_at.desc())
+        return stmt
     stmt = stmt.where(fallback_clause)
-    return stmt.order_by(models.Market.created_at.desc())
+    return stmt.order_by(models.Market.created_at.desc()) if apply_default_order else stmt
 
 
 def _supports_full_text(session: Session) -> bool:
