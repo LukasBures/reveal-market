@@ -10,7 +10,9 @@ dependencies = [
     "web3==6.19.0",
     "python-dotenv==1.0.1",
     "pydantic==2.7.1",
-    "structlog==24.2.0"
+    "structlog==24.2.0",
+    "prometheus-client==0.20.0",
+    "psycopg[binary]==3.2.3"
 ]
 
 [dependency-groups]

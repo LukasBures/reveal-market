@@ -64,6 +64,11 @@ type proofResult struct {
 	Warnings      []string
 }
 
+type proofStreamResult struct {
+	resp settlementProofResponse
+	err  error
+}
+
 // app bundles configuration, prover backend, and simple state for /healthz.
 type app struct {
 	cfg            shared.Config
@@ -263,7 +268,14 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := a.generateProofResponse(r.Context(), req)
+	requestID := a.nextRequestID()
+
+	if wantsStream(r) {
+		a.streamProof(w, r, req, requestID)
+		return
+	}
+
+	resp, err := a.generateProofResponse(r.Context(), req, requestID)
 	if err != nil {
 		var perr *proverError
 		if errors.As(err, &perr) {
@@ -276,8 +288,86 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest) (settlementProofResponse, error) {
-	requestID := a.nextRequestID()
+func wantsStream(r *http.Request) bool {
+	flag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("stream")))
+	if flag == "1" || flag == "true" || flag == "yes" {
+		return true
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "text/event-stream")
+}
+
+func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlementProofRequest, requestID string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "stream_unavailable", "streaming not supported", nil)
+		return
+	}
+	ctx := r.Context()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	stream := func(event string, payload any) {
+		writeSSE(w, event, payload)
+		flusher.Flush()
+	}
+
+	stream("accepted", map[string]any{
+		"request_id":   requestID,
+		"status":       "accepted",
+		"backend":      a.prover.Backend(),
+		"circuit_hash": a.circuitHash,
+	})
+
+	resultCh := make(chan proofStreamResult, 1)
+	go func() {
+		resp, err := a.generateProofResponse(ctx, req, requestID)
+		resultCh <- proofStreamResult{resp: resp, err: err}
+		close(resultCh)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			stream("cancelled", map[string]any{
+				"request_id": requestID,
+				"status":     "cancelled",
+				"message":    ctx.Err().Error(),
+			})
+			return
+		case res, ok := <-resultCh:
+			if !ok {
+				return
+			}
+			if res.err != nil {
+				status := http.StatusInternalServerError
+				code := "prover_error"
+				message := "failed to generate proof"
+				var perr *proverError
+				if errors.As(res.err, &perr) {
+					status = perr.status
+					code = perr.code
+					message = perr.err.Error()
+				}
+				stream("error", map[string]any{
+					"request_id":  requestID,
+					"status":      "failed",
+					"http_status": status,
+					"error":       code,
+					"message":     message,
+				})
+				return
+			}
+			stream("proof", res.resp)
+			return
+		}
+	}
+}
+
+func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest, requestID string) (settlementProofResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 	defer cancel()
 	start := time.Now().UTC()
@@ -482,6 +572,16 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		logLine("error", "prover.encode_failed", map[string]any{"error": err.Error()})
 	}
+}
+
+func writeSSE(w http.ResponseWriter, event string, payload any) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		logLine("error", "prover.stream.encode_failed", map[string]any{"event": event, "error": err.Error()})
+		return
+	}
+	fmt.Fprintf(w, "event: %s\n", event)
+	fmt.Fprintf(w, "data: %s\n\n", data)
 }
 
 func writeError(w http.ResponseWriter, status int, code string, message string, err error) {

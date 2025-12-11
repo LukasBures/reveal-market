@@ -1,35 +1,19 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app import models
 from app.config import get_settings
+from app.schemas import FxQuoteResponse
 from pydantic import SecretStr
 
 
 def _mock_fx(monkeypatch, price: float = 2.5):
-    from app import pricing as pricing_module
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal(str(price)), stale=False, received_at=None)
 
-    pricing_module._FX_CACHE.clear()
-
-    class DummyResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"price": price}
-
-    class DummyClient:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def get(self, *args, **kwargs):
-            return DummyResponse()
-
-    monkeypatch.setattr("app.main.httpx.get", lambda *args, **kwargs: DummyResponse())
-    monkeypatch.setattr("app.main.httpx.Client", lambda *args, **kwargs: DummyClient())
-    monkeypatch.setattr("app.pricing.httpx.Client", lambda *args, **kwargs: DummyClient())
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.pricing.fetch_fx_quote", _fx_quote)
 
 
 def _configure_signer():

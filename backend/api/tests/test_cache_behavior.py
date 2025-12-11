@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import time
 
 import app.main as api_main
 from app import crud, models
@@ -28,7 +28,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
-    def fail(*args, **kwargs):  # pragma: no cover - defensive
+    async def fail(*args, **kwargs):  # pragma: no cover - defensive
         raise AssertionError("Database should not be queried on cache hit")
 
     monkeypatch.setattr(crud, "get_markets", fail)
@@ -86,7 +86,7 @@ def test_market_detail_cached(client, db_session, monkeypatch):
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
-    def fail(*args, **kwargs):  # pragma: no cover - defensive
+    async def fail(*args, **kwargs):  # pragma: no cover - defensive
         raise AssertionError("Database should not be queried on cache hit")
 
     monkeypatch.setattr(crud, "get_market_by_event_id", fail)
@@ -104,7 +104,7 @@ def test_hydrate_markets_cache_populates_from_db(client, db_session):
     db_session.add_all([first, second])
     db_session.commit()
 
-    summary = api_main.hydrate_markets_cache(source="test", limit=5)
+    summary = asyncio.run(api_main.hydrate_markets_cache(source="test", limit=5))
     assert summary["status"] == "hydrated"
     cache_key = summary["cache_key"]
     cache_store = getattr(api_main.cache_client, "store", {})
@@ -117,28 +117,39 @@ def test_hydrate_markets_cache_populates_from_db(client, db_session):
 
 def test_cache_refresh_worker_disables_when_setting_false(monkeypatch):
     monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", False, raising=False)
-    stop_event = api_main._start_cache_refresh_worker()
-    assert stop_event is None
+    calls: list[dict[str, int | None]] = []
+
+    async def fake_hydrate(**kwargs):
+        calls.append(kwargs)
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(api_main, "hydrate_markets_cache", fake_hydrate, raising=False)
+    asyncio.run(api_main._cache_refresh_loop())
+    assert calls == []
 
 
 def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     calls: list[dict[str, int | None]] = []
 
-    def fake_hydrate(*, source: str, limit: int | None = None, order_by: str | None = None):
+    async def fake_hydrate(*, source: str, limit: int | None = None, order_by: str | None = None):
         calls.append({"source": source, "limit": limit, "order_by": order_by})
         return {"status": "hydrated", "limit": limit, "order_by": order_by}
 
     monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", True, raising=False)
-    monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.05, raising=False)
+    monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.01, raising=False)
     monkeypatch.setattr(api_main.settings, "cache_refresh_limit", 7, raising=False)
     monkeypatch.setattr(api_main, "hydrate_markets_cache", fake_hydrate, raising=False)
 
-    stop_event = api_main._start_cache_refresh_worker()
-    assert stop_event is not None
-    try:
-        time.sleep(0.12)
-    finally:
-        stop_event.set()
+    async def _run_once():
+        task = asyncio.create_task(api_main._cache_refresh_loop())
+        await asyncio.sleep(0.02)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(_run_once())
 
     assert calls
     assert calls[0]["source"] == "refresh"

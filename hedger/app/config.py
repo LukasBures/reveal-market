@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 
 from pydantic import Field
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(
         default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market",
+        env="RM_DATABASE_URL",
     )
     redis_url: str = Field(default="redis://redis:6379/0")
 
@@ -91,6 +93,10 @@ def get_settings() -> Settings:
 
     @lru_cache(maxsize=1)
     def _load() -> Settings:
-        return Settings()  # type: ignore[call-arg]
+        cfg = Settings()  # type: ignore[call-arg]
+        rm_dsn = os.getenv("RM_DATABASE_URL")
+        if rm_dsn:
+            cfg.database_url = rm_dsn
+        return cfg
 
     return _load()

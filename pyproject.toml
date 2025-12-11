@@ -26,9 +26,13 @@ extend-exclude = [
 select = ["E", "F", "W", "B", "I", "N", "UP", "S"]
 ignore = ["B008", "S101"]
 fixable = ["ALL"]
+extend-select = ["TID"]
 
 [tool.ruff.lint.isort]
 case-sensitive = false
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"requests" = { msg = "Use httpx.AsyncClient for outbound calls in async services." }
 
 [tool.ruff.format]
 quote-style = "double"

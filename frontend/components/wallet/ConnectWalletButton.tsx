@@ -126,9 +126,10 @@ export function ConnectWalletButton() {
     chains,
     error: switchError,
     isPending: isSwitching,
-    switchChain,
+    switchChain: switchChainRaw,
     switchChainAsync,
   } = useSwitchChain();
+  const switchChain: typeof switchChainRaw | undefined = switchChainRaw;
 
   const [message, setMessage] = useState("gm from Reveal Market");
   const [isModalOpen, setModalOpen] = useState(false);
@@ -530,20 +531,16 @@ export function ConnectWalletButton() {
                         wallet.
                       </p>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {switchChain ? (
-                          <button
-                            type="button"
-                            onClick={handleSwitchChain}
-                            disabled={isSwitching}
-                            className="rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isSwitching ? "Switching…" : `Switch to ${defaultChain.name}`}
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          onClick={handleSwitchChain}
+                          disabled={!switchChain || isSwitching}
+                          className="rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isSwitching ? "Switching…" : `Switch to ${defaultChain.name}`}
+                        </button>
                         <span className="text-[11px] text-amber-50/70">
-                          {switchChain
-                            ? "If this fails, switch inside your wallet (WalletConnect, MetaMask, Coinbase, injected) then retry."
-                            : "Open your wallet and switch networks (WalletConnect, MetaMask, Coinbase, injected) then retry."}
+                          If this fails, switch inside your wallet (WalletConnect, MetaMask, Coinbase, injected) then retry.
                         </span>
                       </div>
                       {switchFailure ? <p className="mt-2 text-[11px] text-amber-50/80">{switchFailure}</p> : null}
@@ -558,7 +555,7 @@ export function ConnectWalletButton() {
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          {switchChain && chain?.id !== defaultChain.id && (
+                          {chain?.id !== defaultChain.id && (
                             <button
                               type="button"
                               onClick={handleSwitchChain}

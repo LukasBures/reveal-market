@@ -5,10 +5,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
+from typing import cast
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from redis import Redis
+from redis.exceptions import RedisError
 from shared.logging import log_event
 from shared.metrics import Counter as RM_Counter
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
@@ -17,6 +19,18 @@ from app.config import Settings
 
 logger = logging.getLogger("reveal_market.api.rate_limit")
 RATE_LIMIT_COUNTER = RM_Counter("rate_limit_events_total", "Rate limit decisions", ["outcome"])
+_RATE_LIMIT_LUA = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+else
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+  end
+end
+return {current, redis.call('TTL', KEYS[1])}
+"""
 
 
 @dataclass
@@ -66,7 +80,7 @@ class RateLimiter:
         if client is not None and hasattr(client, "pipeline"):
             try:
                 return self._evaluate_redis(client, identifier, limit, window)
-            except Exception as exc:  # pragma: no cover - defensive fallback
+            except (RedisError, OSError, RuntimeError) as exc:  # pragma: no cover - defensive fallback
                 log_event(
                     logger,
                     logging.WARNING,
@@ -92,16 +106,29 @@ class RateLimiter:
 
     def _evaluate_redis(self, client: Redis, identifier: str, limit: int, window: int) -> RateLimitResult:
         key = f"{self.prefix}:{identifier}"
-        pipeline = client.pipeline()
-        pipeline.incr(key, 1)
-        pipeline.ttl(key)
-        count, ttl = pipeline.execute()
-        if ttl is None or ttl < 0:
-            client.expire(key, window)
-            ttl = window
-        remaining = max(limit - int(count), 0)
-        reset_at = time.time() + ttl
-        allowed = int(count) <= limit
+        try:
+            result = cast(
+                tuple[int | str | bytes | None, int | str | bytes | None],
+                client.eval(_RATE_LIMIT_LUA, 1, key, window),  # type: ignore[arg-type]
+            )
+            count, ttl = result
+        except RedisError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="rate_limit.redis_eval_error",
+                message="redis rate limit evaluation failed, falling back to memory",
+                error=str(exc),
+            )
+            return self._evaluate_memory(identifier, limit, window)
+        count_int = int(count) if count is not None else 0
+        ttl_value_raw = ttl if ttl is not None else window
+        ttl_value = int(ttl_value_raw)
+        if ttl_value < 0:
+            ttl_value = window
+        remaining = max(limit - count_int, 0)
+        reset_at = time.time() + ttl_value
+        allowed = count_int <= limit
         return RateLimitResult(allowed=allowed, limit=limit, remaining=remaining, reset_at=reset_at)
 
 

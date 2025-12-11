@@ -31,6 +31,8 @@ def main() -> None:
             reload_dirs=["app", "shared"],
             log_config=None,
             log_level=log_level_name.lower(),
+            loop="uvloop",
+            http="httptools",
         )
     else:
         uvicorn.run(
@@ -40,6 +42,8 @@ def main() -> None:
             log_config=None,
             log_level=log_level_name.lower(),
             workers=workers,
+            loop="uvloop",
+            http="httptools",
         )
 
 

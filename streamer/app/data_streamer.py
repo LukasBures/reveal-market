@@ -15,7 +15,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
 from .config import Settings
-from .rtds_client import PolymarketRTDSClient, RTDSMessage, RTDSRouter, Subscription
+from .rtds_client import Subscription
 from .state import StreamState, iter_ws
 
 if TYPE_CHECKING:
@@ -51,8 +51,6 @@ class DataStreamer:
                 )
         self.metric_ticks = None
         self._init_metrics()
-        self.rtds_client: PolymarketRTDSClient | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._rtds_last_version: int = -1
 
     @staticmethod
@@ -114,7 +112,6 @@ class DataStreamer:
         self.metric_ticks = DataStreamer._metric_ticks_shared
 
     async def start(self) -> None:
-        self._loop = asyncio.get_running_loop()
         self._tasks = [
             asyncio.create_task(self._ws_loop(), name="ws-loop"),
             asyncio.create_task(self._rest_poll_loop(), name="rest-poll"),
@@ -128,8 +125,6 @@ class DataStreamer:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
-        if self.rtds_client:
-            self.rtds_client.stop(wait=False)
 
     async def _ws_loop(self) -> None:
         while not self._stop.is_set():
@@ -151,77 +146,87 @@ class DataStreamer:
                     "subscriptions": len(self.state.subscriptions.assets),
                 },
             )
-            async for ws in iter_ws(self.settings.clob_ws_url, name="clob-ws"):
-                if self._stop.is_set():
-                    break
-                try:
-                    logger.info(
-                        "CLOB websocket connected",
-                        extra={
-                            "event": "clob.ws.connected",
-                            "url": self.settings.clob_ws_url,
-                            "subscriptions": len(self.state.subscriptions.assets),
-                        },
-                    )
-                    last_version = await self._refresh_clob_subscription(ws, last_version=-1)
-                    msg_count = 0
-                    while not self._stop.is_set():
-                        try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=1)
-                        except TimeoutError:
+            try:
+                async for ws in iter_ws(self.settings.clob_ws_url, name="clob-ws"):
+                    if self._stop.is_set():
+                        break
+                    try:
+                        logger.info(
+                            "CLOB websocket connected",
+                            extra={
+                                "event": "clob.ws.connected",
+                                "url": self.settings.clob_ws_url,
+                                "subscriptions": len(self.state.subscriptions.assets),
+                            },
+                        )
+                        last_version = await self._refresh_clob_subscription(ws, last_version=-1)
+                        msg_count = 0
+                        while not self._stop.is_set():
+                            try:
+                                raw = await asyncio.wait_for(ws.recv(), timeout=1)
+                            except TimeoutError:
+                                last_version = await self._refresh_clob_subscription(ws, last_version)
+                                continue
+                            try:
+                                payload = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue
+                            msg_count += 1
+                            if msg_count % 50 == 1:
+                                logger.info(
+                                    "Received CLOB payload batch",
+                                    extra={
+                                        "event": "clob.ws.message",
+                                        "count": msg_count,
+                                        "subscriptions": len(self.state.subscriptions.assets),
+                                    },
+                                )
+                            if isinstance(payload, list):
+                                for item in payload:
+                                    if isinstance(item, dict):
+                                        await self._handle_tick(item, source="ws")
+                            elif isinstance(payload, dict):
+                                await self._handle_tick(payload, source="ws")
                             last_version = await self._refresh_clob_subscription(ws, last_version)
-                            continue
-                        try:
-                            payload = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-                        msg_count += 1
-                        if msg_count % 50 == 1:
-                            logger.info(
-                                "Received CLOB payload batch",
-                                extra={
-                                    "event": "clob.ws.message",
-                                    "count": msg_count,
-                                    "subscriptions": len(self.state.subscriptions.assets),
-                                },
-                            )
-                        if isinstance(payload, list):
-                            for item in payload:
-                                if isinstance(item, dict):
-                                    await self._handle_tick(item, source="ws")
-                        elif isinstance(payload, dict):
-                            await self._handle_tick(payload, source="ws")
-                        last_version = await self._refresh_clob_subscription(ws, last_version)
-                except Exception as exc:
-                    logger.warning(
-                        "CLOB ws loop error",
-                        extra={
-                            "event": "clob.ws.error",
-                            "error": str(exc),
-                            "backoff_seconds": self.settings.ws_reconnect_seconds,
-                        },
-                    )
-                    await asyncio.sleep(self.settings.ws_reconnect_seconds)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "CLOB ws loop error",
+                            extra={
+                                "event": "clob.ws.error",
+                                "error": str(exc),
+                                "backoff_seconds": self.settings.ws_reconnect_seconds,
+                            },
+                        )
+                        await asyncio.sleep(self.settings.ws_reconnect_seconds)
+            except asyncio.CancelledError:
+                raise
 
     async def _rest_poll_loop(self) -> None:
         while not self._stop.is_set():
             try:
                 await self._poll_rest()
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # pragma: no cover - network path
                 logger.warning("REST poll failed", extra={"event": "polymarket.rest.failed", "error": str(exc)})
             await asyncio.sleep(self.settings.rest_poll_seconds)
 
     async def _flush_loop(self) -> None:
         interval = max(0.05, self.settings.publish_throttle_ms / 1000)
-        while not self._stop.is_set():
-            await asyncio.sleep(interval)
-            if not self._publish_cache:
-                continue
-            to_publish = self._publish_cache
-            self._publish_cache = {}
-            for key, payload in to_publish.items():
-                market_id, outcome = key.split(":", 1)
-                await self.state.cache_tick(market_id, outcome, payload)
+        try:
+            while not self._stop.is_set():
+                await asyncio.sleep(interval)
+                if not self._publish_cache:
+                    continue
+                to_publish = self._publish_cache
+                self._publish_cache = {}
+                for key, payload in to_publish.items():
+                    market_id, outcome = key.split(":", 1)
+                    await self.state.cache_tick(market_id, outcome, payload)
+        except asyncio.CancelledError:
+            return
 
     async def _poll_rest(self) -> None:
         total = 0
@@ -545,41 +550,51 @@ class DataStreamer:
     async def _rtds_loop(self) -> None:
         if not self.settings.rtds_enabled:
             return
-        self._ensure_rtds_client()
         while not self._stop.is_set():
             try:
-                self._ensure_rtds_client()
-                await self._maybe_refresh_rtds_subscriptions()
+                subs = self._build_rtds_subscriptions()
+                current_version = max(self.state.subscriptions.version, getattr(self.state, "rtds_symbols_version", 0))
+                if not subs:
+                    await asyncio.sleep(self.settings.ws_reconnect_seconds)
+                    continue
+                async for ws in iter_ws(
+                    self.settings.rtds_ws_url,
+                    name="rtds",
+                    ping_interval=self.settings.rtds_ping_seconds,
+                    ping_timeout=max(3, self.settings.rtds_ping_seconds // 2),
+                    read_timeout=self.settings.ws_reconnect_seconds,
+                ):
+                    if self._stop.is_set():
+                        break
+                    await ws.send(json.dumps({"action": "subscribe", "subscriptions": [s.to_wire() for s in subs]}))
+                    self._rtds_last_version = current_version
+                    try:
+                        async for raw in ws:
+                            if self._stop.is_set():
+                                break
+                            try:
+                                payload = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue
+                            await self._handle_rtds(payload)
+                            latest_version = max(
+                                self.state.subscriptions.version, getattr(self.state, "rtds_symbols_version", 0)
+                            )
+                            if latest_version != self._rtds_last_version:
+                                subs = self._build_rtds_subscriptions()
+                                if not subs:
+                                    break
+                                await ws.send(
+                                    json.dumps({"action": "subscribe", "subscriptions": [s.to_wire() for s in subs]})
+                                )
+                                self._rtds_last_version = latest_version
+                    except TimeoutError:
+                        continue
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # pragma: no cover - reconnect path
                 logger.warning("RTDS loop error", extra={"event": "rtds.error", "error": str(exc)})
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
-
-    def _ensure_rtds_client(self) -> None:
-        if not self.settings.rtds_enabled:
-            return
-        if self.rtds_client:
-            return
-        router = RTDSRouter(logger=logger)
-        router.register(self.settings.rtds_topic_clob, "*", self._dispatch_rtds_message)
-        self.rtds_client = PolymarketRTDSClient(
-            url=self.settings.rtds_ws_url,
-            router=router,
-            ping_interval=self.settings.rtds_ping_seconds,
-            ping_timeout=max(3, self.settings.rtds_ping_seconds // 2),
-            logger=logger,
-        )
-        self.rtds_client.start_in_thread(name="rtds-client")
-
-    async def _maybe_refresh_rtds_subscriptions(self) -> None:
-        if not self.rtds_client:
-            return
-        current_version = max(self.state.subscriptions.version, getattr(self.state, "rtds_symbols_version", 0))
-        if current_version == self._rtds_last_version:
-            return
-        subs = self._build_rtds_subscriptions()
-        if subs:
-            self.rtds_client.add_subscriptions(subs)
-        self._rtds_last_version = current_version
 
     def _build_rtds_subscriptions(self) -> list[Subscription]:
         assets = sorted(self.state.subscriptions.assets or self.state.rtds_symbols)
@@ -592,15 +607,6 @@ class DataStreamer:
                 filters=assets,
             )
         ]
-
-    def _dispatch_rtds_message(self, msg: RTDSMessage) -> None:
-        if not self._loop:
-            return
-        payload = {"topic": msg.topic, "type": msg.type, "payload": msg.payload}
-        try:
-            asyncio.run_coroutine_threadsafe(self._handle_rtds(payload), self._loop)
-        except Exception as exc:  # pragma: no cover - thread dispatch
-            logger.warning("RTDS dispatch failed", extra={"event": "rtds.dispatch.failed", "error": str(exc)})
 
     async def _refresh_clob_subscription(self, ws, last_version: int) -> int:
         current_version = self.state.subscriptions.version

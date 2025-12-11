@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from shared import repository as shared_repository
 from sqlalchemy import func, literal, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from . import models, schemas
 
 
-def get_markets(
-    session: Session,
+async def get_markets(
+    session: AsyncSession,
     *,
     status: str | None = None,
     category: str | None = None,
@@ -56,13 +57,14 @@ def get_markets(
     else:
         stmt = stmt.order_by(models.Market.created_at.desc())
     stmt = stmt.offset(offset).limit(limit)
-    rows: list[models.Market] = list(session.execute(stmt).unique().scalars().all())
+    result = await session.execute(stmt)
+    rows: list[models.Market] = list(result.unique().scalars().all())
     return rows
 
 
-def get_market_stats(session: Session) -> list[schemas.MarketStatusBreakdown]:
+async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBreakdown]:
     stmt = select(models.Market.closed, func.count(models.Market.id)).group_by(models.Market.closed)
-    rows = session.execute(stmt).all()
+    rows = (await session.execute(stmt)).all()
     live = 0
     finalized = 0
     for closed_flag, count in rows:
@@ -78,16 +80,17 @@ def get_market_stats(session: Session) -> list[schemas.MarketStatusBreakdown]:
     ]
 
 
-def get_market_by_event_id(session: Session, event_id: str) -> models.Market | None:
-    return shared_repository.get_market_by_event_id(session, event_id)
+async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models.Market | None:
+    stmt = select(models.Market).where(models.Market.event_id == event_id)
+    return (await session.scalars(stmt)).first()
 
 
-def get_market_by_condition_id(session: Session, condition_id: str) -> models.Market | None:
+async def get_market_by_condition_id(session: AsyncSession, condition_id: str) -> models.Market | None:
     stmt = select(models.Market).where(models.Market.condition_id == condition_id)
-    return session.scalars(stmt).first()
+    return (await session.scalars(stmt)).first()
 
 
-def get_markets_by_group_slug(session: Session, group_slug: str) -> list[models.Market]:
+async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> list[models.Market]:
     stmt = (
         select(models.Market)
         .options(
@@ -99,17 +102,18 @@ def get_markets_by_group_slug(session: Session, group_slug: str) -> list[models.
         .where(models.Market.group_slug == group_slug)
         .order_by(models.Market.created_at.desc())
     )
-    rows: list[models.Market] = list(session.execute(stmt).unique().scalars().all())
+    result = await session.execute(stmt)
+    rows: list[models.Market] = list(result.unique().scalars().all())
     return rows
 
 
-def get_resolution_by_condition_id(session: Session, condition_id: str) -> models.Resolution | None:
+async def get_resolution_by_condition_id(session: AsyncSession, condition_id: str) -> models.Resolution | None:
     stmt = select(models.Resolution).where(models.Resolution.condition_id == condition_id)
-    return session.scalars(stmt).first()
+    return (await session.scalars(stmt)).first()
 
 
-def create_or_update_market(session: Session, market_in: schemas.MarketCreate) -> models.Market:
-    return shared_repository.upsert_market(session, market_in.model_dump())
+async def create_or_update_market(session: AsyncSession, market_in: schemas.MarketCreate) -> models.Market:
+    return await session.run_sync(shared_repository.upsert_market, market_in.model_dump())
 
 
 def _replace_tags(market: models.Market, tags: list[str] | None) -> None:
@@ -126,7 +130,7 @@ def _replace_tags(market: models.Market, tags: list[str] | None) -> None:
     market.tags_rel = [models.MarketTag(tag=tag) for tag in deduped]
 
 
-def patch_market(session: Session, market: models.Market, update: schemas.MarketUpdate) -> models.Market:
+async def patch_market(session: AsyncSession, market: models.Market, update: schemas.MarketUpdate) -> models.Market:
     legacy_fields = {"outcomes", "outcome_prices", "clob_token_ids"}
     for field, value in update.model_dump(exclude_unset=True).items():
         if field in legacy_fields:
@@ -140,14 +144,15 @@ def patch_market(session: Session, market: models.Market, update: schemas.Market
     return market
 
 
-def search_markets(session: Session, query: str, limit: int) -> list[models.Market]:
+async def search_markets(session: AsyncSession, query: str, limit: int) -> list[models.Market]:
     stmt = select(models.Market)
     stmt = _apply_text_search(session, stmt, query or "")
     stmt = stmt.limit(limit)
-    return list(session.scalars(stmt))
+    result = await session.scalars(stmt)
+    return list(result)
 
 
-def _apply_text_search(session: Session, stmt, search: str | None, apply_default_order: bool = True):
+def _apply_text_search(session: AsyncSession, stmt, search: str | None, apply_default_order: bool = True):
     search_value = (search or "").strip()
     if not search_value:
         return stmt.order_by(models.Market.created_at.desc()) if apply_default_order else stmt
@@ -181,7 +186,7 @@ def _apply_text_search(session: Session, stmt, search: str | None, apply_default
     return stmt.order_by(models.Market.created_at.desc()) if apply_default_order else stmt
 
 
-def _supports_full_text(session: Session) -> bool:
+def _supports_full_text(session: AsyncSession) -> bool:
     bind = session.get_bind()
     if bind is None:
         return False

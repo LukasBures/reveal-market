@@ -3,6 +3,7 @@ import type { Config, CreateConnectorFn } from "wagmi";
 import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
 import { defineChain } from "viem";
 import { ensureLocalStorage } from "@/lib/localStoragePolyfill";
+import { logger } from "@/lib/logging";
 import { resolveUrlConfig } from "@/lib/env-presets";
 
 ensureLocalStorage();
@@ -15,22 +16,52 @@ declare global {
   var __wagmiWalletConnectors: CreateConnectorFn[] | undefined;
 }
 
-const DEFAULT_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 2651420);
-const DEFAULT_CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? "Horizen Testnet";
-const DEFAULT_RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://horizen-testnet.rpc.caldera.xyz/http";
-const DEFAULT_EXPLORER =
-  process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz";
+const EXPECTED_CHAIN_ID = 2651420;
+const FALLBACK_CHAIN_NAME = "Horizen Testnet";
+const FALLBACK_RPC_URL = "https://horizen-testnet.rpc.caldera.xyz/http";
+const FALLBACK_EXPLORER = "https://horizen-testnet.explorer.caldera.xyz";
+
+const parseChainId = (raw?: string | number | null): number | null => {
+  if (raw === undefined || raw === null) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const resolvedEnvChainId = parseChainId(process.env.NEXT_PUBLIC_CHAIN_ID);
+const chainId =
+  resolvedEnvChainId === EXPECTED_CHAIN_ID ? resolvedEnvChainId : EXPECTED_CHAIN_ID;
+if (resolvedEnvChainId === null) {
+  logger.warn("wagmi.chain_id_missing", {
+    provided_chain_id: process.env.NEXT_PUBLIC_CHAIN_ID ?? null,
+    fallback_chain_id: EXPECTED_CHAIN_ID,
+  });
+} else if (resolvedEnvChainId !== EXPECTED_CHAIN_ID) {
+  logger.warn("wagmi.chain_id_mismatch", {
+    provided_chain_id: resolvedEnvChainId,
+    fallback_chain_id: EXPECTED_CHAIN_ID,
+  });
+}
+
+const chainName = process.env.NEXT_PUBLIC_CHAIN_NAME || FALLBACK_CHAIN_NAME;
+const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || FALLBACK_RPC_URL;
+const explorerUrl = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL || FALLBACK_EXPLORER;
+if (!process.env.NEXT_PUBLIC_RPC_URL) {
+  logger.warn("wagmi.rpc_url_missing", { fallback_rpc_url: FALLBACK_RPC_URL });
+}
+if (!process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL) {
+  logger.warn("wagmi.explorer_missing", { fallback_explorer_url: FALLBACK_EXPLORER });
+}
 
 export const defaultChain = defineChain({
-  id: DEFAULT_CHAIN_ID,
-  name: DEFAULT_CHAIN_NAME,
+  id: chainId,
+  name: chainName,
   nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
   rpcUrls: {
-    default: { http: [DEFAULT_RPC_URL] },
-    public: { http: [DEFAULT_RPC_URL] },
+    default: { http: [rpcUrl] },
+    public: { http: [rpcUrl] },
   },
   blockExplorers: {
-    default: { name: "Explorer", url: DEFAULT_EXPLORER },
+    default: { name: "Explorer", url: explorerUrl },
   },
 });
 
@@ -84,7 +115,7 @@ const buildWagmiConfig = (): Config =>
     chains,
     connectors: getWalletConnectors(),
     transports: {
-      [defaultChain.id]: http(DEFAULT_RPC_URL),
+      [defaultChain.id]: http(rpcUrl),
     },
     ssr: true,
   });

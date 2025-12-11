@@ -4,6 +4,7 @@ INFRA_SERVICES ?= postgres redis
 ALL_SERVICES := postgres redis api worker hedger frontend caddy prover streamer
 
 .PHONY: api worker hedger frontend caddy prover streamer all stack down test fmt local prod
+.PHONY: test-backend test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover
 
 api:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) api
@@ -37,6 +38,32 @@ down:
 
 test:
 	./run_tests.sh
+
+test-backend:
+	./backend/run_tests.sh
+
+test-frontend:
+	cd frontend && ./run_tests.sh
+
+test-hedger:
+	cd hedger && ./run_tests.sh
+
+test-streamer:
+	cd streamer && ./run_tests.sh
+
+test-relayer:
+	cd relayer && ./run_tests.sh
+
+test-contracts: test-contracts-polygon test-contracts-zen
+
+test-contracts-polygon:
+	cd contracts/polygon && ./run_tests.sh
+
+test-contracts-zen:
+	cd contracts/zen && ./run_tests.sh
+
+test-prover:
+	cd prover && ./run_tests.sh
 
 format:
 	pre-commit run --all-files

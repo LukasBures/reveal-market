@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+from app.schemas import FxQuoteResponse
 from pydantic import SecretStr
 
 
@@ -90,16 +91,11 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
     monkeypatch.setattr("app.main.settings", settings, raising=False)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False, None))
 
-    class DummySyncResponse:
-        def raise_for_status(self):
-            return None
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
-        def json(self):
-            return {"price": 10, "stale": False}
-
-    monkeypatch.setattr("app.main.httpx.get", lambda *a, **k: DummySyncResponse())
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
         "stake_zen": 10,
@@ -136,16 +132,11 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
     monkeypatch.setattr("app.main.settings", settings, raising=False)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (10, False, None))
 
-    class DummySyncResponse:
-        def raise_for_status(self):
-            return None
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
-        def json(self):
-            return {"price": 10, "stale": False}
-
-    monkeypatch.setattr("app.main.httpx.get", lambda *a, **k: DummySyncResponse())
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
         "stake_zen": 5,
@@ -185,7 +176,11 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr("app.main.settings", settings, raising=False)
     now_ts = datetime.now(tz=UTC)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (Decimal("10"), True, now_ts))
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=True, received_at=now_ts)
+
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
 
     payload = {
         "stake_zen": 0.1,

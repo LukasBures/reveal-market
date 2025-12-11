@@ -8,6 +8,7 @@ from functools import lru_cache
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from shared.env_presets import get_preset
+from sqlalchemy.engine import make_url
 
 PRESET = get_preset()
 
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
     version: str = Field(default="1.0.0")
 
     database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
+    database_async_url: str | None = Field(
+        default=None,
+        description="Optional async driver URL; defaults to database_url converted to asyncpg",
+    )
     database_echo: bool = Field(default=False)
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
@@ -164,6 +169,17 @@ class Settings(BaseSettings):
         """Return the combined monetization percentage (haircut + worsen + rake)."""
 
         return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
+
+    @property
+    def resolved_async_database_url(self) -> str:
+        """Return an async-compatible database URL, deriving from the sync URL when needed."""
+
+        if self.database_async_url:
+            return self.database_async_url
+        url = make_url(self.database_url)
+        if url.drivername.startswith("postgresql"):
+            url = url.set(drivername="postgresql+asyncpg")
+        return str(url)
 
 
 @lru_cache(maxsize=1)

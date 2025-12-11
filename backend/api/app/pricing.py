@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 import httpx
-from tenacity import AsyncRetrying, Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from app.config import Settings
 from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
 _FX_CACHE: dict[str, Decimal | bool | float | str | None] = {}
+_FX_HTTP_CLIENT: httpx.AsyncClient | None = None
+_FX_CLIENT_TIMEOUT: float | None = None
+_FX_CLIENT_CLASS: type[httpx.AsyncClient] = httpx.AsyncClient
 
 # FX source is pinned to the streamer; override in code if the streamer host changes.
 STREAMER_FX_URL = "http://streamer:8100/fx/zen-usd"
@@ -22,6 +26,23 @@ def _resolved_fx_url(settings: Settings) -> str:
 
     _ = settings  # settings kept for future host overrides without API breakage
     return STREAMER_FX_URL
+
+
+def _get_fx_client(timeout_seconds: float) -> httpx.AsyncClient:
+    """Reuse a single AsyncClient so TLS handshakes are not repeated per request."""
+
+    global _FX_HTTP_CLIENT, _FX_CLIENT_TIMEOUT, _FX_CLIENT_CLASS
+    async_client_cls: type[httpx.AsyncClient] = httpx.AsyncClient
+    if (
+        _FX_HTTP_CLIENT is None
+        or _FX_CLIENT_TIMEOUT != timeout_seconds
+        or _FX_CLIENT_CLASS is not async_client_cls
+        or getattr(_FX_HTTP_CLIENT, "is_closed", False)
+    ):
+        _FX_HTTP_CLIENT = async_client_cls(timeout=timeout_seconds)
+        _FX_CLIENT_TIMEOUT = timeout_seconds
+        _FX_CLIENT_CLASS = async_client_cls
+    return _FX_HTTP_CLIENT
 
 
 class PricingEngine:
@@ -129,6 +150,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
     now = monotonic()
     cache_ttl = float(settings.fx_cache_ttl_seconds)
     url = _resolved_fx_url(settings)
+    client = _get_fx_client(settings.fx_timeout_seconds)
 
     async def _request() -> dict[str, object]:
         async for attempt in AsyncRetrying(
@@ -138,10 +160,9 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
             reraise=True,
         ):
             with attempt:
-                async with httpx.AsyncClient(timeout=settings.fx_timeout_seconds) as client:
-                    response = await client.get(url)
-                    response.raise_for_status()
-                    return response.json()
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.json()
         raise RuntimeError("failed to fetch FX price after retries")
 
     try:
@@ -193,49 +214,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
 
 
 def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool, datetime | None]:
-    """Synchronous FX fetch with bounded retries and stale flag."""
+    """Synchronous wrapper around the async FX fetcher to preserve legacy call sites."""
 
-    now = monotonic()
-    url = _resolved_fx_url(settings)
-    expires_at_raw = _FX_CACHE.get("expires_at")
-    expires_at = float(expires_at_raw) if isinstance(expires_at_raw, (int, float)) else None
-    if expires_at and expires_at > now and "zen_usd" in _FX_CACHE:
-        price = _FX_CACHE.get("zen_usd")
-        stale = bool(_FX_CACHE.get("stale"))
-        ts_raw = _FX_CACHE.get("received_at")
-        parsed_ts = None
-        if ts_raw:
-            try:
-                parsed_ts = datetime.fromisoformat(str(ts_raw))
-            except (TypeError, ValueError):
-                parsed_ts = None
-        return Decimal(str(price)) if price is not None else None, stale, parsed_ts
-
-    retryer = Retrying(
-        stop=stop_after_attempt(3),
-        wait=wait_random_exponential(multiplier=0.2, max=2.0),
-        retry=retry_if_exception_type(httpx.HTTPError),
-        reraise=True,
-    )
-
-    with httpx.Client(timeout=settings.fx_timeout_seconds) as client:
-        for attempt in retryer:
-            with attempt:
-                response = client.get(url)
-                response.raise_for_status()
-                data = response.json()
-                stale = bool(data.get("fx_stale") or data.get("stale"))
-                received_at = _parse_received_at(data)
-                raw = _extract_fx_price(data)
-                if raw is None:
-                    raise ValueError("FX feed response missing zen_usd/price")
-                _FX_CACHE.update(
-                    {
-                        "zen_usd": raw,
-                        "stale": stale,
-                        "expires_at": now + float(settings.fx_cache_ttl_seconds),
-                        "received_at": received_at.isoformat() if received_at else None,
-                    }
-                )
-                return raw, stale, received_at
-    return None, True, None
+    fx_quote = asyncio.run(fetch_fx_quote(settings))
+    return fx_quote.zen_usd, fx_quote.stale, fx_quote.received_at

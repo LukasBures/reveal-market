@@ -21,7 +21,7 @@ The Docker image is wired into `docker-compose.yml` as `hedger`. To start it alo
 
 Useful env vars (defaults live in `app/config.py`):
 
-- `HEDGER_DATABASE_URL` – Postgres URL (defaults to the shared `postgres` service).
+- `RM_DATABASE_URL` – Postgres URL (defaults to the shared `postgres` service).
 - `HEDGER_REDIS_URL` – Redis URL for lightweight locks/state.
 - `HEDGER_POLYMARKET_API_BASE` – Base URL for Polymarket REST/GraphQL.
 - `HEDGER_FX_FEED_URL` – Trusted ZEN/USD feed (align with API/streamer endpoint, e.g., http://streamer:8100/fx/zen-usd).

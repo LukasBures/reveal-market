@@ -7,6 +7,7 @@ from web3.middleware import geth_poa_middleware
 from .app import create_app
 from .config import load_config
 from .logging_setup import configure_logging
+from .queue import TxQueue
 from .service import build_service
 
 configure_logging()
@@ -18,10 +19,33 @@ except RuntimeError as err:
     print(f"Failed to load config: {err}", file=sys.stderr)
     raise
 
-web3 = Web3(Web3.HTTPProvider(cfg.rpc_url))
+web3 = Web3(Web3.HTTPProvider(cfg.rpc_url, request_kwargs={"timeout": cfg.http_timeout_seconds}))
 web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 account = web3.eth.account.from_key(cfg.relayer_private_key)
-service = build_service(web3, Web3.to_checksum_address(cfg.relayer_escrow_address), account, cfg.chain_id)
+service = build_service(
+    web3,
+    Web3.to_checksum_address(cfg.relayer_escrow_address),
+    account,
+    cfg.chain_id,
+    cfg.rpc_url,
+    max_retries=cfg.max_retries,
+    retry_backoff_seconds=cfg.retry_backoff_seconds,
+    tx_timeout_seconds=cfg.tx_timeout_seconds,
+    max_block_age_seconds=cfg.max_block_age_seconds,
+    min_relayer_balance_wei=cfg.min_relayer_balance_wei,
+    min_escrow_token_balance_wei=cfg.min_escrow_token_balance_wei,
+    min_relayer_token_allowance_wei=cfg.min_relayer_token_allowance_wei,
+    fee_bump_percent=cfg.fee_bump_percent,
+)
+
+queue = TxQueue(
+    cfg.queue_db_path,
+    service,
+    dsn=cfg.queue_dsn,
+    poll_seconds=cfg.queue_poll_seconds,
+    max_attempts=cfg.queue_max_attempts,
+    fee_bump_percent=cfg.fee_bump_percent,
+)
 
 logger.info(
     "relayer_boot",
@@ -31,6 +55,15 @@ logger.info(
     escrow_address=cfg.relayer_escrow_address,
     host=cfg.host,
     port=cfg.port,
+    queue_db=cfg.queue_db_path,
+    queue_dsn=cfg.queue_dsn,
+    http_timeout_seconds=cfg.http_timeout_seconds,
 )
 
-app = create_app(service, cfg.chain_id, cfg.rpc_url)
+app = create_app(
+    service,
+    cfg.chain_id,
+    cfg.rpc_url,
+    bearer_token=cfg.bearer_token,
+    tx_queue=queue,
+)

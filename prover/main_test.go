@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +176,52 @@ func TestProofHandlerSuccess(t *testing.T) {
 	}
 	if stub.lastRequest.MarketID != payload.MarketID {
 		t.Fatalf("request not forwarded")
+	}
+}
+
+func TestProofHandlerStream(t *testing.T) {
+	stub := &stubProver{
+		backend:     "stub-backend",
+		circuitHash: "0xtest",
+		ready:       true,
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
+		},
+	}
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	payload := settlementProofRequest{
+		MarketID:       "0xabc",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement?stream=1", bytes.NewReader(body))
+
+	app.proofHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("unexpected content type: %s", ct)
+	}
+	bodyStr := rec.Body.String()
+	if !strings.Contains(bodyStr, "event: accepted") {
+		t.Fatalf("missing accepted event")
+	}
+	if !strings.Contains(bodyStr, "event: proof") {
+		t.Fatalf("missing proof event")
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected prover call, got %d", stub.calls)
 	}
 }
 

@@ -18,7 +18,7 @@ import time
 from decimal import ROUND_UP, Decimal
 from typing import Any
 
-import requests
+import httpx
 
 API_URL = "https://horizen-testnet.hub.caldera.xyz/api/trpc/faucet.requestFaucetFunds"
 EXPLORER_BASE = "https://horizen-testnet.explorer.caldera.xyz/tx"
@@ -42,7 +42,7 @@ ROLLUP_SUBDOMAIN = DEFAULT_ROLLUP
 
 
 def request_faucet(
-    session: requests.Session,
+    session: httpx.Client,
     *,
     rollup_subdomain: str,
     recipient_address: str,
@@ -110,24 +110,23 @@ def main() -> int:
         RECIPIENT_ADDRESS,
         ROLLUP_SUBDOMAIN,
     )
-    session = requests.Session()
+    with httpx.Client(timeout=30.0) as session:
+        for i in range(1, count + 1):
+            try:
+                result = request_faucet(
+                    session,
+                    rollup_subdomain=ROLLUP_SUBDOMAIN,
+                    recipient_address=RECIPIENT_ADDRESS,
+                    turnstile_token=TURNSTILE_TOKEN,
+                    token_rollup_address=TOKEN_ROLLUP_ADDRESS or "",
+                )
+                tx_hash = result.get("transactionHash") or "<unknown>"
+                log.info("[%s/%s] success tx=%s url=%s", i, count, tx_hash, explorer_url(tx_hash))
+            except Exception as exc:
+                log.error("[%s/%s] failed: %s", i, count, exc)
 
-    for i in range(1, count + 1):
-        try:
-            result = request_faucet(
-                session,
-                rollup_subdomain=ROLLUP_SUBDOMAIN,
-                recipient_address=RECIPIENT_ADDRESS,
-                turnstile_token=TURNSTILE_TOKEN,
-                token_rollup_address=TOKEN_ROLLUP_ADDRESS or "",
-            )
-            tx_hash = result.get("transactionHash") or "<unknown>"
-            log.info("[%s/%s] success tx=%s url=%s", i, count, tx_hash, explorer_url(tx_hash))
-        except Exception as exc:
-            log.error("[%s/%s] failed: %s", i, count, exc)
-
-        if i < count:
-            time.sleep(DELAY_SECONDS)
+            if i < count:
+                time.sleep(DELAY_SECONDS)
 
     return 0
 

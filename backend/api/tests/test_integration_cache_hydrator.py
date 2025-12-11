@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import app.main as api_main
 from app import models
 from shared.cache_keys import markets_list_cache_key
@@ -20,7 +22,7 @@ def test_hydrator_writes_tagged_cache_and_respects_lock(client, db_session, monk
     db_session.commit()
 
     # first hydrate should populate cache
-    summary = api_main.hydrate_markets_cache(source="test", limit=2)
+    summary = asyncio.run(api_main.hydrate_markets_cache(source="test", limit=2))
     assert summary["status"] == "hydrated"
 
     cache = api_main.get_cache_client()
@@ -30,6 +32,6 @@ def test_hydrator_writes_tagged_cache_and_respects_lock(client, db_session, monk
     assert payload is not None
     # second hydrate should detect lock and skip
     cache.set("lock:markets_cache:hydrate", "1", ex=30, nx=True)
-    skipped = api_main.hydrate_markets_cache(source="test", limit=2)
+    skipped = asyncio.run(api_main.hydrate_markets_cache(source="test", limit=2))
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "hydrate_in_progress"

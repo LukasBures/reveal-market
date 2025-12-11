@@ -3,6 +3,7 @@
 # ruff: noqa: UP047
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -13,12 +14,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from inspect import isawaitable
+from threading import Lock
 from typing import Any, TypeVar
 from urllib.parse import quote_plus
 
 import httpx
 from py_clob_client.client import ClobClient
 from redis import Redis
+from redis.exceptions import RedisError
 from shared import cache as shared_cache
 from shared import models as shared_models
 from shared import repository as shared_repository
@@ -226,11 +229,13 @@ class SyncSummary:
 @dataclass
 class CacheInvalidationReport:
     tag_counts: dict[str, int] = field(default_factory=dict)
+    _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     def record(self, tag: str, removed: int) -> None:
         if removed <= 0:
             return
-        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + removed
+        with self._lock:
+            self.tag_counts[tag] = self.tag_counts.get(tag, 0) + removed
 
     @property
     def total(self) -> int:
@@ -480,7 +485,7 @@ def _build_clob_client() -> ClobClient | None:
         return None
     try:
         return ClobClient(str(host))
-    except Exception as exc:  # pragma: no cover - defensive
+    except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
@@ -548,7 +553,7 @@ def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
         return None
     try:
         client = ConditionalTokensClient(str(rpc_url), contract_address)
-    except Exception as exc:  # pragma: no cover - defensive
+    except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
@@ -584,7 +589,7 @@ def _build_goldsky_client() -> GoldskyClient | None:
             api_key=api_key,
             timeout_seconds=settings.goldsky_timeout_seconds,
         )
-    except Exception as exc:  # pragma: no cover - defensive
+    except (ValueError, RuntimeError, httpx.HTTPError, httpx.RequestError) as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
@@ -643,7 +648,7 @@ def _fetch_resolution_snapshot(
                 backoff_max,
                 on_retry=_log_retry if attempts > 1 else None,
             )
-        except Exception as exc:  # pragma: no cover - defensive
+        except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
                 logging.WARNING,
@@ -717,7 +722,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
             settings.polymarket_sync_retry_backoff_max_seconds,
             on_retry=_log_fetch_retry if settings.polymarket_sync_max_attempts > 1 else None,
         )
-    except Exception as exc:
+    except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
         POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
         log_event(
             logger,
@@ -735,7 +740,7 @@ def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
                 max_pages=settings.polymarket_max_pages,
                 logger=logger,
             )
-        except Exception as exc:  # pragma: no cover - defensive
+        except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
                 logging.WARNING,
@@ -1205,7 +1210,7 @@ def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int
             continue
         try:
             payload = _market_record_to_payload(record)
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except (TypeError, ValueError, KeyError) as exc:  # pragma: no cover - defensive guard
             log_event(
                 logger,
                 logging.WARNING,
@@ -1285,32 +1290,46 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
         try:
             removed = shared_cache.invalidate_tag(redis_client, tag)
             report.record(tag, removed)
-        except Exception as exc:  # pragma: no cover - defensive
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.cache.invalidate_failed",
-                message="failed to invalidate cache tag",
-                tag=tag,
-                error=str(exc),
-            )
+        except (RedisError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.cache.invalidate_failed",
+                    message="failed to invalidate cache tag",
+                    tag=tag,
+                    error=str(exc),
+                )
 
+    tags: list[str] = []
     if summary.changed_events or summary.changed_categories:
-        _invalidate("markets:list")
-        _invalidate("category:trending")
-        _invalidate("markets:suggest")
+        tags.extend(["markets:list", "category:trending", "markets:suggest"])
     if summary.stats_dirty and summary.changed_events:
-        _invalidate("markets:stats")
+        tags.append("markets:stats")
     if summary.changed_group_slugs:
-        _invalidate("markets:group")
+        tags.append("markets:group")
     for event_id in summary.changed_events:
-        _invalidate(f"market:{event_id}")
+        tags.append(f"market:{event_id}")
     for condition_id in summary.changed_conditions:
-        _invalidate(f"resolution:{condition_id}")
+        tags.append(f"resolution:{condition_id}")
     for category_slug in summary.changed_categories:
-        _invalidate(f"category:{category_slug}")
+        tags.append(f"category:{category_slug}")
     for group_slug in summary.changed_group_slugs:
-        _invalidate(f"group:{group_slug}")
+        tags.append(f"group:{group_slug}")
+
+    if tags:
+
+        async def _run() -> None:
+            semaphore = asyncio.Semaphore(8)
+
+            async def _invalidate_async(tag: str) -> None:
+                async with semaphore:
+                    await asyncio.to_thread(_invalidate, tag)
+
+            await asyncio.gather(*(_invalidate_async(tag) for tag in tags))
+
+        asyncio.run(_run())
+
     if summary.changed_categories:
         CACHE_INVALIDATION_COUNTER.labels(type="category").inc(len(summary.changed_categories))
     report.log()
@@ -1320,23 +1339,36 @@ def _invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary) -> 
 def _persist_resolution_cache_updates(redis_client: Redis | None, summary: SyncSummary) -> None:
     if redis_client is None or not summary.resolution_cache_updates:
         return
-    for condition_id, payload in summary.resolution_cache_updates:
-        try:
-            shared_cache.set_json(
-                redis_client,
-                resolution_cache_key(condition_id),
-                payload,
-                settings.markets_cache_ttl_seconds,
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.cache.resolution_write_failed",
-                message="failed to persist resolution cache payload",
-                condition_id=condition_id,
-                error=str(exc),
-            )
+
+    async def _run() -> None:
+        semaphore = asyncio.Semaphore(8)
+
+        async def _write(condition_id: str, payload: dict[str, Any]) -> None:
+            async with semaphore:
+                try:
+                    await asyncio.to_thread(
+                        shared_cache.set_json,
+                        redis_client,
+                        resolution_cache_key(condition_id),
+                        payload,
+                        settings.markets_cache_ttl_seconds,
+                    )
+                except (RedisError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
+                    if logger.isEnabledFor(logging.DEBUG):
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            event="worker.cache.resolution_write_failed",
+                            message="failed to persist resolution cache payload",
+                            condition_id=condition_id,
+                            error=str(exc),
+                        )
+
+        await asyncio.gather(
+            *(_write(condition_id, payload) for condition_id, payload in summary.resolution_cache_updates)
+        )
+
+    asyncio.run(_run())
 
 
 def _run_prover_jobs(summary: SyncSummary, redis_client: Redis | None) -> int:
@@ -1838,8 +1870,31 @@ def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None
         )
 
 
-def run_worker() -> None:
-    """Main polling loop that downloads markets and writes them into the database."""
+async def _run_worker_tick(redis_client: Redis | None) -> None:
+    """Execute a single worker tick with cache priming in parallel."""
+
+    async def _run_process_once() -> dict[str, Any]:
+        return await asyncio.to_thread(process_once, redis_client)
+
+    async def _run_prime_markets() -> dict[str, Any]:
+        return await asyncio.to_thread(prime_markets_cache, redis_client)
+
+    async def _run_prime_featured() -> dict[str, Any]:
+        return await asyncio.to_thread(prime_featured_views, redis_client)
+
+    async with asyncio.TaskGroup() as tg:
+        process_task = tg.create_task(_run_process_once())
+        prime_markets_task = tg.create_task(_run_prime_markets())
+        prime_featured_task = tg.create_task(_run_prime_featured())
+
+    sync_stats = process_task.result()
+    prime_stats = prime_markets_task.result()
+    prime_stats.update(prime_featured_task.result())
+    await asyncio.to_thread(record_batch_stats, redis_client, sync_stats, prime_stats)
+
+
+async def run_worker() -> None:
+    """Main polling loop that downloads markets and writes them into the database asynchronously."""
     try:
         redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
     except Exception as exc:  # pragma: no cover - defensive
@@ -1869,12 +1924,8 @@ def run_worker() -> None:
     try:
         while True:
             loop_start = time.time()
-            sync_stats = process_once(redis_client)
-            prime_stats = prime_markets_cache(redis_client)
-            featured_stats = prime_featured_views(redis_client)
-            prime_stats.update(featured_stats)
-            record_batch_stats(redis_client, sync_stats, prime_stats)
-            time.sleep(_calculate_sleep(loop_start))
+            await _run_worker_tick(redis_client)
+            await asyncio.sleep(_calculate_sleep(loop_start))
     finally:
         heartbeat_stop.set()
 
@@ -2618,7 +2669,7 @@ def record_batch_stats(
 def main() -> None:  # pragma: no cover - CLI bootstrap
     """CLI entrypoint used by Docker/Procfile executions."""
     try:
-        run_worker()
+        asyncio.run(run_worker())
     except KeyboardInterrupt:  # pragma: no cover - graceful shutdown
         logger.info("worker interrupted, shutting down")
 

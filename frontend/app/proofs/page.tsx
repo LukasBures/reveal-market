@@ -37,12 +37,17 @@ type ProofSearchParams = {
   request_id?: string;
 };
 
-export default async function ProofsPage({ searchParams }: { searchParams?: ProofSearchParams }) {
+export default async function ProofsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<ProofSearchParams | undefined>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const PAGE_SIZE = 24;
-  const normalizedMarketId = searchParams?.marketId ?? searchParams?.market_id;
-  const normalizedEventId = searchParams?.eventId ?? searchParams?.event_id;
-  const normalizedConditionId = searchParams?.conditionId ?? searchParams?.condition_id;
-  const normalizedRequestId = searchParams?.requestId ?? searchParams?.request_id;
+  const normalizedMarketId = resolvedSearchParams?.marketId ?? resolvedSearchParams?.market_id;
+  const normalizedEventId = resolvedSearchParams?.eventId ?? resolvedSearchParams?.event_id;
+  const normalizedConditionId = resolvedSearchParams?.conditionId ?? resolvedSearchParams?.condition_id;
+  const normalizedRequestId = resolvedSearchParams?.requestId ?? resolvedSearchParams?.request_id;
   const filters = {
     eventId: normalizedEventId,
     conditionId: normalizedConditionId,

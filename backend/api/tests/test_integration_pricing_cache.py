@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from time import sleep
 
 import app.main as api_main
 import pytest
+from app import models
+from app.schemas import FxQuoteResponse
 from eth_account import Account
 
 
@@ -20,7 +22,10 @@ def test_quote_issue_and_submit_with_caps_and_fx(client, monkeypatch, db_session
     monkeypatch.setattr(api_main.settings, "max_stake_zen", 20.0, raising=False)
 
     # Stable FX
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (Decimal("10"), False, None))
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
+
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
 
     # Issue quote
     quote_payload = {
@@ -53,7 +58,7 @@ def test_quote_issue_and_submit_with_caps_and_fx(client, monkeypatch, db_session
         assert detail.get("error") in {"user_market_cap_exceeded", "market_cap_exceeded", "stake_above_cap"}
 
 
-def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch):
+def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch, db_session):
     signer = Account.create()
     user = Account.create()
     monkeypatch.setattr(api_main.settings, "pricing_chain_id", 2651420, raising=False)
@@ -61,7 +66,11 @@ def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch):
     monkeypatch.setattr(api_main.settings, "pricing_quote_ttl_seconds", 1, raising=False)
     monkeypatch.setattr(api_main.settings, "quote_expiry_sweep_interval_seconds", 1, raising=False)
     monkeypatch.setattr(api_main.settings, "max_stake_zen", 10.0, raising=False)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (Decimal("5"), False, None))
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("5"), stale=False, received_at=None)
+
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
 
     payload = {
         "stake_zen": 1,
@@ -74,10 +83,16 @@ def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch):
     quote = client.post("/pricing/quote", json=payload).json()
     assert quote["quote_id"]
 
-    # Let it expire
-    sleep(1.2)
-    # Trigger sweeper loop once
-    api_main._quote_sweeper_loop(api_main._quote_sweeper_stop_event or api_main.Event(), run_once=True)
+    # Force expiry without waiting in real time.
+    record = db_session.get(models.Quote, quote["quote_id"])
+    assert record is not None
+    record.expires_at = datetime.now(tz=UTC) - timedelta(seconds=1)
+    db_session.add(record)
+    db_session.commit()
+
+    asyncio.run(api_main._quote_sweeper_loop(run_once=True))
+    db_session.refresh(record)
+    assert record.status == models.QuoteStatusEnum.EXPIRED.value
 
     submit = client.post("/pricing/submit", json={"quote": quote})
     assert submit.status_code == 400
@@ -94,7 +109,11 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     monkeypatch.setattr(api_main.settings, "max_user_stake_per_market_zen", 0.15, raising=False)
     monkeypatch.setattr(api_main.settings, "max_market_stake_zen", 0.2, raising=False)
     now_ts = datetime.now(tz=UTC)
-    monkeypatch.setattr("app.main.fetch_fx_price_sync", lambda *a, **k: (Decimal("10"), False, now_ts))
+
+    async def _fx_quote_cap(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=now_ts)
+
+    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote_cap)
 
     base_payload = {
         "stake_zen": 0.1,

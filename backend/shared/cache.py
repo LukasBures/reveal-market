@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import logging
 from collections.abc import Iterable, Sequence
 from inspect import isawaitable
 from threading import Lock
-from typing import Any, cast
+from types import ModuleType
+from typing import Any, Protocol, cast
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -16,6 +19,31 @@ logger = logging.getLogger("reveal_market.cache")
 
 _TAG_PREFIX = "cache:tag:"
 _SCHEMA_UNKNOWN_TAG = "schema:unknown"
+
+
+class _JsonLib(Protocol):
+    def loads(self, payload: str | bytes) -> Any: ...
+
+    def dumps(self, payload: Any) -> bytes: ...
+
+
+_orjson_module: ModuleType | None = None
+_orjson_spec = importlib.util.find_spec("orjson")
+if _orjson_spec is not None:
+    _orjson_module = importlib.import_module("orjson")
+orjson = cast(_JsonLib | None, _orjson_module)
+
+
+def _json_loads(payload: str | bytes) -> Any:
+    if orjson is not None:
+        return orjson.loads(payload)
+    return json.loads(payload)
+
+
+def _json_dumps(payload: Any) -> str:
+    if orjson is not None:
+        return orjson.dumps(payload).decode()
+    return json.dumps(payload)
 
 
 class CacheStats:
@@ -122,9 +150,9 @@ def get_json(client: Redis | None, key: str) -> Any:
             )
         return None
     if isinstance(payload_raw, bytes):
-        payload = payload_raw.decode()
-    elif isinstance(payload_raw, str):
         payload = payload_raw
+    elif isinstance(payload_raw, str):
+        payload = payload_raw.encode()
     else:
         log_event(
             logger,
@@ -137,7 +165,7 @@ def get_json(client: Redis | None, key: str) -> Any:
         stats.record_error()
         return None
     try:
-        data = json.loads(payload)
+        data = _json_loads(payload)
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -149,13 +177,14 @@ def get_json(client: Redis | None, key: str) -> Any:
             )
         stats.record_hit()
         return data
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         log_event(
             logger,
             logging.WARNING,
             event="cache.decode.error",
             message="redis payload was not valid JSON",
             key=key,
+            error=str(exc),
         )
         stats.record_error()
         return None
@@ -175,7 +204,7 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
             )
         return
     try:
-        payload = json.dumps(value)
+        payload = _json_dumps(value)
         if ttl_seconds:
             client.set(key, payload, ex=ttl_seconds)
         else:

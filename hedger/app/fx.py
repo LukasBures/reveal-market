@@ -138,7 +138,7 @@ class FxOracle:
             if self.feed_alt_url:
                 try:
                     return await _pull(self.feed_alt_url)
-                except Exception as alt_exc:
+                except (RetryError, httpx.HTTPError, InvalidOperation, ValueError) as alt_exc:
                     logger.warning(
                         "Alt FX feed unavailable; falling back",
                         extra={
@@ -153,7 +153,7 @@ class FxOracle:
             if self.feed_alt_url:
                 try:
                     return await _pull(self.feed_alt_url)
-                except Exception as alt_exc:
+                except (RetryError, httpx.HTTPError, InvalidOperation, ValueError) as alt_exc:
                     logger.warning(
                         "Alt FX feed unavailable; falling back",
                         extra={

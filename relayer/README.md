@@ -14,6 +14,12 @@ Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to t
 - `CHAIN_ID`: matching chain ID (e.g., `2651420`).
 - `RELAYER_HOST`: bind host (e.g., `0.0.0.0`).
 - `RELAYER_PORT`: bind port (e.g., `8088`).
+- `RELAYER_BEARER_TOKEN` (optional): if set, `Authorization: Bearer <token>` is required for `/commit` and `/claim`.
+- `RELAYER_MAX_BLOCK_AGE_SECONDS` (default `60`): mark health degraded if the latest block is older.
+- `RELAYER_MIN_BALANCE_WEI` (default `0`): mark health degraded when relayer ETH balance is below this.
+- `RELAYER_MAX_RETRIES` (default `3`), `RELAYER_RETRY_BACKOFF_SECONDS` (default `0.5`), `RELAYER_TX_TIMEOUT_SECONDS` (default `120`): tx retry/backoff + receipt wait tuning.
+- Queue + bumping: prefer Postgres via `RM_DATABASE_URL` e.g., `postgresql+psycopg2://user:<REDACTED>@host:5432/db`; fallback SQLite path via `RELAYER_QUEUE_DB_PATH` (default `relayer_queue.db`). Tuning: `RELAYER_QUEUE_POLL_SECONDS` (default `1`), `RELAYER_QUEUE_MAX_ATTEMPTS` (default `5`), `RELAYER_FEE_BUMP_PERCENT` (default `0.15` bump per retry).
+- Token health thresholds: `RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI`, `RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI`.
 
 ## Install & Run (local)
 ```bash
@@ -35,10 +41,10 @@ docker run --rm -p 8088:8088 \
 
 ## API
 - `GET /healthz` — status + addresses.
-- `POST /commit` — body: `user, market, commitment, nonce, expiry, signature, ticket_value_wei?`
-- `POST /claim` — body: `market, user, ticket_id, outcome_id, amount, salt, merkle_proof[]`
-
-Responses include `txHash` and `status`.
+- `GET /metrics` — Prometheus scrape target.
+- `POST /commit` — body: `user, market, commitment, nonce, expiry, signature, ticket_value_wei?`; when the queue is enabled responses are `202 Accepted` with `{jobId, status: queued}` (synchronous mode returns `txHash`).
+- `POST /claim` — body: `market, user, ticket_id, outcome_id, amount, salt, merkle_proof[]`; when the queue is enabled responses are `202 Accepted` with `{jobId, status: queued}` (synchronous mode returns `txHash`).
+- Admin (auth if bearer set): `GET /admin/queue/deadletter` lists dead-lettered jobs; `POST /admin/queue/deadletter/{id}/replay` resets to pending; `DELETE /admin/queue/deadletter/{id}` purges.
 
 ## Tests
 ```bash
@@ -48,6 +54,6 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=src uv run pytest
 ```
 
 ## Notes
-- Service is stateless; wire it to your backend queue for commit/claim tasks.
-- Gas funding: ensure the relayer EOA is funded on the target network.
+- Service uses a durable queue with automatic fee bumping; set `RM_DATABASE_URL` to a Postgres instance to persist across restarts (mount a volume if using SQLite).
+- Gas funding: ensure the relayer EOA is funded on the target network; health exposes ETH balance, collateral token balances/allowances, and block freshness.
 - Contracts must match the deployed ABI (commit/claim paths). Update `abi.py` if needed.

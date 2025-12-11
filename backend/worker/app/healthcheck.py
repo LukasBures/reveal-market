@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from .config import get_settings
 
@@ -14,7 +15,7 @@ def main() -> int:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return 0
-    except Exception as exc:  # pragma: no cover - defensive
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive
         print(f"[healthcheck] database connectivity failed: {exc}", file=sys.stderr)
         return 1
     finally:

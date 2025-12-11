@@ -6,9 +6,11 @@ import os
 import time
 from datetime import UTC, datetime
 from inspect import isawaitable
+from json import JSONDecodeError
 from urllib.parse import urlparse
 
 import httpx
+from alembic.util.exc import CommandError
 from redis.exceptions import RedisError
 from shared.cache import get_stats_client
 from shared.logging import log_event
@@ -16,17 +18,18 @@ from shared.migrations import get_current_revision, get_head_revision
 from shared.onchain.client import load_account
 from shared.polymarket import build_polymarket_markets_url
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import schemas
 from .cache import get_redis_client
-from .config import get_settings
+from .config import Settings, get_settings
 
 ComponentMap = dict[str, schemas.HealthComponent]
 health_logger = logging.getLogger("reveal_market.api.health")
 
 
-async def build_health_response(session: Session) -> schemas.HealthResponse:
+async def build_health_response(session: AsyncSession) -> schemas.HealthResponse:
     """Aggregate health information from core dependencies."""
 
     settings = get_settings()
@@ -34,7 +37,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     component_states: list[str] = []
 
     checks: list[tuple[str, schemas.HealthComponent]] = [
-        _check_database(session),
+        await _check_database(session),
         _check_redis_connectivity(),
         _check_worker_heartbeat(settings),
         await _check_polymarket_api(settings),
@@ -53,7 +56,7 @@ async def build_health_response(session: Session) -> schemas.HealthResponse:
     try:
         stats_client = get_stats_client()
         cache_stats = stats_client.snapshot() if stats_client else None
-    except Exception as exc:  # pragma: no cover - defensive log
+    except (RuntimeError, AttributeError, ValueError, OSError) as exc:  # pragma: no cover - defensive log
         log_event(health_logger, logging.WARNING, event="health.cache.stats.error", message=str(exc))
         cache_stats = None
 
@@ -77,13 +80,13 @@ def _derive_overall_status(states: list[str]) -> schemas.HealthState:
     return "ok"
 
 
-def _check_database(session: Session) -> tuple[str, schemas.HealthComponent]:
+async def _check_database(session: AsyncSession) -> tuple[str, schemas.HealthComponent]:
     db_start = time.perf_counter()
     try:
-        session.execute(text("SELECT 1"))
+        await session.execute(text("SELECT 1"))
         db_latency = (time.perf_counter() - db_start) * 1000
         component = schemas.HealthComponent(status="ok", latency_ms=db_latency)
-    except Exception as exc:  # pragma: no cover - defensive
+    except (SQLAlchemyError, TypeError) as exc:  # pragma: no cover - defensive
         component = schemas.HealthComponent(status="error", detail=str(exc))
     return "database", component
 
@@ -97,12 +100,12 @@ def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
         component = schemas.HealthComponent(status="ok", latency_ms=redis_latency)
     except RedisError as exc:
         component = schemas.HealthComponent(status="error", detail=str(exc))
-    except Exception as exc:  # pragma: no cover - defensive
+    except (TypeError, ValueError, OSError) as exc:  # pragma: no cover - defensive
         component = schemas.HealthComponent(status="error", detail=str(exc))
     return "redis", component
 
 
-def _check_worker_heartbeat(settings) -> tuple[str, schemas.HealthComponent]:
+def _check_worker_heartbeat(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     try:
         redis_client = get_redis_client()
         heartbeat_raw = redis_client.get(settings.heartbeat_key)
@@ -118,12 +121,12 @@ def _check_worker_heartbeat(settings) -> tuple[str, schemas.HealthComponent]:
             )
         else:
             component = schemas.HealthComponent(status="degraded", detail="heartbeat missing")
-    except Exception as exc:
+    except (RedisError, TypeError, JSONDecodeError, UnicodeDecodeError) as exc:
         component = schemas.HealthComponent(status="error", detail=str(exc))
     return "worker", component
 
 
-async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]:
+async def _check_polymarket_api(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     http_start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
@@ -133,7 +136,7 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
                 base,
                 timeout=settings.polymarket_timeout_seconds,
             )
-            params = {
+            params: dict[str, str | int] = {
                 "limit": 1,
                 "order": settings.polymarket_order,
                 "ascending": str(settings.polymarket_sort_ascending).lower(),
@@ -152,12 +155,10 @@ async def _check_polymarket_api(settings) -> tuple[str, schemas.HealthComponent]
         component = schemas.HealthComponent(status="degraded", detail=str(exc))
     except httpx.HTTPError as exc:
         component = schemas.HealthComponent(status="error", detail=str(exc))
-    except Exception as exc:  # pragma: no cover - defensive
-        component = schemas.HealthComponent(status="error", detail=str(exc))
     return "polymarket_api", component
 
 
-def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
+def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     """Smoke-test pricing signer envs so signed quotes/commitWithQuote can function."""
 
     status: schemas.HealthState = "ok"
@@ -176,7 +177,7 @@ def _check_pricing_signer(settings) -> tuple[str, schemas.HealthComponent]:
         try:
             acct = load_account(settings.pricing_signer_private_key.get_secret_value())
             derived_address = acct.address
-        except Exception as exc:  # pragma: no cover - defensive
+        except (ValueError, RuntimeError) as exc:  # pragma: no cover - defensive
             status = "error"
             details.append(f"signer load failed: {exc}")
 
@@ -242,15 +243,15 @@ def _check_fx_cors(settings) -> tuple[str, schemas.HealthComponent]:
     if not origins or origins == ["*"]:
         state: schemas.HealthState = "degraded" if is_prod else "ok"
         detail = "CORS origins wildcard; streamer FX origin not explicitly allowed"
-        return ("fx_cors", schemas.HealthComponent(status=state, detail=detail))
+        return "fx_cors", schemas.HealthComponent(status=state, detail=detail)
     if fx_origin not in origins:
         state = "degraded" if is_prod else "ok"
         detail = f"FX origin {fx_origin} not in CORS allowlist"
-        return ("fx_cors", schemas.HealthComponent(status=state, detail=detail))
+        return "fx_cors", schemas.HealthComponent(status=state, detail=detail)
     return "fx_cors", schemas.HealthComponent(status="ok", detail="FX origin allowed by CORS")
 
 
-def _check_schema_revision(settings) -> tuple[str, schemas.HealthComponent]:
+def _check_schema_revision(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     """Ensure the DB is at Alembic head so normalized tables exist."""
 
     if str(settings.database_url).startswith("sqlite"):
@@ -269,6 +270,6 @@ def _check_schema_revision(settings) -> tuple[str, schemas.HealthComponent]:
                     detail=f"schema revision mismatch (current={current}, head={head})",
                 ),
             )
-    except Exception as exc:  # pragma: no cover - defensive
+    except (SQLAlchemyError, CommandError, RuntimeError) as exc:  # pragma: no cover - defensive
         return "schema", schemas.HealthComponent(status="error", detail=str(exc))
     return "schema", schemas.HealthComponent(status="ok", detail="schema at head")

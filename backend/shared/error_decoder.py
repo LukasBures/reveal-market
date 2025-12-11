@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +17,9 @@ def load_error_map(path: Path = ERRORS_PATH) -> dict[str, str]:
             if isinstance(data, dict):
                 # normalize keys to lowercase for comparisons
                 return {k.lower(): str(v) for k, v in data.items()}
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError):
         return {}
-    except Exception:
+    except JSONDecodeError:
         return {}
     return {}
 

@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from relayer.app import create_app
+from relayer.queue import TxQueue
 from relayer.schemas import ClaimRequest, CommitRequest
 
 
@@ -10,6 +11,7 @@ class FakeService:
         self.claims = []
         self.account = type("acct", (), {"address": "0xrelayer"})
         self.escrow = type("escrow", (), {"address": "0xescrow"})
+        self.health_called = False
 
     def commit(self, payload):
         self.commits.append(payload)
@@ -18,6 +20,22 @@ class FakeService:
     def claim(self, payload):
         self.claims.append(payload)
         return {"txHash": "0xclaim", "status": 1}
+
+    def health(self):
+        self.health_called = True
+        return {
+            "status": "ok",
+            "relayer": self.account.address,
+            "escrow": self.escrow.address,
+            "chainId": 1,
+            "rpc": "http://localhost",
+            "latestBlock": 1,
+            "blockAgeSeconds": 0,
+            "relayerBalanceWei": 1,
+            "issues": [],
+            "connected": True,
+            "escrowOwner": self.account.address,
+        }
 
 
 @pytest.fixture
@@ -33,6 +51,82 @@ def test_healthz(client):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["relayer"] == "0xrelayer"
+    assert body["escrow"] == "0xescrow"
+
+
+def test_metrics(client):
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert b"relayer_request_latency_seconds" in resp.content
+
+
+def test_commit_route_with_queue(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert "jobId" in body
+    assert service.commits == []
+
+
+def test_claim_route_with_queue(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    payload = ClaimRequest(
+        market="0x0000000000000000000000000000000000000002",
+        user="0x0000000000000000000000000000000000000001",
+        ticket_id=0,
+        outcome_id=1,
+        amount=10,
+        salt="0x" + "1" * 64,
+        merkle_proof=[],
+    ).model_dump()
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert "jobId" in body
+    assert service.claims == []
+
+
+def test_admin_deadletter_endpoints(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", bearer_token="secret", tx_queue=queue)  # noqa: S106 - test token
+    client = TestClient(app)
+
+    job_id = queue.enqueue("commit", {"foo": "bar"})
+    # mark as deadletter manually
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute("UPDATE jobs SET status = 'deadletter', attempts = 3, last_error = 'boom' WHERE id = ?", (job_id,))
+
+    resp = client.get("/admin/queue/deadletter", headers={"Authorization": "Bearer secret"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deadletter"][0]["jobId"] == job_id
+
+    resp = client.post(f"/admin/queue/deadletter/{job_id}/replay", headers={"Authorization": "Bearer secret"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pending"
+
+    resp = client.delete(f"/admin/queue/deadletter/{job_id}", headers={"Authorization": "Bearer secret"})
+    assert resp.status_code == 400  # not deadletter anymore
 
 
 def test_commit_route(client):
@@ -60,6 +154,53 @@ def test_claim_route(client):
         merkle_proof=[],
     ).model_dump()
     resp = client.post("/claim", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["txHash"] == "0xclaim"
+
+
+def test_commit_requires_auth_when_enabled():
+    service = FakeService()
+    bearer = "test-token"
+    app = create_app(service, 1, "http://localhost", bearer_token=bearer)
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 401
+
+    resp = client.post("/commit", json=payload, headers={"Authorization": f"Bearer {bearer}"})
+    assert resp.status_code == 200
+    assert resp.json()["txHash"] == "0xcommit"
+
+
+def test_claim_requires_auth_when_enabled():
+    service = FakeService()
+    bearer = "test-token"
+    app = create_app(service, 1, "http://localhost", bearer_token=bearer)
+    client = TestClient(app)
+
+    payload = ClaimRequest(
+        market="0x0000000000000000000000000000000000000002",
+        user="0x0000000000000000000000000000000000000001",
+        ticket_id=0,
+        outcome_id=1,
+        amount=10,
+        salt="0x" + "1" * 64,
+        merkle_proof=[],
+    ).model_dump()
+
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 401
+
+    resp = client.post("/claim", json=payload, headers={"Authorization": f"Bearer {bearer}"})
     assert resp.status_code == 200
     assert resp.json()["txHash"] == "0xclaim"
 

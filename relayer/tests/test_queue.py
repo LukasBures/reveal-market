@@ -1,0 +1,71 @@
+import json
+
+from relayer.queue import TxQueue
+from relayer.service import TxSendError
+
+
+class DummyService:
+    def __init__(self):
+        self.commit_calls = 0
+        self.claim_calls = 0
+
+    def commit(self, payload, **kwargs):
+        self.commit_calls += 1
+        return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
+
+    def claim(self, payload, **kwargs):
+        self.claim_calls += 1
+        return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
+
+
+class FlakyService:
+    def __init__(self):
+        self.commit_calls = 0
+
+    def commit(self, payload, **kwargs):
+        self.commit_calls += 1
+        if self.commit_calls == 1:
+            raise TxSendError("first attempt failed", nonce=7)
+        return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 7}
+
+    def claim(self, payload, **kwargs):
+        return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
+
+
+def test_queue_process_commit(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    result = queue.enqueue_and_process("commit", {"foo": "bar"})
+    assert result["status"] == "succeeded"
+    assert result["txHash"] == "0xcommit"
+    assert svc.commit_calls == 1
+
+
+def test_queue_retry_then_succeed(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = FlakyService()
+    queue = TxQueue(str(db_path), svc, max_attempts=2, start_worker=False)
+
+    job_id = queue.enqueue("commit", {"payload": "x"})
+    first = queue.process_job(job_id)
+    assert first["status"] == "pending"
+    assert svc.commit_calls == 1
+
+    second = queue.process_job(job_id)
+    assert second["status"] == "succeeded"
+    assert second["txHash"] == "0xcommit"
+    assert svc.commit_calls == 2
+
+
+def test_queue_persists_payload(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = queue.enqueue("claim", {"foo": "bar"})
+    with queue._connect() as conn:  # noqa: SLF001
+        row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row is not None
+    assert json.loads(row["payload"]) == {"foo": "bar"}

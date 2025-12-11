@@ -99,9 +99,12 @@ class PriceStreamer:
             self.metric_ws_ping_age.set(ping_age)
 
     async def _fx_refresh_loop(self) -> None:
-        while not self._stop.is_set():
-            await self._fx_refresh_once()
-            await asyncio.sleep(self.settings.fx_rest_interval_seconds)
+        try:
+            while not self._stop.is_set():
+                await self._fx_refresh_once()
+                await asyncio.sleep(self.settings.fx_rest_interval_seconds)
+        except asyncio.CancelledError:
+            return
 
     async def _fx_refresh_once(self) -> None:
         now = datetime.now(UTC)
@@ -177,6 +180,8 @@ class PriceStreamer:
                         except json.JSONDecodeError:
                             continue
                         await self._handle_fx_ws(data)
+            except asyncio.CancelledError:
+                raise
             except FatalWebsocketError as exc:
                 self.state.fx_ws_connected = False
                 self.state.fx_last_error = f"http_{exc.status_code}"

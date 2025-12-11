@@ -16,7 +16,7 @@ import sys
 
 try:
     from eth_account import Account  # type: ignore
-except Exception as exc:  # pragma: no cover - import guard
+except ImportError as exc:  # pragma: no cover - import guard
     sys.stderr.write(f"eth_account is required to run this script: {exc}\n")
     sys.exit(1)
 

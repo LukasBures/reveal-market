@@ -710,7 +710,7 @@ def test_list_markets_by_category_uses_cache(client, db_session, monkeypatch):
     assert first.status_code == 200
     assert [item["event_id"] for item in first.json()] == ["evt-politics"]
 
-    def fail(*args, **kwargs):  # pragma: no cover - defensive
+    async def fail(*args, **kwargs):  # pragma: no cover - defensive
         raise AssertionError("category query should be served from cache")
 
     monkeypatch.setattr(crud, "get_markets", fail)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -11,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from inspect import isawaitable
 from secrets import token_hex
-from threading import Event, Lock, Thread
+from threading import Event, Lock
 from typing import Annotated, Any, cast
 from urllib.parse import unquote_plus
 from uuid import uuid4
@@ -25,11 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from py_clob_client.client import ClobClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from redis import Redis
 from redis.exceptions import RedisError
 from shared import models as shared_models
-from shared import repository as shared_repository
 from shared.cache import add_tag, add_tags, get_client, get_json, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import (
     category_cache_key,
@@ -47,18 +47,19 @@ from shared.migrations import get_current_revision
 from shared.onchain import OnChainConfigurationError
 from shared.onchain.client import load_account
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from web3 import Web3
 
-from app import crud, models, schemas
+from app import crud, models, repository_async, schemas
 from app.config import Settings, get_settings
 from app.database import get_session, run_migrations, session_scope
 from app.health import build_health_response
 from app.logging_config import setup_logging
 from app.metrics import RequestMetrics, classify_latency_bucket, update_cache_context
 from app.onchain import fetch_factory_markets
-from app.pricing import PricingEngine, fetch_fx_price_sync, fetch_fx_quote
+from app.pricing import PricingEngine, fetch_fx_quote
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.security import SecurityHeadersMiddleware
 
@@ -105,9 +106,9 @@ instrumentator = Instrumentator()
 cache_client: Redis | None = None
 _cache_lock = Lock()
 _heartbeat_stop_event: Event | None = None
-_metrics_stop_event: Event | None = None
-_cache_refresh_stop_event: Event | None = None
-_quote_sweeper_stop_event: Event | None = None
+_metrics_task: asyncio.Task | None = None
+_cache_refresh_task: asyncio.Task | None = None
+_quote_sweeper_task: asyncio.Task | None = None
 request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
 goldsky_client: GoldskyClient | None = None
 
@@ -145,38 +146,41 @@ RESOLUTION_CACHE_COUNTER = Counter(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _heartbeat_stop_event, _metrics_stop_event, _cache_refresh_stop_event, _quote_sweeper_stop_event
+    global _heartbeat_stop_event, _metrics_task, _cache_refresh_task, _quote_sweeper_task
     run_migrations()
-    _record_schema_revision_tag()
+    await _record_schema_revision_tag()
     _heartbeat_stop_event = start_heartbeat_logger(
         logger,
         settings.app_name,
         interval_seconds=settings.container_heartbeat_seconds,
         message=f"{settings.app_name} container heartbeat",
     )
-    if _metrics_stop_event is None:
-        _metrics_stop_event = _start_metrics_publisher()
+    if _metrics_task is None:
+        _metrics_task = asyncio.create_task(_metrics_publisher_loop(), name="api-metrics-publisher")
     if settings.cache_hydrate_on_startup:
-        hydrate_markets_cache(
+        await hydrate_markets_cache(
             source="startup", limit=settings.cache_hydrate_limit, order_by=settings.cache_hydrate_order_by
         )
-    if _cache_refresh_stop_event is None:
-        _cache_refresh_stop_event = _start_cache_refresh_worker()
-    if _quote_sweeper_stop_event is None:
-        _quote_sweeper_stop_event = _start_quote_sweeper()
-    yield
-    if _heartbeat_stop_event is not None:
-        _heartbeat_stop_event.set()
-        _heartbeat_stop_event = None
-    if _metrics_stop_event is not None:
-        _metrics_stop_event.set()
-        _metrics_stop_event = None
-    if _cache_refresh_stop_event is not None:
-        _cache_refresh_stop_event.set()
-        _cache_refresh_stop_event = None
-    if _quote_sweeper_stop_event is not None:
-        _quote_sweeper_stop_event.set()
-        _quote_sweeper_stop_event = None
+    if _cache_refresh_task is None:
+        _cache_refresh_task = asyncio.create_task(_cache_refresh_loop(), name="markets-cache-refresh")
+    if _quote_sweeper_task is None:
+        _quote_sweeper_task = asyncio.create_task(_quote_sweeper_loop(), name="pricing-quote-sweeper")
+    try:
+        yield
+    finally:
+        if _heartbeat_stop_event is not None:
+            _heartbeat_stop_event.set()
+            _heartbeat_stop_event = None
+        for task in (_metrics_task, _cache_refresh_task, _quote_sweeper_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        _metrics_task = None
+        _cache_refresh_task = None
+        _quote_sweeper_task = None
 
 
 app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
@@ -486,17 +490,20 @@ def _publish_api_heartbeat() -> None:
         )
 
 
-def _start_metrics_publisher() -> Event:
-    stop_event = Event()
+async def _metrics_publisher_loop() -> None:
     interval = max(10, settings.performance_heartbeat_interval_seconds)
-
-    def _run() -> None:
-        while not stop_event.wait(interval):
+    try:
+        while True:
             _publish_api_heartbeat()
-
-    thread = Thread(target=_run, name="api-metrics-publisher", daemon=True)
-    thread.start()
-    return stop_event
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        log_event(
+            logger,
+            logging.INFO,
+            event="api.heartbeat.stop",
+            message="api heartbeat publisher stopping",
+        )
+        raise
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
@@ -546,7 +553,7 @@ def _load_heartbeat_payload(key: str) -> dict[str, Any] | None:
         return None
 
 
-def _record_schema_revision_tag() -> None:
+async def _record_schema_revision_tag() -> None:
     """Persist the current Alembic revision to DB and Redis for cache tagging/health."""
 
     cache = get_cache_client()
@@ -570,8 +577,8 @@ def _record_schema_revision_tag() -> None:
         )
         return
     try:
-        with session_scope() as session:
-            shared_repository.record_schema_version(session, revision, key=settings.schema_version_key)
+        async with session_scope() as session:
+            await repository_async.record_schema_version(session, revision, key=settings.schema_version_key)
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -699,7 +706,7 @@ def get_cache_client() -> Redis | None:
     return cache_client
 
 
-def hydrate_markets_cache(
+async def hydrate_markets_cache(
     source: str = "manual", *, limit: int | None = None, order_by: str | None = None
 ) -> dict[str, Any]:
     """Populate the hottest markets into Redis directly from Postgres."""
@@ -737,10 +744,10 @@ def hydrate_markets_cache(
         summary["status"] = "skipped"
         summary["reason"] = "hydrate_in_progress"
         return summary
-    with session_scope() as session:
-        records = crud.get_markets(session, limit=hydrated_limit, offset=0, order_by=target_order_by)
+    async with session_scope() as session:
+        records = await crud.get_markets(session, limit=hydrated_limit, offset=0, order_by=target_order_by)
         market_models = _filter_markets_for_visibility(
-            _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
+            await _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
         )
     if not market_models:
         if cache is not None and lock_acquired:
@@ -782,85 +789,81 @@ def hydrate_markets_cache(
     return summary
 
 
-def _start_cache_refresh_worker() -> Event | None:
+async def _cache_refresh_loop() -> None:
     if not settings.cache_refresh_enabled:
-        return None
-    stop_event = Event()
-    thread = Thread(target=_cache_refresh_loop, args=(stop_event,), daemon=True)
-    thread.start()
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.cache.refresh.start",
-        message="started background cache refresh worker",
-        interval_seconds=settings.cache_refresh_interval_seconds,
-        limit=settings.cache_refresh_limit,
-    )
-    return stop_event
-
-
-def _cache_refresh_loop(stop_event: Event) -> None:
+        return
     interval = max(1, settings.cache_refresh_interval_seconds)
-    while not stop_event.is_set():
-        try:
-            hydrate_markets_cache(
-                source="refresh", limit=settings.cache_refresh_limit, order_by=settings.cache_hydrate_order_by
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            log_event(
-                logger,
-                logging.WARNING,
-                event="markets.cache.refresh.error",
-                message="failed to refresh markets cache",
-                error=str(exc),
-            )
-        jitter = min(interval * 0.2, 30)
-        wait_seconds = interval + _RNG.uniform(-jitter, jitter)
-        stop_event.wait(max(1, wait_seconds))
+    try:
+        while True:
+            try:
+                await hydrate_markets_cache(
+                    source="refresh", limit=settings.cache_refresh_limit, order_by=settings.cache_hydrate_order_by
+                )
+            except (
+                RedisError,
+                SQLAlchemyError,
+                httpx.HTTPError,
+                httpx.RequestError,
+                RuntimeError,
+                ValueError,
+            ) as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="markets.cache.refresh.error",
+                    message="failed to refresh markets cache",
+                    error=str(exc),
+                )
+            jitter = min(interval * 0.2, 30)
+            wait_seconds = interval + _RNG.uniform(-jitter, jitter)
+            await asyncio.sleep(max(1, wait_seconds))
+    except asyncio.CancelledError:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.cache.refresh.stop",
+            message="stopping markets cache refresher",
+        )
+        raise
 
 
-def _quote_sweeper_loop(stop_event: Event, *, run_once: bool = False) -> None:
+async def _quote_sweeper_loop(*, run_once: bool = False) -> None:
     interval = max(15, settings.quote_expiry_sweep_interval_seconds)
-    while not stop_event.is_set():
-        try:
-            with session_scope() as session:
-                expired = shared_repository.expire_stale_quotes(session)
-                session.flush()
-                if expired:
-                    PRICING_COUNTER.labels(event="sweep", result="expired").inc(expired)
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="pricing.quote.sweep",
-                        message="expired stale quotes",
-                        expired=expired,
-                        ttl_seconds=settings.quote_store_ttl_seconds,
-                    )
-        except Exception as exc:  # pragma: no cover - defensive
-            log_event(
-                logger,
-                logging.WARNING,
-                event="pricing.quote.sweep_error",
-                message="quote expiry sweep failed",
-                error=str(exc),
-            )
-        if run_once:
-            break
-        stop_event.wait(interval)
-
-
-def _start_quote_sweeper() -> Event:
-    stop_event = Event()
-    thread = Thread(target=_quote_sweeper_loop, args=(stop_event,), daemon=True)
-    thread.start()
-    log_event(
-        logger,
-        logging.INFO,
-        event="pricing.quote.sweep.start",
-        message="started quote expiry sweeper",
-        interval_seconds=settings.quote_expiry_sweep_interval_seconds,
-    )
-    return stop_event
+    try:
+        while True:
+            try:
+                async with session_scope() as session:
+                    expired = await repository_async.expire_stale_quotes(session)
+                    await session.flush()
+                    if expired:
+                        PRICING_COUNTER.labels(event="sweep", result="expired").inc(expired)
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="pricing.quote.sweep",
+                            message="expired stale quotes",
+                            expired=expired,
+                            ttl_seconds=settings.quote_store_ttl_seconds,
+                        )
+            except (SQLAlchemyError, RedisError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="pricing.quote.sweep_error",
+                    message="quote expiry sweep failed",
+                    error=str(exc),
+                )
+            if run_once:
+                break
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        log_event(
+            logger,
+            logging.INFO,
+            event="pricing.quote.sweep.stop",
+            message="stopping quote sweeper",
+        )
+        raise
 
 
 rate_limiter = RateLimiter(_current_settings, get_cache_client)
@@ -884,7 +887,7 @@ def _build_goldsky_client() -> GoldskyClient | None:
             api_key=api_key,
             timeout_seconds=settings.goldsky_timeout_seconds,
         )
-    except Exception as exc:  # pragma: no cover - defensive
+    except (ValueError, RuntimeError, httpx.HTTPError, httpx.RequestError) as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
@@ -1027,18 +1030,20 @@ def _apply_market_caps(market: schemas.MarketResponse) -> None:
 
 
 def _safe_float(value: Any) -> float | None:
-    try:
-        if value is None:
-            return None
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
         numeric = float(value)
-        if numeric != numeric:  # NaN guard
-            return None
-        return numeric
+        return None if numeric != numeric else numeric  # NaN guard
+    try:
+        numeric = float(value)
     except (TypeError, ValueError):
         return None
+    return None if numeric != numeric else numeric
 
 
 def _parse_group_threshold(value: Any) -> float | None:
+    threshold_re = re.compile(r"-?\d+(?:\.\d+)?")
     if value is None:
         return None
     if isinstance(value, (int, float, Decimal)):
@@ -1046,34 +1051,35 @@ def _parse_group_threshold(value: Any) -> float | None:
             return float(value)
         except (TypeError, ValueError, OverflowError):
             return None
-    if isinstance(value, str):
-        cleaned = value.strip().lower().replace(",", "").replace("$", "")
-        cleaned = cleaned.lstrip("><= ")
-        multiplier = 1.0
-        if cleaned.endswith("k"):
-            multiplier = 1_000.0
-            cleaned = cleaned[:-1]
-        elif cleaned.endswith("m"):
-            multiplier = 1_000_000.0
-            cleaned = cleaned[:-1]
-        elif cleaned.endswith("b"):
-            multiplier = 1_000_000_000.0
-            cleaned = cleaned[:-1]
-        match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
-        if not match:
-            return None
-        try:
-            return float(match.group(0)) * multiplier
-        except (TypeError, ValueError, OverflowError):
-            return None
-    return None
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lower().replace(",", "").replace("$", "")
+    cleaned = cleaned.lstrip("><= ")
+    multiplier = 1.0
+    if cleaned.endswith("k"):
+        multiplier = 1_000.0
+        cleaned = cleaned[:-1]
+    elif cleaned.endswith("m"):
+        multiplier = 1_000_000.0
+        cleaned = cleaned[:-1]
+    elif cleaned.endswith("b"):
+        multiplier = 1_000_000_000.0
+        cleaned = cleaned[:-1]
+    match = threshold_re.search(cleaned)
+    if not match:
+        return None
+    try:
+        return float(match.group(0)) * multiplier
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _parse_threshold_from_title(title: str | None) -> float | None:
+    threshold_re = re.compile(r"-?\d+(?:\.\d+)?")
     if not title:
         return None
     cleaned = title.strip().lower().replace(",", "")
-    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    match = threshold_re.search(cleaned)
     if not match:
         return None
     suffix = cleaned[match.end() :].strip()
@@ -1098,7 +1104,7 @@ def _normalize_datetime(dt: datetime | None) -> datetime | None:
     return dt
 
 
-def _load_group_aggregates(session: Session, slugs: set[str]) -> dict[str, dict[str, float | None]]:
+async def _load_group_aggregates(session: AsyncSession, slugs: set[str]) -> dict[str, dict[str, float | None]]:
     if not slugs:
         return {}
     stmt = (
@@ -1113,7 +1119,8 @@ def _load_group_aggregates(session: Session, slugs: set[str]) -> dict[str, dict[
         .group_by(models.Market.group_slug)
     )
     aggregates: dict[str, dict[str, float | None]] = {}
-    for slug, volume_sum, liquidity_sum, total_sum in session.execute(stmt):
+    result = await session.execute(stmt)
+    for slug, volume_sum, liquidity_sum, total_sum in result:
         if not slug:
             continue
         aggregates[slug] = {
@@ -1124,7 +1131,7 @@ def _load_group_aggregates(session: Session, slugs: set[str]) -> dict[str, dict[
     return aggregates
 
 
-def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.MarketSibling]:
+async def _get_group_siblings(session: AsyncSession, group_slug: str) -> list[schemas.MarketSibling]:
     normalized = (group_slug or "").strip().lower()
     if not normalized:
         return []
@@ -1134,7 +1141,7 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
     if cached is not None:
         try:
             return [schemas.MarketSibling.model_validate(item) for item in cached]
-        except Exception as exc:  # pragma: no cover - defensive cache parse
+        except (ValidationError, TypeError, ValueError) as exc:  # pragma: no cover - defensive cache parse
             log_event(
                 logger,
                 logging.DEBUG,
@@ -1144,23 +1151,28 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
                 error=str(exc),
             )
 
-    markets = session.execute(select(models.Market).where(models.Market.group_slug == normalized)).scalars().all()
+    result = await session.execute(select(models.Market).where(models.Market.group_slug == normalized))
+    markets = result.scalars().all()
     if not markets:
         return []
     ids = [m.id for m in markets if m.id is not None]
     outcome_map: dict[int, list[models.MarketOutcome]] = {}
     if ids:
-        outcome_rows = session.execute(
-            select(models.MarketOutcome)
-            .where(models.MarketOutcome.market_id.in_(ids))
-            .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+        outcome_rows = (
+            await session.execute(
+                select(models.MarketOutcome)
+                .where(models.MarketOutcome.market_id.in_(ids))
+                .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+            )
         ).scalars()
         for row in outcome_rows:
             outcome_map.setdefault(row.market_id, []).append(row)
     meta_map: dict[int, models.MarketGammaMetadata] = {}
     if ids:
-        meta_rows = session.execute(
-            select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(ids))
+        meta_rows = (
+            await session.execute(
+                select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(ids))
+            )
         ).scalars()
         meta_map = {row.market_id: row for row in meta_rows}
 
@@ -1223,15 +1235,16 @@ def _get_group_siblings(session: Session, group_slug: str) -> list[schemas.Marke
             add_tag(cache, schema_tag, cache_key)
             add_tag(cache, "markets:group", cache_key)
             add_tag(cache, f"group:{normalized}", cache_key)
-        except Exception as exc:  # pragma: no cover - cache best-effort
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="markets.group.cache_write_failed",
-                message="failed to persist siblings cache payload",
-                group_slug=normalized,
-                error=str(exc),
-            )
+        except (RedisError, TypeError, ValueError) as exc:  # pragma: no cover - cache best-effort
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="markets.group.cache_write_failed",
+                    message="failed to persist siblings cache payload",
+                    group_slug=normalized,
+                    error=str(exc),
+                )
     return siblings
 
 
@@ -1307,8 +1320,8 @@ def _coalesce_grouped_markets(
     return standalone + list(grouped.values())
 
 
-def _attach_group_fields(
-    session: Session, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
+async def _attach_group_fields(
+    session: AsyncSession, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
 ) -> None:
     slug_map: dict[str, list[schemas.MarketResponse]] = {}
     for market in markets:
@@ -1327,11 +1340,11 @@ def _attach_group_fields(
         slug_map.setdefault(slug, []).append(market)
     if not slug_map:
         return
-    aggregates = _load_group_aggregates(session, set(slug_map.keys()))
+    aggregates = await _load_group_aggregates(session, set(slug_map.keys()))
     for slug, group_markets in slug_map.items():
         siblings: list[schemas.MarketSibling] | None = None
         if include_siblings:
-            siblings = _get_group_siblings(session, slug)
+            siblings = await _get_group_siblings(session, slug)
         aggregate = aggregates.get(slug)
         aggregate_volume = aggregate.get("volume_24h_usd") if aggregate else None
         aggregate_volume_total = aggregate.get("volume_total") if aggregate else None
@@ -1350,7 +1363,7 @@ def _attach_group_fields(
                 market.liquidity_usd = aggregate_liquidity
 
 
-def _load_normalized_fields(session: Session, markets: list[schemas.MarketResponse]) -> None:
+async def _load_normalized_fields(session: AsyncSession, markets: list[schemas.MarketResponse]) -> None:
     """Populate outcomes, prices, tags, clob tokens, and gamma metadata onto market models."""
 
     id_map: dict[int, schemas.MarketResponse] = {}
@@ -1363,10 +1376,12 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
     market_ids = list(id_map.keys())
 
     # Outcomes
-    outcome_rows = session.execute(
-        select(models.MarketOutcome)
-        .where(models.MarketOutcome.market_id.in_(market_ids))
-        .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+    outcome_rows = (
+        await session.execute(
+            select(models.MarketOutcome)
+            .where(models.MarketOutcome.market_id.in_(market_ids))
+            .order_by(models.MarketOutcome.market_id, models.MarketOutcome.outcome_id)
+        )
     ).scalars()
     outcome_map: dict[int, list[models.MarketOutcome]] = {}
     for outcome_row in outcome_rows:
@@ -1390,8 +1405,10 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         )
 
     # Tags
-    tag_rows = session.execute(
-        select(models.MarketTag).where(models.MarketTag.market_id.in_(market_ids)).order_by(models.MarketTag.tag)
+    tag_rows = (
+        await session.execute(
+            select(models.MarketTag).where(models.MarketTag.market_id.in_(market_ids)).order_by(models.MarketTag.tag)
+        )
     ).scalars()
     tag_map: dict[int, list[str]] = {}
     tag_iter: Iterable[models.MarketTag] = cast(Iterable[models.MarketTag], tag_rows)
@@ -1408,10 +1425,12 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         target.tags = tag_map.get(mid) or None
 
     # Clob tokens
-    token_rows = session.execute(
-        select(models.MarketClobToken)
-        .where(models.MarketClobToken.market_id.in_(market_ids))
-        .order_by(models.MarketClobToken.id)
+    token_rows = (
+        await session.execute(
+            select(models.MarketClobToken)
+            .where(models.MarketClobToken.market_id.in_(market_ids))
+            .order_by(models.MarketClobToken.id)
+        )
     ).scalars()
     token_map: dict[int, list[str]] = {}
     token_iter: Iterable[models.MarketClobToken] = cast(Iterable[models.MarketClobToken], token_rows)
@@ -1429,8 +1448,10 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         target.clob_token_ids = tokens or None
 
     # Gamma metadata
-    meta_rows = session.execute(
-        select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(market_ids))
+    meta_rows = (
+        await session.execute(
+            select(models.MarketGammaMetadata).where(models.MarketGammaMetadata.market_id.in_(market_ids))
+        )
     ).scalars()
     meta_map: dict[int, models.MarketGammaMetadata] = {}
     meta_iter: Iterable[models.MarketGammaMetadata] = cast(Iterable[models.MarketGammaMetadata], meta_rows)
@@ -1443,8 +1464,8 @@ def _load_normalized_fields(session: Session, markets: list[schemas.MarketRespon
         if mid_int is None:
             continue
         meta_map[mid_int] = meta_row
-    event_rows = session.execute(
-        select(models.MarketGammaEvent).where(models.MarketGammaEvent.market_id.in_(market_ids))
+    event_rows = (
+        await session.execute(select(models.MarketGammaEvent).where(models.MarketGammaEvent.market_id.in_(market_ids)))
     ).scalars()
     event_map: dict[int, models.MarketGammaEvent] = {}
     event_iter: Iterable[models.MarketGammaEvent] = cast(Iterable[models.MarketGammaEvent], event_rows)
@@ -1599,7 +1620,9 @@ def _is_trending_market(market: schemas.MarketResponse, popularity: float | None
     )
 
 
-def _load_resolution_records(session: Session, markets: list[schemas.MarketResponse]) -> dict[str, models.Resolution]:
+async def _load_resolution_records(
+    session: AsyncSession, markets: list[schemas.MarketResponse]
+) -> dict[str, models.Resolution]:
     condition_ids = []
     for market in markets:
         condition = getattr(market, "condition_id", None)
@@ -1609,35 +1632,39 @@ def _load_resolution_records(session: Session, markets: list[schemas.MarketRespo
         return {}
     stmt = select(models.Resolution).where(models.Resolution.condition_id.in_(condition_ids))
     records: dict[str, models.Resolution] = {}
-    for record in session.scalars(stmt):
+    for record in await session.scalars(stmt):
         if record.condition_id:
             records[record.condition_id.lower()] = record
     return records
 
 
-def _load_outcomes_for_market(session: Session, market: models.Market | schemas.MarketResponse | None) -> list[str]:
+async def _load_outcomes_for_market(
+    session: AsyncSession, market: models.Market | schemas.MarketResponse | None
+) -> list[str]:
     if market is None:
         return []
     mid = getattr(market, "id", None)
     if not isinstance(mid, int):
         return []
-    rows = session.execute(
-        select(models.MarketOutcome.label)
-        .where(models.MarketOutcome.market_id == mid)
-        .order_by(models.MarketOutcome.outcome_id)
+    rows = (
+        await session.execute(
+            select(models.MarketOutcome.label)
+            .where(models.MarketOutcome.market_id == mid)
+            .order_by(models.MarketOutcome.outcome_id)
+        )
     ).scalars()
     return list(rows)
 
 
-def _enrich_market_models(
-    session: Session, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
+async def _enrich_market_models(
+    session: AsyncSession, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
 ) -> list[schemas.MarketResponse]:
     """Attach metadata, caps, and cached resolutions to market responses."""
 
-    _load_normalized_fields(session, markets)
-    _attach_group_fields(session, markets, include_siblings=include_siblings)
+    await _load_normalized_fields(session, markets)
+    await _attach_group_fields(session, markets, include_siblings=include_siblings)
     _augment_market_models(markets)
-    resolution_map = _load_resolution_records(session, markets)
+    resolution_map = await _load_resolution_records(session, markets)
     for market in markets:
         condition = getattr(market, "condition_id", None)
         if isinstance(condition, str):
@@ -1860,14 +1887,16 @@ def _build_proof_receipt_model(
     return schemas.ProofReceipt.model_validate(receipt_payload)
 
 
-def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) -> list[schemas.MarketResponse]:
+async def _fallback_markets_by_category_slug(
+    session: AsyncSession, slug: str, limit: int
+) -> list[schemas.MarketResponse]:
     """Fetch markets when canonical category labels fail by matching on slugified category."""
 
     normalized = slug.strip().lower()
     if not normalized:
         return []
     buffer_size = min(settings.max_page_size * 2, max(limit * 2, settings.default_page_size))
-    candidates = crud.get_markets(session, limit=buffer_size, offset=0)
+    candidates = await crud.get_markets(session, limit=buffer_size, offset=0)
     matched: list[schemas.MarketResponse] = []
     for candidate in candidates:
         category_value = getattr(candidate, "category", None) or ""
@@ -1885,7 +1914,7 @@ def _fallback_markets_by_category_slug(session: Session, slug: str, limit: int) 
             category_slug=normalized,
             fallback_count=len(matched),
         )
-        matched = _enrich_market_models(session, matched)
+        matched = await _enrich_market_models(session, matched)
     return matched
 
 
@@ -2041,12 +2070,12 @@ def read_root() -> dict[str, str]:
 
 
 @app.get("/healthz", response_model=schemas.HealthResponse, tags=["health"])
-async def health_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
+async def health_check(session: AsyncSession = Depends(get_session)) -> schemas.HealthResponse:
     return await build_health_response(session)
 
 
 @app.get("/ready", response_model=schemas.HealthResponse, tags=["health"])
-async def readiness_check(session: Session = Depends(get_session)) -> schemas.HealthResponse:
+async def readiness_check(session: AsyncSession = Depends(get_session)) -> schemas.HealthResponse:
     return await build_health_response(session)
 
 
@@ -2067,8 +2096,8 @@ def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
     )
 
 
-def _enforce_caps(
-    session: Session,
+async def _enforce_caps(
+    session: AsyncSession,
     *,
     stake_zen: Decimal,
     market_id: str | None,
@@ -2078,12 +2107,14 @@ def _enforce_caps(
 ) -> tuple[float | None, float | None, float | None, float | None]:
     """Apply per-bet/user/market caps using durable quote state."""
 
-    shared_repository.expire_stale_quotes(session)
+    await repository_async.expire_stale_quotes(session)
     window = settings.bet_cap_ttl_seconds
     market_total = None
     user_total = None
     if market_id:
-        market_existing = float(shared_repository.sum_quote_stakes(session, market_id=market_id, window_seconds=window))
+        market_existing = float(
+            await repository_async.sum_quote_stakes(session, market_id=market_id, window_seconds=window)
+        )
         if exclude_quote and exclude_quote.market_id == market_id:
             market_existing = max(0.0, market_existing - float(exclude_quote.stake_zen))
         projected_market = market_existing + (float(stake_zen) if include_stake else 0.0)
@@ -2103,7 +2134,7 @@ def _enforce_caps(
 
     if market_id and user_id:
         user_existing = float(
-            shared_repository.sum_quote_stakes(
+            await repository_async.sum_quote_stakes(
                 session,
                 market_id=market_id,
                 user_id=user_id,
@@ -2138,9 +2169,9 @@ def _enforce_caps(
 
 
 @app.post("/pricing/quote", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
-def pricing_quote(
+async def pricing_quote(
     payload: schemas.PricingQuoteRequest,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> schemas.PricingQuoteResponse:
     """Return a pricing quote for a ZEN stake, gating on FX availability."""
 
@@ -2154,7 +2185,7 @@ def pricing_quote(
             },
         )
     if payload.market_id:
-        market_record = shared_repository.get_market_by_event_id(session, payload.market_id)
+        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
         if market_record and (
             market_record.status
             in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
@@ -2166,17 +2197,18 @@ def pricing_quote(
             )
     # Always source FX server-side; ignore client-provided zen_usd.
     try:
-        zen_usd_raw, stale, fx_received_at = fetch_fx_price_sync(settings)
-        if stale:
+        fx_quote = await fetch_fx_quote(settings)
+        if fx_quote.stale:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "error": "fx_stale",
                     "message": "FX price stale",
-                    "fx_received_at": fx_received_at.isoformat() if fx_received_at else None,
+                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
                 },
             )
-        zen_usd = float(zen_usd_raw) if zen_usd_raw is not None else None
+        zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
+        fx_received_at = fx_quote.received_at
     except HTTPException:
         raise
     except Exception as exc:
@@ -2191,7 +2223,7 @@ def pricing_quote(
     user_remaining = None
     market_remaining = None
     if payload.market_id:
-        market_total, user_total, market_remaining, user_remaining = _enforce_caps(
+        market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
             session,
             stake_zen=payload.stake_zen,
             market_id=payload.market_id,
@@ -2276,7 +2308,7 @@ def pricing_quote(
     )
     quote_payload = quote.model_dump(mode="json")
     try:
-        shared_repository.create_quote(
+        await repository_async.create_quote(
             session,
             {
                 "quote_id": quote_id,
@@ -2295,7 +2327,7 @@ def pricing_quote(
                 "expires_at": expires_at,
             },
         )
-        session.flush()
+        await session.flush()
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive log
@@ -2328,9 +2360,9 @@ def pricing_quote(
 
 
 @app.post("/pricing/submit", response_model=schemas.PricingSubmitResponse, tags=["pricing"])
-def pricing_submit(
+async def pricing_submit(
     payload: schemas.PricingSubmitRequest,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> schemas.PricingSubmitResponse:
     """Validate a signed pricing quote and optionally enforce FX drift bounds."""
 
@@ -2366,7 +2398,7 @@ def pricing_submit(
         PRICING_COUNTER.labels(event="submit", result="missing").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
     quote_id = quote.quote_id
-    db_quote = shared_repository.get_quote(session, quote_id)
+    db_quote = await repository_async.get_quote(session, quote_id)
     if db_quote is None:
         PRICING_COUNTER.labels(event="submit", result="missing").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
@@ -2375,13 +2407,13 @@ def pricing_submit(
     db_expires_at = _as_aware(cast(datetime | None, getattr(db_quote, "expires_at", None)))
     if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
-        session.flush()
+        await session.flush()
         PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     quote_expires_at = _as_aware(quote.expires_at)
     if quote_expires_at and quote_expires_at <= now:
         db_quote.status = models.QuoteStatusEnum.EXPIRED.value
-        session.flush()
+        await session.flush()
         PRICING_COUNTER.labels(event="submit", result="expired").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
     if db_quote.wallet_address and quote.wallet_address:
@@ -2433,17 +2465,17 @@ def pricing_submit(
     current_fx: Decimal | None = None
     if payload.max_fx_diff_percent is not None:
         try:
-            raw_fx_price, fx_stale, fx_received_at = fetch_fx_price_sync(settings)
-            if raw_fx_price is not None:
-                current_fx = Decimal(str(raw_fx_price))
-            if fx_stale:
+            fx_quote = await fetch_fx_quote(settings)
+            if fx_quote.zen_usd is not None:
+                current_fx = fx_quote.zen_usd
+            if fx_quote.stale:
                 PRICING_COUNTER.labels(event="submit", result="fx_stale").inc()
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
                         "error": "fx_stale",
                         "message": "FX price stale during submit",
-                        "fx_received_at": fx_received_at.isoformat() if fx_received_at else None,
+                        "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
                     },
                 )
             fx_diff_percent = (
@@ -2473,7 +2505,7 @@ def pricing_submit(
             ) from exc
     else:
         current_fx = quote.zen_usd
-    _enforce_caps(
+    await _enforce_caps(
         session,
         stake_zen=quote.stake_zen,
         market_id=quote.market_id,
@@ -2482,13 +2514,13 @@ def pricing_submit(
     )
 
     db_quote.payload = quote.model_dump(mode="json")
-    shared_repository.mark_quote_status(
+    await repository_async.mark_quote_status(
         session,
         db_quote,
         models.QuoteStatusEnum.CONSUMED,
         consumed_at=now,
     )
-    session.flush()
+    await session.flush()
     PRICING_COUNTER.labels(event="submit", result="ok").inc()
     log_event(
         logger,
@@ -2511,10 +2543,10 @@ def pricing_submit(
 
 
 @app.get("/pricing/quotes/{quote_id}", response_model=schemas.QuoteRecord, tags=["pricing"])
-def pricing_quote_state(quote_id: str, session: Session = Depends(get_session)) -> schemas.QuoteRecord:
+async def pricing_quote_state(quote_id: str, session: AsyncSession = Depends(get_session)) -> schemas.QuoteRecord:
     """Diagnostic endpoint to retrieve persisted quote state."""
 
-    record = shared_repository.get_quote(session, quote_id)
+    record = await repository_async.get_quote(session, quote_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="quote_not_found")
     return schemas.QuoteRecord.model_validate(record)
@@ -2570,20 +2602,21 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
 
 
 @app.get("/treasury/snapshots", response_model=list[schemas.TreasurySnapshot], tags=["treasury"])
-def treasury_snapshots(
+async def treasury_snapshots(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     market_id: Annotated[str | None, Query()] = None,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.TreasurySnapshot]:
-    query = session.query(models.HedgerTreasurySnapshot).order_by(models.HedgerTreasurySnapshot.created_at.desc())
+    stmt = select(models.HedgerTreasurySnapshot).order_by(models.HedgerTreasurySnapshot.created_at.desc())
     if market_id:
-        query = query.filter(models.HedgerTreasurySnapshot.market_id == market_id)
-    rows = query.limit(limit).all()
+        stmt = stmt.where(models.HedgerTreasurySnapshot.market_id == market_id)
+    result = await session.execute(stmt.limit(limit))
+    rows = result.scalars().all()
     return [schemas.TreasurySnapshot.model_validate(row) for row in rows]
 
 
 @app.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])
-def list_markets(
+async def list_markets(
     request: Request,
     status: Annotated[str | None, Query(description="Filter markets by status")] = None,
     category: Annotated[str | None, Query(description="Filter markets by category")] = None,
@@ -2609,7 +2642,7 @@ def list_markets(
     coalesce_groups: Annotated[
         bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
     ] = None,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     coalesce_mode = bool(coalesce_groups)
     popularity_mode = order_by == "popularity" or bool(trending)
@@ -2660,7 +2693,7 @@ def list_markets(
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
-            hydrated = _enrich_market_models(session, hydrated)
+            hydrated = await _enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
             duration = (time.perf_counter() - start) * 1000
@@ -2703,7 +2736,7 @@ def list_markets(
         query_offset = offset
     if coalesce_mode:
         query_limit = min(settings.max_page_size, max(query_limit, limit * 3))
-    markets = crud.get_markets(
+    markets = await crud.get_markets(
         session,
         status=status,
         category=category,
@@ -2714,7 +2747,7 @@ def list_markets(
         offset=query_offset,
         order_by=order_by,
     )
-    market_models = _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
+    market_models = await _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     market_models = _filter_markets_for_visibility(market_models)
     if coalesce_mode and market_models:
         market_models = _coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
@@ -2811,7 +2844,7 @@ def list_markets(
 
 
 @app.get("/categories/{category_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
-def list_markets_by_category(
+async def list_markets_by_category(
     category_slug: str,
     request: Request,
     limit: Annotated[
@@ -2822,7 +2855,7 @@ def list_markets_by_category(
     coalesce_groups: Annotated[
         bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
     ] = None,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     order_by = request.query_params.get("order_by")
     volume_mode = order_by in {"volume_24h_usd", "volume"}
@@ -2860,7 +2893,7 @@ def list_markets_by_category(
         cached_payload = get_json(cache, cache_key)
         hydrated = _hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
-            hydrated = _enrich_market_models(session, hydrated)
+            hydrated = await _enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
             models_from_cache = _filter_markets_for_visibility(hydrated)
             if coalesce_mode and models_from_cache:
@@ -2900,18 +2933,18 @@ def list_markets_by_category(
         order_by=order_by,
     )
     if trending_category:
-        markets = crud.get_markets(session, limit=fetch_limit, offset=fetch_offset, order_by=order_by)
+        markets = await crud.get_markets(session, limit=fetch_limit, offset=fetch_offset, order_by=order_by)
     else:
-        markets = crud.get_markets(
+        markets = await crud.get_markets(
             session, category=category_label, limit=fetch_limit, offset=fetch_offset, order_by=order_by
         )
     market_models = _filter_markets_for_visibility(
-        _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
+        await _enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
     )
     if not market_models and not trending_category and offset == 0:
-        fallback_matches = _fallback_markets_by_category_slug(session, category_slug_key, limit)
+        fallback_matches = await _fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
-            market_models = _filter_markets_for_visibility(_enrich_market_models(session, fallback_matches))
+            market_models = _filter_markets_for_visibility(await _enrich_market_models(session, fallback_matches))
     if coalesce_mode and market_models:
         market_models = _coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if volume_mode and market_models:
@@ -2972,15 +3005,15 @@ def list_markets_by_category(
 
 
 @app.get("/markets/group/{group_slug}", response_model=schemas.GroupedMarketsResponse, tags=["markets"])
-def list_grouped_markets(
+async def list_grouped_markets(
     group_slug: str,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> schemas.GroupedMarketsResponse:
     normalized_slug = group_slug.strip().lower()
-    markets = crud.get_markets_by_group_slug(session, normalized_slug)
+    markets = await crud.get_markets_by_group_slug(session, normalized_slug)
     if not markets:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="group_not_found")
-    market_models = _enrich_market_models(
+    market_models = await _enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
     )
 
@@ -3026,9 +3059,9 @@ async def list_onchain_markets():
 
 
 @app.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
-def market_stats(
+async def market_stats(
     request: Request,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketStatusBreakdown]:
     start = time.perf_counter()
     cache = get_cache_client()
@@ -3048,7 +3081,7 @@ def market_stats(
             result_count=len(cached),
         )
         return [schemas.MarketStatusBreakdown.model_validate(item) for item in cached]
-    stats = crud.get_market_stats(session)
+    stats = await crud.get_market_stats(session)
     payload = [jsonable_encoder(item) for item in stats]
     duration = (time.perf_counter() - start) * 1000
     if cache_available:
@@ -3082,11 +3115,11 @@ def market_stats(
 
 
 @app.get("/markets/suggest", response_model=list[schemas.MarketResponse], tags=["markets"])
-def suggest_markets(
+async def suggest_markets(
     request: Request,
     q: Annotated[str, Query(min_length=2, max_length=200, description="Search term for suggestions")],
     limit: Annotated[int, Query(ge=1, le=25, description="Maximum number of suggestions to return")] = 5,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     start = time.perf_counter()
     cache = get_cache_client()
@@ -3105,7 +3138,7 @@ def suggest_markets(
     if cached is not None:
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:suggest")
         models_from_cache = [schemas.MarketResponse.model_validate(item) for item in cached]
-        _enrich_market_models(session, models_from_cache)
+        await _enrich_market_models(session, models_from_cache)
         log_event(
             logger,
             logging.INFO,
@@ -3118,9 +3151,9 @@ def suggest_markets(
         )
         return models_from_cache
 
-    results = crud.search_markets(session, normalized_query, limit)
+    results = await crud.search_markets(session, normalized_query, limit)
     market_models = [schemas.MarketResponse.model_validate(m) for m in results]
-    filtered = _filter_markets_for_visibility(_enrich_market_models(session, market_models))
+    filtered = _filter_markets_for_visibility(await _enrich_market_models(session, market_models))
     if not filtered:
         log_event(
             logger,
@@ -3162,7 +3195,7 @@ def suggest_markets(
 
 
 @app.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"], include_in_schema=False)
-def list_proof_receipts(
+async def list_proof_receipts(
     request: Request,
     limit: Annotated[
         int, Query(ge=1, le=settings.max_page_size, description="Maximum number of proof receipts to return")
@@ -3172,7 +3205,7 @@ def list_proof_receipts(
     event_id: Annotated[str | None, Query(description="Filter by market event id")] = None,
     condition_id: Annotated[str | None, Query(description="Filter by condition id (0x…)")] = None,
     request_id: Annotated[str | None, Query(description="Filter by prover request id")] = None,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> list[schemas.ProofReceipt]:
     start = time.perf_counter()
     cache = get_cache_client()
@@ -3228,7 +3261,7 @@ def list_proof_receipts(
         filters.append(func.lower(shared_models.Market.condition_id) == condition_filter)
     if filters:
         stmt = stmt.where(*filters)
-    rows = session.execute(stmt).all()
+    rows = (await session.execute(stmt)).all()
     receipts: list[schemas.ProofReceipt] = []
     cache_hits = 0
     for receipt_row, settlement_row, market_row in rows:
@@ -3256,10 +3289,10 @@ def list_proof_receipts(
 
 
 @app.get("/resolution/{condition_id_hex}", response_model=schemas.ResolutionSummary, tags=["markets"])
-def read_resolution(
+async def read_resolution(
     condition_id_hex: str,
     request: Request,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> schemas.ResolutionSummary:
     start = time.perf_counter()
     cache = get_cache_client()
@@ -3288,9 +3321,9 @@ def read_resolution(
         )
         return cached_summary
 
-    market = crud.get_market_by_condition_id(session, normalized_condition)
-    record = crud.get_resolution_by_condition_id(session, normalized_condition)
-    market_outcomes = _load_outcomes_for_market(session, market)
+    market = await crud.get_market_by_condition_id(session, normalized_condition)
+    record = await crud.get_resolution_by_condition_id(session, normalized_condition)
+    market_outcomes = await _load_outcomes_for_market(session, market)
 
     summary_model: schemas.ResolutionSummary | None = None
     if record is not None:
@@ -3364,8 +3397,8 @@ def read_resolution(
                         "market_id": getattr(market, "id", None) if market else None,
                         "event_id": getattr(market, "event_id", None) if market else None,
                     }
-                    shared_repository.upsert_resolution(session, persisted_payload)
-                    session.flush()
+                    await repository_async.upsert_resolution(session, persisted_payload)
+                    await session.flush()
                 except Exception as exc:  # pragma: no cover - defensive persistence
                     log_event(
                         logger,
@@ -3432,10 +3465,10 @@ def read_resolution(
 
 
 @app.get("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])
-def read_market(
+async def read_market(
     event_id: str,
     request: Request,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
 ) -> schemas.MarketResponse:
     cache_key = _market_detail_cache_key(event_id)
     cache = get_cache_client()
@@ -3453,7 +3486,7 @@ def read_market(
     if cached is not None:
         duration = (time.perf_counter() - start) * 1000
         model = schemas.MarketResponse.model_validate(cached)
-        _enrich_market_models(session, [model], include_siblings=True)
+        await _enrich_market_models(session, [model], include_siblings=True)
         update_cache_context(request, cache_key=cache_key, hit=True, source="markets:detail")
         MARKET_DETAIL_CACHE_COUNTER.labels(outcome="hit").inc()
         log_event(
@@ -3468,11 +3501,13 @@ def read_market(
         )
         return model
 
-    market = crud.get_market_by_event_id(session, event_id)
+    market = await crud.get_market_by_event_id(session, event_id)
     if not market:
         MARKET_DETAIL_CACHE_COUNTER.labels(outcome="miss").inc()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
-    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)], include_siblings=True)[0]
+    response = (
+        await _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)], include_siblings=True)
+    )[0]
     duration = (time.perf_counter() - start) * 1000
     if cache_available:
         schema_tag = get_schema_tag(cache, settings.schema_version_key)
@@ -3555,7 +3590,9 @@ def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
 )
-def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(get_session)) -> schemas.MarketResponse:
+async def upsert_market(
+    market_in: schemas.MarketCreate, session: AsyncSession = Depends(get_session)
+) -> schemas.MarketResponse:
     start = time.perf_counter()
     log_event(
         logger,
@@ -3569,8 +3606,8 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
     payload = market_in.model_dump()
     for legacy in ("outcomes", "outcome_prices", "tags", "clob_token_ids"):
         payload.pop(legacy, None)
-    market = crud.create_or_update_market(session, schemas.MarketCreate(**payload))
-    session.flush()
+    market = await crud.create_or_update_market(session, schemas.MarketCreate(**payload))
+    await session.flush()
     event_id_value = cast(str | None, getattr(market, "event_id", None))
     _invalidate_market_cache(
         event_id_value,
@@ -3587,7 +3624,7 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
         category=market.category,
         duration_ms=round(duration, 2),
     )
-    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
+    response = (await _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)]))[0]
     return response
 
 
@@ -3597,10 +3634,10 @@ def upsert_market(market_in: schemas.MarketCreate, session: Session = Depends(ge
     tags=["markets"],
     include_in_schema=False,
 )
-def update_market(
-    event_id: str, update: schemas.MarketUpdate, session: Session = Depends(get_session)
+async def update_market(
+    event_id: str, update: schemas.MarketUpdate, session: AsyncSession = Depends(get_session)
 ) -> schemas.MarketResponse:
-    market = crud.get_market_by_event_id(session, event_id)
+    market = await crud.get_market_by_event_id(session, event_id)
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     start = time.perf_counter()
@@ -3612,8 +3649,8 @@ def update_market(
         event_id=event_id,
         fields=list(update.model_dump(exclude_unset=True).keys()),
     )
-    crud.patch_market(session, market, update)
-    session.flush()
+    await crud.patch_market(session, market, update)
+    await session.flush()
     _invalidate_market_cache(
         event_id,
         cast(str | None, getattr(market, "condition_id", None)),
@@ -3628,7 +3665,7 @@ def update_market(
         event_id=event_id,
         duration_ms=round(duration, 2),
     )
-    response = _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)])[0]
+    response = (await _enrich_market_models(session, [schemas.MarketResponse.model_validate(market)]))[0]
     return response
 
 

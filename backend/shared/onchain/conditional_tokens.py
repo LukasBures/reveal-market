@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from web3 import Web3
+from web3.exceptions import Web3Exception
 from web3.types import HexStr
 
 _CONDITIONAL_TOKENS_ABI: list[dict[str, Any]] = [
@@ -103,7 +104,7 @@ class ConditionalTokensClient:
                 fromBlock=0,
                 toBlock="latest",
             )
-        except Exception:  # pragma: no cover - defensive
+        except (Web3Exception, ValueError, TypeError):  # pragma: no cover - defensive
             return {}
         if not logs:
             return {}

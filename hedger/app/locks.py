@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 try:
     from redis.asyncio import Redis
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     Redis = None  # type: ignore
 
 
@@ -21,7 +22,7 @@ class RedisLockManager:
         self._idempotency_cache: dict[str, float] = {}
 
     @asynccontextmanager
-    async def lock(self, key: str):
+    async def lock(self, key: str) -> AsyncIterator[None]:
         if self.redis:
             token = str(time.time())
             acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)

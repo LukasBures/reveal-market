@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
+import httpx
 from redis.asyncio import Redis
+from tenacity import RetryError
 
 from .bet_processor_zen import BetProcessorZen
 from .bridge import BridgeClient
@@ -118,7 +122,7 @@ class HedgerService:
             redis_url=self.settings.redis_url,
         )
 
-    async def ingest_commit(self, commit: CommitEvent) -> dict:
+    async def ingest_commit(self, commit: CommitEvent) -> dict[str, Any]:
         idemp_key = self._build_idempotency_key(commit)
         if self.lock_manager and not await self.lock_manager.claim_idempotency(idemp_key):
             log_event(
@@ -153,7 +157,7 @@ class HedgerService:
 
         try:
             quote = await self.fx_oracle.get_quote()
-        except Exception as exc:
+        except (RetryError, httpx.HTTPError, InvalidOperation, ValueError) as exc:
             log_event(
                 logger,
                 logging.WARNING,
@@ -209,7 +213,7 @@ class HedgerService:
             snapshot, instruction, breaches = await self.exposure_ledger.record_commit(
                 commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc
             )
-        response: dict = {
+        response: dict[str, Any] = {
             "snapshot": snapshot,
             "hedge_instruction": instruction,
             "breaches": breaches,
@@ -222,7 +226,9 @@ class HedgerService:
             self.repository.set_replay_offset(self.settings.commit_stream_name, commit.stream_offset)
         return response
 
-    async def _validate_signed_quote(self, commit, quote_payload) -> tuple[bool, str | None]:
+    async def _validate_signed_quote(
+        self, commit: CommitEvent, quote_payload: Mapping[str, Any] | Any
+    ) -> tuple[bool, str | None]:
         """
         If a SignedQuote payload is attached to the commit, ensure it is fresh and matches stake/outcome/fx.
         This mirrors the on-chain digest and prevents hedging against tampered client inputs.
@@ -236,7 +242,7 @@ class HedgerService:
             from eth_account import Account
             from eth_account.messages import encode_defunct
             from web3 import Web3
-        except Exception as exc:  # pragma: no cover - runtime dependency guard
+        except ImportError as exc:  # pragma: no cover - runtime dependency guard
             log_event(
                 logger,
                 logging.WARNING,
@@ -251,7 +257,7 @@ class HedgerService:
             fx_scaled = int(quote_payload.get("zen_usd_scaled"))
             expiry_ts = int(quote_payload.get("expiry_ts"))
             chain_id = int(quote_payload.get("chain_id"))
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             logger.debug("quote parse failed", extra={"event": "hedger.commit.quote_parse_failed", "error": str(exc)})
             return False, "quote_fields_invalid"
 
@@ -302,7 +308,7 @@ class HedgerService:
             recovered = Account.recover_message(
                 encode_defunct(hexstr=digest.hex()), signature=quote_payload["signature"]
             )
-        except Exception as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             log_event(
                 logger,
                 logging.WARNING,
@@ -322,7 +328,7 @@ class HedgerService:
             drift_pct = abs(live_scaled - fx_scaled) / fx_scaled * 100 if fx_scaled else 0
             if drift_pct > 5:  # 5% drift guardrail; adjust if needed
                 return False, "quote_fx_drift"
-        except Exception as exc:
+        except (RetryError, httpx.HTTPError, InvalidOperation, ValueError) as exc:
             logger.debug(
                 "quote FX validation skipped",
                 extra={"event": "hedger.commit.quote_fx_invalid", "error": str(exc)},
@@ -330,7 +336,7 @@ class HedgerService:
 
         return True, None
 
-    async def _execute_hedge(self, instruction: HedgeInstruction) -> dict:
+    async def _execute_hedge(self, instruction: HedgeInstruction) -> dict[str, Any]:
         lock_ctx = self.lock_manager.lock(f"hedge:{instruction.market_id}") if self.lock_manager else self._noop_lock
         async with lock_ctx:
             quote = await self.polymarket_client.quote_execution(
@@ -365,7 +371,11 @@ class HedgerService:
                         client_order_id=client_order_id,
                     )
                     filled_size = self._extract_filled_size(order_payload, instruction.size_usd)
-                except Exception as exc:  # pragma: no cover - network errors handled via retry
+                except (
+                    httpx.HTTPError,
+                    RuntimeError,
+                    ValueError,
+                ) as exc:  # pragma: no cover - network errors handled via retry
                     log_event(
                         logger,
                         logging.ERROR,
@@ -430,10 +440,10 @@ class HedgerService:
         update_float_and_utilization(float_zen=None, lp_utilization=utilization)
         return utilization
 
-    async def trigger_settlement(self, market_id: str, payload: dict) -> dict:
+    async def trigger_settlement(self, market_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         return await self.settlement.request_settlement(market_id, payload)
 
-    async def settle_market(self, market_id: str, outcome: OutcomeSide | str) -> dict:
+    async def settle_market(self, market_id: str, outcome: OutcomeSide | str) -> dict[str, Any]:
         if isinstance(outcome, OutcomeSide):
             outcome_value = outcome.value
         else:
@@ -476,7 +486,7 @@ class HedgerService:
 
     async def request_bridge(
         self, direction: str, amount: Decimal, destination: str, *, slippage_bps: int | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Manually request a bridge transfer. Direction must be `usdc_to_zen` or `zen_to_usdc`.
         """
@@ -493,7 +503,7 @@ class HedgerService:
             )
         raise ValueError("direction must be 'usdc_to_zen' or 'zen_to_usdc'")
 
-    async def health(self) -> dict:
+    async def health(self) -> dict[str, Any]:
         latest_commit_at = self.repository.latest_commit_timestamp()
         fx_stale = self.fx_oracle.stale()
         utilization = await self.vault_client.current_utilization()
@@ -572,10 +582,12 @@ class HedgerService:
 
     @staticmethod
     @asynccontextmanager
-    async def _noop_async_lock():
+    async def _noop_async_lock() -> AsyncIterator[None]:
         yield
 
-    async def _project_settlement(self, market_id: str, outcome_value: str, persist: bool = False) -> dict | None:
+    async def _project_settlement(
+        self, market_id: str, outcome_value: str, persist: bool = False
+    ) -> dict[str, Any] | None:
         commits = self.repository.get_commits_for_market(market_id)
         if not commits:
             return None
@@ -593,7 +605,7 @@ class HedgerService:
             return None
         try:
             quote = await self.fx_oracle.get_quote()
-        except Exception:
+        except (RetryError, httpx.HTTPError, InvalidOperation, ValueError):
             return None
         realized, unrealized = await self.vault_client.get_pnl()
         expected_usdc_payout_if_win = expected_payout + Decimal(str(max(unrealized, 0.0)))
@@ -632,14 +644,14 @@ class HedgerService:
         }
 
     @staticmethod
-    def _extract_expected_payout(payloads: list[dict], fallback: Decimal) -> Decimal:
+    def _extract_expected_payout(payloads: list[dict[str, Any]], fallback: Decimal) -> Decimal:
         for payload in payloads:
             value = payload.get("expected_usdc_payout") or payload.get("expected_payout_usdc")
             if value is None:
                 continue
             try:
                 return Decimal(str(value))
-            except Exception as exc:
+            except (InvalidOperation, TypeError, ValueError) as exc:
                 log_event(
                     logger,
                     logging.DEBUG,
@@ -649,7 +661,7 @@ class HedgerService:
                 )
         return fallback
 
-    def _build_prover_payload(self, market_id: str, outcome: str) -> dict:
+    def _build_prover_payload(self, market_id: str, outcome: str) -> dict[str, Any]:
         commits = self.repository.get_commits_for_market(market_id)
         commit_payloads = [
             {
@@ -672,6 +684,6 @@ class HedgerService:
             "commits": commit_payloads,
         }
 
-    async def _build_and_persist_economics(self, market_id: str, outcome_value: str) -> dict | None:
+    async def _build_and_persist_economics(self, market_id: str, outcome_value: str) -> dict[str, Any] | None:
         economics = await self._project_settlement(market_id, outcome_value, persist=True)
         return economics

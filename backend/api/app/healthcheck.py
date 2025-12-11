@@ -3,8 +3,11 @@ from __future__ import annotations
 import sys
 
 from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
+from .cache import get_redis_client
 from .config import get_settings
 
 
@@ -13,16 +16,21 @@ def _check_database(database_url: str) -> None:
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise RuntimeError(f"database unavailable: {exc}") from exc
     finally:
         engine.dispose()
 
 
 def _check_redis(redis_url: str) -> None:
-    client = Redis.from_url(redis_url)
+    # Prefer the cached client used by the app; fall back to a fresh one only if unavailable.
+    client: Redis | None = get_redis_client()
+    if client is None:
+        client = Redis.from_url(redis_url, decode_responses=True)
     try:
         client.ping()
-    finally:
-        client.close()
+    except RedisError as exc:
+        raise RuntimeError(f"redis unavailable: {exc}") from exc
 
 
 def main() -> int:
@@ -31,12 +39,12 @@ def main() -> int:
 
     try:
         _check_database(settings.database_url)
-    except Exception as exc:  # pragma: no cover - defensive
+    except RuntimeError as exc:  # pragma: no cover - defensive
         failures.append(f"database unavailable: {exc}")
 
     try:
         _check_redis(settings.redis_url)
-    except Exception as exc:  # pragma: no cover - defensive
+    except RuntimeError as exc:  # pragma: no cover - defensive
         failures.append(f"redis unavailable: {exc}")
 
     if failures:

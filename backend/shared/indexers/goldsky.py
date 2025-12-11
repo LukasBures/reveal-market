@@ -6,10 +6,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+from tenacity import RetryError, Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from shared.logging import log_event
 from shared.onchain.conditional_tokens import _derive_winners
+
+try:
+    import orjson
+except ImportError:  # pragma: no cover - optional dependency
+    orjson = None  # type: ignore[assignment]
 
 
 class GoldskyError(RuntimeError):
@@ -104,7 +109,8 @@ class GoldskyClient:
         self.endpoint = endpoint
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
-        self._transport = transport
+        self._transport = transport or httpx.HTTPTransport(retries=0)
+        self._client = httpx.Client(timeout=self.timeout_seconds, transport=self._transport)
         self._logger = logging.getLogger(logger_name)
         wait_strategy = wait_random_exponential(multiplier=backoff_seconds, max=backoff_max_seconds)
 
@@ -134,11 +140,12 @@ class GoldskyClient:
         return headers
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        timeout = httpx.Timeout(self.timeout_seconds)
-        with httpx.Client(timeout=timeout, transport=self._transport) as client:
-            response = client.post(self.endpoint, json=payload, headers=self._headers())
-            response.raise_for_status()
-        data = response.json()
+        response = self._client.post(self.endpoint, json=payload, headers=self._headers())
+        response.raise_for_status()
+        try:
+            data = orjson.loads(response.content) if orjson is not None else response.json()
+        except ValueError as exc:
+            raise GoldskyError(f"invalid response from goldsky: {exc}") from exc
         errors = data.get("errors")
         if errors:
             raise GoldskyError(str(errors))
@@ -170,7 +177,12 @@ class GoldskyClient:
             batch = token_ids[idx : idx + chunk_size]
             try:
                 records = _fetch_batch(batch)
-            except Exception as exc:  # pragma: no cover - network path
+            except (
+                GoldskyError,
+                httpx.HTTPError,
+                httpx.RequestError,
+                RetryError,
+            ) as exc:  # pragma: no cover - network path
                 log_event(
                     self._logger,
                     logging.WARNING,
@@ -199,7 +211,7 @@ class GoldskyClient:
         }
         try:
             data = self._run_with_retry(lambda: self._post(payload))
-        except Exception as exc:
+        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
             log_event(
                 self._logger,
                 logging.ERROR,
