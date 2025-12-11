@@ -293,7 +293,11 @@ jobs:
         env:
           RAPIDSNARK_VERSION: v0.0.7
         run: |
-          curl -fsSL -o /tmp/rapidsnark.zip "https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}.zip"
+          set -euo pipefail
+          ARCHIVE="rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}.zip"
+          URL="https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/${ARCHIVE}"
+          echo "Downloading ${URL}"
+          curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/rapidsnark.zip "${URL}"
           unzip -q /tmp/rapidsnark.zip -d /tmp/rapidsnark
           RS_DIR="/tmp/rapidsnark/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}"
           echo "${RS_DIR}/bin" >> $GITHUB_PATH

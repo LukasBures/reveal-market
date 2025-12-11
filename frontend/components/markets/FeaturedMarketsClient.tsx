@@ -45,6 +45,8 @@ export function FeaturedMarketsClient({
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
+  const [offset, setOffset] = useState(initialMarkets.length);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [autoLoadTriggered, setAutoLoadTriggered] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -110,8 +112,10 @@ export function FeaturedMarketsClient({
     const initialLikelyMore = initialMarkets.length >= pageSize || seeded.length >= pageSize;
     setMarkets(seeded);
     setHasMore(initialLikelyMore && seeded.length < maxItems);
+    setOffset(initialMarkets.length);
     setAutoLoadCount(0);
     setAutoLoadTriggered(false);
+    setIsLoadingMore(false);
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
   useEffect(() => {
@@ -126,30 +130,29 @@ export function FeaturedMarketsClient({
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
-      if (!hasMore || isPending || remainingSlots <= 0) return;
-      const nextLimit = batchSize;
+      const nextLimit = Number.isFinite(remainingSlots) ? Math.min(batchSize, remainingSlots) : batchSize;
+      if (!hasMore || isPending || isLoadingMore || nextLimit <= 0) return;
       if (mode === "auto") {
         setAutoLoadTriggered(true);
       }
+      const fetchOffset = offset;
+      setIsLoadingMore(true);
       startTransition(async () => {
         try {
           const additions = await fetchFeaturedMarkets(nextLimit, {
             searchQuery,
             category: normalizedCategory,
-            offset: markets.length,
+            offset: fetchOffset,
             status,
             trending,
             coalesceGroups: true,
           });
           const merged = normalizeMarkets([...markets, ...additions]);
-          if (normalizeMarkets(additions).length === 0) {
-            setHasMore(false);
-            return;
-          }
-          const computedHasMore = additions.length > 0 && merged.length < maxItems && additions.length === nextLimit;
-          setMarkets(merged);
-          setHasMore(computedHasMore);
           const newItemsAdded = merged.length - markets.length;
+          const computedHasMore = additions.length === nextLimit && merged.length < maxItems;
+          setMarkets(merged);
+          setOffset(fetchOffset + additions.length);
+          setHasMore(computedHasMore);
           if (mode === "auto" && newItemsAdded > 0) {
             setAutoLoadTriggered(true);
             setAutoLoadCount((count) => count + 1);
@@ -157,6 +160,8 @@ export function FeaturedMarketsClient({
         } catch (error) {
           logger.clientError("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
           setHasMore(false);
+        } finally {
+          setIsLoadingMore(false);
         }
       });
     },
@@ -164,9 +169,11 @@ export function FeaturedMarketsClient({
       normalizedCategory,
       hasMore,
       isPending,
+      isLoadingMore,
       markets,
       maxItems,
       remainingSlots,
+      offset,
       searchQuery,
       status,
       filterByStatus,
@@ -177,11 +184,12 @@ export function FeaturedMarketsClient({
     ],
   );
 
+  const isBusy = isPending || isLoadingMore;
   const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
   const showManualButton = markets.length > 0 && hasMore && (!autoLoadTriggered || autoLoadCount >= AUTO_LOAD_BATCHES);
 
   useEffect(() => {
-    if (!canAutoLoad || isPending) {
+    if (!canAutoLoad || isBusy) {
       return;
     }
     const target = sentinelRef.current;
@@ -199,7 +207,7 @@ export function FeaturedMarketsClient({
     }, { rootMargin: "200px" });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [canAutoLoad, handleLoadMore, isPending, markets.length]);
+  }, [canAutoLoad, handleLoadMore, isBusy, markets.length]);
 
   const renderEmptyState = () => {
     if (emptyNotice) {
@@ -230,11 +238,12 @@ export function FeaturedMarketsClient({
         <div className="flex items-center justify-center">
           <button
             type="button"
-            disabled={!hasMore || isPending}
+            disabled={!hasMore || isBusy}
+            aria-busy={isBusy}
             onClick={() => handleLoadMore("manual")}
             className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isPending ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}
+            {isBusy ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}
           </button>
         </div>
       )}
