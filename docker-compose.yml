@@ -85,7 +85,7 @@ services:
     mem_swappiness: 0
     environment:
       <<: *backend-env
-      RM_ENVIRONMENT: local
+      RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
       APP_WORKERS: ${APP_WORKERS:-2}
       UVICORN_WORKERS: 2
       PYTHONUNBUFFERED: 1
