@@ -132,7 +132,7 @@ describe("FeaturedMarketsClient", () => {
     expect(screen.queryByRole("button", { name: /load more markets/i })).not.toBeInTheDocument();
   });
 
-  it("allows sorting by total volume", () => {
+  it("preserves the order returned by the API", () => {
     const markets = [
       { eventId: "evt-a", title: "Higher 24h", volume24hUsd: 800, volume: 1_000 },
       { eventId: "evt-b", title: "Highest total", volume24hUsd: 100, volume: 5_000 },
@@ -143,6 +143,6 @@ describe("FeaturedMarketsClient", () => {
     );
 
     const titles = Array.from(container.querySelectorAll("h3")).map((node) => node.textContent ?? "");
-    expect(titles[0]).toContain("Highest total");
+    expect(titles[0]).toContain("Higher 24h");
   });
 });

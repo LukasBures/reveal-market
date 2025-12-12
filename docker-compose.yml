@@ -4,7 +4,7 @@ name: reveal-market
 # connection strings. Override values via .env / CLI if needed.
 
 x-backend-env: &backend-env
-  MODE: ${MODE}
+  RM_ENVIRONMENT: ${RM_ENVIRONMENT}
   RM_DATABASE_URL: ${RM_DATABASE_URL}
   RM_REDIS_URL: ${RM_REDIS_URL}
   RM_POLYMARKET_API_BASE: ${RM_POLYMARKET_API_BASE}
@@ -183,7 +183,7 @@ services:
     restart: unless-stopped
     mem_swappiness: 0
     environment:
-      HEDGER_ENVIRONMENT: ${MODE:-dev}
+      HEDGER_ENVIRONMENT: ${RM_ENVIRONMENT:-dev}
       HEDGER_LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RM_DATABASE_URL: ${RM_DATABASE_URL:-postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market}
       HEDGER_REDIS_URL: ${HEDGER_REDIS_URL}

@@ -57,7 +57,7 @@ fi
 
 # Try to reach the backend API; warn if unreachable but proceed by default so
 # local runs can still build against the configured host (override with FRONTEND_REQUIRE_API=true).
-MODE_ENV="${MODE:-${NODE_ENV:-development}}"
+MODE_ENV="${RM_ENVIRONMENT:-${NODE_ENV:-development}}"
 if [[ "${MODE_ENV,,}" == *prod* ]]; then
   DEFAULT_API_BASE="${RM_API_BASE_URL:-https://api.revealmarket.xyz}"
 else

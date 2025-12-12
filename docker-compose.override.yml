@@ -66,7 +66,7 @@ services:
   api:
     # Override prod-like defaults so local runs get verbose logs + live code reloading.
     environment:
-      MODE: dev
+      RM_ENVIRONMENT: local
       LOG_LEVEL: INFO
     # Bind-mount source directories so edits on the host immediately reflect in the container.
     volumes:
@@ -84,7 +84,7 @@ services:
 
   worker:
     environment:
-      MODE: dev
+      RM_ENVIRONMENT: local
       LOG_LEVEL: INFO
       # Mirror production heartbeat cadence so diagnostics fire once per minute.
       RM_POLL_INTERVAL_SECONDS: 60

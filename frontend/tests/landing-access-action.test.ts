@@ -24,22 +24,22 @@ async function importActionModule() {
 
 describe("requestLandingAccessAction", () => {
   const originalEnv = process.env.LANDING_ACCESS_CODE;
-  const originalMode = process.env.MODE;
+  const originalEnvName = process.env.RM_ENVIRONMENT;
 
   beforeEach(() => {
     mockCookies.mockReturnValue({
       get: vi.fn(),
       set: setCookieMock,
     });
-    process.env.MODE = "production";
+    process.env.RM_ENVIRONMENT = "production";
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-    if (originalMode === undefined) {
-      delete process.env.MODE;
+    if (originalEnvName === undefined) {
+      delete process.env.RM_ENVIRONMENT;
     } else {
-      process.env.MODE = originalMode;
+      process.env.RM_ENVIRONMENT = originalEnvName;
     }
     if (originalEnv === undefined) {
       delete process.env.LANDING_ACCESS_CODE;

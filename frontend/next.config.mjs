@@ -1,8 +1,8 @@
 import path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from "next/constants.js";
 
-const MODE = (process.env.MODE ?? process.env.NODE_ENV ?? "development").toLowerCase();
-const IS_PROD_MODE = MODE.includes("prod");
+const RM_ENV = (process.env.RM_ENVIRONMENT ?? process.env.NODE_ENV ?? "development").toLowerCase();
+const IS_PROD_MODE = RM_ENV.includes("prod");
 const DEFAULT_API_BASE = IS_PROD_MODE ? "https://api.revealmarket.xyz" : "http://localhost:8000";
 const DEFAULT_STREAMER_BASE = IS_PROD_MODE ? "https://stream.revealmarket.xyz" : "http://localhost:8100";
 const API_BASE = DEFAULT_API_BASE.replace(/\/$/, "");

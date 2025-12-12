@@ -42,7 +42,7 @@ export function MarketCard({ market }: Props) {
   const outcomes = market.outcomes ?? [];
   const visibleOutcomes = outcomes.length > 0 ? outcomes.slice(0, 2) : ["Awaiting outcomes"];
   const categoryLabel = market.category ?? "General";
-  const volumeUsd = getMarketVolume(market);
+  const volumeTotal = getMarketVolume(market, "total");
   const extraImage =
     market.extraData && typeof market.extraData === "object"
       ? (market.extraData as Record<string, any>).image_url ??
@@ -107,8 +107,8 @@ export function MarketCard({ market }: Props) {
             </div>
             <div className="mt-auto grid grid-cols-2 gap-2 text-[11px] uppercase tracking-[0.25em] text-white/60">
               <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
-                <span>24h vol</span>
-                <span className="font-semibold text-white/80">{formatStatValue(volumeUsd)}</span>
+                <span>Volume</span>
+                <span className="font-semibold text-white/80">{formatStatValue(volumeTotal)}</span>
               </div>
               <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
                 <span>Liquidity</span>
@@ -140,8 +140,8 @@ export function MarketCard({ market }: Props) {
             </div>
             <div className="mt-auto grid grid-cols-2 gap-2 text-[11px] uppercase tracking-[0.25em] text-white/60">
               <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
-                <span>24h vol</span>
-                <span className="font-semibold text-white/80">{formatStatValue(volumeUsd)}</span>
+                <span>Volume</span>
+                <span className="font-semibold text-white/80">{formatStatValue(volumeTotal)}</span>
               </div>
               <div className="flex items-center justify-between rounded-lg border border-white/5 bg-slate-900/40 px-3 py-2">
                 <span>Liquidity</span>

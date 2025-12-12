@@ -26,7 +26,7 @@ const PRESETS: Record<string, ModePreset> = {
 };
 
 const resolveMode = () => {
-  const modeEnv = (process.env.MODE ?? process.env.NODE_ENV ?? "local").toLowerCase();
+  const modeEnv = (process.env.RM_ENVIRONMENT ?? process.env.NODE_ENV ?? "local").toLowerCase();
   return modeEnv.includes("prod") ? "prod" : "local";
 };
 

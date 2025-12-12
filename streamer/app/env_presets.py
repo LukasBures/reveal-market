@@ -4,8 +4,10 @@ import os
 
 
 def resolve_mode() -> str:
-    mode = (os.getenv("MODE") or os.getenv("STREAMER_ENVIRONMENT") or "").lower()
-    if mode in {"prod", "production"}:
+    env = (os.getenv("RM_ENVIRONMENT") or "").lower()
+    if env in PRESETS:
+        return env
+    if env in {"prod", "production"}:
         return "prod"
     return "local"
 

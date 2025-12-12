@@ -19,7 +19,7 @@ def test_compute_host_warnings_missing_cors_origin():
 
 
 def test_cors_prod_overrides_wildcard(monkeypatch):
-    monkeypatch.setenv("MODE", "prod")
+    monkeypatch.setenv("RM_ENVIRONMENT", "prod")
     from app import main
 
     monkeypatch.setattr(

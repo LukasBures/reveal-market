@@ -24,7 +24,7 @@ export async function FeaturedMarketsSection({
   emptyNotice,
   sortBy = "totalVolume",
 }: Props = {}) {
-  const orderBy = sortBy === "totalVolume" ? "volume" : "volume_24h_usd";
+  const orderBy = "volume";
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,

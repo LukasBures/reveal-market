@@ -13,7 +13,6 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
-import { getMarketVolume } from "./markets";
 import { fetchMarketActivity, fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
 export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
@@ -62,11 +61,6 @@ const maybeShortCircuitOffline = (scope: string) => {
     return true;
   }
   return false;
-};
-
-const computePopularity = (market: MarketSummary): number => {
-  const volume = getMarketVolume(market);
-  return Number.isFinite(volume) ? volume : 0;
 };
 
 const coerceNumber = (value: any): number | undefined => {
@@ -453,18 +447,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
         count: items.length,
       });
     }
-    const getUpdatedAt = (m: MarketSummary): string =>
-      (m as any).updatedAt ?? (m as any).updated_at ?? m.extraData?.gamma?.updated_at ?? "";
-    const scored = mapped.map((m) => ({ market: m, popularity: computePopularity(m) }));
-    const sorter = (a: { market: MarketSummary; popularity: number }, b: { market: MarketSummary; popularity: number }) => {
-      const diff = (b.popularity ?? 0) - (a.popularity ?? 0);
-      if (diff !== 0) return diff;
-      const aUpdated = getUpdatedAt(a.market);
-      const bUpdated = getUpdatedAt(b.market);
-      return bUpdated > aUpdated ? 1 : bUpdated < aUpdated ? -1 : 0;
-    };
-    const orderedByVolume = scored.sort(sorter).map((entry) => entry.market);
-    return trendingMode ? orderedByVolume.slice(0, limit) : orderedByVolume;
+    return mapped;
   } catch (error) {
     logOfflineAwareError("fetchFeaturedMarkets", error);
     return [];

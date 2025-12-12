@@ -159,7 +159,7 @@ class Settings(BaseSettings):
         env_value = os.getenv("RM_RATE_LIMIT_ENABLED")
         if env_value is not None:
             return value
-        env = (os.getenv("RM_ENVIRONMENT") or os.getenv("ENVIRONMENT") or "development").lower()
+        env = (os.getenv("RM_ENVIRONMENT") or "development").lower()
         if env not in {"dev", "development", "local", "test", "testing"}:
             return True
         return value

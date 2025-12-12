@@ -46,7 +46,7 @@ Tech stack callouts:
 
 ## Environment Variables
 
-Defaults are derived from `MODE` (`local` → localhost:3000/8000/8100, `prod` → revealmarket.xyz/api/stream). You only need to set overrides when deviating from those presets. Common knobs:
+Defaults are derived from `RM_ENVIRONMENT` (`local` → localhost:3000/8000/8100, `prod` → revealmarket.xyz/api/stream). You only need to set overrides when deviating from those presets. Common knobs:
 
 | Variable | Purpose |
 | -------- | ------- |
@@ -173,19 +173,19 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
 - **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API base resolves and responds to `/health` (defaults come from `MODE`: prod → `https://api.revealmarket.xyz`, local → `http://localhost:8000`).
+- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API base resolves and responds to `/health` (defaults come from `RM_ENVIRONMENT`: prod → `https://api.revealmarket.xyz`, local → `http://localhost:8000`).
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ## Streaming & FX
 
 - **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
 - **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
-- **WSS/TLS** – Streamer defaults follow `MODE` (prod → `https://stream.revealmarket.xyz`, local → `http://localhost:8100`) and auto-switch to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
-- **Env summary** – Defaults come from `MODE` (prod/local presets). Override with `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only when needed; keep streamer-side `STREAMER_WORSEN_PERCENT` aligned.
+- **WSS/TLS** – Streamer defaults follow `RM_ENVIRONMENT` (prod → `https://stream.revealmarket.xyz`, local → `http://localhost:8100`) and auto-switch to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
+- **Env summary** – Defaults come from `RM_ENVIRONMENT` (prod/local presets). Override with `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only when needed; keep streamer-side `STREAMER_WORSEN_PERCENT` aligned.
 
 ## Deployment / Runbook
 
-- **Env vars**: Mostly preset by `MODE`; optional overrides include `RM_API_BASE_URL`, `STREAMER_INTERNAL_URL`, wallet provider keys, and any analytics keys (ensure CSP allows them).
+- **Env vars**: Mostly preset by `RM_ENVIRONMENT`; optional overrides include `RM_API_BASE_URL`, `STREAMER_INTERNAL_URL`, wallet provider keys, and any analytics keys (ensure CSP allows them).
 - **TLS**: Terminate at Caddy/Nginx; streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
 - **Health**: API `/healthz`, streamer `/healthz`; frontend relies on a reachable API (build/tests fail fast if `/health` is down).
 - **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
@@ -207,12 +207,12 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 1. `npm install && npm run lint && npm run test`.
 2. `npm run build` (ensures there are no SSG/ISR surprises).
-3. Ensure `MODE=production` in your hosting platform; override `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only if pointing at non-standard hosts.
+3. Ensure `RM_ENVIRONMENT=production` in your hosting platform; override `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only if pointing at non-standard hosts.
 4. Serve over HTTPS so CSP/HSTS headers take effect. If you terminate TLS upstream (Cloudflare, Fastly, etc.), mirror the security headers there.
 5. Configure caching:
    - Static assets: long-lived CDN cache.
    - App routes: let Next.js handle incremental cache (the worker invalidates tags automatically).
-6. Docker tip: when using `docker/frontend/Dockerfile`, set `MODE=production` so server-side rendering + JSON-LD reference the production presets.
+6. Docker tip: when using `docker/frontend/Dockerfile`, set `RM_ENVIRONMENT=production` so server-side rendering + JSON-LD reference the production presets.
 
 Docker images rely on `next build` + `next start --turbo` by default; see the repository root for compose examples.
 

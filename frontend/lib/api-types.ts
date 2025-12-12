@@ -154,5 +154,5 @@ export type FetchFeaturedMarketsOptions = {
   trending?: boolean;
   onlyFeatured?: boolean;
   coalesceGroups?: boolean;
-  orderBy?: "volume_24h_usd" | "volume";
+  orderBy?: "volume";
 };

@@ -34,7 +34,7 @@ export function SearchMarketsClient({
   const [refreshKey, setRefreshKey] = useState(0);
   const [isPending, startTransition] = useTransition();
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
-  const orderBy = sortBy === "totalVolume" ? "volume" : "volume_24h_usd";
+  const orderBy = "volume";
 
   useEffect(() => {
     const trimmed = initialQuery.trim();
