@@ -83,10 +83,9 @@ export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
 log_step "Running frontend lint"
 npm run lint
 
-TEMP_LOCALSTORAGE_FILE="$(mktemp -t vitest-localstorage-XXXXXX)"
-# Preserve existing NODE_OPTIONS while ensuring localstorage flag has a real path.
+# Clean up any inherited --localstorage-file flags (not allowed in NODE_OPTIONS) to avoid Node errors.
 EXISTING_NODE_OPTIONS="${NODE_OPTIONS:-}"
-export NODE_OPTIONS="${EXISTING_NODE_OPTIONS//--localstorage-file/} --localstorage-file=${TEMP_LOCALSTORAGE_FILE}"
+export NODE_OPTIONS="${EXISTING_NODE_OPTIONS//--localstorage-file[^ ]*/}"
 
 log_step "Running frontend unit tests"
 npm run test
