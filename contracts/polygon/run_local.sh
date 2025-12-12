@@ -7,11 +7,10 @@ echo "=============================="
 forge build
 echo "✅ Build complete"
 echo
-
 echo "=============================="
 echo "🧪  POLYGON: Running tests"
 echo "=============================="
-forge test --gas-report --fail-fast
+forge test --fail-fast
 echo "✅ Tests complete"
 echo
 

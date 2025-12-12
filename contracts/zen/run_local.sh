@@ -59,7 +59,7 @@ echo
 echo "=============================="
 echo "🧪  STEP 2: Running tests"
 echo "=============================="
-forge test --gas-report --fail-fast
+forge test --fail-fast
 echo "✅ Tests complete"
 echo
 

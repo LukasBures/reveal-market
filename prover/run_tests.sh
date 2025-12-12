@@ -17,7 +17,7 @@ mkdir -p "${GOCACHE}"
 
 log_step "Running Go tests for prover"
 ./check_artifacts.sh
-go test "$@" -v ./...
+LOG_LEVEL=${LOG_LEVEL:-error} go test "$@" ./...
 
 log_step "gofmt check"
 CHANGED=$(gofmt -l .)
