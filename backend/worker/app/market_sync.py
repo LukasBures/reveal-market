@@ -38,6 +38,8 @@ class SyncOutcome:
     market_created: bool = False
     market_updated: bool = False
     group_slugs: set[str] = field(default_factory=set)
+    gamma_metadata_updates: int = 0
+    gamma_events_written: int = 0
 
 
 @dataclass
@@ -67,6 +69,8 @@ class SyncSummary:
     markets_created: int = 0
     markets_updated: int = 0
     markets_deleted: int = 0
+    gamma_metadata_updates: int = 0
+    gamma_events_written: int = 0
     summaries_enqueued: int = 0
     proofs_generated: int = 0
     resolutions_backfilled: int = 0
@@ -87,6 +91,8 @@ class SyncSummary:
             "cache_invalidations": cache_invalidations,
             "resolutions_backfilled": self.resolutions_backfilled,
             "market_errors": self.failed_markets,
+            "gamma_metadata_updates": self.gamma_metadata_updates,
+            "gamma_events_written": self.gamma_events_written,
         }
 
 
@@ -118,9 +124,11 @@ async def _persist_normalized_market_data(
     clob_token_ids: list[str] | None,
     gamma_metadata: dict | None,
     gamma_events: list[dict[str, Any]] | None,
-) -> None:
+) -> dict[str, int]:
     """Replace normalized tables for a market with the latest payload."""
 
+    metadata_written = 0
+    events_written = 0
     await session.execute(delete(shared_models.MarketOutcome).where(shared_models.MarketOutcome.market_id == market_id))
     if outcomes:
         for idx, label in enumerate(outcomes):
@@ -166,6 +174,7 @@ async def _persist_normalized_market_data(
     )
     if gamma_metadata:
         session.add(shared_models.MarketGammaMetadata(market_id=market_id, **gamma_metadata))
+        metadata_written = 1
 
     await session.execute(
         delete(shared_models.MarketGammaEvent).where(shared_models.MarketGammaEvent.market_id == market_id)
@@ -177,6 +186,8 @@ async def _persist_normalized_market_data(
             normalized = _normalize_gamma_event(raw)
             if normalized:
                 session.add(shared_models.MarketGammaEvent(market_id=market_id, **normalized))
+                events_written += 1
+    return {"metadata": metadata_written, "events": events_written}
 
 
 def _normalize_gamma_event(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -325,6 +336,10 @@ async def collect_market_changes_with_summary(
             summary.changed_group_slugs.update(outcome.group_slugs)
         if outcome.resolution_cache_payload and outcome.condition_id:
             summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
+        if outcome.gamma_metadata_updates or outcome.gamma_events_written:
+            summary.gamma_metadata_updates += outcome.gamma_metadata_updates
+            summary.gamma_events_written += outcome.gamma_events_written
+            summary.stats_dirty = True
         if await maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
             summary.summaries_enqueued += 1
         if (
@@ -634,6 +649,7 @@ async def _sync_market(
     gamma_raw = payload.pop("gamma_raw", None)
     gamma_metadata = payload.pop("gamma_metadata", None)
     gamma_events = payload.pop("gamma_events", None)
+    gamma_counts = {"metadata": 0, "events": 0}
 
     if existing is None:
         db_market = await shared_repository.upsert_market(session, payload, existing)
@@ -685,7 +701,7 @@ async def _sync_market(
     if db_market is not None:
         if db_market.id is None:
             await session.flush()
-        await _persist_normalized_market_data(
+        gamma_counts = await _persist_normalized_market_data(
             session,
             market_id=db_market.id,
             outcomes=outcomes,
@@ -695,6 +711,18 @@ async def _sync_market(
             gamma_metadata=gamma_metadata,
             gamma_events=gamma_events,
         )
+        if gamma_counts.get("metadata") or gamma_counts.get("events"):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.market.gamma_updated",
+                message="updated gamma metadata/events",
+                event_id=market.event_id,
+                metadata=gamma_counts.get("metadata", 0),
+                events=gamma_counts.get("events", 0),
+            )
+    else:
+        gamma_counts = {"metadata": 0, "events": 0}
     await _record_factory_state(session, db_market, market)
     resolution_outcome = await apply_resolution(session, db_market, market)
     await session.flush()
@@ -713,6 +741,8 @@ async def _sync_market(
         market_created=market_created,
         market_updated=market_updated,
         group_slugs=group_slugs,
+        gamma_metadata_updates=gamma_counts.get("metadata", 0),
+        gamma_events_written=gamma_counts.get("events", 0),
     )
 
 
