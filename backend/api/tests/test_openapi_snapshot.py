@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.main import app
+from app.server import app
 from fastapi.testclient import TestClient
 
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "openapi.json"

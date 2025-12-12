@@ -385,11 +385,10 @@ class ClobOrderBookResponse(BaseModel):
             return []
         parsed: list[OrderBookLevel] = []
         for level in levels:
-            if hasattr(level, "__dict__"):
-                level = level.__dict__  # type: ignore[assignment]
-            if isinstance(level, dict):
-                price = ClobOrderBookResponse._coerce_decimal(level.get("price"))
-                size = ClobOrderBookResponse._coerce_decimal(level.get("size"))
+            level_dict = level.__dict__ if hasattr(level, "__dict__") else level
+            if isinstance(level_dict, dict):
+                price = ClobOrderBookResponse._coerce_decimal(level_dict.get("price"))
+                size = ClobOrderBookResponse._coerce_decimal(level_dict.get("size"))
                 if price is not None and size is not None:
                     parsed.append(OrderBookLevel(price=price, size=size))
         return parsed

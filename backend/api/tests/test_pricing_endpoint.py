@@ -81,21 +81,22 @@ def test_pricing_fx_rejects_stale_payload(client, monkeypatch):
 
 def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     # Force deterministic FX and signer env.
-    from app.config import get_settings
+    import app.runtime as runtime
     from eth_account import Account
 
     signer = Account.create()
     user = Account.create()
-    settings = get_settings()
+    settings = runtime.settings
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
-    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
         "stake_zen": 10,
@@ -119,24 +120,25 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
 
 
 def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
-    from app.config import get_settings
-    from app.main import _build_quote_digest
+    import app.runtime as runtime
+    from app.server import build_quote_digest
     from eth_account import Account
     from eth_account.messages import encode_defunct
     from pydantic import SecretStr
 
     signer = Account.create()
     user = Account.create()
-    settings = get_settings()
+    settings = runtime.settings
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
-    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
         "stake_zen": 5,
@@ -150,7 +152,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     assert resp.status_code == 200
     quote = resp.json()
 
-    digest = _build_quote_digest(
+    digest = build_quote_digest(
         settings.pricing_chain_id,
         quote["market_address"],
         quote["wallet_address"],
@@ -174,13 +176,13 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
-    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr("app.server.settings", settings, raising=False)
     now_ts = datetime.now(tz=UTC)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=True, received_at=now_ts)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     payload = {
         "stake_zen": 0.1,

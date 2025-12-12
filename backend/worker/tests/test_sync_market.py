@@ -4,20 +4,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import app.main
-from app.main import sync_market
+import app.market_sync as market_sync
+import app.resolution as resolution_module
+import pytest
+from app.market_sync import sync_market
 from app.polymarket import MarketPayload
 from shared.models import Base, Market, Resolution
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+pytestmark = pytest.mark.asyncio
 
 
-def create_in_memory_db():
-    """Bootstrap a temporary SQLite database mirroring the production schema subset."""
-    engine = create_engine("sqlite://", future=True)
-    Base.metadata.create_all(bind=engine)
-
-    session_factory = sessionmaker(
+async def create_async_in_memory_db():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(
         bind=engine,
         autoflush=False,
         autocommit=False,
@@ -27,9 +30,9 @@ def create_in_memory_db():
     return engine, session_factory
 
 
-def test_sync_market_inserts_and_updates():
+async def test_sync_market_inserts_and_updates():
     """Verify the same event_id can be inserted and subsequently updated."""
-    engine, session_factory = create_in_memory_db()
+    engine, session_factory = await create_async_in_memory_db()
 
     try:
         initial = MarketPayload(
@@ -46,13 +49,13 @@ def test_sync_market_inserts_and_updates():
             outcome_prices=[0.5, 0.5],
         )
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, initial)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, initial)
             assert outcome.market_changed is True
-            session.commit()
+            await session.commit()
 
-        with session_factory() as session:
-            stored = session.execute(select(Market).where(Market.event_id == "evt-1")).scalar_one()
+        async with session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == "evt-1"))).scalar_one()
             assert stored.title == "First Market"
             assert stored.status == "commit"
             labels = [row.label for row in stored.outcomes_rel]
@@ -61,22 +64,22 @@ def test_sync_market_inserts_and_updates():
 
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, updated)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, updated)
             assert outcome.market_changed is True
-            session.commit()
+            await session.commit()
 
-        with session_factory() as session:
-            stored = session.execute(select(Market).where(Market.event_id == "evt-1")).scalar_one()
+        async with session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == "evt-1"))).scalar_one()
             assert stored.title == "Updated Market"
             assert stored.status == "settled"
             assert stored.rake_bps is None
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
-def test_sync_market_reuses_prefetched_instance(monkeypatch):
-    engine, session_factory = create_in_memory_db()
+async def test_sync_market_reuses_prefetched_instance(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
     try:
         base_payload = MarketPayload(
             event_id="evt-prefetch",
@@ -91,31 +94,31 @@ def test_sync_market_reuses_prefetched_instance(monkeypatch):
             gamma_raw={"id": "evt-prefetch"},
         )
 
-        with session_factory() as session:
-            sync_market(session, base_payload)
-            session.commit()
+        async with session_factory() as session:
+            await sync_market(session, base_payload)
+            await session.commit()
 
-        with session_factory() as session:
-            existing = session.execute(select(Market).where(Market.event_id == "evt-prefetch")).scalar_one()
+        async with session_factory() as session:
+            existing = (await session.execute(select(Market).where(Market.event_id == "evt-prefetch"))).scalar_one()
             updated = base_payload.model_copy(update={"title": "Prefetched Update"})
 
             def _unexpected(*args, **kwargs):
                 raise AssertionError("should not refetch market when prefetched instance is provided")
 
-            monkeypatch.setattr("app.main.shared_repository.get_market_by_event_id", _unexpected, raising=False)
+            monkeypatch.setattr("app.market_sync.shared_repository.get_market_by_event_id", _unexpected, raising=False)
 
-            sync_market(session, updated, existing_market=existing)
-            session.commit()
+            await sync_market(session, updated, existing_market=existing)
+            await session.commit()
 
-        with session_factory() as session:
-            stored = session.execute(select(Market).where(Market.event_id == "evt-prefetch")).scalar_one()
+        async with session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == "evt-prefetch"))).scalar_one()
             assert stored.title == "Prefetched Update"
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
-def test_sync_market_persists_resolution(monkeypatch):
-    engine, session_factory = create_in_memory_db()
+async def test_sync_market_persists_resolution(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
 
     class DummyClient:
         def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
@@ -135,8 +138,8 @@ def test_sync_market_persists_resolution(monkeypatch):
             }
 
     try:
-        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
-        monkeypatch.setattr("app.main.conditional_tokens_client", DummyClient(), raising=False)
+        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
+        monkeypatch.setattr(resolution_module, "conditional_tokens_client", DummyClient(), raising=False)
 
         payload = MarketPayload(
             event_id="evt-resolution",
@@ -152,25 +155,25 @@ def test_sync_market_persists_resolution(monkeypatch):
             condition_id="0x" + "3" * 64,
         )
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, payload)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, payload)
             assert outcome.resolution_changed is True
-            session.commit()
+            await session.commit()
 
-        with session_factory() as session:
-            record = session.execute(
-                select(Resolution).where(Resolution.condition_id == payload.condition_id.lower())
+        async with session_factory() as session:
+            record = (
+                await session.execute(select(Resolution).where(Resolution.condition_id == payload.condition_id.lower()))
             ).scalar_one()
             assert record.resolved is True
             assert record.transaction_hash == "0x" + "2" * 64
     finally:
-        engine.dispose()
-        monkeypatch.setattr("app.main.conditional_tokens_client", None, raising=False)
-        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
+        await engine.dispose()
+        monkeypatch.setattr(resolution_module, "conditional_tokens_client", None, raising=False)
+        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
 
 
-def test_sync_market_uses_goldsky_when_available(monkeypatch):
-    engine, session_factory = create_in_memory_db()
+async def test_sync_market_uses_goldsky_when_available(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
 
     class DummyGoldsky:
         def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
@@ -190,8 +193,8 @@ def test_sync_market_uses_goldsky_when_available(monkeypatch):
             }
 
     try:
-        monkeypatch.setattr("app.main.goldsky_client", DummyGoldsky(), raising=False)
-        monkeypatch.setattr("app.main.conditional_tokens_client", None, raising=False)
+        monkeypatch.setattr(resolution_module, "goldsky_client", DummyGoldsky(), raising=False)
+        monkeypatch.setattr(resolution_module, "conditional_tokens_client", None, raising=False)
 
         payload = MarketPayload(
             event_id="evt-goldsky",
@@ -207,24 +210,24 @@ def test_sync_market_uses_goldsky_when_available(monkeypatch):
             condition_id="0x" + "6" * 64,
         )
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, payload)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, payload)
             assert outcome.resolution_changed is True
-            session.commit()
+            await session.commit()
 
-        with session_factory() as session:
-            record = session.execute(
-                select(Resolution).where(Resolution.condition_id == payload.condition_id.lower())
+        async with session_factory() as session:
+            record = (
+                await session.execute(select(Resolution).where(Resolution.condition_id == payload.condition_id.lower()))
             ).scalar_one()
             assert record.source == "goldsky_subgraph"
             assert record.block_number == 777
     finally:
-        engine.dispose()
-        monkeypatch.setattr("app.main.goldsky_client", None, raising=False)
+        await engine.dispose()
+        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
 
 
-def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
-    engine, session_factory = create_in_memory_db()
+async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
     try:
         updated_at = datetime.now(UTC)
         payload = MarketPayload(
@@ -243,29 +246,29 @@ def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         )
 
         call_count = 0
-        original_upsert = app.main.shared_repository.upsert_market
+        original_upsert = market_sync.shared_repository.upsert_market
 
         def tracked_upsert(session, data, existing=None):
             nonlocal call_count
             call_count += 1
             return original_upsert(session, data, existing)
 
-        monkeypatch.setattr("app.main.shared_repository.upsert_market", tracked_upsert, raising=False)
+        monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, payload)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, payload)
             assert outcome.market_changed is True
             assert outcome.resolution_changed is False
-            session.commit()
+            await session.commit()
 
         identical = MarketPayload(**payload.model_dump())
 
-        with session_factory() as session:
-            _, outcome = sync_market(session, identical)
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, identical)
             assert outcome.market_changed is False
             assert outcome.resolution_changed is False
-            session.commit()
+            await session.commit()
 
         assert call_count == 1
     finally:
-        engine.dispose()
+        await engine.dispose()

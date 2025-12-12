@@ -1,8 +1,11 @@
+"""Standalone healthcheck script used by container probes."""
+
 from __future__ import annotations
 
+import asyncio
 import sys
 
-from redis import Redis
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,6 +15,8 @@ from .config import get_settings
 
 
 def _check_database(database_url: str) -> None:
+    """Perform a sync DB connectivity check using SQLAlchemy text select."""
+
     engine = create_engine(database_url, future=True, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
@@ -22,18 +27,22 @@ def _check_database(database_url: str) -> None:
         engine.dispose()
 
 
-def _check_redis(redis_url: str) -> None:
+async def _check_redis(redis_url: str) -> None:
+    """Ping Redis using the shared client if available."""
+
     # Prefer the cached client used by the app; fall back to a fresh one only if unavailable.
     client: Redis | None = get_redis_client()
     if client is None:
         client = Redis.from_url(redis_url, decode_responses=True)
     try:
-        client.ping()
+        await client.ping()
     except RedisError as exc:
         raise RuntimeError(f"redis unavailable: {exc}") from exc
 
 
 def main() -> int:
+    """Return 0 when DB and Redis are reachable, otherwise print failures."""
+
     settings = get_settings()
     failures: list[str] = []
 
@@ -43,7 +52,7 @@ def main() -> int:
         failures.append(f"database unavailable: {exc}")
 
     try:
-        _check_redis(settings.redis_url)
+        asyncio.run(_check_redis(settings.redis_url))
     except RuntimeError as exc:  # pragma: no cover - defensive
         failures.append(f"redis unavailable: {exc}")
 

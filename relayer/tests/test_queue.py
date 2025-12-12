@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from relayer.queue import TxQueue
 from relayer.service import TxSendError
 
@@ -32,39 +33,42 @@ class FlakyService:
         return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
 
 
-def test_queue_process_commit(tmp_path):
+@pytest.mark.asyncio
+async def test_queue_process_commit(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()
     queue = TxQueue(str(db_path), svc, start_worker=False)
 
-    result = queue.enqueue_and_process("commit", {"foo": "bar"})
+    result = await queue.enqueue_and_process("commit", {"foo": "bar"})
     assert result["status"] == "succeeded"
     assert result["txHash"] == "0xcommit"
     assert svc.commit_calls == 1
 
 
-def test_queue_retry_then_succeed(tmp_path):
+@pytest.mark.asyncio
+async def test_queue_retry_then_succeed(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = FlakyService()
     queue = TxQueue(str(db_path), svc, max_attempts=2, start_worker=False)
 
-    job_id = queue.enqueue("commit", {"payload": "x"})
-    first = queue.process_job(job_id)
+    job_id = await queue.enqueue("commit", {"payload": "x"})
+    first = await queue.process_job(job_id)
     assert first["status"] == "pending"
     assert svc.commit_calls == 1
 
-    second = queue.process_job(job_id)
+    second = await queue.process_job(job_id)
     assert second["status"] == "succeeded"
     assert second["txHash"] == "0xcommit"
     assert svc.commit_calls == 2
 
 
-def test_queue_persists_payload(tmp_path):
+@pytest.mark.asyncio
+async def test_queue_persists_payload(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()
     queue = TxQueue(str(db_path), svc, start_worker=False)
 
-    job_id = queue.enqueue("claim", {"foo": "bar"})
+    job_id = await queue.enqueue("claim", {"foo": "bar"})
     with queue._connect() as conn:  # noqa: SLF001
         row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (job_id,)).fetchone()
     assert row is not None

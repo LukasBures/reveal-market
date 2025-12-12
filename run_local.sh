@@ -8,6 +8,7 @@
 # - Optional --skip-build for faster iterations when only restarting containers; service arguments limit rebuild scope.
 # - Starts docker compose (with --remove-orphans) in the foreground so logs stream to the terminal (use --detach to background).
 # - Tip: run `make test` (backend) / `npm run test` (frontend) before calling this to catch errors earlier.
+# - Python services use uv; for local API/worker tooling run `uv sync --extra dev` inside backend/api and backend/worker.
 #
 # Usage: ./run_local.sh [options] [extra docker-compose args]
 #
@@ -39,6 +40,10 @@ DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
+PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
+PROVER_ARTIFACTS_BUILD_DIR="${PROVER_ARTIFACTS_DIR}/prover/circuits/build"
+PROVER_ARTIFACTS_URL="${PROVER_ARTIFACTS_URL:-}"
+PROVER_ARTIFACTS_SHA256="${PROVER_ARTIFACTS_SHA256:-}"
 PROVER_REQUIRED_FILES=(
   "settlement_js/generate_witness.js"
   "settlement_js/settlement.wasm"
@@ -154,27 +159,95 @@ export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_local}"
 COMPOSE_ENV_ARGS=()
 WAIT_FLAG=()
 
+list_missing_prover_files() {
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    if [[ ! -s "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
+      echo "${rel_path}"
+    fi
+  done
+}
+
+seed_prover_artifacts_from_submodule() {
+  if [[ ! -d "${PROVER_ARTIFACTS_DIR}" ]]; then
+    return 1
+  fi
+  if command -v git >/dev/null 2>&1; then
+    if ! git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null 2>&1; then
+      log_warn "Failed to update prover/artifacts submodule; proceeding without seeding."
+    fi
+  else
+    log_warn "git not found; cannot refresh prover/artifacts submodule."
+    return 1
+  fi
+  if [[ ! -d "${PROVER_ARTIFACTS_BUILD_DIR}" ]]; then
+    return 1
+  fi
+  log_step "Seeding prover artifacts from prover/artifacts"
+  rm -rf "${PROVER_BUILD_DIR}"
+  mkdir -p "${PROVER_BUILD_DIR}"
+  cp -a "${PROVER_ARTIFACTS_BUILD_DIR}/." "${PROVER_BUILD_DIR}/"
+  return 0
+}
+
+download_prover_artifacts() {
+  if [[ -z "${PROVER_ARTIFACTS_URL}" ]]; then
+    return 1
+  fi
+  if [[ ! -x "${ROOT_DIR}/prover/scripts/download_artifacts.sh" ]]; then
+    log_warn "prover/scripts/download_artifacts.sh is missing or not executable; cannot download artifacts."
+    return 1
+  fi
+  log_step "Downloading prover artifacts from ${PROVER_ARTIFACTS_URL}"
+  if (cd "${ROOT_DIR}/prover" && PROVER_ARTIFACTS_URL="${PROVER_ARTIFACTS_URL}" PROVER_ARTIFACTS_SHA256="${PROVER_ARTIFACTS_SHA256}" ./scripts/download_artifacts.sh); then
+    return 0
+  fi
+  log_warn "Failed to download prover artifacts from ${PROVER_ARTIFACTS_URL}"
+  return 1
+}
+
+sync_prover_caches() {
+  local vk_src="${PROVER_BUILD_DIR}/settlement_vk.json"
+  if [[ ! -s "${vk_src}" ]]; then
+    return
+  fi
+  local cache_targets=(
+    "${ROOT_DIR}/contracts/cache/settlement-vk.json"
+    "${ROOT_DIR}/contracts/zen/cache/settlement-vk.json"
+  )
+  for dest in "${cache_targets[@]}"; do
+    mkdir -p "$(dirname "${dest}")"
+    cp "${vk_src}" "${dest}"
+  done
+}
+
 ensure_prover_artifacts() {
   if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
     log_warn "Skipping Groth16 artifact validation (SKIP_PROVER_CHECK=true)."
     return
   fi
   local missing=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    if [[ ! -s "${PROVER_BUILD_DIR}/${rel_path}" ]]; then
-      missing+=("${rel_path}")
-    fi
-  done
+  log_step "Validating prover artifacts"
+  missing=($(list_missing_prover_files))
+  if (( ${#missing[@]} > 0 )); then
+    log_warn "Groth16 artifacts missing; attempting to seed from prover/artifacts or download."
+    seed_prover_artifacts_from_submodule || true
+    missing=($(list_missing_prover_files))
+  fi
+  if (( ${#missing[@]} > 0 )); then
+    download_prover_artifacts || true
+    missing=($(list_missing_prover_files))
+  fi
   if (( ${#missing[@]} > 0 )); then
     cat <<EOF
 Missing Groth16 artifacts under ${PROVER_BUILD_DIR}.
-Run 'bash prover/circuits/generate_keys.sh' to produce the proving/witness assets before starting Docker.
+Run 'bash prover/circuits/generate_keys.sh' or set PROVER_ARTIFACTS_URL/PROVER_ARTIFACTS_SHA256 to fetch a packaged build before starting Docker.
 Missing files:
 $(printf '  - %s\n' "${missing[@]}")
 Set SKIP_PROVER_CHECK=true to bypass this check (not recommended).
 EOF
     exit 1
   fi
+  sync_prover_caches
 }
 
 disable_next_telemetry() {

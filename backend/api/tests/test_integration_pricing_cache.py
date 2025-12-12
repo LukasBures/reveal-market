@@ -4,7 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import app.main as api_main
+import app.server as api_main
 import pytest
 from app import models
 from app.schemas import FxQuoteResponse
@@ -25,7 +25,7 @@ def test_quote_issue_and_submit_with_caps_and_fx(client, monkeypatch, db_session
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     # Issue quote
     quote_payload = {
@@ -70,7 +70,7 @@ def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch, db_session
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("5"), stale=False, received_at=None)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     payload = {
         "stake_zen": 1,
@@ -113,7 +113,7 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     async def _fx_quote_cap(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=now_ts)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote_cap)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote_cap)
 
     base_payload = {
         "stake_zen": 0.1,

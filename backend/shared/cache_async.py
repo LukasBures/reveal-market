@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import logging
-from collections.abc import Iterable, Sequence
-from inspect import isawaitable
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from threading import Lock
-from types import ModuleType
 from typing import Any, Protocol, cast
 
-from redis import Redis
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from .logging import log_event
 
-logger = logging.getLogger("reveal_market.cache")
+logger = logging.getLogger("reveal_market.cache_async")
 
 _TAG_PREFIX = "cache:tag:"
 _SCHEMA_UNKNOWN_TAG = "schema:unknown"
@@ -27,23 +26,9 @@ class _JsonLib(Protocol):
     def dumps(self, payload: Any) -> bytes: ...
 
 
-_orjson_module: ModuleType | None = None
 _orjson_spec = importlib.util.find_spec("orjson")
-if _orjson_spec is not None:
-    _orjson_module = importlib.import_module("orjson")
+_orjson_module = importlib.import_module("orjson") if _orjson_spec else None
 orjson = cast(_JsonLib | None, _orjson_module)
-
-
-def _json_loads(payload: str | bytes) -> Any:
-    if orjson is not None:
-        return orjson.loads(payload)
-    return json.loads(payload)
-
-
-def _json_dumps(payload: Any) -> str:
-    if orjson is not None:
-        return orjson.dumps(payload).decode()
-    return json.dumps(payload)
 
 
 class CacheStats:
@@ -83,8 +68,20 @@ def get_stats_client() -> CacheStats:
     return _stats
 
 
+def _json_loads(payload: str | bytes) -> Any:
+    if orjson is not None:
+        return orjson.loads(payload)
+    return json.loads(payload)
+
+
+def _json_dumps(payload: Any) -> str:
+    if orjson is not None:
+        return orjson.dumps(payload).decode()
+    return json.dumps(payload)
+
+
 def get_client(url: str) -> Redis | None:
-    """Return a Redis client connected to the provided URL."""
+    """Return an async Redis client connected to the provided URL."""
 
     try:
         return Redis.from_url(url, decode_responses=True)
@@ -100,7 +97,7 @@ def get_client(url: str) -> Redis | None:
         return None
 
 
-def get_json(client: Redis | None, key: str) -> Any:
+async def get_json(client: Redis | None, key: str) -> Any:
     """Fetch and JSON-decode the given key from Redis."""
 
     stats = get_stats_client()
@@ -116,17 +113,7 @@ def get_json(client: Redis | None, key: str) -> Any:
             )
         return None
     try:
-        payload_raw = client.get(key)
-        if isawaitable(payload_raw):
-            log_event(
-                logger,
-                logging.WARNING,
-                event="cache.get.awaitable",
-                message="redis GET returned awaitable unexpectedly",
-                key=key,
-            )
-            stats.record_error()
-            return None
+        payload_raw = await client.get(key)
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -190,7 +177,7 @@ def get_json(client: Redis | None, key: str) -> Any:
         return None
 
 
-def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None = None) -> None:
+async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None = None) -> None:
     """Serialize value as JSON and store it."""
 
     if client is None:
@@ -206,9 +193,9 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
     try:
         payload = _json_dumps(value)
         if ttl_seconds:
-            client.set(key, payload, ex=ttl_seconds)
+            await client.set(key, payload, ex=ttl_seconds)
         else:
-            client.set(key, payload)
+            await client.set(key, payload)
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -231,7 +218,7 @@ def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None
         )
 
 
-def delete(client: Redis | None, key: str) -> None:
+async def delete(client: Redis | None, key: str) -> None:
     """Delete the given key if present."""
 
     if client is None:
@@ -245,7 +232,7 @@ def delete(client: Redis | None, key: str) -> None:
             )
         return
     try:
-        client.delete(key)
+        await client.delete(key)
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -258,15 +245,15 @@ def delete(client: Redis | None, key: str) -> None:
         get_stats_client().record_error()
 
 
-def delete_prefix(client: Redis | None, prefix: str) -> None:
+async def delete_prefix(client: Redis | None, prefix: str) -> None:
     """Delete all keys matching the specified prefix."""
 
     if client is None:
         return
     pattern = f"{prefix}*"
     try:
-        for key in list(iter_scan(client, pattern)):
-            client.delete(key)
+        async for key in iter_scan(client, pattern):
+            await _maybe_await(client.delete(key))
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -279,23 +266,25 @@ def delete_prefix(client: Redis | None, prefix: str) -> None:
         get_stats_client().record_error()
 
 
-def iter_scan(client: Redis, pattern: str) -> Iterable[str]:
+async def iter_scan(client: Redis, pattern: str) -> AsyncIterator[str]:
     """Iterate over keys matching pattern."""
 
-    return client.scan_iter(match=pattern)
+    iterator = cast(AsyncIterator[str], client.scan_iter(match=pattern))
+    async for key in iterator:
+        yield key
 
 
 def _tag_storage_key(tag: str) -> str:
     return f"{_TAG_PREFIX}{tag}"
 
 
-def add_tag(client: Redis | None, tag: str, key: str) -> None:
+async def add_tag(client: Redis | None, tag: str, key: str) -> None:
     """Associate a cache key with a tag for selective invalidation."""
 
     if client is None:
         return
     try:
-        client.sadd(_tag_storage_key(tag), key)
+        await _maybe_await(client.sadd(_tag_storage_key(tag), key))
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -317,14 +306,14 @@ def add_tag(client: Redis | None, tag: str, key: str) -> None:
         )
 
 
-def add_tags(client: Redis | None, tags: Sequence[str], key: str) -> None:
+async def add_tags(client: Redis | None, tags: Sequence[str], key: str) -> None:
     """Associate a cache key with multiple tags."""
 
     for tag in tags:
-        add_tag(client, tag, key)
+        await add_tag(client, tag, key)
 
 
-def invalidate_tag(client: Redis | None, tag: str) -> int:
+async def invalidate_tag(client: Redis | None, tag: str) -> int:
     """Invalidate all cache keys associated with a tag and return the removal count."""
 
     if client is None:
@@ -332,37 +321,20 @@ def invalidate_tag(client: Redis | None, tag: str) -> int:
     storage_key = _tag_storage_key(tag)
     removed = 0
     try:
-        scan_iter = getattr(client, "sscan_iter", None)
-        if callable(scan_iter):
-            iterator: Iterable[str] = scan_iter(storage_key, count=512)
-        else:
-            members_raw = client.smembers(storage_key)
-            if isawaitable(members_raw):
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="cache.tag.awaitable",
-                    message="redis SMEMBERS returned awaitable unexpectedly",
-                    tag=tag,
-                )
-                get_stats_client().record_error()
-                return 0
-            iterator = iter(cast(set[str], members_raw))
-        unlink = getattr(client, "unlink", None)
-        delete_fn = unlink if callable(unlink) else client.delete
+        iterator = cast(AsyncIterator[str], client.sscan_iter(storage_key, count=512))
         batch: list[str] = []
-        for member in iterator:
+        async for member in iterator:
             if not member:
                 continue
             batch.append(member)
             if len(batch) >= 512:
-                delete_fn(*batch)
+                await _maybe_await(client.delete(*batch))
                 removed += len(batch)
                 batch.clear()
         if batch:
-            delete_fn(*batch)
+            await _maybe_await(client.delete(*batch))
             removed += len(batch)
-        client.delete(storage_key)
+        await _maybe_await(client.delete(storage_key))
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -386,13 +358,21 @@ def invalidate_tag(client: Redis | None, tag: str) -> int:
         return 0
 
 
-def get_schema_tag(client: Redis | None, schema_version_key: str) -> str:
+async def _maybe_await(result: Awaitable[Any] | Any) -> Any:
+    """Await a result when possible; passthrough otherwise."""
+
+    if inspect.isawaitable(result):
+        return await cast(Awaitable[Any], result)
+    return result
+
+
+async def get_schema_tag(client: Redis | None, schema_version_key: str) -> str:
     """Return the cache tag that represents the current schema revision."""
 
     if client is None:
         return _SCHEMA_UNKNOWN_TAG
     try:
-        revision = client.get(schema_version_key)
+        revision = await client.get(schema_version_key)
     except RedisError as exc:  # pragma: no cover - defensive
         log_event(
             logger,

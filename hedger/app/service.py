@@ -106,7 +106,7 @@ class HedgerService:
 
     async def startup(self) -> None:
         if self.settings.run_migrations_on_startup:
-            self.repository.create_schema()
+            await self.repository.create_schema()
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
         self.lock_manager = RedisLockManager(
             self.redis, self.settings.redis_lock_ttl_seconds, self.settings.redis_idempotency_ttl_seconds
@@ -134,7 +134,7 @@ class HedgerService:
                 idempotency_key=idemp_key,
             )
             return {"status": "duplicate", "idempotency_key": idemp_key}
-        if self.repository.commit_exists(idemp_key):
+        if await self.repository.commit_exists(idemp_key):
             log_event(
                 logger,
                 logging.INFO,
@@ -223,7 +223,7 @@ class HedgerService:
             hedge_result = await self._execute_hedge(instruction)
             response["hedge_execution"] = hedge_result
         if commit.stream_offset:
-            self.repository.set_replay_offset(self.settings.commit_stream_name, commit.stream_offset)
+            await self.repository.set_replay_offset(self.settings.commit_stream_name, commit.stream_offset)
         return response
 
     async def _validate_signed_quote(
@@ -450,10 +450,10 @@ class HedgerService:
             outcome_value = outcome
         lock_ctx = self.lock_manager.lock(f"settle:{market_id}") if self.lock_manager else self._noop_lock
         async with lock_ctx:
-            if self.repository.is_market_resolved(market_id):
+            if await self.repository.is_market_resolved(market_id):
                 return {"status": "already_resolved", "market_id": market_id}
 
-            payload = self._build_prover_payload(market_id, outcome_value)
+            payload = await self._build_prover_payload(market_id, outcome_value)
             log_event(
                 logger,
                 logging.INFO,
@@ -472,7 +472,7 @@ class HedgerService:
                 submitted_tx=None,
             )
             economics = await self._build_and_persist_economics(market_id, outcome_value)
-            self.repository.mark_market_resolved(market_id, outcome_value)
+            await self.repository.mark_market_resolved(market_id, outcome_value)
             await self.exposure_ledger.finalize_market(market_id)
             log_event(
                 logger,
@@ -504,7 +504,7 @@ class HedgerService:
         raise ValueError("direction must be 'usdc_to_zen' or 'zen_to_usdc'")
 
     async def health(self) -> dict[str, Any]:
-        latest_commit_at = self.repository.latest_commit_timestamp()
+        latest_commit_at = await self.repository.latest_commit_timestamp()
         fx_stale = self.fx_oracle.stale()
         utilization = await self.vault_client.current_utilization()
         if latest_commit_at:
@@ -517,8 +517,8 @@ class HedgerService:
         }
 
     async def _hydrate_from_storage(self) -> None:
-        aggregates = self.repository.load_commit_aggregates()
-        hedge_totals = self.repository.load_hedge_totals()
+        aggregates = await self.repository.load_commit_aggregates()
+        hedge_totals = await self.repository.load_hedge_totals()
         if not aggregates:
             return
         for market_id, data in aggregates.items():
@@ -588,17 +588,17 @@ class HedgerService:
     async def _project_settlement(
         self, market_id: str, outcome_value: str, persist: bool = False
     ) -> dict[str, Any] | None:
-        commits = self.repository.get_commits_for_market(market_id)
+        commits = await self.repository.get_commits_for_market(market_id)
         if not commits:
             return None
 
         winning_stake = sum([c.stake_zen for c in commits if c.direction == outcome_value], start=Decimal("0"))
         total_stake = sum([c.stake_zen for c in commits], start=Decimal("0"))
-        hedge_totals = self.repository.hedge_breakdown(market_id)
+        hedge_totals = await self.repository.hedge_breakdown(market_id)
         borrow_usdc = hedge_totals.get("borrowed", Decimal("0"))
         unwind_usdc = hedge_totals.get("unwound", Decimal("0"))
         net_borrow_usdc = max(Decimal("0"), borrow_usdc - unwind_usdc)
-        hedge_payloads = self.repository.hedge_payloads(market_id)
+        hedge_payloads = await self.repository.hedge_payloads(market_id)
         expected_payout = self._extract_expected_payout(hedge_payloads, net_borrow_usdc)
         stake_for_calc = winning_stake if winning_stake > 0 else total_stake
         if stake_for_calc <= 0:
@@ -661,8 +661,8 @@ class HedgerService:
                 )
         return fallback
 
-    def _build_prover_payload(self, market_id: str, outcome: str) -> dict[str, Any]:
-        commits = self.repository.get_commits_for_market(market_id)
+    async def _build_prover_payload(self, market_id: str, outcome: str) -> dict[str, Any]:
+        commits = await self.repository.get_commits_for_market(market_id)
         commit_payloads = [
             {
                 "direction": row.direction,

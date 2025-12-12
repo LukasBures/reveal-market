@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import json
 import sqlite3
 import threading
@@ -36,12 +38,25 @@ class TxQueue:
         self.max_attempts = max_attempts
         self.fee_bump_percent = fee_bump_percent
         self._lock = threading.Lock()
-        self._stop = threading.Event()
+        self._stop = asyncio.Event()
+        self._worker: asyncio.Task | None = None
         self._init_db()
-        self._worker = None
-        if start_worker:
-            self._worker = threading.Thread(target=self._run, daemon=True)
-            self._worker.start()
+        self._start_worker_flag = start_worker
+
+    async def start(self) -> None:
+        if not self._start_worker_flag:
+            return
+        if self._worker and not self._worker.done():
+            return
+        self._stop.clear()
+        self._worker = asyncio.create_task(self._run_async())
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._worker:
+            self._worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._worker
 
     def _connect_sqlite(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.sqlite_path, check_same_thread=False)
@@ -96,12 +111,7 @@ class TxQueue:
                 conn.execute("UPDATE jobs SET status = 'pending' WHERE status = 'running'")
         self._update_depth()
 
-    def stop(self) -> None:
-        self._stop.set()
-        if self._worker and self._worker.is_alive():
-            self._worker.join(timeout=self.poll_seconds * 2)
-
-    def enqueue(self, action: str, payload: Mapping[str, Any]) -> int:
+    def _enqueue_sync(self, action: str, payload: Mapping[str, Any]) -> int:
         now = int(time.time())
         with self._lock, self._connect() as conn:
             if self.use_postgres:
@@ -126,14 +136,17 @@ class TxQueue:
         self._update_depth()
         return job_id
 
-    def enqueue_and_process(self, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = self.enqueue(action, payload)
-        result = self.process_job(job_id)
+    async def enqueue(self, action: str, payload: Mapping[str, Any]) -> int:
+        return await asyncio.to_thread(self._enqueue_sync, action, payload)
+
+    async def enqueue_and_process(self, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        job_id = await self.enqueue(action, payload)
+        result = await self.process_job(job_id)
         if result.get("status") == "empty":
             raise RuntimeError("queue_empty_after_enqueue")
         return result
 
-    def _reserve_job(self, job_id: int | None = None) -> dict[str, Any] | None:
+    def _reserve_job_sync(self, job_id: int | None = None) -> dict[str, Any] | None:
         now = int(time.time())
         if self.use_postgres:
             with self._lock, self._connect() as conn:
@@ -185,8 +198,8 @@ class TxQueue:
             row_dict["attempts"] = attempts
             return row_dict
 
-    def process_job(self, job_id: int | None = None) -> dict[str, Any]:
-        row = self._reserve_job(job_id)
+    def _process_job_sync(self, job_id: int | None = None) -> dict[str, Any]:
+        row = self._reserve_job_sync(job_id)
         if row is None:
             if job_id is None:
                 return {"status": "empty"}
@@ -230,6 +243,9 @@ class TxQueue:
                     error=str(err),
                 )
             return {"jobId": row["id"], "status": next_status, "nonce": nonce_to_store, "error": str(err)}
+
+    async def process_job(self, job_id: int | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._process_job_sync, job_id)
 
     def _mark_complete(self, job_id: int, tx_hash: str | None, nonce: int | None) -> None:
         now = int(time.time())
@@ -277,11 +293,17 @@ class TxQueue:
                 )
         self._update_depth()
 
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            result = self.process_job()
-            if result.get("status") == "empty":
-                self._stop.wait(self.poll_seconds)
+    async def _run_async(self) -> None:
+        try:
+            while not self._stop.is_set():
+                result = await self.process_job()
+                if result.get("status") == "empty":
+                    try:
+                        await asyncio.wait_for(self._stop.wait(), timeout=self.poll_seconds)
+                    except TimeoutError:
+                        continue
+        except asyncio.CancelledError:
+            return
 
     def _update_depth(self) -> None:
         with self._connect() as conn:
@@ -289,7 +311,7 @@ class TxQueue:
             depth = int(row["cnt"]) if row else 0
             QUEUE_DEPTH.set(depth)
 
-    def list_deadletter(self) -> list[dict[str, Any]]:
+    def _list_deadletter_sync(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
@@ -310,52 +332,61 @@ class TxQueue:
                 for row in rows
             ]
 
-    def replay_job(self, job_id: int) -> dict[str, Any]:
-        with self._lock, self._connect() as conn:
-            row = (
-                conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
-                if self.use_postgres
-                else conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
-            )
-            if row is None:
-                raise RuntimeError("job_not_found")
-            if row["status"] != "deadletter":
-                raise RuntimeError("job_not_deadletter")
-            if self.use_postgres:
-                conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status = 'pending', attempts = 0, last_error = NULL, updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (int(time.time()), job_id),
+    async def list_deadletter(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._list_deadletter_sync)
+
+    async def replay_job(self, job_id: int) -> dict[str, Any]:
+        def _replay():
+            with self._lock, self._connect() as conn:
+                row = (
+                    conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
+                    if self.use_postgres
+                    else conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
                 )
-            else:
-                conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status = 'pending', attempts = 0, last_error = NULL, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (int(time.time()), job_id),
-                )
+                if row is None:
+                    raise RuntimeError("job_not_found")
+                if row["status"] != "deadletter":
+                    raise RuntimeError("job_not_deadletter")
+                if self.use_postgres:
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'pending', attempts = 0, last_error = NULL, updated_at = %s
+                        WHERE id = %s
+                        """,
+                        (int(time.time()), job_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'pending', attempts = 0, last_error = NULL, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (int(time.time()), job_id),
+                    )
+
+        await asyncio.to_thread(_replay)
         self._update_depth()
         return {"jobId": job_id, "status": "pending"}
 
-    def purge_job(self, job_id: int) -> dict[str, Any]:
-        with self._lock, self._connect() as conn:
-            row = (
-                conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
-                if self.use_postgres
-                else conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
-            )
-            if row is None:
-                raise RuntimeError("job_not_found")
-            if row["status"] != "deadletter":
-                raise RuntimeError("job_not_deadletter")
-            if self.use_postgres:
-                conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
-            else:
-                conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    async def purge_job(self, job_id: int) -> dict[str, Any]:
+        def _purge():
+            with self._lock, self._connect() as conn:
+                row = (
+                    conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
+                    if self.use_postgres
+                    else conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                )
+                if row is None:
+                    raise RuntimeError("job_not_found")
+                if row["status"] != "deadletter":
+                    raise RuntimeError("job_not_deadletter")
+                if self.use_postgres:
+                    conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+                else:
+                    conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+        await asyncio.to_thread(_purge)
         self._update_depth()
         return {"jobId": job_id, "status": "purged"}

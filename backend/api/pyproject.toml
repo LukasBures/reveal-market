@@ -24,21 +24,38 @@ dependencies = [
     "tenacity>=9.0.0,<10.0",
     "web3>=7.0,<8.0",
     "py-clob-client>=0.28.0,<0.29",
+    "greenlet>=3.0,<4.0",
     "hatchling>=1.8.0",
     "pre-commit>=4.5.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2,<9.0",
-    "pytest-asyncio>=0.23,<0.24",
-    "pytest-xdist>=3.6,<4.0",
-    "mypy>=1.10,<2.0",
-    "ruff>=0.6,<1.0",
+    # Local development + CI tooling
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.23.8,<0.24",
+    "pytest-xdist>=3.8,<4.0",
+    "execnet>=2.1.2,<3.0",
+    "librt>=0.6.3,<0.7",
+    "mypy>=1.19,<2.0",
+    "mypy-extensions>=1.0.0,<2.0",
+    "ruff>=0.14.5,<0.15",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = [
+    "shared.*",
+    "py_clob_client.*",
+]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling>=1.24.0"]

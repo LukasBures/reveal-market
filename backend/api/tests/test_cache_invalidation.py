@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import app.main as api_main
+import app.server as api_main
 from app import models
+from app.services.markets import market_detail_cache_key
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
 
 
@@ -47,7 +48,7 @@ def test_patch_market_invalidates_detail_and_suggest_cache(client, db_session):
 
     detail = client.get(f"/markets/{market.event_id}")
     assert detail.status_code == 200
-    detail_key = api_main._market_detail_cache_key(market.event_id)
+    detail_key = market_detail_cache_key(market.event_id)
     assert detail_key in api_main.cache_client.store
 
     suggest = client.get("/markets/suggest", params={"q": "Cache", "limit": 5})

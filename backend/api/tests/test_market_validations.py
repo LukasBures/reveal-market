@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app import models
-from app.main import settings
+from app.server import settings
 
 
 def test_create_market_requires_event_id(client):

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
-from redis import Redis
+from redis.asyncio import Redis
 from shared.logging import log_event
 
 from .config import get_settings
@@ -74,7 +74,7 @@ class SummaryJob:
         )
 
 
-def maybe_enqueue_summary_job(
+async def maybe_enqueue_summary_job(
     redis_client: Redis | None,
     *,
     market_record,
@@ -141,7 +141,7 @@ def maybe_enqueue_summary_job(
         oracle=getattr(market_record, "oracle", None),
         metadata=_build_metadata(market_payload),
     )
-    redis_client.lpush(settings.summary_queue_key, job.to_json())
+    await cast(Awaitable[Any], redis_client.lpush(settings.summary_queue_key, job.to_json()))
     market_record.summary_requested_at = now
     if logger.isEnabledFor(logging.DEBUG):
         log_event(

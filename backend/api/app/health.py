@@ -5,14 +5,13 @@ import logging
 import os
 import time
 from datetime import UTC, datetime
-from inspect import isawaitable
 from json import JSONDecodeError
 from urllib.parse import urlparse
 
 import httpx
 from alembic.util.exc import CommandError
 from redis.exceptions import RedisError
-from shared.cache import get_stats_client
+from shared.cache_async import get_stats_client
 from shared.logging import log_event
 from shared.migrations import get_current_revision, get_head_revision
 from shared.onchain.client import load_account
@@ -38,8 +37,8 @@ async def build_health_response(session: AsyncSession) -> schemas.HealthResponse
 
     checks: list[tuple[str, schemas.HealthComponent]] = [
         await _check_database(session),
-        _check_redis_connectivity(),
-        _check_worker_heartbeat(settings),
+        await _check_redis_connectivity(),
+        await _check_worker_heartbeat(settings),
         await _check_polymarket_api(settings),
         _check_pricing_signer(settings),
         _check_cors(settings),
@@ -91,11 +90,13 @@ async def _check_database(session: AsyncSession) -> tuple[str, schemas.HealthCom
     return "database", component
 
 
-def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
+async def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
     redis_start = time.perf_counter()
     try:
         redis_client = get_redis_client()
-        redis_client.ping()
+        if redis_client is None:
+            raise RedisError("redis client unavailable")
+        await redis_client.ping()
         redis_latency = (time.perf_counter() - redis_start) * 1000
         component = schemas.HealthComponent(status="ok", latency_ms=redis_latency)
     except RedisError as exc:
@@ -105,12 +106,12 @@ def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
     return "redis", component
 
 
-def _check_worker_heartbeat(settings: Settings) -> tuple[str, schemas.HealthComponent]:
+async def _check_worker_heartbeat(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     try:
         redis_client = get_redis_client()
-        heartbeat_raw = redis_client.get(settings.heartbeat_key)
-        if isawaitable(heartbeat_raw):
-            raise TypeError("redis client returned awaitable")
+        if redis_client is None:
+            raise RedisError("redis client unavailable")
+        heartbeat_raw = await redis_client.get(settings.heartbeat_key)
         if heartbeat_raw:
             heartbeat_payload = heartbeat_raw.decode() if isinstance(heartbeat_raw, bytes) else str(heartbeat_raw)
             heartbeat = json.loads(heartbeat_payload)

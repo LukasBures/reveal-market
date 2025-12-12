@@ -28,8 +28,8 @@ async def test_builds_prover_payload_and_marks_resolved(tmp_path):
         lp_vault_address="0x" + "02" * 20,
     )
     service = HedgerService(settings)
-    service.repository = HedgerRepository(f"sqlite+pysqlite:///{tmp_path}/settle.db")  # type: ignore
-    service.repository.create_schema()
+    service.repository = HedgerRepository(f"sqlite+aiosqlite:///{tmp_path}/settle.db")  # type: ignore
+    await service.repository.create_schema()
     service.settlement = StubSettler()  # type: ignore
     # Seed commits
     await service.repository.record_commit(
@@ -59,4 +59,4 @@ async def test_builds_prover_payload_and_marks_resolved(tmp_path):
     assert payload["commit_count"] == 2
     assert payload["total_yes_zen"] == "2.00000000"
     assert payload["total_no_zen"] == "3.00000000"
-    assert service.repository.is_market_resolved("m3") is True
+    assert await service.repository.is_market_resolved("m3") is True

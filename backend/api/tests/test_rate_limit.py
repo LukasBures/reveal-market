@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import app.main as api_main
+import asyncio
+
+import app.server as api_main
 from app.rate_limit import RATE_LIMIT_COUNTER
 
 
@@ -9,7 +11,7 @@ def enable_rate_limit(monkeypatch, *, limit: int = 2, window: int = 60, whitelis
     monkeypatch.setattr(api_main.settings, "rate_limit_requests_per_window", limit, raising=False)
     monkeypatch.setattr(api_main.settings, "rate_limit_window_seconds", window, raising=False)
     monkeypatch.setattr(api_main.settings, "rate_limit_whitelist", whitelist or [], raising=False)
-    api_main.rate_limiter.reset()
+    asyncio.run(api_main.rate_limiter.reset())
 
 
 def test_rate_limit_blocks_after_threshold(client, monkeypatch):
@@ -42,7 +44,7 @@ def test_rate_limit_whitelist_allows_requests(client, monkeypatch):
 
 def test_rate_limit_disabled_does_not_block(client, monkeypatch):
     monkeypatch.setattr(api_main.settings, "rate_limit_enabled", False, raising=False)
-    api_main.rate_limiter.reset()
+    asyncio.run(api_main.rate_limiter.reset())
 
     responses = [client.get("/markets") for _ in range(3)]
     assert all(response.status_code == 200 for response in responses)

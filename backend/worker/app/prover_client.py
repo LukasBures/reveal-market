@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from httpx import AsyncClient
 from shared.logging import log_event
 
 logger = logging.getLogger("reveal_market.worker.prover")
@@ -109,6 +110,55 @@ class ProverClient:
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
                 response = client.post(url, json=payload)
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="prover.request.failed",
+                message="prover rejected settlement proof request",
+                error=str(exc),
+            )
+            raise ProverError("failed to generate proof") from exc
+        data = response.json()
+        return SettlementProofResponse.from_payload(data)
+
+
+class AsyncProverClient:
+    """Async HTTP client for the proof generator."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout_seconds: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def generate_settlement_proof(
+        self, request: SettlementProofRequest | dict[str, Any]
+    ) -> SettlementProofResponse:
+        url = f"{self.base_url}/api/v1/proofs/settlement"
+        if isinstance(request, SettlementProofRequest):
+            payload = request.to_payload()
+        else:
+            allowed_fields = {
+                "marketId",
+                "merkleRoot",
+                "winningOutcomeId",
+                "poolTotals",
+                "totalEscrow",
+                "totalLiability",
+                "rakeBps",
+                "circuitHash",
+            }
+            payload = {k: v for k, v in request.items() if k in allowed_fields}
+        try:
+            async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+                response = await client.post(url, json=payload)
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(

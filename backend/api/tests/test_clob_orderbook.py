@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import app.main as api_main
+import app.server as api_main
 
 
 def test_clob_orderbook_endpoint(client, monkeypatch):
@@ -22,7 +22,7 @@ def test_clob_orderbook_endpoint(client, monkeypatch):
                 "hash": "abc123",
             }
 
-    monkeypatch.setattr("app.main.ClobClient", DummyClobClient)
+    monkeypatch.setattr("app.routes.markets.ClobClient", DummyClobClient)
 
     resp = client.get("/clob/orderbook/token-1")
     assert resp.status_code == 200
@@ -48,6 +48,6 @@ def test_clob_orderbook_handles_downstream_failure(client, monkeypatch):
         def get_order_book(self, token_id: str):
             raise ValueError("boom")
 
-    monkeypatch.setattr("app.main.ClobClient", FailingClient)
+    monkeypatch.setattr("app.routes.markets.ClobClient", FailingClient)
     resp = client.get("/clob/orderbook/token-err")
     assert resp.status_code == 502

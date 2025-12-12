@@ -10,6 +10,7 @@ from typing import Any, cast
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from shared.env_presets import get_preset
+from sqlalchemy.engine.url import make_url
 
 PRESET = get_preset()
 
@@ -171,6 +172,15 @@ class Settings(BaseSettings):
     @property
     def total_monetisation_percent(self) -> float:
         return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
+
+    @property
+    def resolved_async_database_url(self) -> str:
+        """Return an async-compatible database URL, deriving from the sync URL when needed."""
+
+        url = make_url(self.database_url)
+        if url.drivername.startswith("postgresql"):
+            url = url.set(drivername="postgresql+asyncpg")
+        return str(url)
 
 
 @lru_cache(maxsize=1)

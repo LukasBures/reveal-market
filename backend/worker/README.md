@@ -33,14 +33,15 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ## 2. Architecture Overview
 
-1. **Startup** (`run_worker`):
+1. **Startup** (`app.service.run_worker`):
    - Configure logging via `app.logging_config`.
+   - Build runtime clients (Polymarket, optional CLOB, Goldsky, Conditional Tokens, prover) in `app.runtime`.
    - Connect to Redis (heartbeat + cache invalidation).
-   - Optionally run Alembic migrations (`_ensure_schema`) and broadcast the latest revision key.
+   - Optionally run Alembic migrations (`app.schema.ensure_schema`) and broadcast the latest revision key.
 2. **Main loop**:
-   - `process_once()`:
-     - Fetch Polymarket markets (with retry).
-     - For each market, `sync_market()` upserts rows and calls `_apply_resolution`.
+   - `process_once()` in `app.service`:
+     - Fetch Polymarket markets (with retry) via `app.fetcher`.
+     - For each market, `app.market_sync.sync_market()` upserts rows and calls `app.resolution.apply_resolution`.
      - Optionally trigger `maybe_create_onchain_market`.
      - Run `cleanup_resolved_markets` to enforce retention.
      - Publish heartbeats, resolution cache updates, and targeted invalidations.
@@ -57,9 +58,19 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 ```
 backend/worker/
 ├── app/
-│   ├── main.py            # Core loop, cache priming, retention
+│   ├── service.py         # Async worker loop, heartbeats, orchestration
+│   ├── runtime.py         # Settings + client builders (Polymarket, CLOB, Goldsky, prover, Conditional Tokens)
+│   ├── fetcher.py         # Polymarket fetch helpers + CLOB enrichment
+│   ├── market_sync.py     # Market persistence, retention, resolution backfill
+│   ├── resolution.py      # Resolution fetch/refresh and ledger upserts
+│   ├── proofs.py          # Settlement proof orchestration + persistence
+│   ├── cache_ops.py       # Cache invalidation + resolution cache writes
+│   ├── prime.py           # Cache priming for homepage/categories/suggestions
+│   ├── metrics.py         # Prometheus counters + cache invalidation reporting
+│   ├── main.py            # Thin re-export/CLI wrapper around `run_worker`
 │   ├── polymarket.py      # Gamma client + MarketPayload normalizer
 │   ├── onchain.py         # Optional MarketFactory automation
+│   ├── summary_worker.py  # AI summary queue consumer
 │   ├── config.py          # Pydantic settings (RM_* vars)
 │   ├── healthcheck.py     # Container health entrypoint
 │   └── logging_config.py  # Shared log formatter

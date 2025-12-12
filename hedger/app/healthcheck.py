@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from .config import get_settings
@@ -9,7 +10,7 @@ from .storage import HedgerRepository
 def main() -> int:
     settings = get_settings()
     repo = HedgerRepository(settings.database_url)
-    repo.check_connection()
+    asyncio.run(repo.check_connection())
     return 0
 
 

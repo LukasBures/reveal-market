@@ -24,7 +24,7 @@ def main() -> None:
 
     if mode == "dev":
         uvicorn.run(
-            "app.main:app",
+            "app.server:app",
             host=host,
             port=port,
             reload=True,
@@ -36,7 +36,7 @@ def main() -> None:
         )
     else:
         uvicorn.run(
-            "app.main:app",
+            "app.server:app",
             host=host,
             port=port,
             log_config=None,

@@ -59,9 +59,13 @@ def create_app(
 
     if tx_queue:
 
+        @app.on_event("startup")
+        async def start_queue_worker() -> None:
+            await tx_queue.start()
+
         @app.on_event("shutdown")
-        def stop_queue_worker() -> None:
-            tx_queue.stop()
+        async def stop_queue_worker() -> None:
+            await tx_queue.stop()
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
@@ -78,7 +82,7 @@ def create_app(
             payload["user"] = Web3.to_checksum_address(payload["user"])
             payload["market"] = Web3.to_checksum_address(payload["market"])
             if tx_queue:
-                job_id = await asyncio.to_thread(tx_queue.enqueue, "commit", payload)
+                job_id = await tx_queue.enqueue("commit", payload)
                 logger.info("commit_enqueued", job_id=job_id, market=payload["market"], user=payload["user"])
                 return JSONResponse(
                     {"jobId": job_id, "status": "queued"},
@@ -103,7 +107,7 @@ def create_app(
             payload["user"] = Web3.to_checksum_address(payload["user"])
             payload["market"] = Web3.to_checksum_address(payload["market"])
             if tx_queue:
-                job_id = await asyncio.to_thread(tx_queue.enqueue, "claim", payload)
+                job_id = await tx_queue.enqueue("claim", payload)
                 logger.info("claim_enqueued", job_id=job_id, market=payload["market"], user=payload["user"])
                 return JSONResponse(
                     {"jobId": job_id, "status": "queued"},
@@ -125,7 +129,7 @@ def create_app(
     async def list_deadletter(_: None = Depends(require_auth)):
         if not tx_queue:
             raise HTTPException(status_code=503, detail="queue_disabled")
-        deadletter = await asyncio.to_thread(tx_queue.list_deadletter)
+        deadletter = await tx_queue.list_deadletter()
         return {"deadletter": deadletter}
 
     @app.post("/admin/queue/deadletter/{job_id}/replay")
@@ -133,7 +137,7 @@ def create_app(
         if not tx_queue:
             raise HTTPException(status_code=503, detail="queue_disabled")
         try:
-            return await asyncio.to_thread(tx_queue.replay_job, job_id)
+            return await tx_queue.replay_job(job_id)
         except RuntimeError as err:
             if str(err) == "job_not_found":
                 raise HTTPException(status_code=404, detail="job_not_found") from err
@@ -146,7 +150,7 @@ def create_app(
         if not tx_queue:
             raise HTTPException(status_code=503, detail="queue_disabled")
         try:
-            return await asyncio.to_thread(tx_queue.purge_job, job_id)
+            return await tx_queue.purge_job(job_id)
         except RuntimeError as err:
             if str(err) == "job_not_found":
                 raise HTTPException(status_code=404, detail="job_not_found") from err

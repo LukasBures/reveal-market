@@ -12,7 +12,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,  # type: ignore[override]
+        app,
         headers: Mapping[str, str] | None = None,
         per_path_overrides: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:

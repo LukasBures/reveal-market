@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from httpx import AsyncClient
 from shared.logging import log_event
 
 from .config import get_settings
@@ -31,13 +32,13 @@ class SummaryResult:
 class SummaryClient:
     """Client responsible for producing AI summaries via OpenAI (or fallback)."""
 
-    def __init__(self, *, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.settings = get_settings()
-        self._transport = transport
+        self._transport: httpx.AsyncBaseTransport | None = transport
         api_key = self.settings.summary_api_key.get_secret_value() if self.settings.summary_api_key else None
         self._api_key = api_key
 
-    def generate(self, job: SummaryJob) -> SummaryResult:
+    async def generate(self, job: SummaryJob) -> SummaryResult:
         prompt = self._render_prompt(job)
         if self._api_key:
             try:
@@ -49,7 +50,7 @@ class SummaryClient:
                     job_id=job.job_id,
                     event_id=job.event_id,
                 )
-                return self._call_openai(prompt)
+                return await self._call_openai(prompt)
             except Exception as exc:  # pragma: no cover - network paths
                 logger.warning(
                     "summary provider call failed: %s", exc, extra={"event": "worker.summary.provider_error"}
@@ -96,7 +97,7 @@ class SummaryClient:
             max_words=self.settings.summary_max_words,
         )
 
-    def _call_openai(self, prompt: str) -> SummaryResult:
+    async def _call_openai(self, prompt: str) -> SummaryResult:
         base_url = str(self.settings.summary_api_base_url or "https://api.openai.com/v1").rstrip("/")
         url = f"{base_url}/chat/completions"
         payload = {
@@ -122,8 +123,8 @@ class SummaryClient:
             "Content-Type": "application/json",
         }
         timeout = httpx.Timeout(self.settings.summary_http_timeout_seconds)
-        with httpx.Client(timeout=timeout, transport=self._transport) as client:
-            response = client.post(url, json=payload, headers=headers)
+        async with AsyncClient(timeout=timeout, transport=self._transport) as client:
+            response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             body = response.json()
         choices = body.get("choices") or []

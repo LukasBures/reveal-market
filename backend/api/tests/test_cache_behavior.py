@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
-import app.main as api_main
+import app.server as api_main
 from app import crud, models
+from app.services.markets import market_detail_cache_key
 from shared import models as shared_models
 from shared.cache_keys import markets_list_cache_key
 from sqlalchemy import select
@@ -82,7 +84,7 @@ def test_market_detail_cached(client, db_session, monkeypatch):
     first = client.get(f"/markets/{market.event_id}")
     assert first.status_code == 200
 
-    cache_key = api_main._market_detail_cache_key(market.event_id)
+    cache_key = market_detail_cache_key(market.event_id)
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
@@ -131,6 +133,51 @@ def test_cache_refresh_worker_disables_when_setting_false(monkeypatch):
 def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     calls: list[dict[str, int | None]] = []
 
+    class DummyCache:
+        def __init__(self):
+            self.store: dict[str, Any] = {}
+
+        async def ping(self):
+            return True
+
+        async def get(self, key: str):
+            return self.store.get(key)
+
+        async def set(self, key: str, value: Any, ex: int | None = None, nx: bool | None = None):
+            if nx and key in self.store:
+                return False
+            self.store[key] = value
+            return True
+
+        async def delete(self, *keys: str):
+            for key in keys:
+                self.store.pop(key, None)
+
+        async def scan_iter(self, match: str):
+            prefix = match[:-1] if match.endswith("*") else match
+            for key in list(self.store.keys()):
+                if key.startswith(prefix):
+                    yield key
+
+        async def sscan_iter(self, key: str, count: int | None = None):
+            members = self.store.get(key)
+            if isinstance(members, set):
+                for member in members:
+                    yield member
+
+        async def sadd(self, key: str, value: str):
+            self.store.setdefault(key, set()).add(value)
+
+        async def smembers(self, key: str):
+            members = self.store.get(key)
+            if isinstance(members, set):
+                return set(members)
+            return set()
+
+    cache = DummyCache()
+    monkeypatch.setattr("app.runtime.cache_client", cache, raising=False)
+    monkeypatch.setattr("app.server.cache_client", cache, raising=False)
+
     async def fake_hydrate(*, source: str, limit: int | None = None, order_by: str | None = None):
         calls.append({"source": source, "limit": limit, "order_by": order_by})
         return {"status": "hydrated", "limit": limit, "order_by": order_by}
@@ -138,6 +185,7 @@ def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", True, raising=False)
     monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.01, raising=False)
     monkeypatch.setattr(api_main.settings, "cache_refresh_limit", 7, raising=False)
+    monkeypatch.setattr("app.tasks.hydrate_markets_cache", fake_hydrate, raising=False)
     monkeypatch.setattr(api_main, "hydrate_markets_cache", fake_hydrate, raising=False)
 
     async def _run_once():

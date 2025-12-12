@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Aggregate test runner: backend → frontend → contracts. Runs each suite in
-# sequence so logs stay clear while still letting each stage use its own
-# parallelism (pytest-xdist, Vitest threads, forge, etc.).
+# Aggregate test runner for backend + hedger + streamer + relayer + frontend +
+# contracts + prover. Runs each suite in sequence so logs stay clear while still
+# letting each stage use its own parallelism (pytest-xdist, Vitest threads,
+# forge, etc.). Extra CLI args are forwarded to every suite.
 
 set -euo pipefail
 
@@ -18,10 +19,25 @@ log_error() {
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_ARGS=("$@")
+
+usage() {
+  cat <<EOF
+Usage: ./run_tests.sh [args...]
+Passes any provided arguments through to each suite (e.g., -v, -k <pattern>).
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
 run_section() {
   local name="$1"
   local script_path="$2"
+  shift 2
+  local -a env_vars=("$@")
 
   log_step "Running ${name} tests"
 
@@ -30,16 +46,16 @@ run_section() {
     exit 1
   fi
 
-  (cd "$(dirname "${script_path}")" && "./$(basename "${script_path}")")
+  (cd "$(dirname "${script_path}")" && "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}")
 }
 
 run_section "backend" "${ROOT_DIR}/backend/run_tests.sh"
 run_section "hedger" "${ROOT_DIR}/hedger/run_tests.sh"
 run_section "streamer" "${ROOT_DIR}/streamer/run_tests.sh"
 run_section "relayer" "${ROOT_DIR}/relayer/run_tests.sh"
+run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh" FRONTEND_REQUIRE_API="${FRONTEND_REQUIRE_API:-true}"
 run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"
-run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh"
 
 log_step "All test suites completed successfully"

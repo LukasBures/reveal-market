@@ -7,6 +7,7 @@
 # - Builds images with cache using BuildKit, always pulling the latest bases (unless --skip-build).
 # - Launches docker compose in detached mode (with --wait when supported) and prints service status.
 # - Designed for VPS/server usage; run CI-equivalent tests beforehand (make test / contracts/run_local.sh full / npm run build).
+# - Python services rely on uv-managed deps; keep backend/api and backend/worker in sync (`uv sync --extra dev`) before CI or image builds.
 #
 # Usage: ./run_prod.sh [options] [compose up args...]
 # -----------------------------------------------------------------------------
@@ -35,6 +36,10 @@ ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_SSH_KEY_PATH="${PROVER_ARTIFACTS_SSH_KEY_PATH:-}"
+PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
+PROVER_ARTIFACTS_BUILD_DIR="${PROVER_ARTIFACTS_DIR}/prover/circuits/build"
+PROVER_ARTIFACTS_URL="${PROVER_ARTIFACTS_URL:-}"
+PROVER_ARTIFACTS_SHA256="${PROVER_ARTIFACTS_SHA256:-}"
 APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
 APK_FALLBACK_URL="${APK_FALLBACK_URL:-https://mirror.leaseweb.net/alpine}"
 ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
@@ -146,7 +151,7 @@ usage() {
 Usage: ./run_prod.sh [options] [compose up args...]
   --skip-build           Skip the docker compose build step (useful when pulling pre-built images).
   --env-file <path>      Override the env file check (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
-  --skip-prover-check   Skip Groth16 artifact validation (not recommended).
+  --skip-prover-check    Skip Groth16 artifact validation (not recommended).
   --prune                Run 'docker system prune -af' and 'docker builder prune -af' before building.
   -h, --help             Show this help text.
 EOF
@@ -162,76 +167,118 @@ EOF
   fi
 }
 
+list_missing_prover_files() {
+  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
+    if [[ ! -s "${ROOT_DIR}/${rel_path}" ]]; then
+      echo "${rel_path}"
+    fi
+  done
+}
+
+update_prover_artifacts_submodule() {
+  if [[ ! -d "${PROVER_ARTIFACTS_DIR}" ]]; then
+    return 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    log_warn "git not found; ensure prover/artifacts is populated before running."
+    return 1
+  fi
+  local submodule_env=()
+  if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+    if [[ ! -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+      log_warn "Artifacts SSH key not found at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; proceeding without submodule auth override."
+    else
+      submodule_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+    fi
+  fi
+  "${submodule_env[@]}" git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null
+}
+
+seed_prover_from_submodule() {
+  if [[ ! -d "${PROVER_ARTIFACTS_BUILD_DIR}" ]]; then
+    return 1
+  fi
+  log_step "Seeding prover artifacts from prover/artifacts"
+  rm -rf "${PROVER_BUILD_DIR}"
+  mkdir -p "${ROOT_DIR}/prover/circuits"
+  cp -a "${PROVER_ARTIFACTS_BUILD_DIR}" "${ROOT_DIR}/prover/circuits/"
+
+  local cache_sources=(
+    "${PROVER_ARTIFACTS_DIR}/contracts/cache/settlement-vk.json"
+    "${PROVER_ARTIFACTS_DIR}/contracts/zen/cache/settlement-vk.json"
+  )
+  local cache_targets=(
+    "${ROOT_DIR}/contracts/cache/settlement-vk.json"
+    "${ROOT_DIR}/contracts/zen/cache/settlement-vk.json"
+  )
+  for i in "${!cache_sources[@]}"; do
+    if [[ -f "${cache_sources[$i]}" ]]; then
+      mkdir -p "$(dirname "${cache_targets[$i]}")"
+      cp "${cache_sources[$i]}" "${cache_targets[$i]}"
+    fi
+  done
+  return 0
+}
+
+download_prover_artifacts() {
+  if [[ -z "${PROVER_ARTIFACTS_URL}" ]]; then
+    return 1
+  fi
+  if [[ ! -x "${ROOT_DIR}/prover/scripts/download_artifacts.sh" ]]; then
+    log_warn "prover/scripts/download_artifacts.sh missing or not executable; cannot download artifacts."
+    return 1
+  fi
+  log_step "Downloading prover artifacts from ${PROVER_ARTIFACTS_URL}"
+  if (cd "${ROOT_DIR}/prover" && PROVER_ARTIFACTS_URL="${PROVER_ARTIFACTS_URL}" PROVER_ARTIFACTS_SHA256="${PROVER_ARTIFACTS_SHA256}" ./scripts/download_artifacts.sh); then
+    return 0
+  fi
+  log_warn "Failed to download prover artifacts from ${PROVER_ARTIFACTS_URL}"
+  return 1
+}
+
+sync_prover_caches() {
+  local vk_src="${PROVER_BUILD_DIR}/settlement_vk.json"
+  if [[ ! -s "${vk_src}" ]]; then
+    return
+  fi
+  local cache_targets=(
+    "${ROOT_DIR}/contracts/cache/settlement-vk.json"
+    "${ROOT_DIR}/contracts/zen/cache/settlement-vk.json"
+  )
+  for dest in "${cache_targets[@]}"; do
+    mkdir -p "$(dirname "${dest}")"
+    cp "${vk_src}" "${dest}"
+  done
+}
+
 check_prover_artifacts() {
   if [[ "${SKIP_PROVER_CHECK}" == "true" ]]; then
     log_warn "Skipping Groth16 prover artifact validation (per flag)."
     return
   fi
-  log_step "Syncing prover artifacts from submodule"
-
-  if command -v git >/dev/null 2>&1; then
-    # Allow overriding SSH identity for the private artifacts repo (e.g., deploy key on production host).
-    local submodule_env=()
-    if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
-      if [[ ! -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
-        log_warn "Artifacts SSH key not found at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; proceeding without submodule auth override."
-      else
-        submodule_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
-      fi
-    fi
-    if ! "${submodule_env[@]}" git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null; then
-      log_warn "Failed to update prover/artifacts submodule; ensure it is cloned and accessible."
-    fi
-  else
-    log_warn "git not found; ensure prover/artifacts is populated before running."
-  fi
-
-  if [[ ! -d "${PROVER_ARTIFACTS_DIR}" ]]; then
-    log_warn "Artifacts submodule directory missing at ${PROVER_ARTIFACTS_DIR}; cannot continue."
-    exit 1
-  fi
 
   local missing=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    local src="${PROVER_ARTIFACTS_DIR}/${rel_path}"
-    local dest="${ROOT_DIR}/${rel_path}"
-    if [[ ! -f "${src}" ]]; then
-      missing+=("${rel_path} (source)")
-      continue
-    fi
-    mkdir -p "$(dirname "${dest}")"
-    cp "${src}" "${dest}"
-  done
-
+  log_step "Validating prover artifacts"
+  sync_prover_caches
+  missing=($(list_missing_prover_files))
   if (( ${#missing[@]} > 0 )); then
-    log_warn "Missing prover artifacts in submodule: ${missing[*]}"
-    log_warn "Populate prover/artifacts (private repo) before running deploy."
-    exit 1
+    update_prover_artifacts_submodule || true
+    seed_prover_from_submodule || true
+    missing=($(list_missing_prover_files))
+  fi
+  if (( ${#missing[@]} > 0 )); then
+    download_prover_artifacts || true
+    missing=($(list_missing_prover_files))
   fi
 
-  # Verify copies landed.
-  local missing_dest=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    local dest="${ROOT_DIR}/${rel_path}"
-    if [[ ! -f "${dest}" ]]; then
-      missing_dest+=("${rel_path}")
-    fi
-  done
-  if (( ${#missing_dest[@]} > 0 )); then
-    log_warn "Failed to stage prover artifacts into repo paths: ${missing_dest[*]}"
-    exit 1
-  fi
-
-  # Final presence check (avoids requiring Go on the host).
-  local missing_final=()
-  for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    local dest="${ROOT_DIR}/${rel_path}"
-    if [[ ! -s "${dest}" ]]; then
-      missing_final+=("${rel_path}")
-    fi
-  done
-  if (( ${#missing_final[@]} > 0 )); then
-    log_warn "Prover artifacts failed final presence check: ${missing_final[*]}"
+  sync_prover_caches
+  missing=($(list_missing_prover_files))
+  if (( ${#missing[@]} > 0 )); then
+    cat <<EOF
+Missing prover artifacts after sync attempts:
+$(printf '  - %s\n' "${missing[@]}")
+Populate prover/artifacts, set PROVER_ARTIFACTS_URL/PROVER_ARTIFACTS_SHA256, or run 'bash prover/circuits/generate_keys.sh' before deploying.
+EOF
     exit 1
   fi
 }

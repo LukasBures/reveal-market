@@ -1,34 +1,33 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
-import app.main
+import app.database as db
+import app.fetcher as fetcher
+import app.market_sync as market_sync
+import app.prime as prime
+import app.proofs as proofs
+import app.runtime as runtime_module
+import app.service as worker_service
 import httpx
 import pytest
-from app.main import (
-    SchemaSyncResult,
-    cleanup_resolved_markets,
-    maybe_generate_settlement_proof,
-    prime_featured_views,
-    prime_markets_cache,
-    process_once,
-    publish_heartbeat,
-    record_batch_stats,
-)
-from app.main import (
-    settings as worker_settings,
-)
+from app.market_sync import SyncSummary
 from app.polymarket import MarketPayload, PolymarketClient
 from app.prover_client import SettlementProofResponse
+from app.schema import SchemaSyncResult
 from prometheus_client import REGISTRY
-from shared import cache as shared_cache
+from shared import cache_async as shared_cache
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
 from shared.models import Base, Market
 from sqlalchemy import create_engine, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
+
+pytestmark = pytest.mark.asyncio
 
 
 # Local helper to stand in for test_sync_market (keeps this test self contained)
@@ -39,58 +38,86 @@ def create_in_memory_db():
     return engine, session_factory
 
 
+async def create_async_in_memory_db():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    return engine, session_factory
+
+
 class DummyRedis:
     def __init__(self):
         self.store: dict[str, Any] = {}
         self.last_set: dict[str, Any] | None = None
         self._ttls: dict[str, int | None] = {}
 
-    def set(self, key: str, value: Any, ex: int | None = None):
+    async def set(self, key: str, value: Any, ex: int | None = None):
         self.store[key] = value
         self.last_set = {"key": key, "value": value, "ttl": ex}
         self._ttls[key] = ex
 
-    def get(self, key: str):
+    async def get(self, key: str):
         return self.store.get(key)
 
-    def delete(self, *keys: str):
+    async def delete(self, *keys: str):
         for key in keys:
             self.store.pop(key, None)
 
-    def scan_iter(self, match: str):
+    async def scan_iter(self, match: str):
         prefix = match[:-1] if match.endswith("*") else match
         for key in list(self.store.keys()):
             if key.startswith(prefix):
                 yield key
 
-    def sadd(self, key: str, value: str):
+    async def sscan_iter(self, key: str, count: int | None = None):
+        members = self.store.get(key, set())
+        if isinstance(members, set):
+            for member in members:
+                yield member
+
+    async def sadd(self, key: str, value: str):
         self.store.setdefault(key, set()).add(value)
 
-    def smembers(self, key: str):
+    async def smembers(self, key: str):
         members = self.store.get(key)
         if isinstance(members, set):
             return set(members)
         return set()
 
-    def ttl(self, key: str):
+    async def ttl(self, key: str):
         ttl = self._ttls.get(key)
         if ttl is None:
             return -1
         return ttl
 
-    def lpush(self, key: str, value: Any):
+    async def lpush(self, key: str, value: Any):
         queue = self.store.setdefault(key, [])
         if not isinstance(queue, list):
             queue = []
             self.store[key] = queue
         queue.insert(0, value)
 
-    def rpush(self, key: str, value: Any):
+    async def rpush(self, key: str, value: Any):
         queue = self.store.setdefault(key, [])
         if not isinstance(queue, list):
             queue = []
             self.store[key] = queue
         queue.append(value)
+
+    async def brpop(self, keys, timeout: int | None = None):
+        key = keys[0] if keys else None
+        if key is None:
+            return None
+        queue = self.store.get(key, [])
+        if not queue:
+            return None
+        value = queue.pop()
+        return key, value
+
+    async def llen(self, key: str) -> int:
+        queue = self.store.get(key, [])
+        return len(queue) if isinstance(queue, list) else 0
 
 
 class DummyCounter:
@@ -111,24 +138,24 @@ class DummyCounter:
         return _Recorder(record)
 
 
-def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
+async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     captured: dict[str, Any] = {}
 
     class DummyClient:
-        def fetch_events_markets(self, **kwargs):
+        async def fetch_events_markets(self, **kwargs):
             captured.update(kwargs)
             return []
 
-    monkeypatch.setattr(app.main, "polymarket_client", DummyClient(), raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_page_size", 25, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_max_pages", 4, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_order", "updatedAt", raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_sort_ascending", False, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_closed_filter", False, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_active_filter", True, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_archived_filter", False, raising=False)
+    monkeypatch.setattr(runtime_module, "polymarket_client", DummyClient(), raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_page_size", 25, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_max_pages", 4, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_order", "updatedAt", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sort_ascending", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_closed_filter", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_active_filter", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_archived_filter", False, raising=False)
 
-    markets, latency = app.main.fetch_markets_from_polymarket()
+    markets, latency = await fetcher.fetch_markets_from_polymarket()
 
     assert markets == []
     assert latency >= 0
@@ -142,39 +169,35 @@ def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     assert extra["archived"] == "false"
 
 
-def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeypatch):
+async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeypatch):
     calls: dict[str, Any] = {"events": 0, "markets": 0}
 
     class DummyClient:
-        def fetch_events_markets(self, **kwargs):
+        async def fetch_events_markets(self, **kwargs):
             calls["events"] += 1
             calls["kwargs"] = kwargs
             return []
 
-        def fetch_markets(self, **_kwargs):
+        async def fetch_markets(self, **_kwargs):
             calls["markets"] += 1
             return []
 
-    monkeypatch.setattr(app.main, "polymarket_client", DummyClient(), raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    monkeypatch.setattr(runtime_module, "polymarket_client", DummyClient(), raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
 
-    markets, _ = app.main.fetch_markets_from_polymarket()
+    markets, _ = await fetcher.fetch_markets_from_polymarket()
 
     assert markets == []
     assert calls["events"] == 1
     assert calls["markets"] == 0
-    assert calls["kwargs"]["order"] == app.main.settings.polymarket_order
+    assert calls["kwargs"]["order"] == runtime_module.settings.polymarket_order
 
 
-def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path, caplog):
-    db_url = f"sqlite:///{tmp_path / 'worker.db'}"
-    engine = create_engine(db_url, future=True)
-    session_factory = sessionmaker(bind=engine, future=True)
-    Base.metadata.create_all(bind=engine)
-
-    monkeypatch.setattr("app.main.engine", engine, raising=False)
-    monkeypatch.setattr("app.main.SessionLocal", session_factory, raising=False)
-    monkeypatch.setattr(app.main.settings, "run_migrations_on_startup", False, raising=False)
+async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, caplog):
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
 
     sample_markets = [
         MarketPayload(
@@ -203,16 +226,20 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
         ),
     ]
 
+    async def _fake_paginated(**_kwargs):
+        yield sample_markets
+
     monkeypatch.setattr(
-        app.main.polymarket_client,
-        "fetch_markets_paginated",
-        lambda **_: [sample_markets],
+        runtime_module,
+        "polymarket_client",
+        type("DummyClient", (), {"fetch_markets_paginated": _fake_paginated})(),
+        raising=False,
     )
 
     dummy = DummyRedis()
     invalidated_tags: list[str] = []
 
-    def fake_invalidate(_, tag: str):
+    async def fake_invalidate(_, tag: str):
         invalidated_tags.append(tag)
         return 1
 
@@ -226,18 +253,16 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
         )
         or 0
     )
-    stats = process_once(dummy)
+    stats = await worker_service.process_once(dummy)
     assert stats["markets_processed"] == len(sample_markets)
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
     assert stats["categories_changed"] == 2
-    assert stats["markets_changed"] == len(sample_markets)
-    assert stats["resolutions_changed"] == 0
     assert stats["summaries_enqueued"] == 0
     assert stats["cache_invalidations"] >= 0
 
-    with session_factory() as session:
-        stored = session.execute(select(Market)).scalars().all()
+    async with session_factory() as session:
+        stored = (await session.execute(select(Market))).scalars().all()
         assert len(stored) == 2
 
     assert dummy.last_set is not None
@@ -261,9 +286,10 @@ def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, tmp_path
         or 0
     )
     assert category_after == category_before + 2
+    await engine.dispose()
 
 
-def test_process_once_publishes_schema_revision(monkeypatch):
+async def test_process_once_publishes_schema_revision(monkeypatch):
     """Ensure schema revisions are broadcast to Redis and tagged caches are invalidated."""
 
     dummy = DummyRedis()
@@ -273,8 +299,15 @@ def test_process_once_publishes_schema_revision(monkeypatch):
         current_revision="0003_schema_versions",
     )
 
-    monkeypatch.setattr("app.main._ensure_schema", lambda: schema_state, raising=False)
-    monkeypatch.setattr("app.main.fetch_markets_from_polymarket", lambda: ([], 5.0), raising=False)
+    async def fake_schema():
+        return schema_state
+
+    async def fake_sync(_redis_client=None):
+        return SyncSummary(), 0, 0, 0.0
+
+    monkeypatch.setattr(worker_service, "ensure_schema", fake_schema, raising=False)
+    monkeypatch.setattr(worker_service, "_sync_polymarket_feed", fake_sync, raising=False)
+    monkeypatch.setattr(worker_service, "run_prover_jobs", lambda *_args, **_kwargs: 0, raising=False)
 
     invalidated: list[str] = []
 
@@ -284,19 +317,19 @@ def test_process_once_publishes_schema_revision(monkeypatch):
 
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
 
-    stats = process_once(dummy)
+    stats = await worker_service.process_once(dummy)
     assert stats["markets_processed"] == 0
     assert stats["markets_changed"] == 0
     assert stats["resolutions_changed"] == 0
     assert stats["markets_changed"] == 0
     assert stats["summaries_enqueued"] == 0
     assert stats["resolutions_changed"] == 0
-    assert dummy.store.get(app.main.settings.schema_version_key) == schema_state.current_revision
+    assert dummy.store.get(runtime_module.settings.schema_version_key) == schema_state.current_revision
     assert "schema:unknown" in invalidated
     assert f"schema:{schema_state.previous_revision}" in invalidated
 
 
-def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
+async def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
     dummy = DummyRedis()
     schema_state = SchemaSyncResult(
         changed=False,
@@ -304,29 +337,32 @@ def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
         current_revision="0004_latest_revision",
     )
 
-    def fail_fetch():
-        raise RuntimeError("connect refused")
-
     published_stats: dict[str, Any] = {}
 
-    def fake_publish(_redis, stats):
+    async def fake_publish(_redis, stats):
         published_stats.update(stats)
 
-    monkeypatch.setattr("app.main._ensure_schema", lambda: schema_state, raising=False)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_markets_paginated", lambda **_: fail_fetch(), raising=False)
-    monkeypatch.setattr("app.main.publish_heartbeat", fake_publish, raising=False)
+    async def fake_schema():
+        return schema_state
+
+    async def fail_sync(_redis_client=None):
+        raise RuntimeError("connect refused")
+
+    monkeypatch.setattr(worker_service, "ensure_schema", fake_schema, raising=False)
+    monkeypatch.setattr(worker_service, "_sync_polymarket_feed", fail_sync, raising=False)
+    monkeypatch.setattr(worker_service, "publish_heartbeat", fake_publish, raising=False)
 
     caplog.set_level(logging.WARNING, logger="reveal_market.worker")
-    stats = process_once(dummy)
+    stats = await worker_service.process_once(dummy)
 
     assert stats["markets_processed"] == 0
     assert stats == published_stats
-    assert dummy.store.get(app.main.settings.schema_version_key) == schema_state.current_revision
+    assert dummy.store.get(runtime_module.settings.schema_version_key) == schema_state.current_revision
     events = [getattr(record, "event", None) for record in caplog.records]
     assert "worker.sync.skipped" in events
 
 
-def test_prime_markets_cache_stores_payload(monkeypatch):
+async def test_prime_markets_cache_stores_payload(monkeypatch):
     dummy = DummyRedis()
     payload = [
         {
@@ -345,16 +381,16 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
 
     transport = httpx.MockTransport(handler)
 
-    monkeypatch.setattr(app.main.settings, "api_base_url", "http://api:8000", raising=False)
-    monkeypatch.setattr(app.main.settings, "markets_cache_limit", 7, raising=False)
-    monkeypatch.setattr(app.main.settings, "markets_cache_offset", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "markets_cache_order_by", "volume_24h_usd", raising=False)
-    monkeypatch.setattr(app.main.settings, "markets_cache_prime_pages", 2, raising=False)
-    monkeypatch.setattr(app.main.settings, "markets_cache_ttl_seconds", 45, raising=False)
-    monkeypatch.setattr(app.main.settings, "cache_prime_timeout_seconds", 2.0, raising=False)
-    monkeypatch.setattr(app.main.settings, "prime_markets_cache_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "api_base_url", "http://api:8000", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "markets_cache_limit", 7, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "markets_cache_offset", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "markets_cache_order_by", "volume_24h_usd", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "markets_cache_prime_pages", 2, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "markets_cache_ttl_seconds", 45, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "cache_prime_timeout_seconds", 2.0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "prime_markets_cache_enabled", True, raising=False)
 
-    summary = prime_markets_cache(dummy, transport=transport)
+    summary = await prime.prime_markets_cache(dummy, transport=transport)
     assert summary["status"] == "primed"
     assert summary["result_count"] == len(payload)
     assert summary["pages"]
@@ -367,10 +403,10 @@ def test_prime_markets_cache_stores_payload(monkeypatch):
     assert cached == payload
 
 
-def test_record_batch_stats_publishes_metrics(monkeypatch):
+async def test_record_batch_stats_publishes_metrics(monkeypatch):
     dummy = DummyRedis()
-    monkeypatch.setattr(app.main.settings, "batch_stats_key", "worker:batch_stats", raising=False)
-    monkeypatch.setattr(app.main.settings, "batch_stats_ttl_seconds", 300, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "batch_stats_key", "worker:batch_stats", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "batch_stats_ttl_seconds", 300, raising=False)
     stats = {
         "markets_processed": 12,
         "markets_changed": 4,
@@ -380,7 +416,7 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
     }
     prime_stats = {"status": "primed", "cache_key": "markets:list:*"}
 
-    record_batch_stats(dummy, stats, prime_stats)
+    await worker_service.record_batch_stats(dummy, stats, prime_stats)
 
     assert dummy.last_set is not None
     assert dummy.last_set["key"] == "worker:batch_stats"
@@ -393,7 +429,7 @@ def test_record_batch_stats_publishes_metrics(monkeypatch):
     assert payload["prime"] == prime_stats
 
 
-def test_publish_heartbeat_includes_flags():
+async def test_publish_heartbeat_includes_flags():
     dummy = DummyRedis()
     stats = {
         "markets_processed": 2,
@@ -412,7 +448,7 @@ def test_publish_heartbeat_includes_flags():
         "redis_available": True,
     }
 
-    publish_heartbeat(dummy, stats)
+    await worker_service.publish_heartbeat(dummy, stats)
 
     assert dummy.last_set is not None
     payload = json.loads(dummy.last_set["value"])
@@ -444,10 +480,10 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
             session.add_all([expired, recent])
             session.commit()
 
-        monkeypatch.setattr(app.main.settings, "resolved_retention_seconds", 60 * 60, raising=False)
+        monkeypatch.setattr(runtime_module.settings, "resolved_retention_seconds", 60 * 60, raising=False)
 
         with session_factory() as session:
-            outcome = cleanup_resolved_markets(session, now=datetime.now(UTC))
+            outcome = market_sync.cleanup_resolved_markets(session, now=datetime.now(UTC))
             session.commit()
 
         assert outcome.events == {"evt-old"}
@@ -463,25 +499,25 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
         engine.dispose()
 
 
-def test_prime_featured_views_prefetches_categories_and_suggestions(monkeypatch):
+async def test_prime_featured_views_prefetches_categories_and_suggestions(monkeypatch):
     dummy = DummyRedis()
     requests: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
         if "/markets/suggest" in request.url.path:
-            key = suggest_cache_key("Alpha query", app.main.settings.suggest_cache_limit)
-            shared_cache.set_json(dummy, key, [], 30)
+            key = suggest_cache_key("Alpha query", runtime_module.settings.suggest_cache_limit)
+            dummy._ttls[key] = 30
         return httpx.Response(status_code=200, json=[])
 
     transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(app.main.settings, "api_base_url", "http://api:8000", raising=False)
-    monkeypatch.setattr(app.main.settings, "featured_categories", ["Politics"], raising=False)
-    monkeypatch.setattr(app.main.settings, "featured_suggest_queries", ["Alpha query"], raising=False)
-    monkeypatch.setattr(app.main.settings, "category_cache_limit", 7, raising=False)
-    monkeypatch.setattr(app.main.settings, "suggest_cache_limit", 4, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "api_base_url", "http://api:8000", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "featured_categories", ["Politics"], raising=False)
+    monkeypatch.setattr(runtime_module.settings, "featured_suggest_queries", ["Alpha query"], raising=False)
+    monkeypatch.setattr(runtime_module.settings, "category_cache_limit", 7, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "suggest_cache_limit", 4, raising=False)
 
-    summary = prime_featured_views(dummy, transport=transport)
+    summary = await prime.prime_featured_views(dummy, transport=transport)
 
     assert summary["categories_primed"] == 1
     assert summary["suggestions_primed"] == 1
@@ -495,7 +531,7 @@ def _fetch_counter(outcome: str) -> float:
     return value or 0.0
 
 
-def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
+async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     payload = MarketPayload(
         event_id="evt-success",
         title="OK",
@@ -505,29 +541,34 @@ def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         gamma_raw={"id": "evt-success"},
     )
 
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", lambda **kwargs: [payload], raising=False)
+    async def _fake_events_markets(**_kwargs):
+        return [payload]
+
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    monkeypatch.setattr(
+        runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": _fake_events_markets})()
+    )
     before = _fetch_counter("success")
 
-    markets, _ = app.main.fetch_markets_from_polymarket()
+    markets, _ = await fetcher.fetch_markets_from_polymarket()
 
     assert markets[0].event_id == "evt-success"
     assert _fetch_counter("success") == before + 1
 
 
-def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
+async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     def always_fail(**kwargs):
         raise RuntimeError("fatal failure")
 
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 1, raising=False)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", always_fail, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    monkeypatch.setattr(runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": always_fail})())
     before = _fetch_counter("error")
     with pytest.raises(RuntimeError):
-        app.main.fetch_markets_from_polymarket()
+        await fetcher.fetch_markets_from_polymarket()
     assert _fetch_counter("error") == before + 1
 
 
-def test_fetch_markets_from_polymarket_retries(monkeypatch):
+async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     payload = MarketPayload(
         event_id="evt-retry",
         title="Retry",
@@ -539,25 +580,25 @@ def test_fetch_markets_from_polymarket_retries(monkeypatch):
 
     attempts = {"count": 0}
 
-    def flaky_fetch(**kwargs):
+    async def flaky_fetch(**kwargs):
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise RuntimeError("temporary failure")
         return [payload]
 
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_max_attempts", 2, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 2, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
     monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(app.main.polymarket_client, "fetch_events_markets", flaky_fetch, raising=False)
+    monkeypatch.setattr(runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": flaky_fetch})())
 
-    markets, _ = app.main.fetch_markets_from_polymarket()
+    markets, _ = await fetcher.fetch_markets_from_polymarket()
 
     assert attempts["count"] == 2
     assert markets[0].event_id == "evt-retry"
 
 
-def test_publish_heartbeat_retries_on_failure(monkeypatch):
+async def test_publish_heartbeat_retries_on_failure(monkeypatch):
     class FlakyRedis:
         def __init__(self):
             self.calls = 0
@@ -571,17 +612,17 @@ def test_publish_heartbeat_retries_on_failure(monkeypatch):
             return True
 
     redis_client = FlakyRedis()
-    monkeypatch.setattr(app.main.settings, "heartbeat_max_retries", 3, raising=False)
-    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_max_retries", 3, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr(asyncio, "sleep", lambda *_args, **_kwargs: None, raising=False)
 
-    app.main.publish_heartbeat(redis_client, {"markets_processed": 5})
+    await worker_service.publish_heartbeat(redis_client, {"markets_processed": 5})
     assert redis_client.calls == 2
     assert json.loads(redis_client.payloads[-1])["markets_processed"] == 5
 
 
-def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
+async def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
     class BrokenRedis:
         def __init__(self):
             self.calls = 0
@@ -591,13 +632,13 @@ def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
             raise RuntimeError("still down")
 
     redis_client = BrokenRedis()
-    monkeypatch.setattr(app.main.settings, "heartbeat_max_retries", 2, raising=False)
-    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
-    monkeypatch.setattr(app.main.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_max_retries", 2, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "heartbeat_retry_backoff_max_seconds", 0, raising=False)
+    monkeypatch.setattr(asyncio, "sleep", lambda *_args, **_kwargs: None, raising=False)
 
     with caplog.at_level(logging.WARNING):
-        app.main.publish_heartbeat(redis_client, {"markets_processed": 1})
+        await worker_service.publish_heartbeat(redis_client, {"markets_processed": 1})
 
     assert redis_client.calls == 2
     assert any("failed to publish worker heartbeat" in record.message for record in caplog.records)
@@ -619,7 +660,7 @@ def test_cleanup_resolved_markets_respects_dry_run(monkeypatch):
             session.commit()
 
         with session_factory() as session:
-            outcome = cleanup_resolved_markets(
+            outcome = market_sync.cleanup_resolved_markets(
                 session,
                 dry_run=True,
                 now=datetime.now(UTC),
@@ -652,10 +693,10 @@ def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
             session.add(market)
             session.commit()
 
-        monkeypatch.setattr(app.main.settings, "resolved_retention_seconds", 60 * 60, raising=False)
+        monkeypatch.setattr(runtime_module.settings, "resolved_retention_seconds", 60 * 60, raising=False)
         reference = datetime(2024, 3, 10, 7, 0, tzinfo=UTC)
         with session_factory() as session:
-            outcome = cleanup_resolved_markets(session, now=reference)
+            outcome = market_sync.cleanup_resolved_markets(session, now=reference)
             session.commit()
 
         assert outcome.deleted_rows == 0
@@ -668,12 +709,12 @@ def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
         engine.dispose()
 
 
-def test_maybe_generate_settlement_proof(monkeypatch):
+async def test_maybe_generate_settlement_proof(monkeypatch):
     class FakeProver:
         def __init__(self):
             self.called_with = None
 
-        def generate_settlement_proof(self, request):
+        async def generate_settlement_proof(self, request):
             self.called_with = request
             return SettlementProofResponse(
                 proof="0xdead",
@@ -685,9 +726,9 @@ def test_maybe_generate_settlement_proof(monkeypatch):
             )
 
     fake_prover = FakeProver()
-    monkeypatch.setattr(app.main, "PROVER_CLIENT", fake_prover, raising=False)
-    monkeypatch.setattr(worker_settings, "prover_enabled", True, raising=False)
-    monkeypatch.setattr(worker_settings, "auto_settlement_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module, "PROVER_CLIENT", fake_prover, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
 
     redis_client = DummyRedis()
     market_payload = MarketPayload(
@@ -720,7 +761,7 @@ def test_maybe_generate_settlement_proof(monkeypatch):
         "winning_outcome_id": 0,
         "circuit_hash": "0xabc",
     }
-    assert maybe_generate_settlement_proof(
+    assert await proofs.maybe_generate_settlement_proof(
         redis_client,
         market_snapshot=market_snapshot,
         market_payload=market_payload,

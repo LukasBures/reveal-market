@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from app.main import _fetch_resolution_snapshot, settings
+from app import resolution
 from app.polymarket import MarketPayload
+from app.runtime import settings
 
 
 def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
@@ -34,11 +35,11 @@ def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
     goldsky = DummyGoldsky()
     conditional = DummyConditional()
 
-    monkeypatch.setattr("app.main.goldsky_client", goldsky, raising=False)
-    monkeypatch.setattr("app.main.conditional_tokens_client", conditional, raising=False)
+    monkeypatch.setattr(resolution, "goldsky_client", goldsky, raising=False)
+    monkeypatch.setattr(resolution, "conditional_tokens_client", conditional, raising=False)
     monkeypatch.setattr(settings, "resolution_fetch_max_attempts", 1, raising=False)
 
-    summary = _fetch_resolution_snapshot("0xabc", market, None)
+    summary = resolution._fetch_resolution_snapshot("0xabc", market, None)
     assert summary is not None
     assert summary["conditionId"] == "0xabc"
     assert conditional.calls == 1

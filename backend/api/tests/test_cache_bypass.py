@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import app.main as api_main
+import app.server as api_main
 from app import models
 
 
 def _disable_cache(monkeypatch):
     monkeypatch.setattr(api_main, "cache_client", None, raising=False)
-    monkeypatch.setattr(api_main, "get_cache_client", lambda: None, raising=False)
+    monkeypatch.setattr("app.runtime.cache_client", None, raising=False)
+
+    async def _no_cache():
+        return None
+
+    monkeypatch.setattr(api_main, "get_cache_client", _no_cache, raising=False)
 
 
 def test_markets_endpoint_bypasses_cache_when_unavailable(client, db_session, monkeypatch):

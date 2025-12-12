@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
-import app.main as api_main
+import app.server as api_main
 from app import crud, models
+from app.services.markets import market_detail_cache_key
 from prometheus_client import REGISTRY
-from shared.cache_keys import category_cache_key, markets_list_cache_key, suggest_cache_key
+from shared.cache_keys import markets_list_cache_key, suggest_cache_key
 from sqlalchemy import select
 
 
@@ -241,12 +241,9 @@ def test_onchain_markets_success(client, monkeypatch):
     async def fake_fetch(settings):
         return ["0x1111111111111111111111111111111111111111"]
 
-    monkeypatch.setattr(api_main, "fetch_factory_markets", fake_fetch)
-    monkeypatch.setattr(
-        api_main,
-        "get_settings",
-        lambda: SimpleNamespace(factory_address="0x123", rpc_url="https://unit.test"),
-    )
+    monkeypatch.setattr("app.routes.markets.fetch_factory_markets", fake_fetch, raising=False)
+    monkeypatch.setattr(api_main.settings, "factory_address", "0x123", raising=False)
+    monkeypatch.setattr(api_main.settings, "rpc_url", "https://unit.test", raising=False)
 
     response = client.get("/markets/onchain")
     assert response.status_code == 200
@@ -346,7 +343,8 @@ def test_resolution_endpoint_uses_goldsky_fallback(client, db_session, monkeypat
             }
 
     dummy = DummyGoldsky()
-    monkeypatch.setattr(api_main, "goldsky_client", dummy, raising=False)
+    monkeypatch.setattr("app.routes.markets.goldsky_client", dummy, raising=False)
+    monkeypatch.setattr("app.runtime.goldsky_client", dummy, raising=False)
 
     response = client.get(f"/resolution/{market.condition_id}")
     assert response.status_code == 200, response.text
@@ -393,7 +391,7 @@ def test_category_endpoint_caches_results(client, db_session):
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-cat1"
 
-    cache_key = category_cache_key("sports", 5, 0)
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0)
     assert cache_key in api_main.cache_client.store
     db_session.query(models.Market).delete()
     db_session.commit()
@@ -432,7 +430,7 @@ def test_category_endpoint_orders_by_volume(client, db_session):
     assert resp.status_code == 200
     payload = resp.json()
     assert [item["event_id"] for item in payload] == ["evt-cat-high", "evt-cat-low"]
-    cache_key = category_cache_key("sports", 5, 0, order_by="volume_24h_usd")
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume_24h_usd")
     assert cache_key in api_main.cache_client.store
 
 
@@ -554,7 +552,7 @@ def test_patch_market_invalidates_detail_cache(client, db_session):
 
     detail = client.get(f"/markets/{market.event_id}")
     assert detail.status_code == 200
-    cache_key = api_main._market_detail_cache_key(market.event_id)
+    cache_key = market_detail_cache_key(market.event_id)
     assert cache_key in api_main.cache_client.store
 
     patch = client.patch(

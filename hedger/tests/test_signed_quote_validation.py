@@ -85,7 +85,7 @@ async def test_validate_signed_quote_accepts_valid_signature(monkeypatch):
         vault_sender_address="0x" + "02" * 20,
         lp_vault_address="0x" + "03" * 20,
         pricing_signer_address=signer.address,
-        database_url="sqlite://",
+        database_url="sqlite+aiosqlite://",
     )
     service = HedgerService(settings)
     service.lock_manager = None
@@ -160,7 +160,7 @@ async def test_validate_signed_quote_rejects_stake_mismatch(monkeypatch):
         vault_sender_address="0x" + "05" * 20,
         lp_vault_address="0x" + "06" * 20,
         pricing_signer_address=signer.address,
-        database_url="sqlite://",
+        database_url="sqlite+aiosqlite://",
     )
     service = HedgerService(settings)
     service.lock_manager = None

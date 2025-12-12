@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 from relayer.app import create_app
@@ -111,7 +113,7 @@ def test_admin_deadletter_endpoints(tmp_path):
     app = create_app(service, 1, "http://localhost", bearer_token="secret", tx_queue=queue)  # noqa: S106 - test token
     client = TestClient(app)
 
-    job_id = queue.enqueue("commit", {"foo": "bar"})
+    job_id = asyncio.run(queue.enqueue("commit", {"foo": "bar"}))
     # mark as deadletter manually
     with queue._connect() as conn:  # noqa: SLF001
         conn.execute("UPDATE jobs SET status = 'deadletter', attempts = 3, last_error = 'boom' WHERE id = ?", (job_id,))

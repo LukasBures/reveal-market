@@ -84,6 +84,8 @@ def upgrade() -> None:
     op.create_index("ix_markets_group_slug", "markets", ["group_slug"])
     op.create_index("ix_markets_featured", "markets", ["featured"])
     op.create_index("ix_markets_event_id", "markets", ["event_id"], unique=True)
+    op.create_index("ix_markets_resolved_at", "markets", ["resolved_at"])
+    op.create_index("ix_markets_event_resolved", "markets", ["event_id", "resolved_at"])
     # Normalize tags and clob token ids instead of storing JSON blobs
     op.create_table(
         "market_tags",
@@ -762,6 +764,8 @@ def downgrade() -> None:
     op.drop_index("ix_market_tags_market_id", table_name="market_tags")
     op.drop_table("market_tags")
     op.drop_index("ix_markets_event_id", table_name="markets")
+    op.drop_index("ix_markets_event_resolved", table_name="markets")
+    op.drop_index("ix_markets_resolved_at", table_name="markets")
     op.drop_index("ix_markets_condition_id", table_name="markets")
     op.drop_index("ix_markets_slug", table_name="markets")
     op.drop_index("ix_markets_status_category", table_name="markets")

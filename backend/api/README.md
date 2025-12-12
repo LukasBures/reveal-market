@@ -21,14 +21,15 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 
 ## 2. Architecture & Request Lifecycle
 
-1. **Startup**: `app.main` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, and wires middleware (TrustedHost, CORS, security headers, Prometheus).
-2. **Request entry**: `request_context_middleware` assigns/propagates `x-request-id`, measures latency, and emits structured events (`http.request.*`).
-3. **Routing**:
-   - Read endpoints hit Redis first (`shared.cache.get_json`). Cache keys are tagged (schema tag, logical tags like `markets:list`) for precise invalidation.
+1. **Startup**: `app.server` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, and wires middleware (TrustedHost, CORS, security headers, Prometheus).
+2. **Async-first**: Route handlers and background tasks stay async; any blocking third-party clients (for example CLOB orderbook fetches) run via `asyncio.to_thread` so the uvicorn loop never stalls.
+3. **Request entry**: `request_context_middleware` assigns/propagates `x-request-id`, measures latency, and emits structured events (`http.request.*`).
+4. **Routing**:
+   - Read endpoints hit Redis first (`shared.cache_async.get_json`). Cache keys are tagged (schema tag, logical tags like `markets:list`) for precise invalidation.
    - On cache miss the handler calls `app.crud`, which wraps SQLAlchemy queries around `shared.models`.
-4. **Response shaping**: `schemas.MarketResponse` is built from normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns (`outcomes`, `outcome_prices`, `tags`, `clob_token_ids`, `extra_data`) were removed.
-5. **Cache writes**: payloads are dumped to Redis JSON, TTL’d via `RM_CACHE_TTL_SECONDS`, and tagged for invalidation by the worker.
-6. **Hydration cycle**: On startup (and every `RM_CACHE_REFRESH_INTERVAL_SECONDS` thereafter) the API queries Postgres for the newest `RM_CACHE_HYDRATE_LIMIT` markets and rewrites the homepage cache. That keeps Redis warm even before the first client request and ensures any worker-led Postgres updates are reflected in cache within seconds.
+5. **Response shaping**: `schemas.MarketResponse` is built from normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns (`outcomes`, `outcome_prices`, `tags`, `clob_token_ids`, `extra_data`) were removed.
+6. **Cache writes**: payloads are dumped to Redis JSON, TTL’d via `RM_CACHE_TTL_SECONDS`, and tagged for invalidation by the worker.
+7. **Hydration cycle**: On startup (and every `RM_CACHE_REFRESH_INTERVAL_SECONDS` thereafter) the API queries Postgres for the newest `RM_CACHE_HYDRATE_LIMIT` markets and rewrites the homepage cache. That keeps Redis warm even before the first client request and ensures any worker-led Postgres updates are reflected in cache within seconds.
 
 ---
 
@@ -37,18 +38,26 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 ```
 backend/api/
 ├── app/
-│   ├── main.py              # FastAPI wiring, routes, middleware
-│   ├── crud.py              # Read/write helpers backed by SQLAlchemy
+│   ├── server.py            # FastAPI app factory + middleware wiring (async-only)
+│   ├── runtime.py           # Shared runtime state (cache client, metrics, settings)
+│   ├── http_middleware.py   # Logging/CORS/security/rate-limit middleware
+│   ├── rate_limit.py        # Async Redis-backed rate limiter + middleware
+│   ├── metrics_registry.py  # Prometheus metric definitions
+│   ├── tasks.py             # Background cache refreshers + heartbeats
+│   ├── routes/              # HTTP routers (markets, pricing, proofs, treasury, meta)
+│   ├── services/            # Cache clients, heartbeat dashboards, market/proof helpers
+│   ├── utils/               # Request helpers (content-length estimation, cache metadata)
+│   ├── crud.py              # Async SQLAlchemy helpers
 │   ├── schemas.py           # Pydantic response + request models
 │   ├── config.py            # Pydantic Settings (RM_* env vars)
-│   ├── database.py          # Engine/session factory + migration hook
+│   ├── database.py          # Async engine/session factory + migration hook
 │   ├── health.py            # Dependency checks for /health
 │   ├── security.py          # CSP/HSTS middleware
 │   ├── logging_config.py    # Service-wide logging setup
 │   └── onchain.py           # Optional MarketFactory introspection
-├── tests/                   # Pytest suite (async + REST)
-├── requirements*.txt        # Pinned runtime/dev dependencies
-├── pyproject.toml           # Tooling (Black/isort/pytest) metadata
+├── tests/                   # Pytest suite (async + REST; uses redis.asyncio + asyncpg)
+├── pyproject.toml           # Runtime + dev dependencies (managed with uv)
+├── uv.lock                  # Resolved lockfile
 └── run.py                   # Local entrypoint (uvicorn wrapper)
 ```
 
@@ -120,7 +129,7 @@ keccak256(
 )
 ```
 
-`app.main._build_quote_digest` (and the test suite) enforce this shape. Changing it requires a deliberate contract + backend dual upgrade.
+`app.server.build_quote_digest` (and the test suite) enforce this shape. Changing it requires a deliberate contract + backend dual upgrade.
 
 ### Operations & runbook (API)
 
@@ -151,7 +160,7 @@ export SETTINGS_FILE=.env.local
 # Start the API (uv prefers the synced virtualenv automatically)
 uv run --project . python run.py
 # or hot-reload:
-uv run --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run --project . uvicorn app.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Useful commands:
@@ -181,12 +190,12 @@ curl -H "accept: application/json" http://localhost:8000/markets
 
 ## 7. Caching Model
 
-- All list/detail endpoints first attempt `shared.cache.get_json(redis_client, key)`.
+- All list/detail endpoints first attempt `shared.cache_async.get_json(redis_client, key)`.
 - Cache keys come from `shared.cache_keys` (`markets:list:{filters}`, `markets:category:<slug>`, etc.).
 - Each cached payload is tagged with:
   - Schema tag (`schema:<rev>`), so when migrations land the worker can nuke the whole cohort.
   - Logical tags (`markets:list`, `market:{event_id}`, `resolution:{condition_id}`) so the worker invalidates only impacted entries after it writes new data.
-- TTL defaults to `RM_CACHE_TTL_SECONDS` (30s). Override per route if needed.
+- TTL defaults to `RM_CACHE_TTL_SECONDS` (5 minutes by default). Override per route if needed.
 - If Redis is offline/unreachable, endpoints now bypass the cache entirely, log the bypass, and avoid registering tags—preventing misleading “cache miss” logs and dangling tag sets during outages. Category caches only tag results when a payload is actually written.
 
 ---
@@ -262,7 +271,7 @@ Add new tests under `backend/api/tests` following the `test_*.py` convention. Us
 | `/markets` always cache-miss | Worker not publishing `RM_SCHEMA_VERSION_KEY`, causing repeated schema-tag invalidation. | Verify worker logs `worker.schema.version_cached` and that Redis stores the revision. |
 | Requests hang at startup | Migrations running or DB unreachable. | Check logs for `worker.schema.synced` / `alembic` output, ensure Postgres credentials are correct. |
 | 403 errors behind ingress | TrustedHost mismatch. | Set `RM_ALLOWED_HOSTS` to include the ingress hostname or `*` for testing. |
-| CSP violations on docs | CDN assets blocked. | Update `docs_csp` overrides in `app.main` if you introduce new assets. |
+| CSP violations on docs | CDN assets blocked. | Update `docs_csp` overrides in `app.server` if you introduce new assets. |
 
 ---
 
@@ -274,7 +283,7 @@ ruff check backend/api
 black backend/api
 
 # Generate OpenAPI schema
-uvicorn app.main:app --reload --port 8000 &
+uvicorn app.server:app --reload --port 8000 &
 curl http://localhost:8000/openapi.json > openapi.json
 
 # Load test a route

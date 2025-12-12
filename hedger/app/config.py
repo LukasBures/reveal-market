@@ -6,6 +6,8 @@ from decimal import Decimal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .storage import ensure_async_db_url
+
 
 class Settings(BaseSettings):
     """Environment-driven configuration for the hedger."""
@@ -18,7 +20,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8090)
 
     database_url: str = Field(
-        default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market",
+        default="postgresql+asyncpg://market_admin:<REDACTED>@postgres:5432/reveal_market",
         env="RM_DATABASE_URL",
     )
     redis_url: str = Field(default="redis://redis:6379/0")
@@ -96,7 +98,9 @@ def get_settings() -> Settings:
         cfg = Settings()  # type: ignore[call-arg]
         rm_dsn = os.getenv("RM_DATABASE_URL")
         if rm_dsn:
-            cfg.database_url = rm_dsn
+            cfg.database_url = ensure_async_db_url(rm_dsn)
+        else:
+            cfg.database_url = ensure_async_db_url(cfg.database_url)
         return cfg
 
     return _load()

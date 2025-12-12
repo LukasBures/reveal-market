@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from app import schemas
-from app.main import _build_quote_digest
+from app.server import build_quote_digest
 
 EXPECTED_SCHEMAS = {
     "MarketResponse": {
@@ -167,7 +167,7 @@ def test_model_schema_shape_is_stable(model, expected):
 
 
 def test_quote_digest_constant():
-    digest = _build_quote_digest(
+    digest = build_quote_digest(
         chain_id=2651420,
         market_address="0x1111111111111111111111111111111111111111",
         wallet_address="0x2222222222222222222222222222222222222222",

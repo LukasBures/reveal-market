@@ -4,10 +4,11 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import app.summary_worker as summary_worker
+import pytest
 from app.summary_client import SummaryClientError
 from app.summary_jobs import SummaryJob
 from app.summary_worker import process_job
-from shared import cache as shared_cache
+from shared import cache_async as shared_cache
 from shared.models import Base, Market
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -32,18 +33,27 @@ class DummyRedis:
     def __init__(self):
         self.queues: dict[str, list[str]] = {}
 
-    def rpush(self, key: str, value: str):
+    async def rpush(self, key: str, value: str):
         self.queues.setdefault(key, []).append(value)
 
-    def lpush(self, key: str, value: str):
+    async def lpush(self, key: str, value: str):
         queue = self.queues.setdefault(key, [])
         queue.insert(0, value)
 
-    def llen(self, key: str) -> int:
+    async def llen(self, key: str) -> int:
         return len(self.queues.get(key, []))
 
+    async def brpop(self, keys, timeout: int | None = None):
+        key = keys[0] if isinstance(keys, (list, tuple)) else keys
+        queue = self.queues.get(key, [])
+        if not queue:
+            return None
+        value = queue.pop()
+        return key, value
 
-def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
+
+@pytest.mark.asyncio
+async def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
     test_session_factory = _setup_session(monkeypatch)
     now = datetime.now(UTC)
     with test_session_factory() as session:
@@ -63,14 +73,14 @@ def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
 
     invalidated = []
 
-    def fake_invalidate(redis_client, tag):
+    async def fake_invalidate(redis_client, tag):
         invalidated.append(tag)
         return 0
 
     monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
 
     class StubClient:
-        def generate(self, job):
+        async def generate(self, job):
             return SimpleNamespace(
                 text="AI generated overview.",
                 source="ai_enrichment",
@@ -89,7 +99,7 @@ def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
         oracle="0xabc",
     )
     redis_client = DummyRedis()
-    assert process_job(job, redis_client, StubClient()) is True
+    assert await process_job(job, redis_client, StubClient()) is True
 
     with test_session_factory() as session:
         stored = session.execute(select(Market).where(Market.event_id == "evt-ai")).scalar_one()
@@ -102,7 +112,8 @@ def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
     assert "markets:list" in invalidated
 
 
-def test_process_job_requeues_on_failure(monkeypatch):
+@pytest.mark.asyncio
+async def test_process_job_requeues_on_failure(monkeypatch):
     redis_client = DummyRedis()
     job = SummaryJob(
         job_id="job-2",
@@ -115,18 +126,22 @@ def test_process_job_requeues_on_failure(monkeypatch):
     )
 
     class FailingClient:
-        def generate(self, job):
+        async def generate(self, job):
             raise SummaryClientError("boom")
 
-    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: 0, raising=False)
-    result = process_job(job, redis_client, FailingClient())
+    async def fake_invalidate(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
+    result = await process_job(job, redis_client, FailingClient())
     assert result is False
     assert job.attempts == 1
     queue_entries = redis_client.queues.get(summary_worker.settings.summary_queue_key, [])
     assert len(queue_entries) == 1
 
 
-def test_process_job_dead_letters_after_max_attempts(monkeypatch):
+@pytest.mark.asyncio
+async def test_process_job_dead_letters_after_max_attempts(monkeypatch):
     redis_client = DummyRedis()
     attempts = summary_worker.settings.summary_retry_max_attempts - 1
     job = SummaryJob(
@@ -141,11 +156,14 @@ def test_process_job_dead_letters_after_max_attempts(monkeypatch):
     )
 
     class FailingClient:
-        def generate(self, job):
+        async def generate(self, job):
             raise SummaryClientError("boom")
 
-    monkeypatch.setattr(shared_cache, "invalidate_tag", lambda *args, **kwargs: 0, raising=False)
-    result = process_job(job, redis_client, FailingClient())
+    async def fake_invalidate(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
+    result = await process_job(job, redis_client, FailingClient())
     assert result is False
     dlq_entries = redis_client.queues.get(summary_worker.settings.summary_dead_letter_key, [])
     assert len(dlq_entries) == 1

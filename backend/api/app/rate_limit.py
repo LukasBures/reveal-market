@@ -1,15 +1,23 @@
+"""Async rate limiting primitives and middleware.
+
+The limiter prefers Redis for distributed counting but gracefully falls back to
+an in-memory lock-protected counter when Redis is unavailable so the API
+continues to function under partial outages.
+"""
+
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from threading import Lock
-from typing import cast
+from typing import Any, cast
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from redis import Redis
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from shared.logging import log_event
 from shared.metrics import Counter as RM_Counter
@@ -35,6 +43,8 @@ return {current, redis.call('TTL', KEYS[1])}
 
 @dataclass
 class RateLimitResult:
+    """Normalized view of a rate limit decision."""
+
     allowed: bool
     limit: int
     remaining: int
@@ -46,10 +56,12 @@ class RateLimitResult:
 
 
 class RateLimiter:
+    """Async-friendly rate limiter that supports Redis and in-process fallbacks."""
+
     def __init__(
         self,
         settings: Settings | Callable[[], Settings],
-        cache_provider: Callable[[], Redis | None],
+        cache_provider: Callable[[], Awaitable[Redis | None] | Redis | None],
         *,
         prefix: str = "ratelimit",
     ):
@@ -60,26 +72,39 @@ class RateLimiter:
         self.cache_provider = cache_provider
         self.prefix = prefix
         self._memory_state: dict[str, tuple[int, float]] = {}
-        self._memory_lock = Lock()
+        self._memory_lock = asyncio.Lock()
 
     @property
     def settings(self) -> Settings:
         return self._settings_provider()
 
-    def reset(self, identifier: str | None = None) -> None:
-        with self._memory_lock:
+    async def reset(self, identifier: str | None = None) -> None:
+        """Reset counters for a single identifier or wipe everything in-memory."""
+
+        async with self._memory_lock:
             if identifier is None:
                 self._memory_state.clear()
             else:
                 self._memory_state.pop(identifier, None)
 
-    def evaluate(self, identifier: str) -> RateLimitResult:
+    async def evaluate(self, identifier: str) -> RateLimitResult:
+        """
+        Evaluate the current request and return the remaining allowance.
+
+        Redis is used when available so multiple API workers can share state;
+        otherwise we default to an in-memory counter to avoid hard failures.
+        """
+
         limit = max(int(self.settings.rate_limit_requests_per_window), 1)
         window = max(int(self.settings.rate_limit_window_seconds), 1)
-        client = self.cache_provider()
+        client_raw = self.cache_provider()
+        if inspect.isawaitable(client_raw):
+            client = await cast(Awaitable[Redis | None], client_raw)
+        else:
+            client = cast(Redis | None, client_raw)
         if client is not None and hasattr(client, "pipeline"):
             try:
-                return self._evaluate_redis(client, identifier, limit, window)
+                return await self._evaluate_redis(client, identifier, limit, window)
             except (RedisError, OSError, RuntimeError) as exc:  # pragma: no cover - defensive fallback
                 log_event(
                     logger,
@@ -88,11 +113,13 @@ class RateLimiter:
                     message="redis rate limit evaluation failed, falling back to memory",
                     error=str(exc),
                 )
-        return self._evaluate_memory(identifier, limit, window)
+        return await self._evaluate_memory(identifier, limit, window)
 
-    def _evaluate_memory(self, identifier: str, limit: int, window: int) -> RateLimitResult:
+    async def _evaluate_memory(self, identifier: str, limit: int, window: int) -> RateLimitResult:
+        """In-memory counter used as a best-effort fallback when Redis is down."""
+
         now = time.time()
-        with self._memory_lock:
+        async with self._memory_lock:
             count, expires_at = self._memory_state.get(identifier, (0, 0.0))
             if expires_at <= now:
                 count = 0
@@ -104,13 +131,13 @@ class RateLimiter:
         allowed = count <= limit
         return RateLimitResult(allowed=allowed, limit=limit, remaining=remaining, reset_at=reset_at)
 
-    def _evaluate_redis(self, client: Redis, identifier: str, limit: int, window: int) -> RateLimitResult:
+    async def _evaluate_redis(self, client: Redis, identifier: str, limit: int, window: int) -> RateLimitResult:
+        """Use a Lua script for atomic increment + TTL handling inside Redis."""
+
         key = f"{self.prefix}:{identifier}"
         try:
-            result = cast(
-                tuple[int | str | bytes | None, int | str | bytes | None],
-                client.eval(_RATE_LIMIT_LUA, 1, key, window),  # type: ignore[arg-type]
-            )
+            eval_result = await cast(Awaitable[Any], client.eval(_RATE_LIMIT_LUA, 1, key, window))  # type: ignore[arg-type]
+            result = cast(tuple[int | str | bytes | None, int | str | bytes | None], eval_result)
             count, ttl = result
         except RedisError as exc:
             log_event(
@@ -120,7 +147,7 @@ class RateLimiter:
                 message="redis rate limit evaluation failed, falling back to memory",
                 error=str(exc),
             )
-            return self._evaluate_memory(identifier, limit, window)
+            return await self._evaluate_memory(identifier, limit, window)
         count_int = int(count) if count is not None else 0
         ttl_value_raw = ttl if ttl is not None else window
         ttl_value = int(ttl_value_raw)
@@ -133,6 +160,8 @@ class RateLimiter:
 
 
 class RateLimitMiddleware:
+    """Starlette middleware that enforces the RateLimiter on every HTTP request."""
+
     def __init__(self, app, *, settings: Settings | Callable[[], Settings], limiter: RateLimiter):
         self.app = app
         if callable(settings):
@@ -162,7 +191,7 @@ class RateLimitMiddleware:
             await self._call_with_headers(scope, receive, send, allowance)
             return
 
-        result = self.limiter.evaluate(identifier)
+        result = await self.limiter.evaluate(identifier)
         headers = self._build_headers(result)
         if not result.allowed:
             log_event(

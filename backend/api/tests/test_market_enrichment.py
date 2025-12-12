@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import app.main as api_main
+import app.server as api_main
 from app import models
 from shared import models as shared_models
 from shared.cache_keys import resolution_cache_key

@@ -12,7 +12,7 @@ def _mock_fx(monkeypatch, price: float = 2.5):
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal(str(price)), stale=False, received_at=None)
 
-    monkeypatch.setattr("app.main.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
     monkeypatch.setattr("app.pricing.fetch_fx_quote", _fx_quote)
 
 
@@ -22,13 +22,20 @@ def _configure_signer():
     settings.pricing_signer_private_key = SecretStr(
         "0x4c0883a69102937d6231471b5dbb6204fe512961708279fe52e05f728621f081"
     )
+    import app.runtime as runtime
+
+    runtime.settings.pricing_chain_id = settings.pricing_chain_id
+    runtime.settings.pricing_signer_private_key = settings.pricing_signer_private_key
+    return settings
 
 
 def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
-    _configure_signer()
+    settings = _configure_signer()
     _mock_fx(monkeypatch, price=1.5)
-    settings = get_settings()
     settings.max_stake_zen = 10
+    import app.runtime as runtime
+
+    runtime.settings.max_stake_zen = 10
 
     payload = {
         "stake_zen": 5.0,

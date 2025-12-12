@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import app.runtime as runtime
 import pytest
 from app import models
 from app.config import get_settings
 from app.database import get_session
-from app.main import app
+from app.server import app
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -18,30 +19,39 @@ class InMemoryCache:
     def __init__(self):
         self.store: dict[str, Any] = {}
 
-    def get(self, key: str):
+    async def ping(self) -> bool:  # pragma: no cover - trivial
+        return True
+
+    async def get(self, key: str):
         return self.store.get(key)
 
-    def set(self, key: str, value: Any, ex: int | None = None, nx: bool | None = None):
+    async def set(self, key: str, value: Any, ex: int | None = None, nx: bool | None = None):
         if nx:
             if key in self.store:
                 return False
         self.store[key] = value
         return True
 
-    def delete(self, *keys: str) -> None:
+    async def delete(self, *keys: str) -> None:
         for key in keys:
             self.store.pop(key, None)
 
-    def scan_iter(self, match: str):
+    async def scan_iter(self, match: str):
         prefix = match[:-1] if match.endswith("*") else match
         for key in list(self.store.keys()):
             if key.startswith(prefix):
                 yield key
 
-    def sadd(self, key: str, value: str) -> None:
+    async def sscan_iter(self, key: str, count: int | None = None):
+        members = self.store.get(key)
+        if isinstance(members, set):
+            for member in members:
+                yield member
+
+    async def sadd(self, key: str, value: str) -> None:
         self.store.setdefault(key, set()).add(value)
 
-    def smembers(self, key: str):
+    async def smembers(self, key: str):
         members = self.store.get(key)
         if isinstance(members, set):
             return set(members)
@@ -58,6 +68,9 @@ def test_database(monkeypatch, tmp_path):
 
     get_settings.cache_clear()
     settings = get_settings()
+    for key, value in settings.model_dump().items():
+        setattr(runtime.settings, key, value)
+    settings = runtime.settings
 
     sync_engine = create_engine(db_url, future=True, connect_args={"check_same_thread": False})
     testing_session_local = sessionmaker(
@@ -72,16 +85,18 @@ def test_database(monkeypatch, tmp_path):
         class_=AsyncSession,
     )
 
+    monkeypatch.setattr("app.runtime.settings", settings, raising=False)
     monkeypatch.setattr("app.database.engine", async_engine, raising=False)
     monkeypatch.setattr("app.database.SessionLocal", testing_async_session, raising=False)
     monkeypatch.setattr("app.database.settings", settings, raising=False)
-    monkeypatch.setattr("app.main.settings", settings, raising=False)
+    monkeypatch.setattr("app.server.settings", settings, raising=False)
+    monkeypatch.setattr("app.tasks.settings", settings, raising=False)
 
     def fake_run_migrations() -> None:
         models.Base.metadata.create_all(bind=sync_engine)
 
     monkeypatch.setattr("app.database.run_migrations", fake_run_migrations, raising=False)
-    monkeypatch.setattr("app.main.run_migrations", fake_run_migrations, raising=False)
+    monkeypatch.setattr("app.tasks.run_migrations", fake_run_migrations, raising=False)
 
     models.Base.metadata.create_all(bind=sync_engine)
 
@@ -105,7 +120,7 @@ def db_session(test_database):
 
 
 @pytest.fixture()
-def client(test_database):
+def client(test_database, monkeypatch):
     _, testing_async_session, _ = test_database
 
     async def override_get_session():
@@ -119,18 +134,33 @@ def client(test_database):
 
     app.dependency_overrides[get_session] = override_get_session
     original_cache = getattr(app, "cache_client", None)
-    import app.main as api_main
+    import app.runtime as runtime
+    import app.server as api_main
 
     original_module_cache = getattr(api_main, "cache_client", None)
+    original_runtime_cache = getattr(runtime, "cache_client", None)
     new_cache = InMemoryCache()
     app.cache_client = new_cache
     api_main.cache_client = new_cache
-    api_main._cache_refresh_task = None
-    api_main._quote_sweeper_task = None
-    api_main._metrics_task = None
-    api_main.instrumentator = api_main.instrumentator  # ensure metrics setup stays bound
-    if hasattr(api_main, "_resolution_client"):
-        api_main._resolution_client = None
+    runtime.cache_client = new_cache
+    app.state.cache_client = new_cache  # type: ignore[attr-defined]
+
+    async def _noop_startup():
+        return None
+
+    async def _noop_stop():
+        return None
+
+    monkeypatch.setattr("app.server.run_startup_tasks", _noop_startup, raising=False)
+    monkeypatch.setattr("app.tasks.run_startup_tasks", _noop_startup, raising=False)
+    monkeypatch.setattr("app.server.stop_background_tasks", _noop_stop, raising=False)
+    monkeypatch.setattr("app.tasks.stop_background_tasks", _noop_stop, raising=False)
+    if hasattr(api_main, "cache_refresh_task"):
+        api_main.cache_refresh_task = None
+    if hasattr(api_main, "quote_sweeper_task"):
+        api_main.quote_sweeper_task = None
+    if hasattr(api_main, "metrics_task"):
+        api_main.metrics_task = None
 
     try:
         with TestClient(app) as test_client:
@@ -141,4 +171,5 @@ def client(test_database):
         elif hasattr(app, "cache_client"):
             delattr(app, "cache_client")
         api_main.cache_client = original_module_cache
+        runtime.cache_client = original_runtime_cache
         app.dependency_overrides.pop(get_session, None)

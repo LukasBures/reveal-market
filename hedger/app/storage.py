@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -12,11 +11,12 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    create_engine,
     func,
     select,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .types import CommitEvent, HedgeInstruction
 
@@ -123,60 +123,74 @@ Index(
 )
 
 
+def ensure_async_db_url(database_url: str) -> str:
+    """
+    Normalize database URLs to async drivers so create_async_engine works even if callers pass sync DSNs.
+    """
+
+    try:
+        url = make_url(database_url)
+    except Exception:
+        return database_url
+    driver = url.drivername or ""
+    if driver.startswith("postgresql") and "asyncpg" not in driver:
+        url = url.set(drivername="postgresql+asyncpg")
+    elif driver.startswith("sqlite") and "aiosqlite" not in driver:
+        url = url.set(drivername="sqlite+aiosqlite")
+    return url.render_as_string(hide_password=False)
+
+
 class HedgerRepository:
     """Lightweight Postgres repository used for audit logs and crash recovery."""
 
     def __init__(self, database_url: str):
-        self.engine = create_engine(database_url, future=True, pool_pre_ping=True)
-        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False, class_=Session)
+        normalized_url = ensure_async_db_url(database_url)
+        self.database_url = normalized_url
+        self.engine: AsyncEngine = create_async_engine(normalized_url, pool_pre_ping=True)
+        self.SessionLocal = async_sessionmaker(bind=self.engine, expire_on_commit=False, class_=AsyncSession)
 
-    def create_schema(self) -> None:
-        Base.metadata.create_all(self.engine, checkfirst=True)
+    async def create_schema(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-    def check_connection(self) -> None:
-        with self.SessionLocal() as session:
-            session.execute(select(1))
+    async def check_connection(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(select(1))
 
     async def record_commit(self, commit: CommitEvent, stake_usd: Decimal, idempotency_key: str | None = None) -> None:
-        await asyncio.to_thread(self._record_commit_sync, commit, stake_usd, idempotency_key)
-
-    def _record_commit_sync(self, commit: CommitEvent, stake_usd: Decimal, idempotency_key: str | None) -> None:
-        with self.SessionLocal() as session:
-            row = CommitRecord(
-                market_id=commit.market_id,
-                direction=commit.direction,
-                stake_zen=commit.stake_zen,
-                stake_usd=stake_usd,
-                committed_at=commit.committed_at,
-                tx_hash=commit.tx_hash,
-                idempotency_key=idempotency_key or commit.idempotency_key,
-                account=commit.account,
-                request_id=commit.request_id,
-                metadata_source=commit.metadata_source,
-            )
-            session.add(row)
-            session.commit()
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                row = CommitRecord(
+                    market_id=commit.market_id,
+                    direction=commit.direction,
+                    stake_zen=commit.stake_zen,
+                    stake_usd=stake_usd,
+                    committed_at=commit.committed_at,
+                    tx_hash=commit.tx_hash,
+                    idempotency_key=idempotency_key or commit.idempotency_key,
+                    account=commit.account,
+                    request_id=commit.request_id,
+                    metadata_source=commit.metadata_source,
+                )
+                session.add(row)
 
     async def record_hedge_instruction(
         self, instruction: HedgeInstruction, response_payload: dict | None = None
     ) -> None:
-        await asyncio.to_thread(self._record_hedge_sync, instruction, response_payload)
-
-    def _record_hedge_sync(self, instruction: HedgeInstruction, response_payload: dict | None) -> None:
-        with self.SessionLocal() as session:
-            row = HedgeActionRecord(
-                market_id=instruction.market_id,
-                hedge_outcome=instruction.hedge_outcome,
-                action=instruction.action,
-                size_usd=instruction.size_usd,
-                slippage_bps=instruction.slippage_bps,
-                reason=instruction.reason,
-                target_coverage=instruction.target_coverage,
-                response_payload=response_payload,
-                is_unwind=1 if instruction.is_unwind else 0,
-            )
-            session.add(row)
-            session.commit()
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                row = HedgeActionRecord(
+                    market_id=instruction.market_id,
+                    hedge_outcome=instruction.hedge_outcome,
+                    action=instruction.action,
+                    size_usd=instruction.size_usd,
+                    slippage_bps=instruction.slippage_bps,
+                    reason=instruction.reason,
+                    target_coverage=instruction.target_coverage,
+                    response_payload=response_payload,
+                    is_unwind=1 if instruction.is_unwind else 0,
+                )
+                session.add(row)
 
     async def record_settlement(
         self,
@@ -187,33 +201,16 @@ class HedgerRepository:
         prover_latency_seconds: int | None,
         submitted_tx: str | None,
     ) -> None:
-        await asyncio.to_thread(
-            self._record_settlement_sync,
-            market_id,
-            outcome,
-            proof_payload,
-            prover_latency_seconds,
-            submitted_tx,
-        )
-
-    def _record_settlement_sync(
-        self,
-        market_id: str,
-        outcome: str,
-        proof_payload: dict | None,
-        prover_latency_seconds: int | None,
-        submitted_tx: str | None,
-    ) -> None:
-        with self.SessionLocal() as session:
-            row = SettlementRecord(
-                market_id=market_id,
-                outcome=outcome,
-                proof_payload=proof_payload,
-                prover_latency_seconds=prover_latency_seconds,
-                submitted_tx=submitted_tx,
-            )
-            session.add(row)
-            session.commit()
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                row = SettlementRecord(
+                    market_id=market_id,
+                    outcome=outcome,
+                    proof_payload=proof_payload,
+                    prover_latency_seconds=prover_latency_seconds,
+                    submitted_tx=submitted_tx,
+                )
+                session.add(row)
 
     async def record_treasury_snapshot(
         self,
@@ -231,113 +228,80 @@ class HedgerRepository:
         zen_balance: Decimal,
         usdc_balance: Decimal,
     ) -> None:
-        await asyncio.to_thread(
-            self._record_treasury_snapshot_sync,
-            market_id,
-            outcome,
-            stake_zen,
-            refund_zen,
-            rake_zen,
-            payout_profit_usdc,
-            borrowed_usdc,
-            lp_share_usdc,
-            repay_amount_usdc,
-            platform_usdc_revenue,
-            zen_balance,
-            usdc_balance,
-        )
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                row = TreasurySnapshotRecord(
+                    market_id=market_id,
+                    outcome=outcome,
+                    stake_zen=stake_zen,
+                    refund_zen=refund_zen,
+                    rake_zen=rake_zen,
+                    payout_profit_usdc=payout_profit_usdc,
+                    borrowed_usdc=borrowed_usdc,
+                    lp_share_usdc=lp_share_usdc,
+                    repay_amount_usdc=repay_amount_usdc,
+                    platform_usdc_revenue=platform_usdc_revenue,
+                    zen_balance=zen_balance,
+                    usdc_balance=usdc_balance,
+                )
+                session.add(row)
 
-    def _record_treasury_snapshot_sync(
-        self,
-        market_id: str,
-        outcome: str,
-        stake_zen: Decimal,
-        refund_zen: Decimal,
-        rake_zen: Decimal,
-        payout_profit_usdc: Decimal,
-        borrowed_usdc: Decimal,
-        lp_share_usdc: Decimal,
-        repay_amount_usdc: Decimal,
-        platform_usdc_revenue: Decimal,
-        zen_balance: Decimal,
-        usdc_balance: Decimal,
-    ) -> None:
-        with self.SessionLocal() as session:
-            row = TreasurySnapshotRecord(
-                market_id=market_id,
-                outcome=outcome,
-                stake_zen=stake_zen,
-                refund_zen=refund_zen,
-                rake_zen=rake_zen,
-                payout_profit_usdc=payout_profit_usdc,
-                borrowed_usdc=borrowed_usdc,
-                lp_share_usdc=lp_share_usdc,
-                repay_amount_usdc=repay_amount_usdc,
-                platform_usdc_revenue=platform_usdc_revenue,
-                zen_balance=zen_balance,
-                usdc_balance=usdc_balance,
-            )
-            session.add(row)
-            session.commit()
+    async def latest_commit_timestamp(self) -> datetime | None:
+        async with self.SessionLocal() as session:
+            result = await session.execute(select(func.max(CommitRecord.committed_at)))
+            return result.scalar_one_or_none()
 
-    def latest_commit_timestamp(self) -> datetime | None:
-        with self.SessionLocal() as session:
-            result = session.execute(select(func.max(CommitRecord.committed_at))).scalar_one_or_none()
-            return result
-
-    def commit_exists(self, idempotency_key: str) -> bool:
+    async def commit_exists(self, idempotency_key: str) -> bool:
         if not idempotency_key:
             return False
-        with self.SessionLocal() as session:
-            return (
-                session.execute(
-                    select(func.count(CommitRecord.id)).where(CommitRecord.idempotency_key == idempotency_key)
-                ).scalar_one()
-                > 0
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(func.count(CommitRecord.id)).where(CommitRecord.idempotency_key == idempotency_key)
             )
+            count = result.scalar_one() or 0
+            return count > 0
 
-    def get_replay_offset(self, stream_name: str) -> str | None:
-        with self.SessionLocal() as session:
-            row = session.get(HedgerReplayOffset, stream_name)
+    async def get_replay_offset(self, stream_name: str) -> str | None:
+        async with self.SessionLocal() as session:
+            row = await session.get(HedgerReplayOffset, stream_name)
             return row.offset if row else None
 
-    def set_replay_offset(self, stream_name: str, offset: str) -> None:
-        with self.SessionLocal() as session:
-            row = session.get(HedgerReplayOffset, stream_name)
-            if row:
-                row.offset = offset
-                row.updated_at = datetime.now(UTC)
-            else:
-                row = HedgerReplayOffset(stream_name=stream_name, offset=offset)
-                session.add(row)
-            session.commit()
+    async def set_replay_offset(self, stream_name: str, offset: str) -> None:
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                row = await session.get(HedgerReplayOffset, stream_name)
+                if row:
+                    row.offset = offset
+                    row.updated_at = datetime.now(UTC)
+                else:
+                    session.add(HedgerReplayOffset(stream_name=stream_name, offset=offset))
 
-    def get_commits_for_market(self, market_id: str) -> list[CommitRecord]:
-        with self.SessionLocal() as session:
-            rows = session.execute(
+    async def get_commits_for_market(self, market_id: str) -> list[CommitRecord]:
+        async with self.SessionLocal() as session:
+            rows = await session.scalars(
                 select(CommitRecord).where(CommitRecord.market_id == market_id).order_by(CommitRecord.committed_at)
-            ).scalars()
-            return list(rows)
+            )
+            return list(rows.all())
 
-    def mark_market_resolved(self, market_id: str, outcome: str) -> None:
-        with self.SessionLocal() as session:
-            existing = session.get(ResolvedMarketRecord, market_id)
-            if existing:
-                existing.outcome = outcome
-                existing.resolved_at = datetime.now(UTC)
-            else:
-                session.add(ResolvedMarketRecord(market_id=market_id, outcome=outcome))
-            session.commit()
+    async def mark_market_resolved(self, market_id: str, outcome: str) -> None:
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                existing = await session.get(ResolvedMarketRecord, market_id)
+                if existing:
+                    existing.outcome = outcome
+                    existing.resolved_at = datetime.now(UTC)
+                else:
+                    session.add(ResolvedMarketRecord(market_id=market_id, outcome=outcome))
 
-    def is_market_resolved(self, market_id: str) -> bool:
-        with self.SessionLocal() as session:
-            return session.get(ResolvedMarketRecord, market_id) is not None
+    async def is_market_resolved(self, market_id: str) -> bool:
+        async with self.SessionLocal() as session:
+            return await session.get(ResolvedMarketRecord, market_id) is not None
 
-    def load_commit_aggregates(self) -> dict[str, dict]:
+    async def load_commit_aggregates(self) -> dict[str, dict]:
         """Return exposure aggregates per market for restart recovery."""
 
-        with self.SessionLocal() as session:
-            rows = session.execute(
+        async with self.SessionLocal() as session:
+            result = await session.execute(
                 select(
                     CommitRecord.market_id,
                     CommitRecord.direction,
@@ -345,7 +309,8 @@ class HedgerRepository:
                     func.sum(CommitRecord.stake_usd),
                     func.max(CommitRecord.created_at),
                 ).group_by(CommitRecord.market_id, CommitRecord.direction)
-            ).all()
+            )
+            rows = result.all()
 
         aggregates: dict[str, dict] = {}
         for market_id, direction, stake_zen, stake_usd, last_update in rows:
@@ -369,30 +334,32 @@ class HedgerRepository:
                 market["no_usd"] += stake_usd or Decimal("0")
         return aggregates
 
-    def load_hedge_totals(self) -> dict[str, Decimal]:
+    async def load_hedge_totals(self) -> dict[str, Decimal]:
         """Return cumulative hedged USD per market."""
 
-        with self.SessionLocal() as session:
-            rows = session.execute(
+        async with self.SessionLocal() as session:
+            result = await session.execute(
                 select(
                     HedgeActionRecord.market_id,
                     func.sum(HedgeActionRecord.size_usd),
                 ).group_by(HedgeActionRecord.market_id)
-            ).all()
+            )
+            rows = result.all()
         return {market_id: total or Decimal("0") for market_id, total in rows}
 
-    def hedge_breakdown(self, market_id: str) -> dict[str, Decimal]:
+    async def hedge_breakdown(self, market_id: str) -> dict[str, Decimal]:
         """Return borrow vs unwind totals for a market."""
 
-        with self.SessionLocal() as session:
-            rows = session.execute(
+        async with self.SessionLocal() as session:
+            result = await session.execute(
                 select(
                     HedgeActionRecord.is_unwind,
                     func.sum(HedgeActionRecord.size_usd),
                 )
                 .where(HedgeActionRecord.market_id == market_id)
                 .group_by(HedgeActionRecord.is_unwind)
-            ).all()
+            )
+            rows = result.all()
         borrow = Decimal("0")
         unwind = Decimal("0")
         for is_unwind, total in rows:
@@ -402,13 +369,14 @@ class HedgerRepository:
                 borrow += total or Decimal("0")
         return {"borrowed": borrow, "unwound": unwind}
 
-    def hedge_payloads(self, market_id: str) -> list[dict]:
-        with self.SessionLocal() as session:
-            rows = (
-                session.query(HedgeActionRecord.response_payload)
-                .filter(HedgeActionRecord.market_id == market_id, HedgeActionRecord.response_payload.isnot(None))
-                .all()
+    async def hedge_payloads(self, market_id: str) -> list[dict]:
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(HedgeActionRecord.response_payload).where(
+                    HedgeActionRecord.market_id == market_id, HedgeActionRecord.response_payload.isnot(None)
+                )
             )
+            rows = result.all()
         payloads: list[dict] = []
         for (payload,) in rows:
             if isinstance(payload, dict):

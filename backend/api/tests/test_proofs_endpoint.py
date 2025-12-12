@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from app import models
 from shared import models as shared_models
-from shared.cache import set_json
+from shared.cache_async import set_json
 from shared.cache_keys import proof_receipt_cache_key
 
 
@@ -66,7 +67,9 @@ def test_list_proof_receipts_returns_records(client, db_session):
         "public_signals": receipt.public_signals,
         "generated_at": receipt.generated_at.isoformat(),
     }
-    set_json(client.app.cache_client, proof_receipt_cache_key(market.condition_id), cache_payload, ttl_seconds=60)
+    asyncio.run(
+        set_json(client.app.cache_client, proof_receipt_cache_key(market.condition_id), cache_payload, ttl_seconds=60)
+    )
 
     response = client.get("/proofs?limit=5&offset=0")
 
