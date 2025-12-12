@@ -35,7 +35,6 @@ pushd "${CONTRACTS_DIR}" >/dev/null
 
 # Keep Forge offline and deterministic.
 export FOUNDRY_SIG_PROVIDER=none
-export FOUNDRY_OFFLINE=true
 export HTTP_PROXY=
 export HTTPS_PROXY=
 export ALL_PROXY=

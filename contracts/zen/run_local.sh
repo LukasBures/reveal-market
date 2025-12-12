@@ -49,8 +49,6 @@ export ALL_PROXY=
 
 ensure_deps
 
-export FOUNDRY_OFFLINE=true
-
 echo "=============================="
 echo "🏗️  STEP 1: Building contracts"
 echo "=============================="
