@@ -555,16 +555,6 @@ export function ConnectWalletButton() {
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          {chain?.id !== defaultChain.id && (
-                            <button
-                              type="button"
-                              onClick={handleSwitchChain}
-                              disabled={!switchChain || isSwitching}
-                              className="rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/80 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {`Switch to ${defaultChain.name}`}
-                            </button>
-                          )}
                           <button
                             type="button"
                             onClick={() => disconnect()}

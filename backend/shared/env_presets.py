@@ -20,6 +20,9 @@ PRESETS: dict[str, dict[str, object]] = {
             "127.0.0.1:8000",
             "api",
             "api:8000",
+            "revealmarket.xyz",
+            "api.revealmarket.xyz",
+            "stream.revealmarket.xyz",
             "testserver",
         ],
         "api_cors_origins": [

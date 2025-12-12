@@ -179,9 +179,10 @@ describe("ConnectWalletButton", () => {
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
 
-    expect(
-      screen.queryByRole("button", { name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i") }),
-    ).not.toBeInTheDocument();
+    const switchButton = screen.getByRole("button", {
+      name: new RegExp(`switch to ${hoistedDefaults.defaultChain.name}`, "i"),
+    });
+    expect(switchButton).toBeDisabled();
   });
 
   it("surfaces a wrong network prompt when switching is unavailable", () => {

@@ -143,9 +143,6 @@ export function MarketDetailMetadata({ market }: Props) {
             mono: true,
             href: explorerHref("address", market.marketAddress),
           })}
-        {market.conditionId && renderItem({ label: "Condition ID", value: market.conditionId, mono: true })}
-        {market.questionId && renderItem({ label: "Question ID", value: market.questionId, mono: true })}
-        {sourceSlug && renderItem({ label: "Source slug", value: sourceSlug, mono: true })}
         {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
         {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
         {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}

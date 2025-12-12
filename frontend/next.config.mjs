@@ -8,6 +8,9 @@ const DEFAULT_STREAMER_BASE = IS_PROD_MODE ? "https://stream.revealmarket.xyz" :
 const API_BASE = DEFAULT_API_BASE.replace(/\/$/, "");
 const STREAMER_BASE = DEFAULT_STREAMER_BASE.replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
+const PROD_API_BASE = "https://api.revealmarket.xyz";
+const PROD_STREAMER_BASE = "https://stream.revealmarket.xyz";
+const PROD_STREAMER_WS = PROD_STREAMER_BASE.replace(/^http/i, "ws");
 const DISABLE_MINIFY = process.env.NEXT_DISABLE_MINIFY === "true";
 
 const GA_ORIGINS = [
@@ -75,7 +78,17 @@ const nextConfig = (phase) => {
     scriptSrc.push("'unsafe-eval'");
   }
 
-  const connectSrc = ["'self'", API_BASE, STREAMER_BASE, STREAMER_WS, ...WALLET_PROVIDER_ORIGINS, ...WALLET_PROVIDER_WS];
+  const connectSrc = [
+    "'self'",
+    API_BASE,
+    STREAMER_BASE,
+    STREAMER_WS,
+    PROD_API_BASE,
+    PROD_STREAMER_BASE,
+    PROD_STREAMER_WS,
+    ...WALLET_PROVIDER_ORIGINS,
+    ...WALLET_PROVIDER_WS,
+  ];
   if (isDev) {
     connectSrc.push("http://localhost:8000", "http://localhost:8100", "ws://localhost:8100");
   }

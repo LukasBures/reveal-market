@@ -43,12 +43,11 @@ import { resolveUrlConfig } from "@/lib/env-presets";
 const FX_DEFAULT_PATH = "/fx/zen-usd";
 
 const urls = resolveUrlConfig();
-const apiBase = urls.apiBaseInternal || urls.apiBaseUrl;
+const isServer = typeof window === "undefined";
+const apiBase = isServer && urls.apiBaseInternal ? urls.apiBaseInternal : urls.apiBaseUrl;
 const streamerBasePublic = urls.streamerPublic;
 const streamerBaseInternal = urls.streamerInternal;
 const offlineApiBase = "";
-
-const isServer = typeof window === "undefined";
 const isBrowser = !isServer;
 const isHttpsPage = typeof window !== "undefined" && window.location?.protocol === "https:";
 const publicStreamerIsHttp = streamerBasePublic.startsWith("http://");

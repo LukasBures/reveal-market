@@ -53,7 +53,7 @@ export function resolveUrlConfig() {
   const preset = PRESETS[resolveMode()] ?? PRESETS.local;
   const runningInDocker = (process.env.RUNNING_IN_DOCKER ?? "").toLowerCase() === "true";
   const apiBaseDefault = runningInDocker && preset.apiInternal ? preset.apiInternal : preset.apiBase;
-  const apiBaseUrl = coalesceUrl(process.env.RM_API_BASE_URL, apiBaseDefault, "API base URL");
+  const apiBaseUrl = coalesceUrl(process.env.RM_API_BASE_URL, preset.apiBase, "API base URL");
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
   const siteUrl = coalesceUrl(process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
   const streamerPublic = coalesceUrl(undefined, preset.streamerPublic, "Streamer URL");
