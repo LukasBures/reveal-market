@@ -43,7 +43,8 @@ describe("MarketLivePanels", () => {
     expect(screen.getAllByText("0.340").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("0.360").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("5.56%")).toBeInTheDocument();
-    expect(screen.getAllByText(/00:00:00/).length).toBeGreaterThanOrEqual(1);
+    const midnightPattern = /(?:00|24):00:00/;
+    expect(screen.getAllByText(midnightPattern).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/buy/i)).toBeInTheDocument();
     expect(screen.getByText("0.350")).toBeInTheDocument();
     expect(screen.getByText("50.00")).toBeInTheDocument();

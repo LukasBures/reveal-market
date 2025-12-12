@@ -48,6 +48,7 @@ run_py_tests() {
 
   local workers="${PYTEST_WORKER_COUNT:-$(calc_pytest_workers)}"
   local -a pytest_args=()
+  local plugin_autoload_disabled="${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}"
 
   local venv_path="${ROOT_DIR}/.venv"
   local python_bin="${venv_path}/bin/python"
@@ -66,6 +67,10 @@ run_py_tests() {
     "${ruff_bin}" check app tests
   fi
 
+  if [[ -n "${plugin_autoload_disabled}" && "${plugin_autoload_disabled}" != "0" ]]; then
+    pytest_args+=("-p" "pytest_asyncio.plugin")
+  fi
+
   if [[ -n "${workers}" && "${workers}" =~ ^[0-9]+$ && "${workers}" -gt 1 ]]; then
     XDIST_AVAILABLE=$("${python_bin}" - <<'PY'
 import importlib.util
@@ -73,6 +78,9 @@ print("yes" if importlib.util.find_spec("xdist") or importlib.util.find_spec("py
 PY
 )
     if [[ "$XDIST_AVAILABLE" == "yes" ]]; then
+      if [[ -n "${plugin_autoload_disabled}" && "${plugin_autoload_disabled}" != "0" ]]; then
+        pytest_args+=("-p" "xdist.plugin")
+      fi
       pytest_args+=("-n" "${workers}")
     else
       log_step "pytest-xdist not installed; running single-worker (set PYTEST_WORKER_COUNT=1 or install xdist)"

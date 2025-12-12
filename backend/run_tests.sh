@@ -79,6 +79,16 @@ run_py_tests() {
 
 run_py_tests "${REPO_ROOT}/backend/api"
 
+run_openapi_snapshot() {
+  log_step "OpenAPI snapshot check"
+  (
+    activate_venv "${REPO_ROOT}/backend/api"
+    pushd "${REPO_ROOT}" >/dev/null
+    python -m pytest backend/api/tests/test_openapi_snapshot.py
+    popd >/dev/null
+  )
+}
+
 run_shared_tests() {
   local shared_tests_path="backend/shared/tests"
   log_step "Running pytest for shared modules"
@@ -102,6 +112,23 @@ run_shared_tests() {
 
 run_shared_tests
 
+run_mypy() {
+  local service_dir="$1"
+  shift
+  local -a targets=("$@")
+  log_step "Running mypy for ${targets[*]}"
+  (
+    activate_venv "${service_dir}"
+    pushd "${REPO_ROOT}" >/dev/null
+    python -m mypy --config-file pyproject.toml "${targets[@]}"
+    popd >/dev/null
+  )
+}
+
+run_openapi_snapshot
+run_mypy "${REPO_ROOT}/backend/api" backend/api/app backend/shared
+
 run_py_tests "${REPO_ROOT}/backend/worker"
+run_mypy "${REPO_ROOT}/backend/worker" backend/worker/app
 
 log_step "Backend tests completed successfully"

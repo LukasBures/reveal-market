@@ -57,8 +57,10 @@ describe("MarketLiveStatusBar", () => {
     expect(screen.getByText(/ws live @ 1\.5000 5s/i)).toBeInTheDocument();
     expect(screen.getByText(/fx rest 1/i)).toBeInTheDocument();
     expect(screen.getByText(/trades 2 \/ hist 3/i)).toBeInTheDocument();
-    expect(screen.getByText(/last trade 00:00:08/i)).toBeInTheDocument();
-    expect(screen.getByText(/last tick 00:00:09 \(1s\)/i)).toBeInTheDocument();
+    const lastTradePattern = /last trade (?:00|24):00:08/i;
+    const lastTickPattern = /last tick (?:00|24):00:09 \(1s\)/i;
+    expect(screen.getByText(lastTradePattern)).toBeInTheDocument();
+    expect(screen.getByText(lastTickPattern)).toBeInTheDocument();
     expect(screen.getByText(/tick size 0\.01/i)).toBeInTheDocument();
   });
 

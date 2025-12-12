@@ -83,6 +83,9 @@ export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
 log_step "Running frontend lint"
 npm run lint
 
+log_step "Running frontend unit tests"
+npm run test
+
 log_step "Running frontend build"
 npm run build
 

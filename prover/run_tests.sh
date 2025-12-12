@@ -19,4 +19,15 @@ log_step "Running Go tests for prover"
 ./check_artifacts.sh
 go test "$@" -v ./...
 
+log_step "gofmt check"
+CHANGED=$(gofmt -l .)
+if [ -n "$CHANGED" ]; then
+  echo "gofmt would reformat:"
+  echo "$CHANGED"
+  exit 1
+fi
+
+log_step "go vet"
+go vet -v ./...
+
 log_step "Prover tests completed successfully"

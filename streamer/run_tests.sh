@@ -26,9 +26,21 @@ if (major, minor) != (3, 12):
 PY
 
 # Install dev dependencies if missing.
-if ! "$PYTHON_BIN" -c "import pytest, pytest_asyncio, prometheus_client, xdist, websocket" >/dev/null 2>&1; then
+if ! "$PYTHON_BIN" -c "import pytest, pytest_asyncio, prometheus_client, xdist, websocket, mypy" >/dev/null 2>&1; then
   "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
   "$PYTHON_BIN" -m pip install --no-cache-dir -e .[dev]
+fi
+
+CONFIG_PATH="${ROOT_DIR}/../pyproject.toml"
+TARGET_PATH="${ROOT_DIR}/app"
+
+echo "Running mypy (streamer)"
+"$PYTHON_BIN" -m mypy --config-file "${CONFIG_PATH}" "${TARGET_PATH}"
+
+PYTEST_ARGS=()
+# When plugin autoloading is disabled (e.g., in CI), explicitly enable the plugins we rely on.
+if [[ -n "${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}" ]]; then
+  PYTEST_ARGS+=(-p pytest_asyncio)
 fi
 
 WORKERS="${PYTEST_WORKER_COUNT:-4}"
@@ -39,7 +51,10 @@ PY
 )
 
 if [[ "$WORKERS" =~ ^[0-9]+$ && "$WORKERS" -gt 1 && "$XDIST_AVAILABLE" == "yes" ]]; then
-  exec "$PYTHON_BIN" -m pytest -n "$WORKERS"
+  if [[ -n "${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}" ]]; then
+    PYTEST_ARGS+=(-p pytest_xdist)
+  fi
+  exec "$PYTHON_BIN" -m pytest "${PYTEST_ARGS[@]}" -n "$WORKERS"
 fi
 
-exec "$PYTHON_BIN" -m pytest
+exec "$PYTHON_BIN" -m pytest "${PYTEST_ARGS[@]}"
