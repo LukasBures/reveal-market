@@ -109,7 +109,7 @@ describe("MarketCard", () => {
         }}
       />,
     );
-    expect(screen.getByText(/24h vol/i)).toBeInTheDocument();
+    expect(screen.getByText(/volume/i)).toBeInTheDocument();
     expect(screen.getByText("$100K")).toBeInTheDocument();
     expect(screen.getByText(/Liquidity/i)).toBeInTheDocument();
     expect(screen.getByText("$250K")).toBeInTheDocument();

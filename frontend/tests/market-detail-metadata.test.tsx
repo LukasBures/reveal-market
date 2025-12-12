@@ -16,8 +16,6 @@ const baseMarket: MarketDetail = {
   outcomePrices: [0.45, 0.55],
   imageUrl: null,
   slug: "fed-cut-rates",
-  conditionId: "0xabc",
-  questionId: "0xdef",
   umaStatus: "resolved",
   oracle: "UMA",
   marketAddress: "0x123",
@@ -42,13 +40,11 @@ describe("MarketDetailMetadata", () => {
     expect(screen.getByText("#macro")).toBeInTheDocument();
   });
 
-  it("renders condition/question IDs and links addresses to the explorer", () => {
+  it("links addresses to the explorer", () => {
     process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://explorer.testnet/";
 
     render(<MarketDetailMetadata market={baseMarket} />);
 
-    expect(screen.getByText("0xabc")).toBeInTheDocument();
-    expect(screen.getByText("0xdef")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: baseMarket.marketAddress! })).toHaveAttribute(
       "href",
       "https://explorer.testnet/address/0x123",
@@ -56,14 +52,13 @@ describe("MarketDetailMetadata", () => {
     expect(screen.getByRole("button", { name: "Copy Market address" })).toBeInTheDocument();
   });
 
-  it("prefers gamma slug and renders CLOB metadata plus rake", () => {
+  it("renders CLOB metadata plus rake", () => {
     const market: MarketDetail = {
       ...baseMarket,
       rakeBps: 149.6,
       extraData: {
         ...(baseMarket.extraData ?? {}),
         gamma: {
-          slug: "gamma-slug",
           clobTokenIds: [111, "222"],
           clobPairId: "pair-999",
         },
@@ -72,7 +67,6 @@ describe("MarketDetailMetadata", () => {
 
     render(<MarketDetailMetadata market={market} />);
 
-    expect(screen.getByText("gamma-slug")).toBeInTheDocument();
     expect(screen.getByText("pair-999")).toBeInTheDocument();
     expect(screen.getByText("111, 222")).toBeInTheDocument();
     expect(screen.getByText("150 bps")).toBeInTheDocument();

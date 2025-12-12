@@ -66,13 +66,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock') }}
-      - name: Sync backend dependencies
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+      - name: Sync dependencies
         run: |
+          uv sync --frozen --no-install-project
           uv sync --project backend/api --extra dev --no-install-project --frozen
           uv sync --project backend/worker --extra dev --no-install-project --frozen
           uv sync --project streamer --extra dev --no-install-project --frozen
-          uv sync --project relayer --group dev --no-install-project
+          uv sync --project relayer --group dev --no-install-project --frozen
+          uv sync --project hedger --extra dev --no-install-project --frozen
       - name: Pre-commit checks
         run: uv run pre-commit run --all-files
 
@@ -94,7 +98,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Sync API dependencies
         run: uv sync --project backend/api --extra dev --no-install-project --frozen
@@ -102,6 +108,7 @@ jobs:
       - name: Run API tests
         env:
           PYTEST_WORKER_COUNT: 4
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
         working-directory: backend/api
         run: uv run --project . -- python -m pytest -n "${PYTEST_WORKER_COUNT}"
 
@@ -109,6 +116,7 @@ jobs:
         env:
           PYTHONPATH: backend
           PYTEST_WORKER_COUNT: 4
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
         run: uv run --project backend/api -- python -m pytest -n "${PYTEST_WORKER_COUNT}" backend/shared/tests
 
       - name: Type check API + shared (mypy)
@@ -135,7 +143,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('backend/worker/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Sync worker dependencies
         run: uv sync --project backend/worker --extra dev --no-install-project --frozen
@@ -143,6 +153,7 @@ jobs:
       - name: Run worker tests
         env:
           PYTEST_WORKER_COUNT: 4
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
         working-directory: backend/worker
         run: uv run --project . -- python -m pytest -n "${PYTEST_WORKER_COUNT}"
 
@@ -168,7 +179,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('streamer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Sync streamer dependencies
         run: |
@@ -180,6 +193,7 @@ jobs:
       - name: Run streamer tests
         env:
           PYTEST_WORKER_COUNT: 4
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
         run: ./streamer/run_tests.sh
 
   relayer:
@@ -200,11 +214,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('relayer/uv.lock') }}
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Sync relayer dependencies
         run: |
-          uv sync --project relayer --group dev --no-install-project
+          uv sync --project relayer --group dev --no-install-project --frozen
 
       - name: Relayer tests
         env:
@@ -212,6 +228,38 @@ jobs:
         run: |
           cd relayer
           PYTHONPATH=src uv run pytest
+
+  hedger:
+    needs: precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Sync hedger dependencies
+        run: uv sync --project hedger --extra dev --no-install-project --frozen
+
+      - name: Hedger tests
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+          PYTEST_WORKER_COUNT: 4
+        working-directory: hedger
+        run: uv run --project . -- ./run_tests.sh
 
   contracts-polygon:
     needs: precommit
@@ -258,8 +306,6 @@ jobs:
     env:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:1337
       RM_API_BASE_URL: http://localhost:1337
-      RM_OFFLINE_API_BASE_URL: http://localhost:1337
-      RM_FORCE_OFFLINE: "true"
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'test-wc-project-id' }}
 
     steps:
@@ -400,6 +446,7 @@ jobs:
       - backend-api
       - backend-worker
       - relayer
+      - hedger
       - streamer
       - contracts-polygon
       - contracts-zen
