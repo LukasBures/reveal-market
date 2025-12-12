@@ -175,11 +175,14 @@ class Settings(BaseSettings):
         """Return an async-compatible database URL, deriving from the sync URL when needed."""
 
         if self.database_async_url:
-            return self.database_async_url
+            async_url = make_url(self.database_async_url)
+            return async_url.render_as_string(hide_password=False)
         url = make_url(self.database_url)
         if url.drivername.startswith("postgresql"):
             url = url.set(drivername="postgresql+asyncpg")
-        return str(url)
+        elif url.drivername.startswith("sqlite") and "+aiosqlite" not in url.drivername:
+            url = url.set(drivername="sqlite+aiosqlite")
+        return url.render_as_string(hide_password=False)
 
 
 @lru_cache(maxsize=1)

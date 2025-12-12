@@ -45,10 +45,12 @@ RUN apt-get update -qq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+RUN id -u "${APP_USER}" >/dev/null 2>&1 || (groupadd -r "${APP_GROUP}" && useradd --create-home -r -g "${APP_GROUP}" "${APP_USER}")
+
 COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src
 
-RUN id -u "${APP_USER}" >/dev/null 2>&1 || (groupadd -r "${APP_GROUP}" && useradd --create-home -r -g "${APP_GROUP}" "${APP_USER}")
+RUN chown -R ${APP_USER}:${APP_GROUP} /app
 USER ${APP_USER}
 
 CMD ["/bin/sh", "-c", "/app/.venv/bin/python -m uvicorn relayer.main:app --host \"${RELAYER_HOST}\" --port \"${RELAYER_PORT}\""]

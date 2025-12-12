@@ -32,6 +32,29 @@ def test_fx_priority_skips_lower_sources():
     assert state.fx_quote and state.fx_quote.raw_zen_usd == Decimal("10")
 
 
+def test_fx_updates_refresh_same_source_timestamp():
+    state = StreamState(Settings(fx_max_age_seconds=60))
+    first = state.register_fx(Decimal("8.5"), source="binance_ws")
+    assert first is not None
+    first_ts = state.fx_last_update
+    # Simulate an aging quote that is still within the freshness window.
+    staleish_ts = (first_ts or datetime.now(UTC)) - timedelta(seconds=30)
+    state.fx_quote = FxQuote(
+        zen_usd=first.zen_usd,
+        raw_zen_usd=first.raw_zen_usd,
+        fetched_at=staleish_ts,
+        stale=False,
+        source="binance_ws",
+    )
+    state.fx_last_update = staleish_ts
+    state.fx_last_source = "binance_ws"
+
+    refreshed = state.register_fx(Decimal("8.6"), source="binance_ws")
+    assert refreshed is not None
+    assert state.fx_last_update and first_ts and state.fx_last_update > first_ts
+    assert state.fx_quote and state.fx_quote.stale is False
+
+
 @pytest.mark.asyncio
 async def test_price_streamer_rest_refresh_when_ws_stale():
     settings = Settings(fx_ws_stale_ttl_seconds=3, fx_rest_interval_seconds=5, fx_max_age_seconds=5)

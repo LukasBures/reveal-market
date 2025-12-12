@@ -378,7 +378,7 @@ class StreamState:
         digest = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
         return digest
 
-    def _update_fx(self, quote: FxQuote, *, reason: str | None = None) -> None:
+    def _update_fx(self, quote: FxQuote, *, reason: str | None = None, quiet: bool = False) -> None:
         prev_source = self.fx_last_source or "unknown"
         self.fx_quote = quote
         self.fx_last_update = quote.fetched_at
@@ -390,7 +390,8 @@ class StreamState:
         if quote.source in self._WS_SOURCES:
             self.fx_ws_connected = True
             self.fx_ws_last_update = quote.fetched_at
-        logger.info(
+        log_fn = logger.debug if quiet else logger.info
+        log_fn(
             "FX source updated",
             extra={
                 "event": "fx.source.update",
@@ -484,19 +485,23 @@ class StreamState:
         last_source = self.fx_last_source if isinstance(self.fx_last_source, str) else ""
         current_priority = self._SOURCE_PRIORITY.get(last_source, 99)
         new_priority = self._SOURCE_PRIORITY.get(source, 99)
-        if self.fx_quote and not is_current_stale and not self.fx_quote.stale and current_priority <= new_priority:
-            logger.debug(
-                "Ignoring FX update due to priority",
-                extra={
-                    "event": "fx.update.ignored",
-                    "current_source": self.fx_last_source,
-                    "incoming_source": source,
-                    "reason": reason or "priority",
-                },
-            )
-            return None
+        quiet_update = False
+        if self.fx_quote and not is_current_stale and not self.fx_quote.stale:
+            if last_source == source:
+                quiet_update = True
+            elif current_priority < new_priority:
+                logger.debug(
+                    "Ignoring FX update due to priority",
+                    extra={
+                        "event": "fx.update.ignored",
+                        "current_source": self.fx_last_source,
+                        "incoming_source": source,
+                        "reason": reason or "priority",
+                    },
+                )
+                return None
         quote = FxQuote(zen_usd=adjusted_price, raw_zen_usd=price, fetched_at=now, stale=False, source=source)
-        self._update_fx(quote, reason=reason)
+        self._update_fx(quote, reason=reason, quiet=quiet_update)
         self._fx_rejection_count = 0
         return quote
 
@@ -546,7 +551,9 @@ async def iter_ws(
             ) as ws:
                 yield _AsyncWebSocket(ws, timeout=read_timeout, name=name, url=ws_url)
         except InvalidStatus as exc:  # pragma: no cover - reconnection path
-            status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
+            status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
+                exc, "status_code", None
+            )
             logger.warning(
                 "ws dropped; reconnecting",
                 extra={"event": f"{name}.ws.reconnect", "error": f"http_{status_code}", "url": ws_url},

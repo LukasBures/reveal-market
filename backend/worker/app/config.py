@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     app_name: str = Field(default="Reveal Market Worker")
     environment: str = Field(default="development")
     database_url: str = Field(default="postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market")
+    database_async_url: str | None = Field(
+        default=None,
+        description="Optional async driver URL; defaults to database_url converted to asyncpg",
+    )
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
     database_pool_timeout: float = Field(default=10.0, gt=0)
@@ -177,10 +181,15 @@ class Settings(BaseSettings):
     def resolved_async_database_url(self) -> str:
         """Return an async-compatible database URL, deriving from the sync URL when needed."""
 
+        if self.database_async_url:
+            async_url = make_url(self.database_async_url)
+            return async_url.render_as_string(hide_password=False)
         url = make_url(self.database_url)
         if url.drivername.startswith("postgresql"):
             url = url.set(drivername="postgresql+asyncpg")
-        return str(url)
+        elif url.drivername.startswith("sqlite") and "+aiosqlite" not in url.drivername:
+            url = url.set(drivername="sqlite+aiosqlite")
+        return url.render_as_string(hide_password=False)
 
 
 @lru_cache(maxsize=1)
