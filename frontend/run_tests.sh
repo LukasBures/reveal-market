@@ -85,7 +85,8 @@ npm run lint
 
 TEMP_LOCALSTORAGE_FILE="$(mktemp -t vitest-localstorage-XXXXXX)"
 # Preserve existing NODE_OPTIONS while ensuring localstorage flag has a real path.
-export NODE_OPTIONS="${NODE_OPTIONS//--localstorage-file/} --localstorage-file=${TEMP_LOCALSTORAGE_FILE}"
+EXISTING_NODE_OPTIONS="${NODE_OPTIONS:-}"
+export NODE_OPTIONS="${EXISTING_NODE_OPTIONS//--localstorage-file/} --localstorage-file=${TEMP_LOCALSTORAGE_FILE}"
 
 log_step "Running frontend unit tests"
 npm run test
