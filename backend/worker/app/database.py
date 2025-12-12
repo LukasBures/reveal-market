@@ -11,7 +11,8 @@ settings = get_settings()
 engine = create_async_engine(
     settings.resolved_async_database_url,
     future=True,
-    echo=settings.environment.lower() in {"dev", "development", "local"},
+    # Disable SQL echo to keep container logs concise; structured events are emitted separately.
+    echo=False,
     pool_pre_ping=True,
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
