@@ -4,8 +4,8 @@ import logging
 from dataclasses import dataclass
 
 from redis.asyncio import Redis
-from shared import repository as shared_repository
-from shared.cache_async import invalidate_tag
+from shared import cache_async as shared_cache
+from shared import repository_async as shared_repository
 from shared.logging import log_event
 from shared.migrations import get_current_revision
 from shared.migrations import run_migrations as apply_migrations
@@ -67,7 +67,7 @@ async def ensure_schema() -> SchemaSyncResult:
         )
     else:
         async with session_scope() as session:
-            previous_revision = await session.run_sync(shared_repository.record_schema_version, revision)
+            previous_revision = await shared_repository.record_schema_version(session, revision)
         result.current_revision = revision
         result.previous_revision = previous_revision
         result.changed = previous_revision != revision
@@ -115,7 +115,7 @@ async def propagate_schema_revision(redis_client: Redis | None, state: SchemaSyn
         if previous_tag:
             tags_to_invalidate.append(previous_tag)
         for tag in tags_to_invalidate:
-            invalidated = await invalidate_tag(redis_client, tag)
+            invalidated = await shared_cache.invalidate_tag(redis_client, tag)
             log_event(
                 logger,
                 logging.DEBUG,

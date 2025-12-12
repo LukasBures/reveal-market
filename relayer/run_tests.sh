@@ -17,4 +17,5 @@ source "${ACTIVATE_PATH}"
 export PYTHONPATH=src
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
-python -m pytest "$@"
+# Explicitly load pytest-asyncio so async tests run even without plugin autoload tweaks.
+python -m pytest -p pytest_asyncio.plugin "$@"

@@ -15,15 +15,15 @@ class FakeService:
         self.escrow = type("escrow", (), {"address": "0xescrow"})
         self.health_called = False
 
-    def commit(self, payload):
+    async def commit(self, payload):
         self.commits.append(payload)
         return {"txHash": "0xcommit", "status": 1}
 
-    def claim(self, payload):
+    async def claim(self, payload):
         self.claims.append(payload)
         return {"txHash": "0xclaim", "status": 1}
 
-    def health(self):
+    async def health(self):
         self.health_called = True
         return {
             "status": "ok",

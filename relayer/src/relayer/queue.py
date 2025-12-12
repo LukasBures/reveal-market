@@ -198,8 +198,8 @@ class TxQueue:
             row_dict["attempts"] = attempts
             return row_dict
 
-    def _process_job_sync(self, job_id: int | None = None) -> dict[str, Any]:
-        row = self._reserve_job_sync(job_id)
+    async def process_job(self, job_id: int | None = None) -> dict[str, Any]:
+        row = await asyncio.to_thread(self._reserve_job_sync, job_id)
         if row is None:
             if job_id is None:
                 return {"status": "empty"}
@@ -209,12 +209,20 @@ class TxQueue:
         payload: dict[str, Any] = json.loads(row["payload"])
         nonce = row.get("nonce")
         bump_factor = (1 + self.fee_bump_percent) ** max(0, attempts - 1)
+        logger.info(
+            "queue.job.start",
+            job_id=row["id"],
+            action=row["action"],
+            attempts=attempts,
+            bump_factor=round(bump_factor, 4),
+            nonce_override=nonce,
+        )
 
         try:
             if row["action"] == "commit":
-                result = self.service.commit(payload, nonce_override=nonce, bump_factor=bump_factor)
+                result = await self.service.commit(payload, nonce_override=nonce, bump_factor=bump_factor)
             elif row["action"] == "claim":
-                result = self.service.claim(payload, nonce_override=nonce, bump_factor=bump_factor)
+                result = await self.service.claim(payload, nonce_override=nonce, bump_factor=bump_factor)
             else:
                 raise RuntimeError(f"unknown action {row['action']}")
 
@@ -222,18 +230,33 @@ class TxQueue:
             tx_hash = cast(str | None, result.get("txHash"))
             nonce_used_raw = result.get("nonce", nonce)
             nonce_used = int(nonce_used_raw) if nonce_used_raw is not None else None
-            self._mark_complete(job_id, tx_hash, nonce_used)
+            await asyncio.to_thread(self._mark_complete, job_id, tx_hash, nonce_used)
             QUEUE_OUTCOMES.labels(action=row["action"], status="succeeded").inc()
+            logger.info(
+                "queue.job.succeeded",
+                job_id=job_id,
+                action=row["action"],
+                tx_hash=tx_hash,
+                nonce=nonce_used,
+                attempts=attempts,
+            )
             return {"jobId": job_id, "status": "succeeded", "txHash": tx_hash, "nonce": nonce_used}
         except (TxSendError, Web3Exception, ValueError, RuntimeError) as err:
             nonce_to_store = nonce
             if isinstance(err, TxSendError) and err.nonce is not None:
                 nonce_to_store = err.nonce
             next_status = "pending" if attempts < self.max_attempts else "deadletter"
-            self._mark_failure(row["id"], next_status, attempts, str(err), nonce_to_store)
+            await asyncio.to_thread(self._mark_failure, row["id"], next_status, attempts, str(err), nonce_to_store)
             QUEUE_OUTCOMES.labels(action=row["action"], status=next_status).inc()
             if next_status == "deadletter":
-                logger.error("queue.deadletter", job_id=row["id"], action=row["action"], error=str(err))
+                logger.error(
+                    "queue.deadletter",
+                    job_id=row["id"],
+                    action=row["action"],
+                    attempts=attempts,
+                    error=str(err),
+                    nonce=nonce_to_store,
+                )
             else:
                 logger.warning(
                     "queue.retry_scheduled",
@@ -241,11 +264,10 @@ class TxQueue:
                     action=row["action"],
                     attempts=attempts,
                     error=str(err),
+                    nonce=nonce_to_store,
+                    next_status=next_status,
                 )
             return {"jobId": row["id"], "status": next_status, "nonce": nonce_to_store, "error": str(err)}
-
-    async def process_job(self, job_id: int | None = None) -> dict[str, Any]:
-        return await asyncio.to_thread(self._process_job_sync, job_id)
 
     def _mark_complete(self, job_id: int, tx_hash: str | None, nonce: int | None) -> None:
         now = int(time.time())
@@ -367,7 +389,7 @@ class TxQueue:
                     )
 
         await asyncio.to_thread(_replay)
-        self._update_depth()
+        await asyncio.to_thread(self._update_depth)
         return {"jobId": job_id, "status": "pending"}
 
     async def purge_job(self, job_id: int) -> dict[str, Any]:
@@ -388,5 +410,5 @@ class TxQueue:
                     conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
 
         await asyncio.to_thread(_purge)
-        self._update_depth()
+        await asyncio.to_thread(self._update_depth)
         return {"jobId": job_id, "status": "purged"}

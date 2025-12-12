@@ -8,22 +8,23 @@ from typing import Any
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
 from shared import models as shared_models
+from shared import repository_async as shared_repository
 from shared.cache_keys import proof_receipt_cache_key
 from shared.logging import log_event
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import runtime
 from .database import session_scope
 from .market_sync import SyncSummary
 from .polymarket import MarketPayload
-from .proof_builder import SettlementDataMissingError, build_prover_payload
+from .proof_builder import SettlementDataMissingError, build_prover_payload_async
 from .prover_client import ProverError
 
 logger = runtime.logger
 
 
-def _persist_settlement_snapshot(session: Session, market_id: int, snapshot: dict[str, Any]) -> None:
+async def _persist_settlement_snapshot(session: AsyncSession, market_id: int, snapshot: dict[str, Any]) -> None:
     """Write settlement + commitment data to the ledger tables for durability."""
 
     def _as_int(value: Any) -> int | None:
@@ -45,16 +46,12 @@ def _persist_settlement_snapshot(session: Session, market_id: int, snapshot: dic
     }
     settlement_payload = {k: v for k, v in settlement_fields.items() if v not in (None, "")}
     if settlement_payload:
-        from shared import repository as shared_repository
-
-        shared_repository.upsert_settlement_snapshot(session, market_id, settlement_payload)
+        await shared_repository.upsert_settlement_snapshot(session, market_id, settlement_payload)
 
     tickets = snapshot.get("tickets") or []
     if tickets:
         try:
-            from shared import repository as shared_repository
-
-            shared_repository.record_commitments(session, market_id, tickets)
+            await shared_repository.record_commitments(session, market_id, tickets)
         except Exception as exc:  # pragma: no cover - durability best-effort
             log_event(
                 logger,
@@ -191,8 +188,8 @@ async def maybe_generate_settlement_proof(
                     normalized_condition = record_condition.lower()
                 if market_address is None:
                     market_address = getattr(market_record, "market_address", None)
-            payload = await session.run_sync(build_prover_payload, numeric_market_id)
-            await session.run_sync(_persist_settlement_snapshot, numeric_market_id, payload)
+            payload = await build_prover_payload_async(session, numeric_market_id)
+            await _persist_settlement_snapshot(session, numeric_market_id, payload)
             persisted_snapshot = True
             settlement_row = (
                 await session.execute(
@@ -219,7 +216,7 @@ async def maybe_generate_settlement_proof(
     if payload is not None and numeric_market_id is not None and not persisted_snapshot:
         try:
             async with session_scope() as session:
-                await session.run_sync(_persist_settlement_snapshot, numeric_market_id, payload)
+                await _persist_settlement_snapshot(session, numeric_market_id, payload)
                 settlement_row = (
                     await session.execute(
                         select(shared_models.Settlement).where(shared_models.Settlement.market_id == numeric_market_id)
@@ -357,10 +354,8 @@ async def maybe_generate_settlement_proof(
                 settlement.proof_hash = f"0x{proof_hash}" if proof_hash else None
                 session.add(settlement)
             if numeric_market_id is not None:
-                from shared import repository as shared_repository
-
-                await session.run_sync(
-                    shared_repository.record_settlement_receipt,
+                await shared_repository.record_settlement_receipt(
+                    session,
                     market_id=numeric_market_id,
                     market_address=market_address,
                     request_id=response.request_id,

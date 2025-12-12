@@ -3,24 +3,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 import httpx
 from shared import models as shared_models
-from shared import repository as shared_repository
+from shared import repository_async as shared_repository
 from shared.logging import log_event
 from shared.models import MarketStatusEnum
 from shared.onchain.conditional_tokens import _derive_winners
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import runtime
 from .polymarket import MarketPayload
 
 logger = runtime.logger
+goldsky_client = runtime.goldsky_client
+conditional_tokens_client = runtime.conditional_tokens_client
 
 T = TypeVar("T")
 
@@ -32,48 +35,52 @@ class ResolutionOutcome:
     cache_payload: dict[str, Any] | None = None
 
 
-def _run_with_retries(
-    action: Callable[[], T],
+async def _run_with_retries(
+    action: Callable[[], Awaitable[T]],
     max_attempts: int,
     base_backoff: float,
     max_backoff: float | None = None,
-    on_retry: Callable[[int, BaseException | None], None] | None = None,
+    on_retry: Callable[[int, BaseException | None], Awaitable[None] | None] | None = None,
 ) -> T:  # noqa: UP047
-    """Execute an action with optional retry semantics using tenacity."""
+    """Execute an async action with optional retry semantics using tenacity."""
 
     if max_attempts <= 1:
-        return action()
+        return await action()
 
     try:
-        from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+        from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
     except ModuleNotFoundError:  # pragma: no cover - tenacity optional
-        return action()
+        return await action()
 
     base_delay = base_backoff if base_backoff > 0 else 0.1
     wait_kwargs = {"multiplier": base_delay, "min": base_delay}
     if max_backoff is not None and max_backoff > 0:
         wait_kwargs["max"] = max_backoff
 
-    def _before_sleep(retry_state):
+    async def _before_sleep(retry_state):
         if on_retry is None:
             return
         exc = retry_state.outcome.exception() if retry_state.outcome else None
         try:
-            on_retry(retry_state.attempt_number, exc)
+            maybe_awaitable = on_retry(retry_state.attempt_number, exc)
+            if asyncio.iscoroutine(maybe_awaitable):
+                await maybe_awaitable
         except Exception:  # pragma: no cover - logging must not break retries
             logger.debug(
                 "retry callback raised",
                 extra={"attempt": retry_state.attempt_number, "error": str(exc) if exc else None},
             )
 
-    retryer = Retrying(
+    async for attempt in AsyncRetrying(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(**wait_kwargs),
         retry=retry_if_exception_type(Exception),
         before_sleep=_before_sleep,
         reraise=True,
-    )
-    return retryer(action)
+    ):
+        with attempt:
+            return await action()
+    raise RuntimeError("async retryer exited unexpectedly")
 
 
 def _should_refresh_resolution(existing, now: datetime) -> bool:
@@ -135,7 +142,7 @@ def _build_resolution_record(
     }
 
 
-def _fetch_resolution_snapshot(
+async def _fetch_resolution_snapshot(
     condition_id: str,
     market: MarketPayload,
     outcome_count_hint: int | None,
@@ -146,8 +153,8 @@ def _fetch_resolution_snapshot(
     backoff = runtime.settings.resolution_fetch_backoff_seconds
     backoff_max = runtime.settings.resolution_fetch_backoff_max_seconds
 
-    def _with_retry(action: Callable[[], dict[str, Any] | None], source: str) -> dict[str, Any] | None:
-        def _log_retry(attempt: int, exc: BaseException | None) -> None:
+    async def _with_retry(action: Callable[[], Awaitable[dict[str, Any] | None]], source: str) -> dict[str, Any] | None:
+        async def _log_retry(attempt: int, exc: BaseException | None) -> None:
             log_event(
                 logger,
                 logging.WARNING,
@@ -160,7 +167,7 @@ def _fetch_resolution_snapshot(
             )
 
         try:
-            return _run_with_retries(
+            return await _run_with_retries(
                 action,
                 attempts,
                 backoff,
@@ -178,29 +185,43 @@ def _fetch_resolution_snapshot(
             )
             return None
 
-    goldsky = runtime.goldsky_client
+    goldsky = goldsky_client or runtime.goldsky_client
     if goldsky is not None:
-        summary = _with_retry(
-            lambda: goldsky.resolution_summary(condition_id, outcomes, outcome_count_hint),
-            "goldsky",
-        )
+
+        async def _goldsky_action() -> dict[str, Any] | None:
+            result = goldsky.resolution_summary(condition_id, outcomes, outcome_count_hint)  # type: ignore[call-arg]
+            if asyncio.iscoroutine(result):
+                return await result  # type: ignore[return-value]
+            return result  # type: ignore[return-value]
+
+        summary = await _with_retry(_goldsky_action, "goldsky")
         if summary:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.goldsky_success",
+                message="loaded resolution from goldsky",
+                condition_id=condition_id,
+                resolved=summary.get("resolved"),
+            )
             return summary
-    conditional = runtime.conditional_tokens_client
+    conditional = conditional_tokens_client or runtime.conditional_tokens_client
     if conditional is None:
         return None
-    return _with_retry(
-        lambda: conditional.resolution_summary(condition_id, outcomes, outcome_count_hint),
+    return await _with_retry(
+        lambda: asyncio.to_thread(conditional.resolution_summary, condition_id, outcomes, outcome_count_hint),
         "conditional_tokens",
     )
 
 
-def apply_resolution(
-    session: Session, db_market: shared_models.Market | None, market: MarketPayload
+async def apply_resolution(
+    session: AsyncSession, db_market: shared_models.Market | None, market: MarketPayload
 ) -> ResolutionOutcome:
     condition_id = market.condition_id
+    active_goldsky = goldsky_client or runtime.goldsky_client
+    active_conditional = conditional_tokens_client or runtime.conditional_tokens_client
     if (
-        (runtime.goldsky_client is None and runtime.conditional_tokens_client is None)
+        (active_goldsky is None and active_conditional is None)
         or not isinstance(condition_id, str)
         or not condition_id.startswith("0x")
     ):
@@ -211,8 +232,8 @@ def apply_resolution(
                 event="worker.resolution.skipped_unavailable",
                 message="skipping resolution sync because prerequisites not met",
                 condition_id=condition_id,
-                goldsky_enabled=runtime.goldsky_client is not None,
-                conditional_tokens_enabled=runtime.conditional_tokens_client is not None,
+                goldsky_enabled=active_goldsky is not None,
+                conditional_tokens_enabled=active_conditional is not None,
             )
         return ResolutionOutcome()
 
@@ -231,7 +252,7 @@ def apply_resolution(
 
     normalized_condition_id = condition_id.lower()
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
-    existing = shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
+    existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     now = datetime.now(UTC)
 
     if not _should_refresh_resolution(existing, now):
@@ -248,7 +269,7 @@ def apply_resolution(
             )
         return ResolutionOutcome()
 
-    summary = _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
+    summary = await _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
     if summary is None:
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
@@ -277,7 +298,7 @@ def apply_resolution(
             block_number=record_payload.get("block_number"),
         )
 
-    shared_repository.upsert_resolution(session, record_payload)
+    await shared_repository.upsert_resolution(session, record_payload)
     cache_payload = {
         **record_payload,
         "checkedAt": checked_at_dt.isoformat(),
@@ -301,6 +322,7 @@ def apply_resolution(
         if getattr(db_market, "closed", None) is not True:
             db_market.closed = True
         db_market.resolved_at = checked_at_dt
+        session.add(db_market)
         log_event(
             logger,
             logging.DEBUG,
@@ -312,6 +334,7 @@ def apply_resolution(
         )
     else:
         db_market.resolved_at = None
+        session.add(db_market)
     return ResolutionOutcome(
         changed=True,
         condition_id=normalized_condition_id,

@@ -11,9 +11,9 @@ from typing import Any
 
 from redis.asyncio import Redis
 from shared import models as shared_models
-from shared import repository as shared_repository
+from shared import repository_async as shared_repository
 from shared.logging import log_event
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -108,8 +108,8 @@ def _slugify_token(value: str | None) -> str | None:
     return slug or None
 
 
-def _persist_normalized_market_data(
-    session: Session,
+async def _persist_normalized_market_data(
+    session: AsyncSession,
     *,
     market_id: int,
     outcomes: list[str] | None,
@@ -121,7 +121,7 @@ def _persist_normalized_market_data(
 ) -> None:
     """Replace normalized tables for a market with the latest payload."""
 
-    session.query(shared_models.MarketOutcome).filter_by(market_id=market_id).delete()
+    await session.execute(delete(shared_models.MarketOutcome).where(shared_models.MarketOutcome.market_id == market_id))
     if outcomes:
         for idx, label in enumerate(outcomes):
             price = None
@@ -139,7 +139,7 @@ def _persist_normalized_market_data(
                 )
             )
 
-    session.query(shared_models.MarketTag).filter_by(market_id=market_id).delete()
+    await session.execute(delete(shared_models.MarketTag).where(shared_models.MarketTag.market_id == market_id))
     if tags:
         seen = set()
         for tag in tags:
@@ -149,7 +149,9 @@ def _persist_normalized_market_data(
             seen.add(tag_str)
             session.add(shared_models.MarketTag(market_id=market_id, tag=tag_str))
 
-    session.query(shared_models.MarketClobToken).filter_by(market_id=market_id).delete()
+    await session.execute(
+        delete(shared_models.MarketClobToken).where(shared_models.MarketClobToken.market_id == market_id)
+    )
     if clob_token_ids:
         for idx, token in enumerate(clob_token_ids):
             side = None
@@ -159,11 +161,15 @@ def _persist_normalized_market_data(
                 side = "no"
             session.add(shared_models.MarketClobToken(market_id=market_id, token_id=str(token), side=side))
 
-    session.query(shared_models.MarketGammaMetadata).filter_by(market_id=market_id).delete()
+    await session.execute(
+        delete(shared_models.MarketGammaMetadata).where(shared_models.MarketGammaMetadata.market_id == market_id)
+    )
     if gamma_metadata:
         session.add(shared_models.MarketGammaMetadata(market_id=market_id, **gamma_metadata))
 
-    session.query(shared_models.MarketGammaEvent).filter_by(market_id=market_id).delete()
+    await session.execute(
+        delete(shared_models.MarketGammaEvent).where(shared_models.MarketGammaEvent.market_id == market_id)
+    )
     if gamma_events:
         for raw in gamma_events:
             if not isinstance(raw, dict):
@@ -453,10 +459,12 @@ async def sync_market(
     existing_market: shared_models.Market | None = None,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
-    return await session.run_sync(_sync_market_sync, market, existing_market=existing_market)
+    return await _sync_market(session, market, existing_market=existing_market)
 
 
-def _record_factory_state(session: Session, market: shared_models.Market | None, payload: MarketPayload) -> None:
+async def _record_factory_state(
+    session: AsyncSession, market: shared_models.Market | None, payload: MarketPayload
+) -> None:
     """Mirror factory/rake events into the ledger so address drift is auditable."""
 
     factory_address = payload.factory or getattr(market, "factory", None) or runtime.settings.factory_address
@@ -468,7 +476,7 @@ def _record_factory_state(session: Session, market: shared_models.Market | None,
         "oracle": payload.oracle,
         "event_id": payload.event_id,
     }
-    shared_repository.record_factory_event(
+    await shared_repository.record_factory_event(
         session,
         factory_address=str(factory_address),
         market_address=str(market_address) if market_address else None,
@@ -499,171 +507,7 @@ def _should_close_market(close_deadline: datetime | None, explicit_closed: bool 
     return False
 
 
-def _sync_market_sync(
-    session: Session,
-    market: MarketPayload,
-    existing_market: shared_models.Market | None = None,
-):
-    """Synchronous implementation used via AsyncSession.run_sync."""
-    now = datetime.now(UTC)
-    existing = existing_market or shared_repository.get_market_by_event_id(session, market.event_id)
-    previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
-    payload = market.model_dump()
-    if payload.get("closed") is None:
-        payload["closed"] = False
-    condition_id = payload.get("condition_id")
-    if isinstance(condition_id, str):
-        payload["condition_id"] = condition_id.lower()
-    close_deadline = payload.get("closes_at")
-    if close_deadline is None and existing is not None:
-        close_deadline = getattr(existing, "closes_at", None)
-        if close_deadline is not None:
-            payload["closes_at"] = close_deadline
-    should_close = _should_close_market(close_deadline, market.closed, now)
-    payload["closed"] = should_close
-    status_value = payload.get("status") or shared_models.MarketStatusEnum.COMMIT.value
-    if should_close and status_value not in {
-        shared_models.MarketStatusEnum.SETTLED.value,
-        shared_models.MarketStatusEnum.CANCELLED.value,
-    }:
-        status_value = shared_models.MarketStatusEnum.LOCKED.value
-    payload["status"] = status_value
-
-    if logger.isEnabledFor(logging.DEBUG):
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.market.payload_ready",
-            message="prepared market payload for persistence",
-            event_id=market.event_id,
-            existing=existing is not None,
-            should_close=should_close,
-            status=status_value,
-        )
-    db_market = existing
-    market_changed = False
-    market_created = False
-    market_updated = False
-    incoming_updated_at = getattr(market, "source_updated_at", None)
-    incoming_hash = getattr(market, "content_hash", None)
-
-    outcomes = payload.pop("outcomes", None)
-    outcome_prices = payload.pop("outcome_prices", None)
-    tags = payload.pop("tags", None)
-    clob_token_ids = payload.pop("clob_token_ids", None)
-    gamma_raw = payload.pop("gamma_raw", None)
-    gamma_metadata = payload.pop("gamma_metadata", None)
-    gamma_events = payload.pop("gamma_events", None)
-
-    if existing is None:
-        db_market = shared_repository.upsert_market(session, payload, existing)
-        market_changed = True
-        market_created = True
-        if logger.isEnabledFor(logging.DEBUG):
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.market.created",
-                message="market created from polymarket feed",
-                event_id=market.event_id,
-                status=payload.get("status"),
-                category=payload.get("category"),
-            )
-    else:
-        match, match_reason = _markets_match(existing, incoming_updated_at, incoming_hash)
-        if match:
-            if logger.isEnabledFor(logging.DEBUG):
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    event="worker.market.skip_update",
-                    message="skipping market update (no changes detected)",
-                    event_id=market.event_id,
-                    reason=match_reason,
-                )
-        else:
-            db_market = shared_repository.upsert_market(session, payload, existing)
-            market_changed = True
-            market_updated = True
-            if logger.isEnabledFor(logging.DEBUG):
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    event="worker.market.updated",
-                    message="market updated from polymarket feed",
-                    event_id=market.event_id,
-                    status=payload.get("status"),
-                    category=payload.get("category"),
-                    match_reason=match_reason,
-                )
-
-    if market.rake_bps is not None and db_market is not None:
-        db_market.rake_bps = market.rake_bps
-    if db_market is not None:
-        db_market.gamma_raw = gamma_raw
-
-    if db_market is not None:
-        if db_market.id is None:
-            session.flush()
-        _persist_normalized_market_data(
-            session,
-            market_id=db_market.id,
-            outcomes=outcomes,
-            outcome_prices=outcome_prices,
-            tags=tags,
-            clob_token_ids=clob_token_ids,
-            gamma_metadata=gamma_metadata,
-            gamma_events=gamma_events,
-        )
-    _record_factory_state(session, db_market, market)
-    resolution_outcome = apply_resolution(session, db_market, market)
-    session.flush()
-    category_slug = _slugify_token(getattr(db_market, "category", None))
-    current_group_slug = getattr(db_market, "group_slug", None)
-    group_slugs: set[str] = set()
-    for slug in (previous_group_slug, current_group_slug):
-        if isinstance(slug, str) and slug:
-            group_slugs.add(slug)
-    return db_market, SyncOutcome(
-        market_changed=market_changed,
-        resolution_changed=resolution_outcome.changed,
-        category_slug=category_slug,
-        condition_id=resolution_outcome.condition_id,
-        resolution_cache_payload=resolution_outcome.cache_payload,
-        market_created=market_created,
-        market_updated=market_updated,
-        group_slugs=group_slugs,
-    )
-
-
-def cleanup_resolved_markets(  # noqa: C901
-    session: Session,
-    *,
-    dry_run: bool = False,
-    now: datetime | None = None,
-) -> CleanupOutcome:
-    """Remove markets that have been resolved for longer than the configured retention."""
-
-    reference_time = _as_utc(now) or datetime.now(UTC)
-    cutoff = reference_time - timedelta(seconds=runtime.settings.resolved_retention_seconds)
-    stmt = select(
-        shared_models.Market.id,
-        shared_models.Market.event_id,
-        shared_models.Market.condition_id,
-        shared_models.Market.category,
-        shared_models.Market.resolved_at,
-        shared_models.Market.closes_at,
-        shared_models.Market.closed,
-    ).where(
-        or_(
-            shared_models.Market.resolved_at.isnot(None) & (shared_models.Market.resolved_at < cutoff),
-            shared_models.Market.closed.is_(True)
-            & shared_models.Market.closes_at.isnot(None)
-            & (shared_models.Market.closes_at < cutoff),
-        )
-    )
-    records = session.execute(stmt).all()
-
+def _build_cleanup_outcome(records, cutoff: datetime, dry_run: bool) -> CleanupOutcome:
     if not records:
         return CleanupOutcome(
             set(),
@@ -675,11 +519,11 @@ def cleanup_resolved_markets(  # noqa: C901
             category_counts={},
         )
 
-    ids_to_delete: list[int] = []
     event_ids: set[str] = set()
     condition_ids: set[str] = set()
     categories: set[str] = set()
     category_counts: dict[str, int] = {}
+    ids_to_delete: list[int] = []
 
     for row in records:
         resolved_at = _as_utc(row.resolved_at)
@@ -735,7 +579,205 @@ def cleanup_resolved_markets(  # noqa: C901
     )
 
 
-def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int:
+async def _sync_market(
+    session: AsyncSession,
+    market: MarketPayload,
+    existing_market: shared_models.Market | None = None,
+):
+    """Async implementation that upserts market state + resolutions."""
+    now = datetime.now(UTC)
+    existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
+    previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
+    payload = market.model_dump()
+    if payload.get("closed") is None:
+        payload["closed"] = False
+    condition_id = payload.get("condition_id")
+    if isinstance(condition_id, str):
+        payload["condition_id"] = condition_id.lower()
+    close_deadline = payload.get("closes_at")
+    if close_deadline is None and existing is not None:
+        close_deadline = getattr(existing, "closes_at", None)
+        if close_deadline is not None:
+            payload["closes_at"] = close_deadline
+    should_close = _should_close_market(close_deadline, market.closed, now)
+    payload["closed"] = should_close
+    status_value = payload.get("status") or shared_models.MarketStatusEnum.COMMIT.value
+    if should_close and status_value not in {
+        shared_models.MarketStatusEnum.SETTLED.value,
+        shared_models.MarketStatusEnum.CANCELLED.value,
+    }:
+        status_value = shared_models.MarketStatusEnum.LOCKED.value
+    payload["status"] = status_value
+
+    if logger.isEnabledFor(logging.DEBUG):
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.market.payload_ready",
+            message="prepared market payload for persistence",
+            event_id=market.event_id,
+            existing=existing is not None,
+            should_close=should_close,
+            status=status_value,
+        )
+    db_market = existing
+    market_changed = False
+    market_created = False
+    market_updated = False
+    incoming_updated_at = getattr(market, "source_updated_at", None)
+    incoming_hash = getattr(market, "content_hash", None)
+
+    outcomes = payload.pop("outcomes", None)
+    outcome_prices = payload.pop("outcome_prices", None)
+    tags = payload.pop("tags", None)
+    clob_token_ids = payload.pop("clob_token_ids", None)
+    gamma_raw = payload.pop("gamma_raw", None)
+    gamma_metadata = payload.pop("gamma_metadata", None)
+    gamma_events = payload.pop("gamma_events", None)
+
+    if existing is None:
+        db_market = await shared_repository.upsert_market(session, payload, existing)
+        market_changed = True
+        market_created = True
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.market.created",
+                message="market created from polymarket feed",
+                event_id=market.event_id,
+                status=payload.get("status"),
+                category=payload.get("category"),
+            )
+    else:
+        match, match_reason = _markets_match(existing, incoming_updated_at, incoming_hash)
+        if match:
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.market.skip_update",
+                    message="skipping market update (no changes detected)",
+                    event_id=market.event_id,
+                    reason=match_reason,
+                )
+        else:
+            db_market = await shared_repository.upsert_market(session, payload, existing)
+            market_changed = True
+            market_updated = True
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.market.updated",
+                    message="market updated from polymarket feed",
+                    event_id=market.event_id,
+                    status=payload.get("status"),
+                    category=payload.get("category"),
+                    match_reason=match_reason,
+                )
+
+    if market.rake_bps is not None and db_market is not None:
+        db_market.rake_bps = market.rake_bps
+    if db_market is not None:
+        db_market.gamma_raw = gamma_raw
+
+    if db_market is not None:
+        if db_market.id is None:
+            await session.flush()
+        await _persist_normalized_market_data(
+            session,
+            market_id=db_market.id,
+            outcomes=outcomes,
+            outcome_prices=outcome_prices,
+            tags=tags,
+            clob_token_ids=clob_token_ids,
+            gamma_metadata=gamma_metadata,
+            gamma_events=gamma_events,
+        )
+    await _record_factory_state(session, db_market, market)
+    resolution_outcome = await apply_resolution(session, db_market, market)
+    await session.flush()
+    category_slug = _slugify_token(getattr(db_market, "category", None))
+    current_group_slug = getattr(db_market, "group_slug", None)
+    group_slugs: set[str] = set()
+    for slug in (previous_group_slug, current_group_slug):
+        if isinstance(slug, str) and slug:
+            group_slugs.add(slug)
+    return db_market, SyncOutcome(
+        market_changed=market_changed,
+        resolution_changed=resolution_outcome.changed,
+        category_slug=category_slug,
+        condition_id=resolution_outcome.condition_id,
+        resolution_cache_payload=resolution_outcome.cache_payload,
+        market_created=market_created,
+        market_updated=market_updated,
+        group_slugs=group_slugs,
+    )
+
+
+def cleanup_resolved_markets(  # noqa: C901
+    session: Session,
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> CleanupOutcome:
+    """Remove markets that have been resolved for longer than the configured retention."""
+
+    reference_time = _as_utc(now) or datetime.now(UTC)
+    cutoff = reference_time - timedelta(seconds=runtime.settings.resolved_retention_seconds)
+    stmt = select(
+        shared_models.Market.id,
+        shared_models.Market.event_id,
+        shared_models.Market.condition_id,
+        shared_models.Market.category,
+        shared_models.Market.resolved_at,
+        shared_models.Market.closes_at,
+        shared_models.Market.closed,
+    ).where(
+        or_(
+            shared_models.Market.resolved_at.isnot(None) & (shared_models.Market.resolved_at < cutoff),
+            shared_models.Market.closed.is_(True)
+            & shared_models.Market.closes_at.isnot(None)
+            & (shared_models.Market.closes_at < cutoff),
+        )
+    )
+    records = session.execute(stmt).all()
+
+    return _build_cleanup_outcome(records, cutoff, dry_run)
+
+
+async def cleanup_resolved_markets_async(  # noqa: C901
+    session: AsyncSession,
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> CleanupOutcome:
+    """Remove markets that have been resolved for longer than the configured retention."""
+
+    reference_time = _as_utc(now) or datetime.now(UTC)
+    cutoff = reference_time - timedelta(seconds=runtime.settings.resolved_retention_seconds)
+    stmt = select(
+        shared_models.Market.id,
+        shared_models.Market.event_id,
+        shared_models.Market.condition_id,
+        shared_models.Market.category,
+        shared_models.Market.resolved_at,
+        shared_models.Market.closes_at,
+        shared_models.Market.closed,
+    ).where(
+        or_(
+            shared_models.Market.resolved_at.isnot(None) & (shared_models.Market.resolved_at < cutoff),
+            shared_models.Market.closed.is_(True)
+            & shared_models.Market.closes_at.isnot(None)
+            & (shared_models.Market.closes_at < cutoff),
+        )
+    )
+    records = (await session.execute(stmt)).all()
+    return _build_cleanup_outcome(records, cutoff, dry_run)
+
+
+async def _backfill_missing_resolutions(session: AsyncSession, summary: SyncSummary) -> int:
     """Hydrate historical resolutions for markets missing ledger entries."""
 
     limit = max(0, getattr(runtime.settings, "resolution_backfill_limit", 0))
@@ -751,7 +793,8 @@ def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int
         .limit(limit)
     )
     backfilled = 0
-    for record in session.scalars(stmt):
+    result = await session.scalars(stmt)
+    for record in result:
         if not record.condition_id or not record.event_id:
             continue
         try:
@@ -766,7 +809,7 @@ def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int
                 error=str(exc),
             )
             continue
-        outcome = apply_resolution(session, record, payload)
+        outcome = await apply_resolution(session, record, payload)
         if outcome.changed and outcome.condition_id:
             summary.changed_conditions.add(outcome.condition_id)
             if outcome.cache_payload:
@@ -777,7 +820,7 @@ def _backfill_missing_resolutions(session: Session, summary: SyncSummary) -> int
 
 
 async def backfill_missing_resolutions_async(session: AsyncSession, summary: SyncSummary) -> int:
-    return await session.run_sync(_backfill_missing_resolutions, summary)
+    return await _backfill_missing_resolutions(session, summary)
 
 
 def _count_resolution_gaps(session: Session) -> tuple[int, list[str]]:
@@ -802,6 +845,29 @@ def _count_resolution_gaps(session: Session) -> tuple[int, list[str]]:
     return len(events), events
 
 
+async def _count_resolution_gaps_async(session: AsyncSession) -> tuple[int, list[str]]:
+    cutoff_seconds = getattr(runtime.settings, "resolution_gap_warn_seconds", 0)
+    if cutoff_seconds <= 0:
+        return 0, []
+    cutoff = datetime.now(UTC) - timedelta(seconds=cutoff_seconds)
+    stmt = select(
+        shared_models.Market.event_id,
+        shared_models.Market.condition_id,
+        shared_models.Market.resolved_at,
+    ).where(
+        shared_models.Market.condition_id.isnot(None),
+        shared_models.Market.resolved_at.isnot(None),
+        shared_models.Market.resolved_at < cutoff,
+        ~shared_models.Market.condition_id.in_(select(shared_models.Resolution.condition_id)),
+    )
+    events: list[str] = []
+    result = await session.execute(stmt)
+    for event_id, _condition_id, _resolved_at in result:
+        if isinstance(event_id, str):
+            events.append(event_id)
+    return len(events), events
+
+
 def _log_resolution_gaps(session: Session) -> int:
     threshold = getattr(runtime.settings, "resolution_gap_warn_threshold", 0)
     if threshold <= 0:
@@ -820,7 +886,20 @@ def _log_resolution_gaps(session: Session) -> int:
 
 
 async def log_resolution_gaps_async(session: AsyncSession) -> int:
-    return await session.run_sync(_log_resolution_gaps)
+    threshold = getattr(runtime.settings, "resolution_gap_warn_threshold", 0)
+    if threshold <= 0:
+        return 0
+    count, events = await _count_resolution_gaps_async(session)
+    if count >= threshold:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.resolution.gaps",
+            message="markets missing resolution ledger entries",
+            gaps=count,
+            sample_events=events[: min(len(events), 5)],
+        )
+    return count
 
 
 def apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
@@ -836,4 +915,12 @@ def apply_retention_cleanup(session: Session, summary: SyncSummary) -> None:
 
 
 async def apply_retention_cleanup_async(session: AsyncSession, summary: SyncSummary) -> None:
-    await session.run_sync(apply_retention_cleanup, summary)
+    cleanup_outcome = await cleanup_resolved_markets_async(session, dry_run=runtime.settings.resolved_retention_dry_run)
+    if cleanup_outcome.events:
+        summary.changed_events.update(cleanup_outcome.events)
+        summary.stats_dirty = True
+    summary.changed_conditions.update(cleanup_outcome.conditions)
+    summary.changed_categories.update(cleanup_outcome.categories)
+    summary.markets_deleted = cleanup_outcome.deleted_rows
+    if cleanup_outcome.category_counts:
+        record_retention_metrics(cleanup_outcome.category_counts)

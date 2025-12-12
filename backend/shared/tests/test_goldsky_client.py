@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from shared.indexers.goldsky import GoldskyClient, GoldskyError
+from shared.indexers.goldsky import AsyncGoldskyClient, GoldskyError
 
 
 def _build_transport(expected_body: dict, *, status_code: int = 200, request_assertion=None):
-    def handler(request: httpx.Request) -> httpx.Response:
+    async def handler(request: httpx.Request) -> httpx.Response:
         if request_assertion:
             request_assertion(request)
         return httpx.Response(status_code=status_code, json=expected_body)
@@ -16,7 +16,8 @@ def _build_transport(expected_body: dict, *, status_code: int = 200, request_ass
     return httpx.MockTransport(handler)
 
 
-def test_resolution_summary_parses_payload(monkeypatch):
+@pytest.mark.asyncio
+async def test_resolution_summary_parses_payload(monkeypatch):
     timestamp = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
     payload = {
         "data": {
@@ -38,9 +39,9 @@ def test_resolution_summary_parses_payload(monkeypatch):
         assert request.headers.get("x-api-key") == "test-key"
 
     transport = _build_transport(payload, request_assertion=assert_headers)
-    client = GoldskyClient("https://example.com/subgraph", api_key="test-key", transport=transport)
+    client = AsyncGoldskyClient("https://example.com/subgraph", api_key="test-key", transport=transport)
 
-    summary = client.resolution_summary("0xabc", ["YES", "NO"])
+    summary = await client.resolution_summary("0xabc", ["YES", "NO"])
     assert summary is not None
     assert summary["source"] == "goldsky_subgraph"
     assert summary["payouts"] == [0, 1]
@@ -50,20 +51,25 @@ def test_resolution_summary_parses_payload(monkeypatch):
     assert summary["questionId"] == "0x1234"
     assert isinstance(summary["checkedAt"], datetime)
     assert summary["blockTimestamp"] == datetime.fromtimestamp(timestamp, tz=UTC)
+    await client.aclose()
 
 
-def test_resolution_summary_returns_none_when_not_found():
+@pytest.mark.asyncio
+async def test_resolution_summary_returns_none_when_not_found():
     payload = {"data": {"conditionResolutions": []}}
     transport = _build_transport(payload)
-    client = GoldskyClient("https://example.com/subgraph", transport=transport)
+    client = AsyncGoldskyClient("https://example.com/subgraph", transport=transport)
 
-    assert client.resolution_summary("0xmissing") is None
+    assert await client.resolution_summary("0xmissing") is None
+    await client.aclose()
 
 
-def test_resolution_summary_raises_on_graph_errors():
+@pytest.mark.asyncio
+async def test_resolution_summary_raises_on_graph_errors():
     payload = {"errors": [{"message": "boom"}]}
     transport = _build_transport(payload)
-    client = GoldskyClient("https://example.com/subgraph", transport=transport)
+    client = AsyncGoldskyClient("https://example.com/subgraph", transport=transport)
 
     with pytest.raises(GoldskyError):
-        client.resolution_summary("0xabc")
+        await client.resolution_summary("0xabc")
+    await client.aclose()

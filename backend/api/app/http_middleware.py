@@ -41,6 +41,18 @@ def _log_cors_warnings(origins: list[str], scope: str) -> None:
         logger.warning("CORS allow_origins is wildcard; set explicit origins for production", extra={"scope": scope})
 
 
+def _metric_path(request: Request) -> str:
+    """Return a templated path for metrics to keep cardinality low."""
+
+    route = request.scope.get("route")
+    if route is not None:
+        for attr in ("path", "path_format"):
+            template = getattr(route, attr, None)
+            if isinstance(template, str) and template:
+                return template
+    return request.url.path
+
+
 def configure_http_middleware(app: FastAPI, rate_limiter: RateLimiter | None = None) -> None:
     """
     Attach the full HTTP middleware stack (logging, CORS, security, metrics).
@@ -142,10 +154,11 @@ def _log_request_completion(
     duration_ms = (time.perf_counter() - start_time) * 1000
     bytes_sent = estimate_response_bytes(response)
     latency_bucket = classify_latency_bucket(duration_ms)
+    metric_path = _metric_path(request)
     try:
-        REQUEST_LATENCY.labels(
-            method=request.method, path=request.url.path, status_code=str(response.status_code)
-        ).observe(duration_ms / 1000.0)
+        REQUEST_LATENCY.labels(method=request.method, path=metric_path, status_code=str(response.status_code)).observe(
+            duration_ms / 1000.0
+        )
     except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
         logger.debug(
             "failed to emit request latency metric",
@@ -210,9 +223,10 @@ def attach_request_context(app: FastAPI) -> None:
         except HTTPException as exc:
             duration_ms = (time.perf_counter() - start_time) * 1000
             cache_meta = extract_cache_metadata(request)
+            metric_path = _metric_path(request)
             try:
                 REQUEST_LATENCY.labels(
-                    method=request.method, path=request.url.path, status_code=str(exc.status_code)
+                    method=request.method, path=metric_path, status_code=str(exc.status_code)
                 ).observe(duration_ms / 1000.0)
             except Exception as metric_exc:  # pragma: no cover
                 log_event(
@@ -249,8 +263,9 @@ def attach_request_context(app: FastAPI) -> None:
         except Exception:
             duration_ms = (time.perf_counter() - start_time) * 1000
             cache_meta = extract_cache_metadata(request)
+            metric_path = _metric_path(request)
             try:
-                REQUEST_LATENCY.labels(method=request.method, path=request.url.path, status_code="500").observe(
+                REQUEST_LATENCY.labels(method=request.method, path=metric_path, status_code="500").observe(
                     duration_ms / 1000.0
                 )
             except Exception as metric_exc:  # pragma: no cover

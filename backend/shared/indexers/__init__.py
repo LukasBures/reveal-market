@@ -1,5 +1,5 @@
 """Indexing helper clients (Goldsky, etc.)."""
 
-from .goldsky import AsyncGoldskyClient, GoldskyClient, GoldskyError
+from .goldsky import AsyncGoldskyClient, GoldskyError
 
-__all__ = ["GoldskyClient", "GoldskyError", "AsyncGoldskyClient"]
+__all__ = ["GoldskyError", "AsyncGoldskyClient"]

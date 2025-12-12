@@ -1,3 +1,4 @@
+import asyncio
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -60,34 +61,38 @@ class RelayerService:
     min_relayer_token_allowance_wei: int = 0
     fee_bump_percent: float = 0.15
 
-    def _build_base_tx(self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0) -> TxParams:
+    async def _build_base_tx(
+        self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
+    ) -> TxParams:
         nonce = nonce_override
         if nonce is None:
-            nonce = self.web3.eth.get_transaction_count(self.account.address, "pending")
+            nonce = await asyncio.to_thread(self.web3.eth.get_transaction_count, self.account.address, "pending")
         base: dict[str, int | str | Wei] = {
             "from": self.account.address,
             "nonce": nonce,
             "value": cast(Wei, value),
             "chainId": self.chain_id,
         }
-        fee_params = self._build_fee_params(bump_factor)
+        fee_params = await self._build_fee_params(bump_factor)
         return cast(TxParams, {**base, **fee_params})
 
-    def _build_fee_params(self, bump_factor: float = 1.0) -> dict[str, int]:
-        try:
-            latest_block: BlockData = self.web3.eth.get_block("latest")
-            base_fee = latest_block.get("baseFeePerGas")
-            if base_fee is not None:
-                priority_fee = int(self.web3.eth.max_priority_fee * bump_factor)
-                max_fee = int(base_fee * 2 * bump_factor + priority_fee)
-                return {"maxPriorityFeePerGas": priority_fee, "maxFeePerGas": max_fee}
-        except (Web3Exception, ValueError, TypeError) as err:
-            logger.warning("relayer.fee_params.fallback", error=str(err))
-        # legacy fallback
-        gas_price = int(self.web3.eth.gas_price * bump_factor)
-        return {"gasPrice": gas_price}
+    async def _build_fee_params(self, bump_factor: float = 1.0) -> dict[str, int]:
+        def _calc() -> dict[str, int]:
+            try:
+                latest_block: BlockData = self.web3.eth.get_block("latest")
+                base_fee = latest_block.get("baseFeePerGas")
+                if base_fee is not None:
+                    priority_fee = int(self.web3.eth.max_priority_fee * bump_factor)
+                    max_fee = int(base_fee * 2 * bump_factor + priority_fee)
+                    return {"maxPriorityFeePerGas": priority_fee, "maxFeePerGas": max_fee}
+            except (Web3Exception, ValueError, TypeError) as err:
+                logger.warning("relayer.fee_params.fallback", error=str(err))
+            gas_price = int(self.web3.eth.gas_price * bump_factor)
+            return {"gasPrice": gas_price}
 
-    def _send_and_wait(self, tx: TxParams, action: str) -> dict[str, str | int]:
+        return await asyncio.to_thread(_calc)
+
+    async def _send_and_wait(self, tx: TxParams, action: str) -> dict[str, str | int]:
         last_err: Exception | None = None
         start = time.perf_counter()
         nonce_value = tx.get("nonce")
@@ -96,10 +101,10 @@ class RelayerService:
         nonce_used = cast(int, nonce_value)
         for attempt in range(1, self.max_retries + 1):
             try:
-                signed = self.account.sign_transaction(tx)
-                tx_hash = self.web3.eth.send_raw_transaction(signed.raw_transaction)
-                receipt: TxReceipt = self.web3.eth.wait_for_transaction_receipt(
-                    tx_hash, timeout=self.tx_timeout_seconds
+                signed = await asyncio.to_thread(self.account.sign_transaction, tx)
+                tx_hash = await asyncio.to_thread(self.web3.eth.send_raw_transaction, signed.raw_transaction)
+                receipt: TxReceipt = await asyncio.to_thread(
+                    self.web3.eth.wait_for_transaction_receipt, tx_hash, self.tx_timeout_seconds
                 )
                 status = int(receipt["status"])
                 logger.info(f"relayer.{action}.sent", tx_hash=tx_hash.hex(), status=status, attempt=attempt)
@@ -120,30 +125,52 @@ class RelayerService:
                 logger.warning(f"relayer.{action}.error", attempt=attempt, error=str(err))
                 TX_OUTCOMES.labels(action=action, outcome="error").inc()
 
-            time.sleep(self.retry_backoff_seconds * attempt)
+            await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         logger.error(f"relayer.{action}.failed", error=str(last_err))
         TX_OUTCOMES.labels(action=action, outcome="failed").inc()
         raise TxSendError(str(last_err) if last_err else f"{action} failed without error", nonce=nonce_used)
 
-    def commit(
+    async def commit(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
         auth = (payload["commitment"], int(payload["nonce"]), int(payload["expiry"]))
         value = int(payload.get("ticket_value_wei") or 0)
+        logger.info(
+            "relayer.commit.prepare",
+            user=payload.get("user"),
+            market=payload.get("market"),
+            nonce=auth[1],
+            expiry=auth[2],
+            value=value,
+            bump_factor=bump_factor,
+            nonce_override=nonce_override,
+        )
+        base_tx = await self._build_base_tx(value, nonce_override, bump_factor)
         tx = self.escrow.functions.commitOnBehalf(
             payload["user"],
             payload["market"],
             auth,
             payload["signature"],
-        ).build_transaction(self._build_base_tx(value, nonce_override, bump_factor))
-        return self._send_and_wait(tx, "commit")
+        ).build_transaction(base_tx)
+        return await self._send_and_wait(tx, "commit")
 
-    def claim(
+    async def claim(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
         market_addr: ChecksumAddress = self.web3.to_checksum_address(payload["market"])
         market = self.web3.eth.contract(address=market_addr, abi=CLAIM_ABI)
+        logger.info(
+            "relayer.claim.prepare",
+            user=payload.get("user"),
+            market=payload.get("market"),
+            ticket_id=int(payload["ticket_id"]),
+            outcome_id=int(payload["outcome_id"]),
+            amount=int(payload["amount"]),
+            bump_factor=bump_factor,
+            nonce_override=nonce_override,
+        )
+        base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
         tx = market.functions.claim(
             payload["user"],
             int(payload["ticket_id"]),
@@ -151,17 +178,17 @@ class RelayerService:
             int(payload["amount"]),
             payload["salt"],
             payload["merkle_proof"],
-        ).build_transaction(self._build_base_tx(0, nonce_override, bump_factor))
-        return self._send_and_wait(tx, "claim")
+        ).build_transaction(base_tx)
+        return await self._send_and_wait(tx, "claim")
 
-    def health(self) -> dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         issues: list[str] = []
-        connected = self.web3.is_connected()
+        connected = await asyncio.to_thread(self.web3.is_connected)
 
         block_number: int | None = None
         block_age: int | None = None
         try:
-            latest_block = self.web3.eth.get_block("latest")
+            latest_block = await asyncio.to_thread(self.web3.eth.get_block, "latest")
             block_number = latest_block["number"]
             block_ts = int(latest_block["timestamp"])
             now = int(datetime.now(UTC).timestamp())
@@ -174,7 +201,7 @@ class RelayerService:
 
         relayer_balance: int | None = None
         try:
-            relayer_balance = self.web3.eth.get_balance(self.account.address)
+            relayer_balance = await asyncio.to_thread(self.web3.eth.get_balance, self.account.address)
             if relayer_balance < self.min_relayer_balance_wei:
                 issues.append("low_balance")
         except (Web3Exception, ValueError) as err:
@@ -186,17 +213,19 @@ class RelayerService:
         relayer_token_balance: int | None = None
         relayer_token_allowance: int | None = None
         try:
-            token_address_raw = self.escrow.functions.COLLATERAL_TOKEN().call()
+            token_address_raw = await asyncio.to_thread(self.escrow.functions.COLLATERAL_TOKEN().call)
             token_address = str(token_address_raw)
             token_contract = self.web3.eth.contract(
                 address=self.web3.to_checksum_address(token_address),
                 abi=ERC20_ABI,
             )
-            escrow_token_balance = token_contract.functions.balanceOf(self.escrow.address).call()
-            relayer_token_balance = token_contract.functions.balanceOf(self.account.address).call()
-            relayer_token_allowance = token_contract.functions.allowance(
-                self.account.address, self.escrow.address
-            ).call()
+            escrow_token_balance = await asyncio.to_thread(token_contract.functions.balanceOf(self.escrow.address).call)
+            relayer_token_balance = await asyncio.to_thread(
+                token_contract.functions.balanceOf(self.account.address).call
+            )
+            relayer_token_allowance = await asyncio.to_thread(
+                token_contract.functions.allowance(self.account.address, self.escrow.address).call
+            )
             if escrow_token_balance is not None and escrow_token_balance < self.min_escrow_token_balance_wei:
                 issues.append("low_escrow_token_balance")
             if relayer_token_allowance is not None and relayer_token_allowance < self.min_relayer_token_allowance_wei:
@@ -207,7 +236,7 @@ class RelayerService:
 
         escrow_owner: str | None = None
         try:
-            escrow_owner = self.escrow.functions.owner().call()
+            escrow_owner = await asyncio.to_thread(self.escrow.functions.owner().call)
             if escrow_owner is not None and str(escrow_owner).lower() != self.account.address.lower():
                 issues.append("owner_mismatch")
         except (Web3Exception, ValueError) as err:

@@ -91,11 +91,35 @@ def _log_environment() -> None:
 async def lifespan(app: FastAPI):
     """FastAPI lifespan hook that starts and stops background tasks."""
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.lifespan.start",
+        message="api lifespan starting",
+    )
     await run_startup_tasks()
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.lifespan.ready",
+        message="api startup complete; serving traffic",
+    )
     try:
         yield
     finally:
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.lifespan.stop",
+            message="api lifespan stopping",
+        )
         await stop_background_tasks()
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.lifespan.stopped",
+            message="api background tasks stopped",
+        )
 
 
 def create_app() -> FastAPI:

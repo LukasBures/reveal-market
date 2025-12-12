@@ -1,5 +1,5 @@
-import asyncio
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
@@ -24,7 +24,17 @@ def create_app(
     bearer_token: str | None = None,
     tx_queue: TxQueue | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Reveal Relayer", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if tx_queue:
+            await tx_queue.start()
+        try:
+            yield
+        finally:
+            if tx_queue:
+                await tx_queue.stop()
+
+    app = FastAPI(title="Reveal Relayer", version="0.1.0", lifespan=lifespan)
 
     def get_service() -> RelayerService:
         return relayer_service
@@ -57,26 +67,16 @@ def create_app(
         )
         return response
 
-    if tx_queue:
-
-        @app.on_event("startup")
-        async def start_queue_worker() -> None:
-            await tx_queue.start()
-
-        @app.on_event("shutdown")
-        async def stop_queue_worker() -> None:
-            await tx_queue.stop()
-
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
-        return await asyncio.to_thread(relayer_service.health)
+        return await relayer_service.health()
 
     @app.post("/commit")
     async def commit(
         req: CommitRequest,
         svc: RelayerService = Depends(get_service),
         _: None = Depends(require_auth),
-    ) -> Response | dict[str, str | int]:
+    ) -> Any:
         try:
             payload = req.model_dump()
             payload["user"] = Web3.to_checksum_address(payload["user"])
@@ -88,7 +88,7 @@ def create_app(
                     {"jobId": job_id, "status": "queued"},
                     status_code=status.HTTP_202_ACCEPTED,
                 )
-            return await asyncio.to_thread(svc.commit, payload)
+            return await svc.commit(payload)
         except ValueError as err:
             logger.warning("commit_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
@@ -101,7 +101,7 @@ def create_app(
         req: ClaimRequest,
         svc: RelayerService = Depends(get_service),
         _: None = Depends(require_auth),
-    ) -> Response | dict[str, str | int]:
+    ) -> Any:
         try:
             payload = req.model_dump()
             payload["user"] = Web3.to_checksum_address(payload["user"])
@@ -113,7 +113,7 @@ def create_app(
                     {"jobId": job_id, "status": "queued"},
                     status_code=status.HTTP_202_ACCEPTED,
                 )
-            return await asyncio.to_thread(svc.claim, payload)
+            return await svc.claim(payload)
         except ValueError as err:
             logger.warning("claim_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err

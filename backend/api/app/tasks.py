@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from datetime import UTC, datetime
 
 from redis.exceptions import RedisError
@@ -31,6 +32,8 @@ async def record_schema_revision_tag() -> None:
     """Persist the current Alembic revision to DB and Redis for cache tagging/health."""
 
     cache = await get_cache_client()
+    persisted = True
+    cache_written = False
     try:
         revision = get_current_revision(settings.database_url)
     except Exception as exc:  # pragma: no cover - defensive
@@ -62,9 +65,11 @@ async def record_schema_revision_tag() -> None:
             revision=revision,
             error=str(exc),
         )
+        persisted = False
     if cache is not None:
         try:
             await cache.set(settings.schema_version_key, revision)
+            cache_written = True
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
@@ -74,6 +79,15 @@ async def record_schema_revision_tag() -> None:
                 revision=revision,
                 error=str(exc),
             )
+    log_event(
+        logger,
+        logging.INFO,
+        event="schema.revision.recorded",
+        message="schema revision tagging completed",
+        revision=revision,
+        persisted=persisted,
+        cached=cache_written,
+    )
 
 
 async def publish_api_heartbeat() -> None:
@@ -81,6 +95,12 @@ async def publish_api_heartbeat() -> None:
 
     client = await get_cache_client()
     if client is None:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="api.heartbeat.skip",
+            message="skipping api heartbeat; redis unavailable",
+        )
         return
     snapshot = request_metrics.snapshot()
     payload = {
@@ -147,6 +167,12 @@ async def cache_refresh_loop() -> None:
     """Continuously hydrate the hottest markets into Redis with jittered delays."""
 
     if not settings.cache_refresh_enabled:
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.cache.refresh.disabled",
+            message="cache refresh loop disabled by settings",
+        )
         return
     interval = max(1, settings.cache_refresh_interval_seconds)
     try:
@@ -228,18 +254,74 @@ async def start_background_tasks() -> None:
 
     from app import runtime  # local import to avoid cycle
 
+    metrics_interval = max(10, settings.performance_heartbeat_interval_seconds)
+    cache_refresh_interval = max(1, settings.cache_refresh_interval_seconds)
+    quote_sweep_interval = max(15, settings.quote_expiry_sweep_interval_seconds)
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.background.start",
+        message="starting background tasks",
+        cache_refresh_enabled=settings.cache_refresh_enabled,
+        cache_refresh_interval_seconds=cache_refresh_interval,
+        quote_sweep_interval_seconds=quote_sweep_interval,
+        heartbeat_interval_seconds=settings.container_heartbeat_seconds,
+        metrics_interval_seconds=metrics_interval,
+    )
     runtime.heartbeat_stop_event = start_heartbeat_logger(
         logger,
         settings.app_name,
         interval_seconds=settings.container_heartbeat_seconds,
         message=f"{settings.app_name} container heartbeat",
     )
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="service.background.task_started",
+        message="started container heartbeat logger",
+        task="container_heartbeat",
+        interval_seconds=settings.container_heartbeat_seconds,
+    )
     if runtime.metrics_task is None:
         runtime.metrics_task = asyncio.create_task(metrics_publisher_loop(), name="api-metrics-publisher")
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.background.task_started",
+            message="started background task",
+            task="metrics_publisher",
+            interval_seconds=metrics_interval,
+        )
     if settings.cache_refresh_enabled and runtime.cache_refresh_task is None:
         runtime.cache_refresh_task = asyncio.create_task(cache_refresh_loop(), name="markets-cache-refresh")
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.background.task_started",
+            message="started background task",
+            task="cache_refresh",
+            interval_seconds=cache_refresh_interval,
+            limit=settings.cache_refresh_limit,
+            order_by=settings.cache_hydrate_order_by,
+        )
+    elif not settings.cache_refresh_enabled:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="service.background.task_skipped",
+            message="cache refresh loop disabled",
+            task="cache_refresh",
+        )
     if runtime.quote_sweeper_task is None:
         runtime.quote_sweeper_task = asyncio.create_task(quote_sweeper_loop(), name="pricing-quote-sweeper")
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.background.task_started",
+            message="started background task",
+            task="quote_sweeper",
+            interval_seconds=quote_sweep_interval,
+        )
 
 
 async def stop_background_tasks() -> None:
@@ -247,6 +329,12 @@ async def stop_background_tasks() -> None:
 
     from app import runtime  # local import to avoid cycle
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.background.stop",
+        message="stopping background tasks",
+    )
     if runtime.heartbeat_stop_event is not None:
         runtime.heartbeat_stop_event.set()
         runtime.heartbeat_stop_event = None
@@ -260,15 +348,73 @@ async def stop_background_tasks() -> None:
     runtime.metrics_task = None
     runtime.cache_refresh_task = None
     runtime.quote_sweeper_task = None
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="service.background.stopped",
+        message="background tasks cleared",
+    )
 
 
 async def run_startup_tasks() -> None:
     """Run migrations, record schema tags, and kick off background loops."""
 
-    run_migrations()
+    start_time = time.perf_counter()
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.startup.begin",
+        message="running api startup tasks",
+        cache_hydrate_on_startup=settings.cache_hydrate_on_startup,
+        cache_refresh_enabled=settings.cache_refresh_enabled,
+    )
+    try:
+        run_migrations()
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="service.startup.migrations_failed",
+            message="startup failed during migrations",
+            error=str(exc),
+        )
+        raise
     await record_schema_revision_tag()
     await start_background_tasks()
+    hydrate_summary: dict[str, object] | None = None
     if settings.cache_hydrate_on_startup:
-        await hydrate_markets_cache(
-            source="startup", limit=settings.cache_hydrate_limit, order_by=settings.cache_hydrate_order_by
-        )
+        try:
+            hydrate_summary = await hydrate_markets_cache(
+                source="startup", limit=settings.cache_hydrate_limit, order_by=settings.cache_hydrate_order_by
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="service.startup.cache_hydrate_failed",
+                message="startup cache hydration failed",
+                error=str(exc),
+            )
+        else:
+            if hydrate_summary.get("status") != "hydrated":
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="service.startup.cache_hydrate.skipped",
+                    message="startup cache hydration skipped",
+                    status=hydrate_summary.get("status"),
+                    reason=hydrate_summary.get("reason"),
+                    limit=hydrate_summary.get("limit"),
+                    order_by=hydrate_summary.get("order_by"),
+                )
+    else:
+        hydrate_summary = {"status": "disabled", "reason": "cache_hydrate_on_startup_disabled"}
+    total_duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    log_event(
+        logger,
+        logging.INFO,
+        event="service.startup.complete",
+        message="api startup tasks completed",
+        duration_ms=total_duration_ms,
+        cache_hydrate_status=hydrate_summary.get("status") if hydrate_summary else None,
+    )

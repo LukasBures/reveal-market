@@ -7,6 +7,7 @@
 - backend/worker/app/schema.py: `_propagate_schema_revision` lacks a dedicated success metric/log; cache writes are best-effort and can be hard to observe.
 - backend/worker/app/summary_worker.py: Summary worker assumes Redis is reachable; `Redis.from_url` failures crash the worker. Needs guard/retry/backoff like the main worker.
 - backend/worker/app/market_sync.py: Factory/rake mirroring is a stub (“sync” events with no chain data); no listener for MarketFactory events or rake config updates, so on-chain drift isn’t prevented, blocking the “on-chain mirroring & automation” item.
+- session scope handling now exists in both `app/database.py` and `app/summary_worker.py` for test overrides; consider a shared async factory to avoid future drift and centralise overrides.
 
 ## Recommended MVP-ready fixes
 1. Add an ingestion path for commitments/settlements (from on-chain or hedger outputs) so `settlements`/`commitments` tables are populated and proof jobs can run; wire retries + metrics.

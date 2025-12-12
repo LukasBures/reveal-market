@@ -10,11 +10,11 @@ class DummyService:
         self.commit_calls = 0
         self.claim_calls = 0
 
-    def commit(self, payload, **kwargs):
+    async def commit(self, payload, **kwargs):
         self.commit_calls += 1
         return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
 
-    def claim(self, payload, **kwargs):
+    async def claim(self, payload, **kwargs):
         self.claim_calls += 1
         return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
 
@@ -23,13 +23,13 @@ class FlakyService:
     def __init__(self):
         self.commit_calls = 0
 
-    def commit(self, payload, **kwargs):
+    async def commit(self, payload, **kwargs):
         self.commit_calls += 1
         if self.commit_calls == 1:
             raise TxSendError("first attempt failed", nonce=7)
         return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 7}
 
-    def claim(self, payload, **kwargs):
+    async def claim(self, payload, **kwargs):
         return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
 
 

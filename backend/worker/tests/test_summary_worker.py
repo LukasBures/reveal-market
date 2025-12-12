@@ -10,23 +10,20 @@ from app.summary_jobs import SummaryJob
 from app.summary_worker import process_job
 from shared import cache_async as shared_cache
 from shared.models import Base, Market
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _setup_session(monkeypatch):
-    engine = create_engine("sqlite://", future=True)
-    Base.metadata.create_all(bind=engine)
-    test_session_factory = sessionmaker(
-        bind=engine,
-        autoflush=False,
-        autocommit=False,
-        expire_on_commit=False,
-        future=True,
-    )
-    monkeypatch.setattr(summary_worker, "engine", engine, raising=False)
-    monkeypatch.setattr(summary_worker, "SessionLocal", test_session_factory, raising=False)
-    return test_session_factory
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session = async_sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+
+    async def _create_schema():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setattr(summary_worker, "SessionLocal", async_session, raising=False)
+    return async_session, _create_schema, engine
 
 
 class DummyRedis:
@@ -54,62 +51,66 @@ class DummyRedis:
 
 @pytest.mark.asyncio
 async def test_process_job_persists_summary_and_invalidates_cache(monkeypatch):
-    test_session_factory = _setup_session(monkeypatch)
+    test_session_factory, create_schema, engine = _setup_session(monkeypatch)
     now = datetime.now(UTC)
-    with test_session_factory() as session:
-        session.add(
-            Market(
-                event_id="evt-ai",
-                title="AI Summary Market",
-                category="finance",
-                oracle="0xabc",
-                status="commit",
-                created_at=now,
-                updated_at=now,
-                summary_requested_at=now,
-            )
+    try:
+        await create_schema()
+        async with test_session_factory() as session:
+            async with session.begin():
+                session.add(
+                    Market(
+                        event_id="evt-ai",
+                        title="AI Summary Market",
+                        category="finance",
+                        oracle="0xabc",
+                        status="commit",
+                        created_at=now,
+                        updated_at=now,
+                        summary_requested_at=now,
+                    )
+                )
+
+        invalidated = []
+
+        async def fake_invalidate(redis_client, tag):
+            invalidated.append(tag)
+            return 0
+
+        monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
+
+        class StubClient:
+            async def generate(self, job):
+                return SimpleNamespace(
+                    text="AI generated overview.",
+                    source="ai_enrichment",
+                    model="gpt-5.1-mini",
+                    metadata={"mode": "test"},
+                    generated_at=now,
+                )
+
+        job = SummaryJob(
+            job_id="job-1",
+            event_id="evt-ai",
+            title="AI Summary Market",
+            description="Source description",
+            category="finance",
+            tags=["ai"],
+            oracle="0xabc",
         )
-        session.commit()
+        redis_client = DummyRedis()
+        assert await process_job(job, redis_client, StubClient()) is True
 
-    invalidated = []
-
-    async def fake_invalidate(redis_client, tag):
-        invalidated.append(tag)
-        return 0
-
-    monkeypatch.setattr(shared_cache, "invalidate_tag", fake_invalidate, raising=False)
-
-    class StubClient:
-        async def generate(self, job):
-            return SimpleNamespace(
-                text="AI generated overview.",
-                source="ai_enrichment",
-                model="gpt-5.1-mini",
-                metadata={"mode": "test"},
-                generated_at=now,
-            )
-
-    job = SummaryJob(
-        job_id="job-1",
-        event_id="evt-ai",
-        title="AI Summary Market",
-        description="Source description",
-        category="finance",
-        tags=["ai"],
-        oracle="0xabc",
-    )
-    redis_client = DummyRedis()
-    assert await process_job(job, redis_client, StubClient()) is True
-
-    with test_session_factory() as session:
-        stored = session.execute(select(Market).where(Market.event_id == "evt-ai")).scalar_one()
-        assert stored.summary == "AI generated overview."
-        assert stored.summary_source == "ai_enrichment"
-        assert stored.summary_model == "gpt-5.1-mini"
-        assert stored.summary_metadata == {"mode": "test"}
-        assert stored.summary_requested_at is None
-    assert f"market:{job.event_id}" in invalidated
-    assert "markets:list" in invalidated
+        async with test_session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == "evt-ai"))).scalar_one()
+            assert stored.summary == "AI generated overview."
+            assert stored.summary_source == "ai_enrichment"
+            assert stored.summary_model == "gpt-5.1-mini"
+            assert stored.summary_metadata == {"mode": "test"}
+            assert stored.summary_requested_at is None
+        assert f"market:{job.event_id}" in invalidated
+        assert "markets:list" in invalidated
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

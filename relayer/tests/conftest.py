@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import socket
+import warnings
 
 import pytest
 
@@ -19,3 +21,26 @@ def block_network_calls(monkeypatch):
         raise RuntimeError(f"Network access to {host} is blocked during tests")
 
     monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+
+
+@pytest.fixture(autouse=True)
+def _close_event_loop():
+    """Close any leftover event loop between tests to avoid ResourceWarnings."""
+
+    yield
+    policy = asyncio.get_event_loop_policy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            loop = policy.get_event_loop()
+        except RuntimeError:
+            loop = getattr(getattr(policy, "_local", None), "_loop", None)
+    if loop and not loop.is_closed():
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            policy.set_event_loop(None)
+        except RuntimeError:
+            pass

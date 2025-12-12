@@ -17,7 +17,7 @@ import httpx
 from pydantic import AnyHttpUrl
 from redis.asyncio import Redis
 from websockets import connect
-from websockets.exceptions import InvalidStatusCode
+from websockets.exceptions import InvalidStatus
 
 from .config import Settings, get_settings
 from .subscriptions import SubscriptionManager
@@ -545,17 +545,18 @@ async def iter_ws(
                 ping_timeout=ping_timeout if ping_timeout is not None else 20,
             ) as ws:
                 yield _AsyncWebSocket(ws, timeout=read_timeout, name=name, url=ws_url)
-        except InvalidStatusCode as exc:  # pragma: no cover - reconnection path
+        except InvalidStatus as exc:  # pragma: no cover - reconnection path
+            status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
             logger.warning(
                 "ws dropped; reconnecting",
-                extra={"event": f"{name}.ws.reconnect", "error": f"http_{exc.status_code}", "url": ws_url},
+                extra={"event": f"{name}.ws.reconnect", "error": f"http_{status_code}", "url": ws_url},
             )
-            if exc.status_code in fatal_status:
+            if status_code in fatal_status:
                 logger.warning(
                     "ws rejected with fatal status; giving up",
-                    extra={"event": f"{name}.ws.fatal", "status": exc.status_code, "url": ws_url},
+                    extra={"event": f"{name}.ws.fatal", "status": status_code, "url": ws_url},
                 )
-                raise FatalWebsocketError(exc.status_code, ws_url) from exc
+                raise FatalWebsocketError(status_code or -1, ws_url) from exc
             await asyncio.sleep(get_settings().ws_reconnect_seconds)
         except Exception as exc:  # pragma: no cover - reconnection path
             logger.warning(

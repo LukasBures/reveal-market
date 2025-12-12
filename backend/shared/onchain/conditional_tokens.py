@@ -4,10 +4,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from web3 import Web3
-from web3.exceptions import Web3Exception
-from web3.types import HexStr
-
 _CONDITIONAL_TOKENS_ABI: list[dict[str, Any]] = [
     {
         "name": "payoutsAreSet",
@@ -44,6 +40,11 @@ class ConditionalTokensClient:
     """Read resolution information from the Conditional Tokens contract."""
 
     def __init__(self, rpc_url: str, contract_address: str) -> None:
+        from web3 import Web3
+        from web3.exceptions import Web3Exception
+
+        self._web3_cls = Web3
+        self._web3_exception = Web3Exception
         self._web3 = Web3(Web3.HTTPProvider(rpc_url))
         self._contract = self._web3.eth.contract(
             address=Web3.to_checksum_address(contract_address),
@@ -54,7 +55,7 @@ class ConditionalTokensClient:
         """Return whether payouts are set and the numerators for each outcome."""
         if outcome_count < 0:
             raise ValueError("outcome_count must be non-negative")
-        condition_id = Web3.to_bytes(hexstr=cast(HexStr, condition_id_hex))
+        condition_id = self._web3_cls.to_bytes(hexstr=cast(str, condition_id_hex))
         resolved = bool(self._contract.functions.payoutsAreSet(condition_id).call())
         if not resolved:
             return False, [0] * max(outcome_count, 0)
@@ -96,7 +97,7 @@ class ConditionalTokensClient:
         }
 
     def _fetch_resolution_event(self, condition_id_hex: str) -> dict[str, Any]:
-        condition_bytes = Web3.to_bytes(hexstr=cast(HexStr, condition_id_hex))
+        condition_bytes = self._web3_cls.to_bytes(hexstr=cast(str, condition_id_hex))
         event = self._contract.events.ConditionResolution()
         try:
             logs = event.get_logs(
@@ -104,7 +105,7 @@ class ConditionalTokensClient:
                 fromBlock=0,
                 toBlock="latest",
             )
-        except (Web3Exception, ValueError, TypeError):  # pragma: no cover - defensive
+        except (self._web3_exception, ValueError, TypeError):  # pragma: no cover - defensive
             return {}
         if not logs:
             return {}

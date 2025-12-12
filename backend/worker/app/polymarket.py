@@ -478,11 +478,21 @@ class PolymarketClient:
                 markets = event.get("markets")
                 if not markets:
                     continue
+                event_group_slug = (event.get("slug") or event.get("id")) if len(markets) > 1 else None
+                raw_events = event.get("events")
+                event_metadata = raw_events if isinstance(raw_events, list) and raw_events else None
+                if event_metadata is None:
+                    event_metadata = [
+                        {
+                            "slug": event.get("slug"),
+                            "id": event.get("id"),
+                        }
+                    ]
                 for raw in markets:
                     try:
                         payload = MarketPayload.from_gamma(raw)
-                        payload.gamma_events = event.get("events")
-                        payload.group_slug = event.get("slug") or event.get("id")
+                        payload.gamma_events = event_metadata
+                        payload.group_slug = event_group_slug
                         page_payloads.append(payload)
                     except (ValidationError, ValueError) as exc:  # pragma: no cover - defensive
                         logger.warning("skipping invalid polymarket event record: %s", exc)
@@ -823,11 +833,21 @@ class AsyncPolymarketClient:
                 markets = event.get("markets")
                 if not markets:
                     continue
+                event_group_slug = (event.get("slug") or event.get("id")) if len(markets) > 1 else None
+                raw_events = event.get("events")
+                event_metadata = raw_events if isinstance(raw_events, list) and raw_events else None
+                if event_metadata is None:
+                    event_metadata = [
+                        {
+                            "slug": event.get("slug"),
+                            "id": event.get("id"),
+                        }
+                    ]
                 for raw in markets:
                     try:
                         payload = MarketPayload.from_gamma(raw)
-                        payload.gamma_events = event.get("events")
-                        payload.group_slug = event.get("slug") or event.get("id")
+                        payload.gamma_events = event_metadata
+                        payload.group_slug = event_group_slug
                         page_payloads.append(payload)
                     except (ValidationError, ValueError) as exc:  # pragma: no cover - defensive
                         logger.warning("skipping invalid polymarket event record: %s", exc)

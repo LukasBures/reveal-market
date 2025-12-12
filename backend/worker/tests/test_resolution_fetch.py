@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import pytest
 from app import resolution
 from app.polymarket import MarketPayload
 from app.runtime import settings
 
 
-def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
+@pytest.mark.asyncio
+async def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
     # set minimal market payload
     market = MarketPayload(
         event_id="evt-1",
@@ -39,7 +41,7 @@ def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
     monkeypatch.setattr(resolution, "conditional_tokens_client", conditional, raising=False)
     monkeypatch.setattr(settings, "resolution_fetch_max_attempts", 1, raising=False)
 
-    summary = resolution._fetch_resolution_snapshot("0xabc", market, None)
+    summary = await resolution._fetch_resolution_snapshot("0xabc", market, None)
     assert summary is not None
     assert summary["conditionId"] == "0xabc"
     assert conditional.calls == 1

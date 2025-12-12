@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from py_clob_client.client import ClobClient
-from shared.indexers import GoldskyClient
+from shared.indexers import AsyncGoldskyClient
 from shared.logging import log_event
 from shared.onchain import ConditionalTokensClient
 
@@ -37,7 +37,7 @@ PROVER_CLIENT: AsyncProverClient | None = None
 polymarket_client: AsyncPolymarketClient
 clob_client: ClobClient | None = None
 conditional_tokens_client: ConditionalTokensClient | None = None
-goldsky_client: GoldskyClient | None = None
+goldsky_client: AsyncGoldskyClient | None = None
 
 
 def _build_polymarket_client() -> AsyncPolymarketClient:
@@ -118,8 +118,8 @@ def _build_conditional_tokens_client() -> ConditionalTokensClient | None:
     return client
 
 
-def _build_goldsky_client() -> GoldskyClient | None:
-    """Instantiate Goldsky subgraph client when provided an endpoint/API key."""
+def _build_goldsky_client() -> AsyncGoldskyClient | None:
+    """Instantiate async Goldsky subgraph client when provided an endpoint/API key."""
     endpoint = settings.goldsky_subgraph_url
     if not endpoint:
         log_event(
@@ -131,7 +131,7 @@ def _build_goldsky_client() -> GoldskyClient | None:
         return None
     api_key = settings.goldsky_api_key.get_secret_value() if settings.goldsky_api_key else None
     try:
-        client = GoldskyClient(
+        client = AsyncGoldskyClient(
             str(endpoint),
             api_key=api_key,
             timeout_seconds=settings.goldsky_timeout_seconds,

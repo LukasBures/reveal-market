@@ -159,7 +159,16 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
     summary = SyncSummary()
     gap_count = 0
     total_fetched = 0
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.fetch.begin",
+        message="starting polymarket fetch",
+        page_size=runtime.settings.polymarket_page_size,
+        max_pages=runtime.settings.polymarket_max_pages,
+    )
     async with session_scope() as session:
+        page_no = 0
         async for page in runtime.polymarket_client.fetch_markets_paginated(
             page_size=runtime.settings.polymarket_page_size,
             max_pages=runtime.settings.polymarket_max_pages,
@@ -168,7 +177,17 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             closed=runtime.settings.polymarket_closed_filter,
             extra_params=build_filters_from_settings(runtime.settings),
         ):
+            page_no += 1
             total_fetched += len(page)
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.fetch.page",
+                message="fetched polymarket page",
+                page=page_no,
+                count=len(page),
+                total=total_fetched,
+            )
             summary = await collect_market_changes_with_summary(session, page, redis_client, summary=summary)
             await session.flush()
             await session.commit()
@@ -184,6 +203,15 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                 count=backfilled,
             )
         gap_count = await log_resolution_gaps_async(session)
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.sync.postprocess",
+            message="post-processing completed",
+            retention_deleted=summary.markets_deleted,
+            resolutions_backfilled=summary.resolutions_backfilled,
+            resolution_gaps=gap_count,
+        )
     latency_ms = (time.perf_counter() - start) * 1000
     return summary, total_fetched, gap_count, latency_ms
 
@@ -215,6 +243,13 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         return await _handle_sync_failure(exc, tick_start, redis_client, schema_state)
 
     summary.proofs_generated = await run_prover_jobs(summary, redis_client)
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="worker.proof.jobs_complete",
+        message="processed settlement proof jobs",
+        proofs_generated=summary.proofs_generated,
+    )
     cache_report = await invalidate_cache_tags(redis_client, summary)
     stats = summary.to_stats(total_fetched, latency_ms, cache_report.total)
     stats["resolution_gaps"] = gap_count

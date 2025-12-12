@@ -27,8 +27,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-pytestmark = pytest.mark.asyncio
-
 
 # Local helper to stand in for test_sync_market (keeps this test self contained)
 def create_in_memory_db():
@@ -138,6 +136,7 @@ class DummyCounter:
         return _Recorder(record)
 
 
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     captured: dict[str, Any] = {}
 
@@ -169,6 +168,7 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
     assert extra["archived"] == "false"
 
 
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeypatch):
     calls: dict[str, Any] = {"events": 0, "markets": 0}
 
@@ -193,6 +193,7 @@ async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeyp
     assert calls["kwargs"]["order"] == runtime_module.settings.polymarket_order
 
 
+@pytest.mark.asyncio
 async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, caplog):
     engine, session_factory = await create_async_in_memory_db()
     monkeypatch.setattr(db, "engine", engine, raising=False)
@@ -226,7 +227,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
         ),
     ]
 
-    async def _fake_paginated(**_kwargs):
+    async def _fake_paginated(self, **_kwargs):
         yield sample_markets
 
     monkeypatch.setattr(
@@ -289,6 +290,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
     await engine.dispose()
 
 
+@pytest.mark.asyncio
 async def test_process_once_publishes_schema_revision(monkeypatch):
     """Ensure schema revisions are broadcast to Redis and tagged caches are invalidated."""
 
@@ -307,11 +309,15 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
 
     monkeypatch.setattr(worker_service, "ensure_schema", fake_schema, raising=False)
     monkeypatch.setattr(worker_service, "_sync_polymarket_feed", fake_sync, raising=False)
-    monkeypatch.setattr(worker_service, "run_prover_jobs", lambda *_args, **_kwargs: 0, raising=False)
+
+    async def _no_proofs(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(worker_service, "run_prover_jobs", _no_proofs, raising=False)
 
     invalidated: list[str] = []
 
-    def fake_invalidate(redis_client, tag: str):
+    async def fake_invalidate(redis_client, tag: str):
         invalidated.append(tag)
         return 0
 
@@ -329,6 +335,7 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
     assert f"schema:{schema_state.previous_revision}" in invalidated
 
 
+@pytest.mark.asyncio
 async def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
     dummy = DummyRedis()
     schema_state = SchemaSyncResult(
@@ -362,6 +369,7 @@ async def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
     assert "worker.sync.skipped" in events
 
 
+@pytest.mark.asyncio
 async def test_prime_markets_cache_stores_payload(monkeypatch):
     dummy = DummyRedis()
     payload = [
@@ -403,6 +411,7 @@ async def test_prime_markets_cache_stores_payload(monkeypatch):
     assert cached == payload
 
 
+@pytest.mark.asyncio
 async def test_record_batch_stats_publishes_metrics(monkeypatch):
     dummy = DummyRedis()
     monkeypatch.setattr(runtime_module.settings, "batch_stats_key", "worker:batch_stats", raising=False)
@@ -429,6 +438,7 @@ async def test_record_batch_stats_publishes_metrics(monkeypatch):
     assert payload["prime"] == prime_stats
 
 
+@pytest.mark.asyncio
 async def test_publish_heartbeat_includes_flags():
     dummy = DummyRedis()
     stats = {
@@ -499,6 +509,7 @@ def test_cleanup_resolved_markets_removes_expired(monkeypatch):
         engine.dispose()
 
 
+@pytest.mark.asyncio
 async def test_prime_featured_views_prefetches_categories_and_suggestions(monkeypatch):
     dummy = DummyRedis()
     requests: list[str] = []
@@ -531,6 +542,7 @@ def _fetch_counter(outcome: str) -> float:
     return value or 0.0
 
 
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     payload = MarketPayload(
         event_id="evt-success",
@@ -541,7 +553,7 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         gamma_raw={"id": "evt-success"},
     )
 
-    async def _fake_events_markets(**_kwargs):
+    async def _fake_events_markets(self, **_kwargs):
         return [payload]
 
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
@@ -556,8 +568,9 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     assert _fetch_counter("success") == before + 1
 
 
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
-    def always_fail(**kwargs):
+    def always_fail(self, **kwargs):
         raise RuntimeError("fatal failure")
 
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
@@ -568,6 +581,7 @@ async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     assert _fetch_counter("error") == before + 1
 
 
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     payload = MarketPayload(
         event_id="evt-retry",
@@ -580,7 +594,7 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
 
     attempts = {"count": 0}
 
-    async def flaky_fetch(**kwargs):
+    async def flaky_fetch(self, **kwargs):
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise RuntimeError("temporary failure")
@@ -598,13 +612,14 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     assert markets[0].event_id == "evt-retry"
 
 
+@pytest.mark.asyncio
 async def test_publish_heartbeat_retries_on_failure(monkeypatch):
     class FlakyRedis:
         def __init__(self):
             self.calls = 0
             self.payloads: list[str] = []
 
-        def set(self, key, value, ex=None):
+        async def set(self, key, value, ex=None):
             self.calls += 1
             if self.calls < 2:
                 raise RuntimeError("redis unavailable")
@@ -622,6 +637,7 @@ async def test_publish_heartbeat_retries_on_failure(monkeypatch):
     assert json.loads(redis_client.payloads[-1])["markets_processed"] == 5
 
 
+@pytest.mark.asyncio
 async def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, caplog):
     class BrokenRedis:
         def __init__(self):
@@ -709,6 +725,7 @@ def test_cleanup_resolved_markets_handles_timezone_offsets(monkeypatch):
         engine.dispose()
 
 
+@pytest.mark.asyncio
 async def test_maybe_generate_settlement_proof(monkeypatch):
     class FakeProver:
         def __init__(self):

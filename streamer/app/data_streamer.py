@@ -15,7 +15,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
 from .config import Settings
-from .rtds_client import Subscription
+from .rtds_client import PolymarketRTDSClient, Subscription
 from .state import StreamState, iter_ws
 
 if TYPE_CHECKING:
@@ -41,6 +41,7 @@ class DataStreamer:
         self.clob_client: ClobClient | None = None
         self._drop_log_counts: dict[tuple[str, str], int] = {}
         self._drop_log_last_emit: datetime | None = None
+        self.rtds_client: PolymarketRTDSClient | None = None
         self._tune_http_logging()
         if getattr(self.settings, "clob_host", None):
             try:
@@ -52,6 +53,7 @@ class DataStreamer:
         self.metric_ticks = None
         self._init_metrics()
         self._rtds_last_version: int = -1
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @staticmethod
     def _coerce_array(value: Any) -> list | None:
@@ -111,6 +113,43 @@ class DataStreamer:
             )
         self.metric_ticks = DataStreamer._metric_ticks_shared
 
+    def _ensure_rtds_client(self) -> None:
+        """Initialise a lightweight RTDS client for subscription fan-out tests."""
+
+        if self.rtds_client is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - fallback for sync callers
+            loop = asyncio.get_event_loop()
+        self._loop = loop
+
+        def _dispatch(raw: dict[str, Any]) -> None:
+            if not isinstance(raw, dict):
+                return
+            try:
+                asyncio.run_coroutine_threadsafe(self._handle_rtds(raw), loop)
+            except RuntimeError as exc:  # pragma: no cover - loop closed
+                logger.debug(
+                    "Failed to dispatch RTDS payload",
+                    extra={"event": "rtds.dispatch.failed", "error": str(exc)},
+                )
+
+        self.rtds_client = PolymarketRTDSClient(
+            url=self.settings.rtds_ws_url,
+            on_raw_message=_dispatch,
+            ping_interval=self.settings.rtds_ping_seconds,
+            ping_timeout=max(3, self.settings.rtds_ping_seconds // 2),
+            reconnect=False,
+            backoff_initial=self.settings.ws_reconnect_seconds,
+            backoff_max=max(self.settings.ws_reconnect_seconds, 1) * 5,
+            logger=logging.getLogger("reveal_market.streamer.rtds"),
+        )
+        subs = self._build_rtds_subscriptions()
+        if subs:
+            with suppress(Exception):
+                self.rtds_client.add_subscriptions(subs)
+
     async def start(self) -> None:
         self._tasks = [
             asyncio.create_task(self._ws_loop(), name="ws-loop"),
@@ -125,6 +164,9 @@ class DataStreamer:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self.rtds_client:
+            with suppress(Exception):
+                self.rtds_client.stop(wait=False)
 
     async def _ws_loop(self) -> None:
         while not self._stop.is_set():
@@ -546,6 +588,29 @@ class DataStreamer:
         if existing and existing.get("price") == payload.get("price"):
             return
         self._publish_cache[key] = payload
+
+    async def _maybe_refresh_rtds_subscriptions(self) -> None:
+        """Send updated RTDS subscription set when assets/symbols change."""
+
+        if self.rtds_client is None:
+            self._ensure_rtds_client()
+        if not self.rtds_client:
+            return
+        latest_version = max(self.state.subscriptions.version, getattr(self.state, "rtds_symbols_version", 0))
+        if latest_version == self._rtds_last_version:
+            return
+        subs = self._build_rtds_subscriptions()
+        if not subs:
+            self._rtds_last_version = latest_version
+            return
+        try:
+            self.rtds_client.add_subscriptions(subs)
+            self._rtds_last_version = latest_version
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to refresh RTDS subscriptions",
+                extra={"event": "rtds.refresh.failed", "error": str(exc)},
+            )
 
     async def _rtds_loop(self) -> None:
         if not self.settings.rtds_enabled:

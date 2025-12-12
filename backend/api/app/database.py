@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from shared.migrations import run_migrations as apply_migrations
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger("reveal_market.api")
 engine = create_async_engine(
     settings.resolved_async_database_url,
     future=True,
@@ -47,4 +51,26 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 def run_migrations() -> None:
     """Apply the latest database migrations."""
 
+    start_time = time.perf_counter()
+    url = make_url(settings.database_url)
+    logger.info(
+        "running database migrations",
+        extra={
+            "event": "db.migrations.start",
+            "database_driver": url.drivername,
+            "database_host": url.host,
+            "database_name": url.database,
+        },
+    )
     apply_migrations(settings.database_url)
+    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    logger.info(
+        "database migrations applied",
+        extra={
+            "event": "db.migrations.complete",
+            "database_driver": url.drivername,
+            "database_host": url.host,
+            "database_name": url.database,
+            "duration_ms": duration_ms,
+        },
+    )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .storage import ensure_async_db_url
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(
         default="postgresql+asyncpg://market_admin:<REDACTED>@postgres:5432/reveal_market",
-        env="RM_DATABASE_URL",
+        validation_alias=AliasChoices("RM_DATABASE_URL", "HEDGER_DATABASE_URL"),
     )
     redis_url: str = Field(default="redis://redis:6379/0")
 

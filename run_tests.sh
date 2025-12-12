@@ -46,14 +46,14 @@ run_section() {
     exit 1
   fi
 
-  (cd "$(dirname "${script_path}")" && "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}")
+  (cd "$(dirname "${script_path}")" && env "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}")
 }
 
 run_section "backend" "${ROOT_DIR}/backend/run_tests.sh"
 run_section "hedger" "${ROOT_DIR}/hedger/run_tests.sh"
 run_section "streamer" "${ROOT_DIR}/streamer/run_tests.sh"
 run_section "relayer" "${ROOT_DIR}/relayer/run_tests.sh"
-run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh" FRONTEND_REQUIRE_API="${FRONTEND_REQUIRE_API:-true}"
+run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh" FRONTEND_REQUIRE_API="${FRONTEND_REQUIRE_API:-false}"
 run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"

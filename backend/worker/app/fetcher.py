@@ -43,63 +43,70 @@ async def fetch_markets_from_polymarket() -> tuple[list[MarketPayload], float]:
         archived=runtime.settings.polymarket_archived_filter,
     )
 
-    try:
-        markets = await runtime.polymarket_client.fetch_events_markets(
-            page_size=runtime.settings.polymarket_page_size,
-            max_pages=runtime.settings.polymarket_max_pages,
-            order=runtime.settings.polymarket_order,
-            ascending=runtime.settings.polymarket_sort_ascending,
-            closed=runtime.settings.polymarket_closed_filter,
-            extra_params=build_filters_from_settings(runtime.settings),
-        )
-        if runtime.clob_client is not None and markets:
-            try:
-                await asyncio.to_thread(
-                    merge_clob_markets,
-                    markets,
-                    runtime.clob_client,
-                    max_pages=runtime.settings.polymarket_max_pages,
-                    logger=runtime.logger,
-                )
-            except (
-                httpx.HTTPError,
-                httpx.RequestError,
-                RuntimeError,
-                ValueError,
-            ) as exc:  # pragma: no cover - defensive
+    max_attempts = max(1, runtime.settings.polymarket_sync_max_attempts)
+    base_backoff = max(runtime.settings.polymarket_sync_retry_backoff_seconds, 0.0)
+    backoff_max = max(runtime.settings.polymarket_sync_retry_backoff_max_seconds, 0.0)
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            markets = await runtime.polymarket_client.fetch_events_markets(
+                page_size=runtime.settings.polymarket_page_size,
+                max_pages=runtime.settings.polymarket_max_pages,
+                order=runtime.settings.polymarket_order,
+                ascending=runtime.settings.polymarket_sort_ascending,
+                closed=runtime.settings.polymarket_closed_filter,
+                extra_params=build_filters_from_settings(runtime.settings),
+            )
+            if runtime.clob_client is not None and markets:
+                try:
+                    await asyncio.to_thread(
+                        merge_clob_markets,
+                        markets,
+                        runtime.clob_client,
+                        max_pages=runtime.settings.polymarket_max_pages,
+                        logger=runtime.logger,
+                    )
+                except (
+                    httpx.HTTPError,
+                    httpx.RequestError,
+                    RuntimeError,
+                    ValueError,
+                ) as exc:  # pragma: no cover - defensive
+                    log_event(
+                        runtime.logger,
+                        logging.WARNING,
+                        event="worker.clob.enrichment_failed",
+                        message="failed to enrich markets with clob data",
+                        error=str(exc),
+                    )
+            break
+        except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
+            if attempt >= max_attempts:
+                POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
                 log_event(
                     runtime.logger,
-                    logging.WARNING,
-                    event="worker.clob.enrichment_failed",
-                    message="failed to enrich markets with clob data",
+                    logging.ERROR,
+                    event="worker.fetch.error",
+                    message="failed to fetch markets from polymarket after retries",
                     error=str(exc),
                 )
-    except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
-        POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
-        log_event(
-            runtime.logger,
-            logging.ERROR,
-            event="worker.fetch.error",
-            message="failed to fetch markets from polymarket after retries",
-            error=str(exc),
-        )
-        raise
-    if runtime.clob_client is not None:
-        try:
-            merge_clob_markets(
-                markets,
-                runtime.clob_client,
-                max_pages=runtime.settings.polymarket_max_pages,
-                logger=runtime.logger,
-            )
-        except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
+                raise
+            delay = base_backoff * (2 ** (attempt - 1))
+            if backoff_max > 0:
+                delay = min(delay, backoff_max)
             log_event(
                 runtime.logger,
                 logging.WARNING,
-                event="worker.clob.enrichment_failed",
-                message="failed to enrich markets with clob data",
+                event="worker.fetch.retry",
+                message="retrying polymarket fetch",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                delay_seconds=delay,
                 error=str(exc),
             )
+            if delay > 0:
+                await asyncio.sleep(delay)
     latency_ms = (time.perf_counter() - start) * 1000
     if markets:
         POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()

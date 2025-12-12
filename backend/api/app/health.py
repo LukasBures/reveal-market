@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -40,10 +41,10 @@ async def build_health_response(session: AsyncSession) -> schemas.HealthResponse
         await _check_redis_connectivity(),
         await _check_worker_heartbeat(settings),
         await _check_polymarket_api(settings),
-        _check_pricing_signer(settings),
+        await _check_pricing_signer(settings),
         _check_cors(settings),
         _check_fx_cors(settings),
-        _check_schema_revision(settings),
+        await _check_schema_revision(settings),
     ]
 
     for key, component in checks:
@@ -159,7 +160,7 @@ async def _check_polymarket_api(settings: Settings) -> tuple[str, schemas.Health
     return "polymarket_api", component
 
 
-def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.HealthComponent]:
+async def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     """Smoke-test pricing signer envs so signed quotes/commitWithQuote can function."""
 
     status: schemas.HealthState = "ok"
@@ -176,7 +177,7 @@ def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.HealthCompon
         details.append("RM_PRICING_SIGNER_PRIVATE_KEY missing")
     else:
         try:
-            acct = load_account(settings.pricing_signer_private_key.get_secret_value())
+            acct = await asyncio.to_thread(load_account, settings.pricing_signer_private_key.get_secret_value())
             derived_address = acct.address
         except (ValueError, RuntimeError) as exc:  # pragma: no cover - defensive
             status = "error"
@@ -252,15 +253,15 @@ def _check_fx_cors(settings) -> tuple[str, schemas.HealthComponent]:
     return "fx_cors", schemas.HealthComponent(status="ok", detail="FX origin allowed by CORS")
 
 
-def _check_schema_revision(settings: Settings) -> tuple[str, schemas.HealthComponent]:
+async def _check_schema_revision(settings: Settings) -> tuple[str, schemas.HealthComponent]:
     """Ensure the DB is at Alembic head so normalized tables exist."""
 
     if str(settings.database_url).startswith("sqlite"):
         return "schema", schemas.HealthComponent(status="ok", detail="sqlite database; skipping Alembic check")
 
     try:
-        current = get_current_revision(settings.database_url)
-        head = get_head_revision()
+        current = await asyncio.to_thread(get_current_revision, settings.database_url)
+        head = await asyncio.to_thread(get_head_revision)
         if head is None:
             return "schema", schemas.HealthComponent(status="degraded", detail="Alembic head unknown")
         if current != head:

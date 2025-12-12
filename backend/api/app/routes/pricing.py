@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -257,7 +258,7 @@ async def pricing_quote(
         signer_key = raw_signer_key.get_secret_value()
     else:
         signer_key = cast(str | None, raw_signer_key)
-    signer_account = load_account(signer_key)
+    signer_account = await asyncio.to_thread(load_account, signer_key)
     try:
         digest = build_quote_digest(
             settings.pricing_chain_id,
@@ -382,7 +383,7 @@ async def pricing_submit(
         signer_key = raw_signer_key.get_secret_value()
     else:
         signer_key = cast(str | None, raw_signer_key)
-    signer_account = load_account(signer_key) if signer_key else None
+    signer_account = await asyncio.to_thread(load_account, signer_key) if signer_key else None
     if signer_account is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
 

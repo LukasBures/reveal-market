@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shared import repository as shared_repository
+from shared import repository_async as shared_repository
 from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -113,7 +113,7 @@ async def get_resolution_by_condition_id(session: AsyncSession, condition_id: st
 
 
 async def create_or_update_market(session: AsyncSession, market_in: schemas.MarketCreate) -> models.Market:
-    return await session.run_sync(shared_repository.upsert_market, market_in.model_dump())
+    return await shared_repository.upsert_market(session, market_in.model_dump())
 
 
 def _replace_tags(market: models.Market, tags: list[str] | None) -> None:

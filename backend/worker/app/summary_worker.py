@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
 from shared.logging import log_event, reset_request_id, set_request_id
-from shared.repository import apply_market_summary
+from shared.repository_async import apply_market_summary
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_settings
-from .database import session_scope
+from .database import SessionLocal as DatabaseSessionLocal
 from .logging_config import setup_logging
 from .metrics import SUMMARY_DLQ_COUNTER
 from .summary_client import SummaryClient, SummaryClientError
@@ -23,6 +24,7 @@ from .summary_jobs import SummaryJob
 setup_logging("reveal_market.summary_worker")
 logger = logging.getLogger("reveal_market.summary_worker")
 settings = get_settings()
+SessionLocal = DatabaseSessionLocal
 
 
 def _get_redis_client() -> Redis:
@@ -104,6 +106,21 @@ async def _handle_failure(redis_client: Redis, job: SummaryJob, reason: str) -> 
         )
 
 
+@asynccontextmanager
+async def session_scope() -> AsyncIterator[AsyncSession]:
+    """Provide a transactional scope for summary writes."""
+
+    session = SessionLocal()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
 async def run_summary_worker() -> None:
     if not settings.summary_enabled:
         log_event(
@@ -169,8 +186,8 @@ async def process_job(job: SummaryJob, redis_client: Redis, client: SummaryClien
 
 
 async def _apply_summary(session: AsyncSession, job: SummaryJob, result) -> None:
-    await session.run_sync(
-        apply_market_summary,
+    await apply_market_summary(
+        session,
         job.event_id,
         summary=result.text,
         source=result.source,

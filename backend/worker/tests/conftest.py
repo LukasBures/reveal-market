@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import sys
+import warnings
 from pathlib import Path
+
+import pytest
 
 
 def _prefer_worker_package() -> None:
@@ -24,3 +28,49 @@ def _prefer_worker_package() -> None:
 
 
 _prefer_worker_package()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_pytest_asyncio_loop():
+    """Close any event loop left behind by pytest-asyncio's cleanup helper."""
+
+    yield
+    policy = asyncio.get_event_loop_policy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            loop = policy.get_event_loop()
+        except RuntimeError:
+            loop = getattr(getattr(policy, "_local", None), "_loop", None)
+    if loop and not loop.is_closed():
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            policy.set_event_loop(None)
+        except RuntimeError:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _close_loop_after_test():
+    """Ensure clean event loop state between tests to silence ResourceWarnings."""
+
+    yield
+    policy = asyncio.get_event_loop_policy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            loop = policy.get_event_loop()
+        except RuntimeError:
+            loop = getattr(getattr(policy, "_local", None), "_loop", None)
+    if loop and not loop.is_closed():
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            policy.set_event_loop(None)
+        except RuntimeError:
+            pass
