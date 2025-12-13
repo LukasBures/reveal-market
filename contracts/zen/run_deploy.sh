@@ -26,8 +26,8 @@ if ! command -v forge >/dev/null 2>&1; then
   exit 1
 fi
 
-# Pick an env file to source (default to repo .env.local). Override by exporting ENV_FILE before running.
-DEFAULT_ENV_FILE="${ROOT_DIR}/../../.env.prod"
+# Pick an env file to source (default to repo .env.production). Override by exporting ENV_FILE before running.
+DEFAULT_ENV_FILE="${ROOT_DIR}/../../.env.production"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090

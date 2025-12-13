@@ -32,7 +32,7 @@ cd "${PROJECT_DIR}"
 # Load repo-root .env so NEXT_PUBLIC_* variables propagate.
 ROOT_ENV="${PROJECT_DIR}/../.env"
 ROOT_ENV_LOCAL="${PROJECT_DIR}/../.env.local"
-ROOT_ENV_PROD="${PROJECT_DIR}/../.env.prod"
+ROOT_ENV_PROD="${PROJECT_DIR}/../.env.production"
 if [[ -f "${ROOT_ENV}" ]]; then
   log_step "Loading environment from ${ROOT_ENV}"
   # shellcheck disable=SC1090
@@ -52,7 +52,7 @@ elif [[ -f "${ROOT_ENV_PROD}" ]]; then
   source "${ROOT_ENV_PROD}"
   set +a
 else
-  log_warn "No env file (.env, .env.local, or .env.prod) found; using current environment."
+  log_warn "No env file (.env, .env.local, or .env.production) found; using current environment."
 fi
 
 # Try to reach the backend API; warn if unreachable but proceed by default so
