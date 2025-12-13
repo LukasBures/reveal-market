@@ -637,7 +637,8 @@ async def _sync_market(
             status=status_value,
         )
 
-    # If we control a factory and the market lacks an address, precompute a deterministic address using the next market id.
+    # If we control a factory and the market lacks an address, precompute a deterministic address
+    # using the next market id.
     if payload.get("market_address") is None and getattr(existing, "market_address", None) is None:
         factory_address = getattr(runtime.settings, "factory_address", None)
         rpc_url = getattr(runtime.settings, "rpc_url", None)
