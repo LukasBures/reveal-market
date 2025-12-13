@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import runtime
 from .metrics import record_retention_metrics
+from .onchain import get_next_market_id, predict_market_address
 from .polymarket import MarketPayload, _extract_timestamp_candidate, _parse_group_threshold
 from .resolution import apply_resolution
 from .summary_jobs import maybe_enqueue_summary_job
@@ -635,6 +636,37 @@ async def _sync_market(
             should_close=should_close,
             status=status_value,
         )
+
+    # If we control a factory and the market lacks an address, precompute a deterministic address using the next market id.
+    if payload.get("market_address") is None and getattr(existing, "market_address", None) is None:
+        factory_address = getattr(runtime.settings, "factory_address", None)
+        rpc_url = getattr(runtime.settings, "rpc_url", None)
+        if factory_address and rpc_url:
+            try:
+                next_market_id = await get_next_market_id(str(rpc_url), str(factory_address))
+                predicted_address = await predict_market_address(str(rpc_url), str(factory_address), next_market_id)
+                payload["onchain_market_id"] = int(next_market_id)
+                payload["market_address"] = str(predicted_address)
+                payload["factory"] = str(factory_address)
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.market.predicted_address",
+                        message="predicted deterministic market address",
+                        event_id=market.event_id,
+                        market_id=next_market_id,
+                        market_address=predicted_address,
+                    )
+            except Exception as exc:  # pragma: no cover - best effort
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.market.predict_failed",
+                    message="failed to predict market address",
+                    event_id=market.event_id,
+                    error=str(exc),
+                )
     db_market = existing
     market_changed = False
     market_created = False

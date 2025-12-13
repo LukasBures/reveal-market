@@ -56,6 +56,7 @@ class Market(Base):
     metadata_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     oracle: Mapped[str] = mapped_column(String(64), nullable=False)
     factory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    onchain_market_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)
     market_address: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=MarketStatusEnum.COMMIT.value)
     gamma_raw: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

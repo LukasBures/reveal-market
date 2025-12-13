@@ -53,6 +53,7 @@ class MarketPayload(BaseModel):
     metadata_uri: str | None = None
     oracle: str = Field(default="polymarket")
     factory: str | None = None
+    onchain_market_id: int | None = None
     market_address: str | None = None
     status: str = Field(default="commit")
     outcomes: list[str] | None = None  # transient; persisted into market_outcomes

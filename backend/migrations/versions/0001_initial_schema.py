@@ -37,6 +37,7 @@ def upgrade() -> None:
         sa.Column("metadata_uri", sa.String(length=512), nullable=True),
         sa.Column("oracle", sa.String(length=64), nullable=False),
         sa.Column("factory", sa.String(length=64), nullable=True),
+        sa.Column("onchain_market_id", sa.Integer(), nullable=True, unique=True),
         sa.Column("market_address", sa.String(length=64), nullable=True, unique=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="commit"),
         sa.Column("gamma_raw", sa.JSON(), nullable=True),

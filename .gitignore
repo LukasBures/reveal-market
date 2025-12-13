@@ -931,3 +931,6 @@ prover/.gocache
 scripts/pks.txt
 
 scripts/generated/
+
+# Foundry/prover cache artifacts
+contracts/cache/
