@@ -324,6 +324,40 @@ class PricingSubmitResponse(BaseModel):
     valid: bool = True
 
 
+class TradeCommitRequest(BaseModel):
+    quote_id: str = Field(..., description="Quote identifier to consume and commit")
+    max_fx_diff_percent: Decimal | None = Field(
+        default=None, description="Optional FX drift guard passed to pricing submit"
+    )
+
+
+class TradeCommitResponse(BaseModel):
+    tx_hash: str
+    quote_id: str
+    market_id: str
+    outcome_id: int
+    stake_zen: float
+    entry_fx: float
+    potential_payout_zen: float | None = None
+    status: str = "committed"
+    ticket_id: int | None = None
+    escrow_balance_wei: int | None = None
+    salt: str | None = None
+
+
+class PositionRecord(BaseModel):
+    market_id: str
+    market_title: str | None = None
+    outcome_id: int
+    stake_wei: int
+    stake_zen: float
+    tx_hash: str | None = None
+    quote_id: str | None = None
+    status: str = "committed"
+    ticket_id: int | None = None
+    created_at: datetime | None = None
+
+
 class QuoteRecord(BaseModel):
     quote_id: str = Field(alias="quoteId")
     status: str

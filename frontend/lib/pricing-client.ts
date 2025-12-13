@@ -291,3 +291,33 @@ export function createFxWebSocket(path = FX_DEFAULT_PATH): WebSocket | null {
 }
 
 export { FX_DEFAULT_PATH, normalizeFxPath };
+
+export type TradeCommitResponse = {
+  tx_hash: string;
+  quote_id: string;
+  market_id: string;
+  outcome_id: number;
+  stake_zen: number;
+  entry_fx: number;
+  potential_payout_zen?: number | null;
+  status: string;
+  ticket_id?: number | null;
+  escrow_balance_wei?: number | null;
+  salt?: string | null;
+};
+
+export async function submitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {
+  const res = await fetch(getEndpoint("/trade/commit"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quote_id: quoteId,
+      max_fx_diff_percent: maxFxDiffPercent ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Trade failed (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as TradeCommitResponse;
+}

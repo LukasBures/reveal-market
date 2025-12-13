@@ -262,6 +262,28 @@ async def record_commitments(session: AsyncSession, market_id: int, tickets: lis
     return count
 
 
+async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
+    """Return the number of commitments persisted for a market."""
+
+    result = await session.execute(
+        select(func.count()).select_from(models.Commitment).where(models.Commitment.market_id == market_db_id)
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def list_commitments_for_wallet(session: AsyncSession, wallet_address: str) -> list[tuple[models.Commitment, models.Market]]:
+    """Return commitments with market metadata for a wallet address."""
+
+    stmt = (
+        select(models.Commitment, models.Market)
+        .join(models.Market, models.Market.id == models.Commitment.market_id)
+        .where(models.Commitment.user_address == wallet_address.lower())
+        .order_by(models.Commitment.created_at.desc())
+    )
+    rows = await session.execute(stmt)
+    return rows.all()
+
+
 async def record_factory_event(
     session: AsyncSession,
     *,

@@ -81,3 +81,53 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 - Happy-path demo: (1) user connects wallet on Horizen testnet; (2) requests quote, submits `commitWithQuote`; (3) worker ingests commitment; (4) resolve market (manual trigger acceptable); (5) worker stores resolution ledger and requests proof; (6) prover generates proof; (7) API exposes proof on `/proofs`; (8) frontend shows proof and allows claim; (9) claim tx succeeds and ledger updates.
 - Failure tests: stale FX blocks trade; expired quote rejected; wrong chain/address blocked; missing artifacts causes prover startup failure; CORS/connect-src misconfig surfaces dev warning.
 - Coverage: backend tests for caps, quote persistence, resolution ledger, proof exposure; frontend tests for trading flow guards, proofs filters/CSV, positions dashboard, chart wiring; contracts/prover tests for updated circuit and verifier hash.
+
+
+
+___
+
+
+
+
+• Here’s a workable MVP flow that matches the current stack (relayer + fixed-ticket commitWithAuthorization) and gives users something to see after they trade.
+
+  Happy-path flow
+
+  1. Connect & fund
+      - User connects wallet (Horizen testnet enforced).
+      - Approve + deposit ZEN into RelayerEscrow. UI shows escrow balance. (Contract path: approve(ZEN, escrow), then escrow.deposit.)
+
+  2. Market readiness
+      - If the market isn’t deployed yet, backend/worker/relayer creates or predicts it via MarketFactory and stores market_address against the event. The market will be created only when user click buy/trade it will not hide/disallow trading. It should not matter if the market is deployed or not, only for the first bet/trader it has to create that market before the user will create trade.
+
+  3. Get price + caps
+      - UI requests /pricing/quote with {wallet_address, market_id, market_address, outcome_id, stake_zen}.
+      - API signs QUOTE_V1, applies caps, returns quote_id, expiry, signer, chain_id, caps, FX timestamp.
+  
+  4. Confirm & submit
+      - Client POSTs a “trade” action (backend route) with quote_id (and optionally the full quote for drift guard).
+      - Backend calls /pricing/submit to mark the quote consumed and verify signature/FX drift.
+      - Backend derives CommitAuth (commitment hash, nonce, expiry) and calls relayer commitOnBehalf (or enqueues it) → relayer sends commitWithAuthorization to the market. Ticket size should match the quoted stake (for MVP keep ticketSize = 0.1 ZEN).
+  
+  5. Persist + notify
+      - On success, backend stores: quote_id (consumed), tx_hash, market_id, user_address, outcome_id, amount_wei, ticket_hash/leaf, merkle index (if known).
+      - Response to UI: {txHash, quoteId, marketId, outcomeId, stakeZen, entryFx, potentialPayoutZen, status: "committed"} and updated escrow balance (escrow debits ticket).
+  
+  6. Positions visibility
+      - Expose /positions?wallet=… (or session-bound) that returns live commitments with: market/title/outcome, stake, entry FX, quote_id, tx_hash, status (pending/committed/settled), potential win, and whether claimable.
+      - After resolution + proof ingestion, relayer runs claim and credits escrow; positions entry flips to claimed and shows credited amount.
+      - User can withdraw from escrow (escrow.withdraw) to wallet.
+
+  What the user sees in the UI
+
+  - After submitting: tx hash (relayer commit), stake, outcome, implied odds, and a “position added” row.
+  - In Positions: list of open tickets with stake, entry price/FX, potential payout, market status. Show “claimable” when the backend/worker marks it so; show credited amount after claim. Escrow balance visible for withdraw.
+  - Errors that block trading: missing market_address, wrong chain, stale FX, cap exhausted, quote expired/consumed.
+
+  Key plumbing needed
+
+  - A backend “trade” endpoint to consume quotes + call relayer; mark quotes consumed.
+  - Ensure markets have market_address (predict/create if missing) before enabling trade.
+  - Persist commitments in Postgres (we already have commitments table) when relayer tx lands.
+  - Positions API + minimal UI to render them, plus escrow deposit/withdraw UI.
+  - Keep ticket size aligned with quoted stake (MVP: fix at 0.1 ZEN to match UI cap and relayer ticketSize).

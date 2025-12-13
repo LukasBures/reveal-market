@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH, type PricingQuote } from "@/lib/pricing-client";
+import {
+  fetchPricingQuoteWithMeta,
+  FX_DEFAULT_PATH,
+  type PricingQuote,
+  submitTrade,
+  type TradeCommitResponse,
+} from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, useChainId } from "wagmi";
 import { formatTime } from "@/lib/formatters";
-import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
-import { BaseError, erc20Abi, maxUint256, type Address, type Hex } from "viem";
-import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
 import { defaultChain } from "@/lib/wagmi";
 
 type Props = {
@@ -59,19 +62,11 @@ export function StakeQuoteCard({
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
-  const { commitWithQuote, isPending: txPending, error: commitError } = useCommitWithQuote(
-    (marketAddress ?? "") as Address,
-  );
-  const publicClient = usePublicClient({ chainId });
-  const {
-    writeContractAsync: writeApprovalAsync,
-    error: approvalError,
-  } = useWriteContract();
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
-  const [approvalHash, setApprovalHash] = useState<Hex | null>(null);
   const [txConfirmed, setTxConfirmed] = useState(false);
+  const txPending = false;
   const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
@@ -131,19 +126,6 @@ export function StakeQuoteCard({
         : missingMarketAddress
           ? "Market address unavailable"
           : null;
-  const missingZenToken = !ZEN_TOKEN_ADDRESS;
-  const allowanceEnabled = Boolean(address && marketAddress && ZEN_TOKEN_ADDRESS);
-  const {
-    data: allowance,
-    isFetching: allowanceLoading,
-    refetch: refetchAllowance,
-  } = useReadContract({
-    address: allowanceEnabled ? (ZEN_TOKEN_ADDRESS as Address) : undefined,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: allowanceEnabled ? ([address as Address, marketAddress as Address] as const) : undefined,
-    query: { enabled: allowanceEnabled, refetchInterval: 15_000 },
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -281,17 +263,6 @@ export function StakeQuoteCard({
     if (baseStake === null) return null;
     return profitZen !== null ? baseStake + profitZen : baseStake;
   }, [profitUsd, quote]);
-  const requiredAllowance = useMemo(() => {
-    if (!quote?.stake_wei) return 0n;
-    try {
-      return BigInt(quote.stake_wei);
-    } catch {
-      return 0n;
-    }
-  }, [quote?.stake_wei]);
-  const hasAllowance = allowance !== undefined && allowance !== null && allowance >= requiredAllowance;
-  const needsApproval = allowanceEnabled && requiredAllowance > 0n && !hasAllowance;
-  const currentPrice = priceForOutcome(selectedOutcome);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const ctaLabel = loading
     ? "Pricing…"
@@ -366,48 +337,15 @@ export function StakeQuoteCard({
       setTxError("FX is stale or unavailable; retry once fresh.");
       return;
     }
-    if (missingZenToken) {
-      setTxError("ZEN token address is not configured.");
-      return;
-    }
     setTxLoading(true);
     try {
-      if (needsApproval) {
-        const hash = await writeApprovalAsync({
-          address: ZEN_TOKEN_ADDRESS as Address,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [marketAddress as Address, maxUint256],
-          chainId,
-        });
-        setApprovalHash(hash as Hex);
-        if (publicClient) {
-          await publicClient.waitForTransactionReceipt({ hash: hash as Hex });
-          await refetchAllowance();
-        }
-      }
-      const params = buildSignedQuoteParams({
-        quote,
-        outcomeId: selectedOutcome,
-        walletAddress: address as Address,
-        amountWei: BigInt(quote.stake_wei),
-      });
-      const tx = await commitWithQuote(params);
-      const hash = (typeof tx === "string" ? tx : (tx as any)?.hash) as Hex | undefined;
-      if (hash) {
-        setTxHash(hash);
-        if (publicClient) {
-          const receipt = await publicClient.waitForTransactionReceipt({ hash });
-          setTxConfirmed(receipt.status === "success");
-        }
+      const resp: TradeCommitResponse = await submitTrade(quote.quote_id);
+      if (resp.tx_hash) {
+        setTxHash(resp.tx_hash);
+        setTxConfirmed(true);
       }
     } catch (err) {
-      const message =
-        err instanceof BaseError
-          ? err.shortMessage || err.message
-          : err instanceof Error
-            ? err.message
-            : "Trade failed";
+      const message = err instanceof Error ? err.message : "Trade failed";
       const normalized = message.toLowerCase();
       if (normalized.includes("expired")) {
         setTxError("Quote expired. Refreshing…");
@@ -687,39 +625,16 @@ export function StakeQuoteCard({
             Switch to {defaultChain.name} (chain {expectedChainId}) to trade.
           </p>
         )}
-        {quote && needsApproval && !txLoading && !txPending && (
-          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
-            Wallet will request ZEN approval before trading.
-          </p>
-        )}
-        {missingZenToken && (
-          <p className="text-xs text-rose-200">
-            ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.
-          </p>
-        )}
-        {(approvalHash || txHash) && (
+        {txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-            {approvalHash ? `Approval tx: ${approvalHash.slice(0, 10)}…${approvalHash.slice(-6)}` : null}
-            {approvalHash && txHash ? " · " : ""}
-            {txHash ? `Commit tx: ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : null}
+            Commit tx: {txHash.slice(0, 10)}…{txHash.slice(-6)}
           </p>
         )}
         {txConfirmed && txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-            Commit confirmed on-chain.
+            Commit accepted by relayer.
           </p>
         )}
-        {commitError && !txError && (
-          <p className="text-xs text-rose-300">
-            {commitError instanceof Error ? commitError.message : "Commit failed. Check wallet and quote."}
-          </p>
-        )}
-        {approvalError && !txError && (
-          <p className="text-xs text-rose-300">
-            {approvalError instanceof Error ? approvalError.message : "Approval failed. Try again."}
-          </p>
-        )}
-        {allowanceLoading && <p className="text-xs text-slate-400">Checking ZEN allowance…</p>}
       </div>
       {quote && (
         <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3 text-xs text-slate-300">

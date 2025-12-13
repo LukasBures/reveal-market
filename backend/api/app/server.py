@@ -20,6 +20,7 @@ from app.http_middleware import attach_request_context, configure_http_middlewar
 from app.pricing import fetch_fx_quote
 from app.rate_limit import RateLimiter
 from app.routes import markets, meta, pricing, proofs, treasury
+from app.routes import trade
 from app.routes.pricing import build_quote_digest
 from app.runtime import cache_client, is_production, logger, mode_env, settings
 from app.services.cache_client import get_cache_client
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(treasury.router)
     app.include_router(markets.router)
     app.include_router(proofs.router)
+    app.include_router(trade.router)
     app.rate_limiter = rate_limiter  # type: ignore[attr-defined]
     return app
 

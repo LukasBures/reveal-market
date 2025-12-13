@@ -127,6 +127,17 @@ class Settings(BaseSettings):
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
     pricing_quote_ttl_seconds: int = Field(default=120, ge=30, le=600)
+    authorization_signer_private_key: SecretStr | None = Field(
+        default=None, description="Private key for the on-chain authorization signer (CommitAuth signatures)"
+    )
+    relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
+    relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
+    ticket_size_wei: int = Field(
+        default=100_000_000_000_000_000, ge=1, description="Fixed ticket size (wei) used for commitWithAuthorization"
+    )
+    commit_nonce_ttl_seconds: int = Field(
+        default=600, ge=60, description="TTL (seconds) for commit authorization signatures"
+    )
 
     @field_validator("max_page_size")
     @classmethod
