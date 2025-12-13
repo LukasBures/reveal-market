@@ -1,9 +1,10 @@
 import { fetchFeaturedMarkets } from "@/lib/api";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
 import { categoryLabelFromSlug, slugify } from "@/lib/slugs";
+import { DEFAULT_PAGE_SIZE } from "@/components/markets/constants";
 
 const MAX_CATEGORY_MARKETS = Number.POSITIVE_INFINITY;
-const INITIAL_CATEGORY_BATCH = 20;
+const INITIAL_CATEGORY_BATCH = DEFAULT_PAGE_SIZE;
 export async function CategoryMarkets({ slug }: { slug: string }) {
   const normalizedSlug = slugify(slug);
   const categoryLabel = categoryLabelFromSlug(normalizedSlug) ?? slug;

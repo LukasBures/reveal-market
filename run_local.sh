@@ -38,6 +38,7 @@ log_step() {
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
+FRONTEND_ENV_FILE="${ROOT_DIR}/frontend/.env.local"
 TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
@@ -186,6 +187,18 @@ seed_prover_artifacts_from_submodule() {
   rm -rf "${PROVER_BUILD_DIR}"
   mkdir -p "${PROVER_BUILD_DIR}"
   cp -a "${PROVER_ARTIFACTS_BUILD_DIR}/." "${PROVER_BUILD_DIR}/"
+  return 0
+}
+
+sync_prover_from_artifacts_source() {
+  if [[ ! -d "${PROVER_ARTIFACTS_BUILD_DIR}" ]]; then
+    return 1
+  fi
+  log_step "Syncing Groth16 artifacts from prover/artifacts (source of truth)"
+  rm -rf "${PROVER_BUILD_DIR}"
+  mkdir -p "${PROVER_BUILD_DIR}"
+  cp -a "${PROVER_ARTIFACTS_BUILD_DIR}/." "${PROVER_BUILD_DIR}/"
+  sync_prover_caches
   return 0
 }
 
@@ -374,6 +387,7 @@ if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
   log_warn "Missing Caddyfile at ${TARGET_CADDYFILE}"
   exit 1
 fi
+sync_prover_from_artifacts_source || true
 ensure_prover_artifacts
 check_apk_mirror
 
@@ -391,6 +405,12 @@ else
   elif [[ "${ENV_FILE}" != "${DEFAULT_ENV_FILE}" ]]; then
     log_warn "compose CLI (${COMPOSE_CMD[*]}) does not support --env-file; rename env file to .env or switch to docker compose."
   fi
+fi
+
+# Sync root env into frontend/.env.local if it exists and frontend copy is missing.
+if [[ -f "${ENV_FILE}" && ! -f "${FRONTEND_ENV_FILE}" ]]; then
+  log_info "Seeding frontend env from ${ENV_FILE} -> ${FRONTEND_ENV_FILE}"
+  cp "${ENV_FILE}" "${FRONTEND_ENV_FILE}"
 fi
 
 supports_wait_flag() {

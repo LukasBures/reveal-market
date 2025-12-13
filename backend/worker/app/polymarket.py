@@ -188,6 +188,8 @@ class MarketPayload(BaseModel):
         best_ask = _coerce_float(raw.get("bestAsk") or raw.get("bestAskYes") or raw.get("best_ask"))
         spread = _coerce_float(raw.get("spread"))
         volume_total = _coerce_float(raw.get("volume"))
+        if orderbook_volume_usd is None and volume_total is not None:
+            orderbook_volume_usd = volume_total
         if gamma_metadata is not None:
             gamma_metadata["best_bid"] = best_bid
             gamma_metadata["best_ask"] = best_ask

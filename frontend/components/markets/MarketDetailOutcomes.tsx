@@ -825,11 +825,11 @@ export function MarketDetailOutcomes({ market }: Props) {
                       {needsApproval && (
                         <p className="mt-1 text-xs text-amber-200">Wallet will request ZEN approval before trading.</p>
                       )}
-                      {missingZenToken && (
-                        <p className="mt-1 text-xs text-rose-200">
-                          ZEN token address missing. Set NEXT_PUBLIC_ZEN_TOKEN_ADDRESS to continue.
-                        </p>
-                      )}
+                        {missingZenToken && (
+                          <p className="mt-1 text-xs text-rose-200">
+                            ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.
+                          </p>
+                        )}
                       {allowanceLoading && <p className="mt-1 text-xs text-slate-400">Checking ZEN allowance…</p>}
                       {error && (
                         <p className="mt-2 text-xs text-rose-300">

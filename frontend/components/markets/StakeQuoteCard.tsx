@@ -120,14 +120,17 @@ export function StakeQuoteCard({
   const lockedStates = ["locked", "disputed"];
   const isSettled = isResolved === true || settledStates.includes(statusNormalized);
   const isLocked = lockedStates.includes(statusNormalized);
-  const tradingDisabled = Boolean(tradingHalted || isSettled || isLocked);
+  const missingMarketAddress = !marketAddress;
+  const tradingDisabled = Boolean(tradingHalted || isSettled || isLocked || missingMarketAddress);
   const tradingReason = tradingHalted
     ? "Trading halted"
     : isSettled
       ? "Market settled"
       : isLocked
         ? "Market locked"
-        : null;
+        : missingMarketAddress
+          ? "Market address unavailable"
+          : null;
   const missingZenToken = !ZEN_TOKEN_ADDRESS;
   const allowanceEnabled = Boolean(address && marketAddress && ZEN_TOKEN_ADDRESS);
   const {
@@ -165,11 +168,6 @@ export function StakeQuoteCard({
         setError(STAKE_RANGE_ERROR);
         return;
       }
-      if (!marketAddress) {
-        setQuote(null);
-        setError("Missing market address for quote");
-        return;
-      }
       if (capExhausted) {
         setQuote(null);
         setError("Stake cap exhausted for this market/user");
@@ -195,7 +193,7 @@ export function StakeQuoteCard({
         const payload = await fetchPricingQuoteWithMeta(cappedStake, {
           marketId,
           walletAddress: address,
-          marketAddress,
+          marketAddress: marketAddress ?? "",
           outcomeId: selectedOutcome,
         });
         if (!cancelled) {
@@ -427,7 +425,7 @@ export function StakeQuoteCard({
 
   return (
     <div
-      className={`md:sticky md:top-0 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
+      className={`md:sticky md:top-40 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
       {marketTitle && (
         <p className="text-sm font-semibold text-white/90">{marketTitle}</p>
@@ -696,7 +694,7 @@ export function StakeQuoteCard({
         )}
         {missingZenToken && (
           <p className="text-xs text-rose-200">
-            ZEN token address missing. Set NEXT_PUBLIC_ZEN_TOKEN_ADDRESS to continue.
+            ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.
           </p>
         )}
         {(approvalHash || txHash) && (

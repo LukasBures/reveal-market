@@ -781,6 +781,8 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
         try:
             if meta.volume_clob is not None:
                 target.orderbook_volume_usd = float(meta.volume_clob)
+            elif meta.volume is not None:
+                target.orderbook_volume_usd = float(meta.volume)
         except (TypeError, ValueError):
             target.orderbook_volume_usd = target.orderbook_volume_usd or None
         if meta.group_slug and not getattr(target, "group_slug", None):

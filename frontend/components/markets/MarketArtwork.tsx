@@ -1,5 +1,7 @@
+"use client";
+
 import Image from "next/image";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 type Props = {
   src: string | null | undefined;
@@ -11,7 +13,10 @@ type Props = {
 };
 
 const DEFAULT_FALLBACK = (
-  <div className="h-full w-full bg-gradient-to-br from-brand-500/30 via-slate-800 to-slate-950" aria-hidden="true" />
+  <div
+    className="h-full w-full bg-[url('/brand/arrow-pattern.png')] bg-cover bg-center bg-no-repeat"
+    aria-hidden="true"
+  />
 );
 
 export function MarketArtwork({
@@ -22,12 +27,19 @@ export function MarketArtwork({
   borderClass = "border border-white/10",
   fallback = DEFAULT_FALLBACK,
 }: Props) {
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    // Reset error state whenever the source changes so we can try again.
+    setErrored(false);
+  }, [src]);
+
   const sizeClasses = `${sizeClass} aspect-square`;
   return (
     <div
       className={`relative flex-shrink-0 overflow-hidden ${roundedClass} ${borderClass} bg-slate-800/60 ${sizeClasses}`}
     >
-      {src ? (
+      {src && !errored ? (
         <Image
           src={src}
           alt={alt}
@@ -37,6 +49,7 @@ export function MarketArtwork({
           style={{ objectFit: "cover", objectPosition: "center" }}
           priority={false}
           loading="lazy"
+          onError={() => setErrored(true)}
         />
       ) : (
         fallback

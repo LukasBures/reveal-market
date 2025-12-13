@@ -3,8 +3,7 @@ import type { Metadata } from "next";
 import { SearchMarketsClient } from "@/components/markets/SearchMarketsClient";
 import { fetchFeaturedMarkets } from "@/lib/api";
 import { buildMetadata } from "@/lib/seo";
-
-const PAGE_SIZE = 24;
+import { DEFAULT_PAGE_SIZE } from "@/components/markets/constants";
 
 export const metadata: Metadata = buildMetadata({
   title: "Search Markets | Reveal Market",
@@ -24,13 +23,17 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
   const initialQuery = (rawQuery ?? "").trim();
   const initialResults =
     initialQuery.length >= 2
-      ? await fetchFeaturedMarkets(PAGE_SIZE, { searchQuery: initialQuery, status: "any", orderBy: "volume" })
+      ? await fetchFeaturedMarkets(DEFAULT_PAGE_SIZE, { searchQuery: initialQuery, status: "any", orderBy: "volume" })
       : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-black px-4 py-10 text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <SearchMarketsClient initialQuery={initialQuery} initialResults={initialResults} pageSize={PAGE_SIZE} />
+        <SearchMarketsClient
+          initialQuery={initialQuery}
+          initialResults={initialResults}
+          pageSize={DEFAULT_PAGE_SIZE}
+        />
       </div>
     </div>
   );

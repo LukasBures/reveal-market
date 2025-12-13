@@ -75,6 +75,7 @@ Useful scripts:
 - `npm run lint` – ESLint (includes Next.js rules + custom config).
 - `npm run test` – Vitest test suite.
 - `npm run build && npm run start` – production build (used in Docker/CI).
+- `cp ../.env.production frontend/.env.production` – if you keep a single prod env at repo root, copy it into `frontend/` before building so Next.js picks it up (keep real secrets out of git; use the example as the template).
 
 Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, etc.) if you prefer a single entry point.
 
