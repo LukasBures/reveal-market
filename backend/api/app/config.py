@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen-testnet.rpc.caldera.xyz/http"))
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
+    oracle_address: str | None = Field(default=None)
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25)
@@ -137,6 +138,19 @@ class Settings(BaseSettings):
     )
     commit_nonce_ttl_seconds: int = Field(
         default=600, ge=60, description="TTL (seconds) for commit authorization signatures"
+    )
+    verifier_address: str | None = Field(default=None, description="Verifier contract address for market creation")
+    authorization_signer: str | None = Field(default=None, description="Authorization signer address for markets")
+    circuit_hash: str = Field(default="0x0", description="Settlement circuit hash for market creation")
+    market_max_commitments: int = Field(default=10_000, ge=1, description="Max commitments per market")
+    market_protocol_liability_cap_wei: int = Field(
+        default=0, ge=0, description="Protocol liability cap per market (wei); 0 = unlimited"
+    )
+    market_commit_lead_seconds: int = Field(
+        default=86400, ge=60, description="Seconds from now to set commit deadline when auto-creating markets"
+    )
+    market_reveal_lead_seconds: int = Field(
+        default=172800, ge=60, description="Seconds after commit deadline to set reveal deadline when auto-creating markets"
     )
 
     @field_validator("max_page_size")

@@ -20,3 +20,14 @@ export function requireZenTokenAddress(): Address {
   }
   return ZEN_TOKEN_ADDRESS;
 }
+
+const rawEscrow = (process.env.NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS ?? "").trim();
+let normalizedEscrow: Address | null = null;
+if (rawEscrow.length > 0) {
+  try {
+    normalizedEscrow = getAddress(rawEscrow);
+  } catch {
+    normalizedEscrow = null;
+  }
+}
+export const RELAYER_ESCROW_ADDRESS: Address | null = normalizedEscrow;

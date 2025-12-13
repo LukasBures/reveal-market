@@ -6,7 +6,7 @@ import logging
 import secrets
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Tuple
 
 import httpx
 from eth_account import Account
@@ -18,6 +18,8 @@ from web3 import Web3
 
 from app import repository_async, schemas
 from app.routes import pricing as pricing_routes
+from shared.onchain import get_async_web3, load_account, to_checksum
+from shared.onchain.abi import MARKET_FACTORY_ABI
 from app.database import get_session
 from app.runtime import logger, settings
 
@@ -48,6 +50,74 @@ def _require_auth_signer():
     return raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
 
 
+async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> Tuple[str, int]:
+    """Create a market via the factory when no address is stored."""
+
+    if not settings.factory_address:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="factory_missing")
+    if not settings.verifier_address:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="verifier_missing")
+    if not settings.authorization_signer:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authorization_signer_missing")
+    if not settings.oracle_address:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="oracle_missing")
+    raw_key = settings.wallet_private_key
+    if raw_key is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="wallet_private_key_missing")
+    rpc_url = settings.rpc_url
+    if not rpc_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="rpc_url_missing")
+    account = load_account(raw_key.get_secret_value() if hasattr(raw_key, "get_secret_value") else str(raw_key))
+    web3 = get_async_web3(str(rpc_url))
+    factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
+    commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
+    reveal_deadline = commit_deadline + int(settings.market_reveal_lead_seconds)
+    params = (
+        to_checksum(settings.oracle_address),
+        to_checksum(settings.verifier_address),
+        settings.circuit_hash,
+        commit_deadline,
+        reveal_deadline,
+        int(settings.ticket_size_wei),
+        int(settings.market_max_commitments),
+        to_checksum(settings.authorization_signer),
+        int(settings.market_protocol_liability_cap_wei),
+    )
+    nonce = await web3.eth.get_transaction_count(account.address)
+    chain_id = await web3.eth.chain_id
+    tx = await factory.functions.createMarket(params).build_transaction(
+        {"from": account.address, "nonce": nonce, "chainId": chain_id, "gas": 1_200_000}
+    )
+    # Fill gas price if not set
+    if "gasPrice" not in tx and "maxFeePerGas" not in tx:
+        gas_price = await web3.eth.gas_price
+        tx["gasPrice"] = gas_price
+    signed = account.sign_transaction(tx)
+    tx_hash = await web3.eth.send_raw_transaction(signed.rawTransaction)
+    receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    logs = factory.events.MarketCreated().process_receipt(receipt)
+    if not logs:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="market_create_failed")
+    market_address = logs[0]["args"]["market"]
+    market_id = logs[0]["args"]["marketId"]
+    # Persist address + onchain id.
+    market_obj.market_address = market_address
+    market_obj.onchain_market_id = int(market_id)
+    market_obj.factory = settings.factory_address
+    session.add(market_obj)
+    await session.flush()
+    log_event(
+        logger,
+        logging.INFO,
+        event="trade.market_created",
+        message="Auto-created market on first trade",
+        tx_hash=tx_hash.hex(),
+        market_address=market_address,
+        market_id=int(market_id),
+    )
+    return market_address, int(market_id)
+
+
 async def _ensure_market(
     session: AsyncSession, market_id: str, expected_address: str | None
 ) -> tuple[int, str, int | None]:
@@ -57,7 +127,9 @@ async def _ensure_market(
     if not expected_address:
         if market.market_address:
             return market.id, market.market_address, market.onchain_market_id
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_address_missing")
+        # Auto-create a market on first trade when address is missing.
+        address, onchain_id = await _maybe_create_market_onchain(session, market)
+        return market.id, address, onchain_id
     if market.market_address and market.market_address.lower() != expected_address.lower():
         log_event(
             logger,

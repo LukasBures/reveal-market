@@ -9,9 +9,11 @@ import {
   type TradeCommitResponse,
 } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatTime } from "@/lib/formatters";
 import { defaultChain } from "@/lib/wagmi";
+import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
+import { erc20Abi, type Address, maxUint256 } from "viem";
 
 type Props = {
   defaultStakeZen?: number;
@@ -62,6 +64,38 @@ export function StakeQuoteCard({
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
+  const publicClient = usePublicClient({ chainId });
+  const { writeContractAsync } = useWriteContract();
+  const [depositInput, setDepositInput] = useState<string>("0.10");
+  const [withdrawInput, setWithdrawInput] = useState<string>("0.00");
+  const [escrowStatus, setEscrowStatus] = useState<string | null>(null);
+  const [escrowError, setEscrowError] = useState<string | null>(null);
+  const escrowAddress = RELAYER_ESCROW_ADDRESS;
+  const { data: escrowBalance } = useReadContract({
+    address: escrowAddress ?? undefined,
+    abi: [
+      {
+        name: "balances",
+        type: "function",
+        stateMutability: "view",
+        inputs: [{ name: "", type: "address" }],
+        outputs: [{ name: "", type: "uint256" }],
+      },
+    ],
+    functionName: "balances",
+    args: escrowAddress && address ? [address as Address] : undefined,
+    query: { enabled: Boolean(escrowAddress && address) },
+  });
+  const { data: escrowAllowance } = useReadContract({
+    address: ZEN_TOKEN_ADDRESS ?? undefined,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args:
+      ZEN_TOKEN_ADDRESS && escrowAddress && address
+        ? ([address as Address, escrowAddress as Address] as const)
+        : undefined,
+    query: { enabled: Boolean(ZEN_TOKEN_ADDRESS && escrowAddress && address), refetchInterval: 15000 },
+  });
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -285,6 +319,95 @@ export function StakeQuoteCard({
     (quoteExpired ? "Quote expired" : null) ??
     null;
 
+  const handleDeposit = async () => {
+    setEscrowError(null);
+    setEscrowStatus(null);
+    if (!address || !escrowAddress || !ZEN_TOKEN_ADDRESS) {
+      setEscrowError("Missing wallet, escrow, or ZEN token config.");
+      return;
+    }
+    const amountZen = Number(depositInput.replace(",", "."));
+    if (!Number.isFinite(amountZen) || amountZen <= 0) {
+      setEscrowError("Enter a deposit amount.");
+      return;
+    }
+    const amountWei = BigInt(Math.floor(amountZen * 1e18));
+    try {
+      if (!escrowAllowance || escrowAllowance < amountWei) {
+        const approveHash = await writeContractAsync({
+          address: ZEN_TOKEN_ADDRESS as Address,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [escrowAddress as Address, maxUint256],
+          chainId,
+        });
+        setEscrowStatus(`Approve tx: ${approveHash.slice(0, 10)}…${approveHash.slice(-6)}`);
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash: approveHash as any });
+        }
+      }
+      const depositHash = await writeContractAsync({
+        address: escrowAddress as Address,
+        abi: [
+          {
+            name: "deposit",
+            type: "function",
+            stateMutability: "nonpayable",
+            inputs: [{ name: "amount", type: "uint256" }],
+            outputs: [],
+          },
+        ],
+        functionName: "deposit",
+        args: [amountWei],
+        chainId,
+      });
+      setEscrowStatus(`Deposit tx: ${depositHash.slice(0, 10)}…${depositHash.slice(-6)}`);
+      if (publicClient) {
+        await publicClient.waitForTransactionReceipt({ hash: depositHash as any });
+      }
+    } catch (err) {
+      setEscrowError(err instanceof Error ? err.message : "Deposit failed");
+    }
+  };
+
+  const handleWithdraw = async () => {
+    setEscrowError(null);
+    setEscrowStatus(null);
+    if (!address || !escrowAddress) {
+      setEscrowError("Missing wallet or escrow config.");
+      return;
+    }
+    const amountZen = Number(withdrawInput.replace(",", "."));
+    if (!Number.isFinite(amountZen) || amountZen <= 0) {
+      setEscrowError("Enter a withdraw amount.");
+      return;
+    }
+    const amountWei = BigInt(Math.floor(amountZen * 1e18));
+    try {
+      const withdrawHash = await writeContractAsync({
+        address: escrowAddress as Address,
+        abi: [
+          {
+            name: "withdraw",
+            type: "function",
+            stateMutability: "nonpayable",
+            inputs: [{ name: "amount", type: "uint256" }],
+            outputs: [],
+          },
+        ],
+        functionName: "withdraw",
+        args: [amountWei],
+        chainId,
+      });
+      setEscrowStatus(`Withdraw tx: ${withdrawHash.slice(0, 10)}…${withdrawHash.slice(-6)}`);
+      if (publicClient) {
+        await publicClient.waitForTransactionReceipt({ hash: withdrawHash as any });
+      }
+    } catch (err) {
+      setEscrowError(err instanceof Error ? err.message : "Withdraw failed");
+    }
+  };
+
   const handleTrade = async () => {
     setTxError(null);
     setTxHash(null);
@@ -365,6 +488,55 @@ export function StakeQuoteCard({
     <div
       className={`md:sticky md:top-40 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-3">
+        <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Escrow</p>
+        <p className="text-sm font-semibold text-white">
+          Balance:{" "}
+          {escrowBalance !== undefined && escrowBalance !== null
+            ? `${(Number(escrowBalance) / 1e18).toFixed(3)} ZEN`
+            : "—"}
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={depositInput}
+              onChange={(e) => setDepositInput(e.target.value)}
+              className="w-full rounded-lg border border-white/15 bg-slate-900/70 px-2 py-1 text-white"
+              step="0.01"
+              min="0"
+              aria-label="Deposit amount"
+            />
+            <button
+              type="button"
+              onClick={handleDeposit}
+              className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-400"
+            >
+              Approve & Deposit
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={withdrawInput}
+              onChange={(e) => setWithdrawInput(e.target.value)}
+              className="w-full rounded-lg border border-white/15 bg-slate-900/70 px-2 py-1 text-white"
+              step="0.01"
+              min="0"
+              aria-label="Withdraw amount"
+            />
+            <button
+              type="button"
+              onClick={handleWithdraw}
+              className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white hover:bg-white/25"
+            >
+              Withdraw
+            </button>
+          </div>
+        </div>
+        {escrowStatus && <p className="mt-2 text-[11px] text-emerald-200">{escrowStatus}</p>}
+        {escrowError && <p className="mt-2 text-[11px] text-rose-300">{escrowError}</p>}
+      </div>
       {marketTitle && (
         <p className="text-sm font-semibold text-white/90">{marketTitle}</p>
       )}
