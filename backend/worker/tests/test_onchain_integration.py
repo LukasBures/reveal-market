@@ -59,11 +59,20 @@ def test_onchain_creation_happy_path(monkeypatch):
     session = Session()
 
     async def fake_send(**kwargs):
-        return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        return "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1
+
+    async def fake_next_market_id(*args, **kwargs):
+        return 1
+
+    async def fake_predict_address(*args, **kwargs):
+        return "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
     monkeypatch.setattr("app.onchain._send_create_market_transaction", fake_send)
+    monkeypatch.setattr("app.onchain.get_next_market_id", fake_next_market_id)
+    monkeypatch.setattr("app.onchain.predict_market_address", fake_predict_address)
 
     result = maybe_create_onchain_market(settings, market, session)
     assert result == "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     assert session.flushed is True
     assert market.market_address == result
+    assert market.onchain_market_id == 1
