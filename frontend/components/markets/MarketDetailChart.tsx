@@ -173,20 +173,6 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
               Spread {spread !== undefined ? spread.toFixed(3) : "—"}
             </span>
           </div>
-          <div className="flex flex-1 items-center gap-2 overflow-x-auto pb-1">
-            {(outcomes.length ? outcomes : ["Outcome 1", "Outcome 2"]).map((label, idx) => (
-              <button
-                key={`${label || "outcome"}-${idx}`}
-                type="button"
-                onClick={() => setSelectedOutcome(idx)}
-                className={`whitespace-nowrap rounded-full px-3 py-1 ${
-                  selectedOutcome === idx ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
-                }`}
-              >
-                {label || `Outcome ${idx + 1}`}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
       <div className="relative mt-4 h-64 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 p-4 shadow-inner shadow-black/40">

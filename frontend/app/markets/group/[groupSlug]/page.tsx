@@ -165,25 +165,23 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                 outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
                 outcomePrices={market.outcomePrices ?? []}
               />
-              <MarketAnalyticsPanel market={market} />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
-                    <details className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-slate-200">
-                      <summary className="cursor-pointer text-sm font-semibold text-white">
-                        Expand resolution criteria
-                      </summary>
+                    <div className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-slate-200">
+                      <p className="text-sm font-semibold text-white">Resolution criteria</p>
                       <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{selectMarketCopy(market)}</div>
                       <ul className="mt-2 space-y-1 text-xs text-slate-400">
                         <li>Resolver source: {resolverLabel}</li>
                         <li>Commit deadline: {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}</li>
                         <li>Reveal deadline: {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}</li>
                       </ul>
-                    </details>
+                    </div>
                   </div>
                 </div>
               </section>
+              <MarketAnalyticsPanel market={market} />
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">

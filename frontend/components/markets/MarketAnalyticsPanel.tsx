@@ -65,7 +65,7 @@ export function MarketAnalyticsPanel({ market }: Props) {
         <span>Market stats</span>
         <span className="text-slate-400">Live streamer · subgraph fallbacks</span>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid w-full grid-cols-1 gap-3">
         {rows
           .filter((row): row is StatRow => Boolean(row && row.value !== undefined && row.value !== null))
           .map((row) => (

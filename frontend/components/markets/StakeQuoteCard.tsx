@@ -429,11 +429,6 @@ export function StakeQuoteCard({
               {quote.remaining_market_stake_zen?.toFixed(2) ?? "n/a"} ZEN
             </span>
           )}
-          {fxReceivedAt && (
-            <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
-              FX {formatTime(fxReceivedAt)} ({fxAgeSeconds !== null ? `${fxAgeSeconds.toFixed(0)}s ago` : "fresh"})
-            </span>
-          )}
         </div>
       </div>
 
@@ -593,11 +588,6 @@ export function StakeQuoteCard({
           <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
             {tradingReason ?? "Trading is unavailable for this market."}
           </div>
-        )}
-        {!tradingDisabled && allowAutoCreate && (
-          <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-            Market will be deployed automatically on your first trade.
-          </p>
         )}
         {quote && (
           <p className="text-xs text-slate-300">

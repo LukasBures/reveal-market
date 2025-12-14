@@ -38,8 +38,11 @@ logger = runtime.logger
 
 def _calculate_sleep(start_time: float) -> float:
     """Determine how long the worker should sleep to honour the poll interval."""
-    elapsed = time.time() - start_time
-    return max(runtime.settings.poll_interval_seconds - elapsed, 0)
+    elapsed = time.monotonic() - start_time
+    # Aim for a start-to-start cadence so we do not run back-to-back when a tick
+    # finishes quickly. Negative means the tick exceeded the interval.
+    sleep_for = runtime.settings.poll_interval_seconds - elapsed
+    return max(sleep_for, 0)
 
 
 def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | bool]:
@@ -447,8 +450,18 @@ async def run_worker() -> None:
     )
     try:
         while True:
-            loop_start = time.time()
+            loop_start = time.monotonic()
             await _run_worker_tick(redis_client)
-            await asyncio.sleep(_calculate_sleep(loop_start))
+            sleep_for = _calculate_sleep(loop_start)
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.sleep",
+                message="sleeping before next sync tick",
+                sleep_seconds=round(sleep_for, 2),
+                elapsed_seconds=round(time.monotonic() - loop_start, 2),
+                poll_interval_seconds=runtime.settings.poll_interval_seconds,
+            )
+            await asyncio.sleep(sleep_for)
     finally:
         heartbeat_stop.set()
