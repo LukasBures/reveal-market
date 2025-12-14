@@ -28,6 +28,15 @@ from .database import session_scope
 logger = runtime.logger
 
 
+def _raw_tx_bytes(signed_tx: Any) -> bytes:
+    raw_tx = getattr(signed_tx, "rawTransaction", None)
+    if raw_tx is None:
+        raw_tx = getattr(signed_tx, "raw_transaction", None)
+    if raw_tx is None:  # pragma: no cover - defensive for web3 variants
+        raise ValueError("Signed transaction is missing raw transaction bytes")
+    return cast(bytes, raw_tx)
+
+
 def _build_market_contract(web3: AsyncWeb3, market_address: str) -> AsyncContract:
     """Return a typed contract instance for a market address."""
 
@@ -144,7 +153,7 @@ async def _maybe_post_result(web3: AsyncWeb3, account, contract, winning_outcome
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)
-    tx_hash = await web3.eth.send_raw_transaction(signed.rawTransaction)
+    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
     log_event(
         logger,
@@ -180,7 +189,7 @@ async def _submit_verify_and_settle(
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)
-    tx_hash = await web3.eth.send_raw_transaction(signed.rawTransaction)
+    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
     return tx_hash.hex(), getattr(receipt, "blockNumber", None)
 

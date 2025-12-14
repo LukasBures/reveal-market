@@ -7,7 +7,16 @@ from typing import Any, cast
 
 from web3 import HTTPProvider, Web3
 from web3.contract.contract import Contract
-from web3.middleware import geth_poa_middleware  # type: ignore[attr-defined]
+
+try:
+    from web3.middleware import geth_poa_middleware as _poa_middleware  # type: ignore[attr-defined]
+except ImportError:
+    _poa_middleware = None
+
+try:
+    from web3.middleware import ExtraDataToPOAMiddleware  # type: ignore[attr-defined]
+except ImportError:
+    ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
 from .local_logging import log_event
 
@@ -100,7 +109,10 @@ class OnChainLpVaultClient(BaseLpVaultClient):
         self.tx_config = tx_config
         self.w3 = Web3(HTTPProvider(tx_config.rpc_url))
         # Support PoA chains if needed.
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        if _poa_middleware is not None:
+            self.w3.middleware_onion.inject(_poa_middleware, layer=0)
+        elif ExtraDataToPOAMiddleware is not None:
+            self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.account = self.w3.eth.account.from_key(tx_config.private_key)
         self.contract: Contract = self.w3.eth.contract(address=Web3.to_checksum_address(vault_address), abi=self.ABI)
 
@@ -159,7 +171,12 @@ class OnChainLpVaultClient(BaseLpVaultClient):
 
     async def _send_tx(self, tx: dict[str, Any]) -> dict[str, Any]:
         signed = self.account.sign_transaction(tx)
-        tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+        raw_tx = getattr(signed, "rawTransaction", None)
+        if raw_tx is None:
+            raw_tx = getattr(signed, "raw_transaction", None)
+        if raw_tx is None:  # pragma: no cover - defensive for web3 variants
+            raise ValueError("Signed transaction is missing raw transaction bytes")
+        tx_hash = self.w3.eth.send_raw_transaction(raw_tx)
         receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
         receipt_data = cast(dict[str, Any], receipt)
         log_event(

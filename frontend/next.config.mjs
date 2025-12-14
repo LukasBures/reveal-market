@@ -8,6 +8,7 @@ const DEFAULT_STREAMER_BASE = IS_PROD_MODE ? "https://stream.revealmarket.xyz" :
 const API_BASE = DEFAULT_API_BASE.replace(/\/$/, "");
 const STREAMER_BASE = DEFAULT_STREAMER_BASE.replace(/\/$/, "");
 const STREAMER_WS = STREAMER_BASE.replace(/^http/i, "ws");
+const DEFAULT_RPC_URL = "https://horizen-testnet.rpc.caldera.xyz/http";
 const PROD_API_BASE = "https://api.revealmarket.xyz";
 const PROD_STREAMER_BASE = "https://stream.revealmarket.xyz";
 const PROD_STREAMER_WS = PROD_STREAMER_BASE.replace(/^http/i, "ws");
@@ -65,6 +66,23 @@ const walletFrameOrigins = [
   "https://wallet.coinbase.com",
 ];
 
+const rpcOrigins = Array.from(
+  new Set(
+    [process.env.NEXT_PUBLIC_RPC_URL, DEFAULT_RPC_URL]
+      .map((candidate) => (candidate ?? "").trim())
+      .filter(Boolean)
+      .map((rawUrl) => {
+        try {
+          return new URL(rawUrl).origin;
+        } catch (err) {
+          console.warn(`Invalid RPC URL for CSP: ${rawUrl}`);
+          return null;
+        }
+      })
+      .filter(Boolean),
+  ),
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = (phase) => {
   const isDev = phase === PHASE_DEVELOPMENT_SERVER;
@@ -88,6 +106,7 @@ const nextConfig = (phase) => {
     PROD_STREAMER_WS,
     ...WALLET_PROVIDER_ORIGINS,
     ...WALLET_PROVIDER_WS,
+    ...rpcOrigins,
   ];
   if (isDev) {
     connectSrc.push("http://localhost:8000", "http://localhost:8100", "ws://localhost:8100");

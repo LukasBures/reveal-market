@@ -2,7 +2,16 @@ import sys
 
 from structlog import get_logger
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
+try:
+    from web3.middleware import geth_poa_middleware as _poa_middleware
+except ImportError:
+    _poa_middleware = None
+
+try:
+    from web3.middleware import ExtraDataToPOAMiddleware
+except ImportError:
+    ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
 from .app import create_app
 from .config import load_config
@@ -20,7 +29,10 @@ except RuntimeError as err:
     raise
 
 web3 = Web3(Web3.HTTPProvider(cfg.rpc_url, request_kwargs={"timeout": cfg.http_timeout_seconds}))
-web3.middleware_onion.inject(geth_poa_middleware, layer=0)
+if _poa_middleware is not None:
+    web3.middleware_onion.inject(_poa_middleware, layer=0)
+elif ExtraDataToPOAMiddleware is not None:
+    web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 account = web3.eth.account.from_key(cfg.relayer_private_key)
 service = build_service(
     web3,

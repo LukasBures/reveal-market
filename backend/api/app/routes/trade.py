@@ -49,6 +49,15 @@ def _strip_hex(value: str) -> str:
     return value[2:] if value.startswith("0x") else value
 
 
+def _raw_tx_bytes(signed_tx: Any) -> bytes:
+    raw_tx = getattr(signed_tx, "rawTransaction", None)
+    if raw_tx is None:
+        raw_tx = getattr(signed_tx, "raw_transaction", None)
+    if raw_tx is None:  # pragma: no cover - defensive for web3 variants
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="signed_tx_missing_raw_transaction")
+    return cast(bytes, raw_tx)
+
+
 async def _fetch_escrow_balance(wallet_address: str) -> int | None:
     """Return escrow balance for a wallet if escrow + RPC are configured."""
 
@@ -221,6 +230,10 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
     rpc_url = settings.rpc_url
     if not rpc_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="rpc_url_missing")
+    # Ensure the circuit hash is a full 32-byte hex string so contract calls do not explode.
+    circuit_hash = settings.circuit_hash
+    if not isinstance(circuit_hash, str) or len(circuit_hash) != 66 or not circuit_hash.startswith("0x"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="circuit_hash_invalid")
     account = load_account(raw_key.get_secret_value() if hasattr(raw_key, "get_secret_value") else str(raw_key))
     web3 = get_async_web3(str(rpc_url))
     factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
@@ -237,17 +250,23 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
         to_checksum(settings.authorization_signer),
         int(settings.market_protocol_liability_cap_wei),
     )
-    nonce = await web3.eth.get_transaction_count(account.address)
-    chain_id = await web3.eth.chain_id
-    tx = await factory.functions.createMarket(params).build_transaction(
-        {"from": account.address, "nonce": nonce, "chainId": chain_id, "gas": 1_200_000}
-    )
+    try:
+        nonce = await web3.eth.get_transaction_count(account.address)
+        chain_id = await web3.eth.chain_id
+        tx = await factory.functions.createMarket(params).build_transaction(
+            {"from": account.address, "nonce": nonce, "chainId": chain_id, "gas": 1_200_000}
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"market_create_failed:{exc}",
+        ) from exc
     # Fill gas price if not set
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         gas_price = await web3.eth.gas_price
         tx["gasPrice"] = gas_price
     signed = account.sign_transaction(tx)
-    tx_hash = await web3.eth.send_raw_transaction(signed.rawTransaction)
+    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
     logs = factory.events.MarketCreated().process_receipt(receipt)
     if not logs:

@@ -73,6 +73,12 @@ export function DashboardClient() {
       ? `Switch to ${defaultChain.name}`
       : null;
 
+  const sanitizeError = (err: unknown): string => {
+    const raw = err instanceof Error ? err.message : String(err);
+    const [message] = raw.split("Version:");
+    return message.trim() || "Transaction failed";
+  };
+
   const load = useMemo(
     () => async (wallet: string) => {
       try {
@@ -166,7 +172,7 @@ export function DashboardClient() {
       await load(address);
       await loadBundles(address);
     } catch (err) {
-      setEscrowError(err instanceof Error ? err.message : "Deposit failed");
+      setEscrowError(sanitizeError(err));
     }
   };
 
@@ -214,7 +220,7 @@ export function DashboardClient() {
       await load(address);
       await loadBundles(address);
     } catch (err) {
-      setEscrowError(err instanceof Error ? err.message : "Withdraw failed");
+      setEscrowError(sanitizeError(err));
     }
   };
 
