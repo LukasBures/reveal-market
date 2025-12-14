@@ -176,3 +176,18 @@ ___
 - Settlement signer not configured: RM_SETTLEMENT_SIGNER_PRIVATE_KEY is blank in .env.local and .env.production, so I can’t verify funding; fill it and ensure the address is funded on the test chain.
 
   - Next actions to unblock happy path: 1) align circuitHash (re-deploy verifier or roll prover back to the on-chain key); 2) set RM_SETTLEMENT_SIGNER_PRIVATE_KEY + RM_SETTLEMENT_RPC_URL and fund the signer; 3) restart worker/api with those envs so auto settlement can submit.
+
+
+
+___
+
+• RM_RAKE_MANAGER_ADDRESS is just the address of the on-chain RakeManager contract. It’s used whenever the backend/worker needs to know where rake configuration/ownership lives (e.g., on-chain rake overrides or admin flows). Today we keep it as 0x000…0 because we aren’t calling it in the happy-path flows; if you
+  deploy a real RakeManager, set this env to its address so any on-chain ops that touch rake can point to the right contract.
+
+
+› what does rake manager and why it is not deployed
+
+
+• RakeManager is the on-chain contract that would hold rake config/ownership and let an admin update rake overrides. In this stack it’s optional—current flows hardcode rake in env (RM_RAKE_PERCENT) and don’t invoke on-chain rake updates, so we’ve left RM_RAKE_MANAGER_ADDRESS at 0x0 and haven’t deployed one. If you
+  need on-chain rake governance later, deploy RakeManager and set the env to its address so API/worker/admin scripts can point to it.
+
