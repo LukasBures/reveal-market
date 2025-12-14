@@ -86,4 +86,12 @@ run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"
 
-run_section "All test suites" "/bin/true"
+# Final summary line
+final_width=68
+final_label="All test suites"
+final_result="Passed"
+final_dots=$((final_width - ${#final_label} - ${#final_result}))
+((final_dots < 2)) && final_dots=2
+printf '%s' "${final_label}"
+printf '.%.0s' $(seq 1 "${final_dots}")
+printf '%s%s%s\n' "${GREEN}" "${final_result}" "${RESET}"

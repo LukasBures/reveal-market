@@ -8,6 +8,7 @@ import app.runtime as runtime
 from app import models
 from app.schemas import FxQuoteResponse
 from eth_account import Account
+from eth_account.messages import encode_defunct
 from pydantic import SecretStr
 from web3 import Web3
 
@@ -233,7 +234,11 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get(f"/claim/bundles?wallet={user.address}")
+    signature = Account.sign_message(
+        encode_defunct(text=f"claim-bundles:{user.address.lower()}"),
+        private_key=user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["bundles"]) == 1

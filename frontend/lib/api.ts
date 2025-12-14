@@ -619,14 +619,20 @@ export async function fetchPositions(
   }
 }
 
-export async function fetchClaimBundles(wallet: string): Promise<{ bundles: ClaimBundle[]; error?: string }> {
+export async function fetchClaimBundles(
+  wallet: string,
+  signature: string,
+): Promise<{ bundles: ClaimBundle[]; error?: string }> {
   if (maybeShortCircuitOffline("fetchClaimBundles")) {
     return { bundles: [], error: "offline" };
   }
   const url = new URL(`${DEFAULT_API_BASE}/claim/bundles`);
   url.searchParams.set("wallet", wallet);
   try {
-    const response = await fetch(url.toString(), { cache: "no-store" });
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: { "X-Wallet-Signature": signature },
+    });
     if (!response.ok) {
       const detail = await response.text();
       const errorMessage = `Failed to fetch claim bundles (${response.status}): ${detail}`;

@@ -123,29 +123,51 @@ ___
 ___
 
 
-  Core changes (minimal, perpetual claims, keep single terminal phase = Settled)
+• Here’s what’s implemented vs. still missing for each step of the “happy path”:
 
-  1. Remove the claim window check:
-      - In contracts/zen/src/RevealMarket.sol, delete if (block.timestamp > revealDeadline) revert ClaimWindowClosed(); inside claim.
-      - remove the revealDeadline variable if not used, dont care about ABI compatibility - will redeploy contracts so dont be scared
-  2. Stop using Finished as a terminal state:
-      - Don’t call _finish when claimedLiability == totalLiability; just leave phase = Settled.
-      - remove Finished from the enum and from everywhere
-  3. Decide on surplus/top-up handling:
-      - Current verifyAndSettle already returns surplus to the protocol pool before claims. If you never call _finish, any residual dust stays in the market contract. If that’s acceptable, nothing else to do. -> what is the dust here? I believe there should not be dust, anything that is > than total claimable value should be sent to the protocol pool imediately once verify and setle
-      - If you need to recover unclaimed funds eventually, add a governance/timelocked sweepUnclaimed() callable only after a long inactivity period. If you don’t want that, accept the locked dust. After how long should I sweep users' funds ? if ever ? I guess I should not. But for security reason what would you recommend
-  4. Claims permissioning:
-      - If you truly want claims “forever” to be reliable, make claim permissionless (remove onlyRelayer) or allow multiple/rotatable relayers. Otherwise, a dead/censoring relayer can still block claims indefinitely, what about deposit only relayer, but clain only user ? my protocol's part will be sent to the protoocl pool automatically in verify and settle stage
-  5. Keep guards:
-      - Keep phase == Settled, claimsPaused, merkle proof check, and claimedLiability <= totalLiability as-is; they still protect against over-claims.
+  1. Connect wallet
 
-  Cleanup and tests
+  - Implemented in frontend via wagmi; dashboard requires a connected address.
 
-  - Update or remove any references to ClaimWindowClosed (events/errors/tests).
-  - Adjust tests in contracts/zen/test/* that expect claim cutoff or Finished to be reached.
-  - If you remove Finished from the enum, update any consumers (factory views, frontends) that reference it.
+  2. Deposit to relayer escrow
 
-  Optional UX/ops improvements
+  - Solidity supports it (RelayerEscrow.deposit/withdraw).
+  - Frontend currently only displays escrow balance on /dashboard; there is no deposit/withdraw UI flow wired. Users cannot initiate deposits from the app yet. You’ll need a deposit form (approve + deposit) if you want this step in-app.
 
-  - Add relayer rotation and/or a second claim path (user-driven) to reduce reliance on a single relayer.
-  - Emit an event when the market is considered “fully claimed” (if you keep _finish as a counter-only signal) without changing the claimability.
+  3. Place a bet and debit escrow
+
+  - Backend trade/commit routes exist; escrow debit happens in RelayerEscrow.commitOnBehalf (balance reduced, funds sent to market).
+  - Frontend commit flow exists via useCommitWithQuote for on-chain commits; relayer-assisted commit flow is in API, but the UI for committing depends on your market pages (already present). No change needed for debit logic.
+
+  4. Lock/settle and publish bundles
+
+  - Backend has storage for commitments/settlements and the new /claim/bundles endpoint that assembles per-wallet bundles on demand.
+  - Critical dependency: commitments + settlements must be ingested (worker/API commitments/settlements endpoints). Worker TODOs mention commitment ingestion is not wired by default. If you’re not persisting commitments and settlement snapshots, bundles won’t be served. Ensure the worker/API actually records
+    commitments and settlement snapshots for each market.
+
+  5. Dashboard “Claim” button submits claim(...) on-chain
+
+  - Implemented: dashboard now fetches bundles (/claim/bundles) and calls the contract claim directly with user/ticketId/outcomeId/amount/salt/proof. UI shows errors/loading.
+  - Not yet done: client-side sanity checks of leaf/root you mentioned earlier (the app currently trusts the backend bundle). Add those if you still want local verification.
+
+  6. Funds go to the user wallet, not escrow
+
+  - Implemented in RevealMarket.claim (transfers to user), and the dashboard assumes wallet receipt. Escrow balance is not incremented on claim.
+
+  7. Protocol pool retains rake/surplus; unclaimed remain in market
+
+  - Implemented: verifyAndSettle refunds surplus to the protocol pool; unclaimed liability stays in the market. No sweep exists.
+
+  Security/UX gaps to address:
+
+  - /claim/bundles is unauthenticated and keyed by a wallet query param; add auth/binding to the connected wallet to avoid leaking salts/bundles to arbitrary callers.
+  - Worker ingestion needs to be active so commitments + settlements (and salts/leaf indices) are stored; otherwise bundles cannot be built.
+  - Add a deposit/withdraw UI if you want users to fund escrow from the dashboard.
+  - Optional: add leaf/root recomputation in the frontend before calling claim to guard against a bad backend bundle.
+__
+  -   - /claim/bundles is still unauthenticated (wallet query param). You should bind this endpoint to the authenticated wallet to avoid leaking salts/bundles.
+  - Worker/ingestion must populate commitments + settlements for bundles to exist.
+  - Deposit/withdraw also available in the market trade card (already present).
+  - Tests not run here; please run:
+      - cd backend/api && pytest
+      - cd frontend && npm test && npm run lint

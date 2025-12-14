@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +39,19 @@ class FakeService:
             "connected": True,
             "escrowOwner": self.account.address,
         }
+
+
+class IngestService(FakeService):
+    def __init__(self):
+        super().__init__()
+        self.commit_ingests: list[dict[str, Any]] = []
+        self.settlement_ingests: list[dict[str, Any]] = []
+
+    async def push_commit_ingest(self, payload, *, tx_hash=None):
+        self.commit_ingests.append({"payload": payload, "tx_hash": tx_hash})
+
+    async def push_settlement_ingest(self, payload, *, tx_hash=None):
+        self.settlement_ingests.append({"payload": payload, "tx_hash": tx_hash})
 
 
 @pytest.fixture
@@ -162,6 +176,49 @@ def test_claim_route(client):
     resp = client.post("/claim", json=payload)
     assert resp.status_code == 200
     assert resp.json()["txHash"] == "0xclaim"
+
+
+def test_commit_route_triggers_ingest():
+    service = IngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 200
+    assert service.commit_ingests
+    assert service.commit_ingests[0]["tx_hash"] == "0xcommit"
+
+
+def test_claim_route_triggers_ingest():
+    service = IngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = ClaimRequest(
+        market="0x0000000000000000000000000000000000000002",
+        user="0x0000000000000000000000000000000000000001",
+        ticket_id=0,
+        outcome_id=1,
+        amount=10,
+        salt="0x" + "1" * 64,
+        merkle_proof=[],
+    ).model_dump()
+
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 200
+    assert service.settlement_ingests
+    assert service.settlement_ingests[0]["tx_hash"] == "0xclaim"
 
 
 def test_commit_requires_auth_when_enabled():

@@ -429,6 +429,20 @@ async def _ensure_market(
     return market.id, expected_address, resolved_onchain_id
 
 
+def _verify_wallet_signature(wallet: str, signature: str) -> None:
+    """Verify that the signature was produced by the wallet for the claim-bundles scope."""
+
+    try:
+        recovered = Account.recover_message(
+            encode_defunct(text=f"claim-bundles:{wallet.lower()}"),
+            signature=signature,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid_signature:{exc}") from exc
+    if recovered.lower() != wallet.lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
+
+
 @router.post("/trade/commit", response_model=schemas.TradeCommitResponse, tags=["trade"])
 async def trade_commit(
     payload: schemas.TradeCommitRequest,
@@ -626,11 +640,18 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
 
 
 @router.get("/claim/bundles", response_model=schemas.ClaimBundlesResponse, tags=["trade"])
-async def list_claim_bundles(wallet: str, session: AsyncSession = Depends(get_session)) -> schemas.ClaimBundlesResponse:
+async def list_claim_bundles(
+    wallet: str,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    session: AsyncSession = Depends(get_session),
+) -> schemas.ClaimBundlesResponse:
     """Return claim bundles for settled winning tickets belonging to a wallet."""
 
     if not wallet:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+    if not wallet_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+    _verify_wallet_signature(wallet, wallet_signature)
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     bundles: list[schemas.ClaimBundle] = []
     for commitment, market, settlement in rows:

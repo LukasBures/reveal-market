@@ -961,6 +961,22 @@
               "type": "string",
               "title": "Wallet"
             }
+          },
+          {
+            "name": "X-Wallet-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
           }
         ],
         "responses": {

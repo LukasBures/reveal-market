@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { encodePacked, keccak256 } from "viem";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
@@ -20,6 +21,9 @@ const hoisted = vi.hoisted(() => ({
   fetchPositions: vi.fn(),
   fetchClaimBundles: vi.fn(),
   useWriteContract: vi.fn(),
+  useReadContract: vi.fn(),
+  usePublicClient: vi.fn(),
+  useSignMessage: vi.fn(),
 }));
 
 vi.mock("wagmi", async () => {
@@ -30,6 +34,9 @@ vi.mock("wagmi", async () => {
     useAccount: hoisted.useAccount,
     useChainId: hoisted.useChainId,
     useWriteContract: hoisted.useWriteContract,
+    useReadContract: hoisted.useReadContract,
+    usePublicClient: hoisted.usePublicClient,
+    useSignMessage: hoisted.useSignMessage,
   };
 });
 
@@ -50,6 +57,16 @@ describe("DashboardClient", () => {
     hoisted.fetchPositions.mockReset();
     hoisted.fetchClaimBundles.mockReset();
     hoisted.useWriteContract.mockReset();
+    hoisted.useReadContract.mockReset();
+    hoisted.usePublicClient.mockReset();
+    hoisted.useSignMessage.mockReset();
+    hoisted.useSignMessage.mockReturnValue({ signMessageAsync: vi.fn().mockResolvedValue("0xsig") });
+    hoisted.useReadContract.mockReturnValue({ data: 0n });
+    hoisted.useWriteContract.mockReturnValue({
+      writeContractAsync: vi.fn(),
+      isPending: false,
+      error: undefined,
+    });
   });
 
   it("prompts to connect when wallet is disconnected", () => {
@@ -73,13 +90,16 @@ describe("DashboardClient", () => {
       isPending: false,
       error: undefined,
     });
+    hoisted.useReadContract.mockReturnValue({ data: 0n });
+    hoisted.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
+    hoisted.useSignMessage.mockReturnValue({ signMessageAsync: vi.fn().mockResolvedValue("0xsig") });
     hoisted.fetchPositions.mockResolvedValue({
       positions: [
         {
           market_id: "m-1",
           market_title: "Yes/No",
           outcome_id: 0,
-          stake_wei: 100000000000000000,
+          stake_wei: "100000000000000000",
           stake_zen: 0.1,
           status: "settled",
           ticket_id: 0,
@@ -91,19 +111,30 @@ describe("DashboardClient", () => {
       ],
       escrowBalance: "100000000000000000",
     });
+    const salt = "0x" + "00".repeat(32);
+    const user = "0x9999999999999999999999999999999999999999";
+    const userSalt = keccak256(
+      encodePacked(["address", "bytes32"], [user as `0x${string}`, salt as `0x${string}`]),
+    );
+    const leaf = keccak256(
+      encodePacked(
+        ["uint256", "uint256", "uint256", "bytes32"],
+        [0n, 0n, 100000000000000000n, userSalt as `0x${string}`],
+      ),
+    );
     hoisted.fetchClaimBundles.mockResolvedValue({
       bundles: [
         {
           marketId: "m-1",
           marketAddress: "0x1111111111111111111111111111111111111111",
-          commitmentsRoot: "0x" + "ab" * 32,
+          commitmentsRoot: leaf,
           ticketId: 0,
           outcomeId: 0,
-          amountWei: 100000000000000000,
-          salt: "0x" + "00" * 32,
+          amountWei: "100000000000000000",
+          salt,
           merkleProof: [],
-          leaf: "0x" + "ab" * 32,
-          user: "0x9999999999999999999999999999999999999999",
+          leaf,
+          user,
         },
       ],
     });

@@ -88,7 +88,15 @@ def create_app(
                     {"jobId": job_id, "status": "queued"},
                     status_code=status.HTTP_202_ACCEPTED,
                 )
-            return await svc.commit(payload)
+            result = await svc.commit(payload)
+            if hasattr(svc, "push_commit_ingest"):
+                try:
+                    tx_hash = result.get("txHash")
+                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                    await svc.push_commit_ingest(payload, tx_hash=tx_hash_str)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("commit_ingest_failed", error=str(err), market=payload.get("market"))
+            return result
         except ValueError as err:
             logger.warning("commit_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
@@ -113,7 +121,15 @@ def create_app(
                     {"jobId": job_id, "status": "queued"},
                     status_code=status.HTTP_202_ACCEPTED,
                 )
-            return await svc.claim(payload)
+            result = await svc.claim(payload)
+            if hasattr(svc, "push_settlement_ingest"):
+                try:
+                    tx_hash = result.get("txHash")
+                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                    await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("claim_ingest_failed", error=str(err), market=payload.get("market"))
+            return result
         except ValueError as err:
             logger.warning("claim_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
