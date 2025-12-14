@@ -19,14 +19,17 @@ const resolveSiteUrl = () => {
   return config.siteUrl;
 };
 
+const isProdLike = () => (process.env.RM_ENVIRONMENT ?? "").toLowerCase().includes("prod");
+
 const shouldUseSecureCookie = (): boolean => {
   const siteUrl = resolveSiteUrl();
   try {
     const parsed = new URL(siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`);
-    return parsed.protocol === "https:";
+    if (parsed.protocol === "https:") return true;
   } catch {
-    return process.env.NODE_ENV === "production";
+    // fall through to environment-based fallback
   }
+  return isProdLike();
 };
 
 export async function requestLandingAccessAction(

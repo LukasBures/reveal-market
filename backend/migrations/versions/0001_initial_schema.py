@@ -72,11 +72,18 @@ def upgrade() -> None:
         sa.Column("featured", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("closes_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("resolution_status", sa.String(length=32), nullable=False, server_default="final"),
+        sa.Column("resolution_reason", sa.String(length=128), nullable=True),
+        sa.Column("commits_blocked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint(
             "status IN ('commit','locked','settled','cancelled')",
             name="ck_markets_status",
+        ),
+        sa.CheckConstraint(
+            "resolution_status IN ('pending_resolution','disputed','final')",
+            name="ck_markets_resolution_status",
         ),
     )
     op.create_index("ix_markets_status_category", "markets", ["status", "category"])
@@ -87,6 +94,7 @@ def upgrade() -> None:
     op.create_index("ix_markets_event_id", "markets", ["event_id"], unique=True)
     op.create_index("ix_markets_resolved_at", "markets", ["resolved_at"])
     op.create_index("ix_markets_event_resolved", "markets", ["event_id", "resolved_at"])
+    op.create_index("ix_markets_resolution_status", "markets", ["resolution_status"])
     # Normalize tags and clob token ids instead of storing JSON blobs
     op.create_table(
         "market_tags",
@@ -418,6 +426,9 @@ def upgrade() -> None:
         sa.Column("proof_status", sa.String(length=32), nullable=False, server_default="none"),
         sa.Column("proof_request_id", sa.String(length=128), nullable=True),
         sa.Column("proof_hash", sa.String(length=66), nullable=True),
+        sa.Column("settlement_submitted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("settlement_tx_hash", sa.String(length=66), nullable=True),
+        sa.Column("settlement_block_number", sa.BigInteger(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint(
@@ -427,6 +438,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_settlements_market_id", "settlements", ["market_id"])
     op.create_index("ix_settlements_proof_status", "settlements", ["proof_status"])
+    op.create_index("ix_settlements_tx_hash", "settlements", ["settlement_tx_hash"])
 
     # Hedger treasury snapshots (folded from former 0002 migration)
     hedger_table = "hedger_treasury_snapshots"
@@ -623,6 +635,7 @@ def upgrade() -> None:
         ),
         sa.Column("request_id", sa.String(length=128), nullable=False),
         sa.Column("proof_hash", sa.String(length=66), nullable=True),
+        sa.Column("proof", sa.Text(), nullable=True),
         sa.Column("public_signals", sa.JSON(), nullable=True),
         sa.Column("prover_version", sa.String(length=64), nullable=True),
         sa.Column("circuit_hash", sa.String(length=66), nullable=True),
@@ -727,6 +740,7 @@ def downgrade() -> None:
     op.drop_table("chains")
     op.drop_index("ix_hedger_treasury_snapshots_market_id", table_name="hedger_treasury_snapshots")
     op.drop_table("hedger_treasury_snapshots")
+    op.drop_index("ix_settlements_tx_hash", table_name="settlements")
     op.drop_index("ix_settlements_proof_status", table_name="settlements")
     op.drop_index("ix_settlements_market_id", table_name="settlements")
     op.drop_table("settlements")
@@ -764,6 +778,7 @@ def downgrade() -> None:
         op.drop_index("ix_market_tags_gin", table_name="market_tags")
     op.drop_index("ix_market_tags_market_id", table_name="market_tags")
     op.drop_table("market_tags")
+    op.drop_index("ix_markets_resolution_status", table_name="markets")
     op.drop_index("ix_markets_event_id", table_name="markets")
     op.drop_index("ix_markets_event_resolved", table_name="markets")
     op.drop_index("ix_markets_resolved_at", table_name="markets")

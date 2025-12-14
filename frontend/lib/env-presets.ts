@@ -26,12 +26,7 @@ const PRESETS: Record<string, ModePreset> = {
 };
 
 const resolveMode = () => {
-  const modeEnv = (
-    process.env.NEXT_PUBLIC_RM_ENVIRONMENT ??
-    process.env.RM_ENVIRONMENT ??
-    process.env.NODE_ENV ??
-    "local"
-  ).toLowerCase();
+  const modeEnv = (process.env.RM_ENVIRONMENT ?? "local").toLowerCase();
   return modeEnv.includes("prod") ? "prod" : "local";
 };
 
@@ -57,8 +52,8 @@ const coalesceUrl = (candidate: string | undefined | null, fallback: string, lab
 export function resolveUrlConfig() {
   const preset = PRESETS[resolveMode()] ?? PRESETS.local;
   const runningInDocker = (process.env.RUNNING_IN_DOCKER ?? "").toLowerCase() === "true";
-  const apiBaseOverride =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? (runningInDocker ? process.env.RM_API_BASE_URL : undefined);
+  const apiBaseOverride = (process.env.RM_API_BASE_URL ?? "").trim() ||
+    (process.env.NEXT_PUBLIC_API_BASE_URL ?? "");
   const apiBaseUrl = coalesceUrl(apiBaseOverride, preset.apiBase, "API base URL");
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
   const siteUrl = coalesceUrl(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
