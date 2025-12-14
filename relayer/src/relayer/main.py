@@ -1,23 +1,18 @@
+import importlib
 import sys
 
 from structlog import get_logger
 from web3 import Web3
-
-try:
-    from web3.middleware import geth_poa_middleware as _poa_middleware
-except ImportError:
-    _poa_middleware = None
-
-try:
-    from web3.middleware import ExtraDataToPOAMiddleware
-except ImportError:
-    ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
 from .app import create_app
 from .config import load_config
 from .logging_setup import configure_logging
 from .queue import TxQueue
 from .service import build_service
+
+middleware_module = importlib.import_module("web3.middleware")
+_poa_middleware = getattr(middleware_module, "geth_poa_middleware", None)
+ExtraDataToPOAMiddleware = getattr(middleware_module, "ExtraDataToPOAMiddleware", None)
 
 configure_logging()
 logger = get_logger()

@@ -25,6 +25,9 @@ export function DashboardClient() {
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
+  const [bundlesRequested, setBundlesRequested] = useState(false);
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [bundleSignature, setBundleSignature] = useState<string | null>(null);
   const { claimTicket, isPending: claimPending, error: claimError } = useClaimTicket();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
@@ -35,7 +38,7 @@ export function DashboardClient() {
   const [withdrawInput, setWithdrawInput] = useState<string>("0.00");
   const [escrowStatus, setEscrowStatus] = useState<string | null>(null);
   const [escrowError, setEscrowError] = useState<string | null>(null);
-  const { data: onchainEscrowBalance } = useReadContract({
+  const { data: onchainEscrowBalance, refetch: refetchOnchainEscrow } = useReadContract({
     address: escrowAddress ?? undefined,
     abi: [
       {
@@ -50,14 +53,14 @@ export function DashboardClient() {
     args: escrowAddress && address ? [address as Address] : undefined,
     query: { enabled: Boolean(escrowAddress && address) },
   });
-  const { data: tokenBalance } = useReadContract({
+  const { data: tokenBalance, refetch: refetchTokenBalance } = useReadContract({
     address: tokenAddress ?? undefined,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: tokenAddress && address ? ([address as Address] as const) : undefined,
     query: { enabled: Boolean(tokenAddress && address) },
   });
-  const { data: escrowAllowance } = useReadContract({
+  const { data: escrowAllowance, refetch: refetchEscrowAllowance } = useReadContract({
     address: tokenAddress ?? undefined,
     abi: erc20Abi,
     functionName: "allowance",
@@ -72,6 +75,18 @@ export function DashboardClient() {
     : chainMismatch
       ? `Switch to ${defaultChain.name}`
       : null;
+  const hasEscrowAllowance = escrowAllowance !== undefined && escrowAllowance !== null && escrowAllowance > 0n;
+  const depositCtaLabel = hasEscrowAllowance ? "Deposit" : "Approve & Deposit";
+  const depositCtaTitle = fundingBlockedReason
+    ? fundingBlockedReason
+    : hasEscrowAllowance
+      ? "Deposit to escrow"
+      : "Approve and deposit to escrow";
+  const triggerBundleLoad = () => {
+    if (!address) return;
+    setBundlesRequested(true);
+    void fetchBundlesWithUi(address);
+  };
 
   const sanitizeError = (err: unknown): string => {
     const raw = err instanceof Error ? err.message : String(err);
@@ -98,17 +113,38 @@ export function DashboardClient() {
       try {
         setBundleError(null);
         const message = `claim-bundles:${wallet.toLowerCase()}`;
-        const signature = await signMessageAsync({ message });
+        const signature =
+          bundleSignature && bundleSignature.length > 0
+            ? bundleSignature
+            : await signMessageAsync({ message });
+        if (!bundleSignature) {
+          setBundleSignature(signature);
+        }
         const res = await fetchClaimBundles(wallet, signature);
-        setClaimBundles(res.bundles || []);
+        const bundles = res.bundles || [];
+        setClaimBundles(bundles);
         if (res.error) {
           setBundleError(res.error);
         }
+        return bundles;
       } catch (err) {
         setBundleError(err instanceof Error ? err.message : "Failed to load claim bundles");
+        return [];
       }
     },
-    [signMessageAsync],
+    [bundleSignature, signMessageAsync],
+  );
+
+  const fetchBundlesWithUi = useMemo(
+    () => async (wallet: string) => {
+      setBundlesLoading(true);
+      try {
+        return await loadBundles(wallet);
+      } finally {
+        setBundlesLoading(false);
+      }
+    },
+    [loadBundles],
   );
 
   const bundleLookup = useMemo(() => {
@@ -169,8 +205,13 @@ export function DashboardClient() {
       if (publicClient) {
         await publicClient.waitForTransactionReceipt({ hash: depositHash as any });
       }
+      await refetchTokenBalance();
+      await refetchEscrowAllowance();
+      await refetchOnchainEscrow();
       await load(address);
-      await loadBundles(address);
+      if (bundlesRequested) {
+        await fetchBundlesWithUi(address);
+      }
     } catch (err) {
       setEscrowError(sanitizeError(err));
     }
@@ -217,8 +258,13 @@ export function DashboardClient() {
       if (publicClient) {
         await publicClient.waitForTransactionReceipt({ hash: withdrawHash as any });
       }
+      await refetchTokenBalance();
+      await refetchEscrowAllowance();
+      await refetchOnchainEscrow();
       await load(address);
-      await loadBundles(address);
+      if (bundlesRequested) {
+        await fetchBundlesWithUi(address);
+      }
     } catch (err) {
       setEscrowError(sanitizeError(err));
     }
@@ -228,20 +274,27 @@ export function DashboardClient() {
     if (!address) {
       setPositions([]);
       setClaimBundles([]);
+      setBundleSignature(null);
+      setBundlesRequested(false);
       return;
     }
     startTransition(() => {
       void load(address);
-      void loadBundles(address);
     });
-  }, [address, load, loadBundles]);
+  }, [address, load]);
 
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
-    const bundle = bundleLookup.get(key);
+    let bundle = bundleLookup.get(key);
     if (!bundle) {
-      setClaimMessage("Claim data not available yet.");
+      setClaimMessage("Loading claim data for this ticket…");
+      setBundlesRequested(true);
+      const bundles = await fetchBundlesWithUi(address);
+      bundle = bundles.find((b) => `${b.marketId}:${b.ticketId}` === key);
+    }
+    if (!bundle) {
+      setClaimMessage("Claim data not available yet. Click “Load payout data” first.");
       return;
     }
     if (!bundle.marketAddress) {
@@ -301,7 +354,7 @@ export function DashboardClient() {
       });
       setClaimMessage(`Claim sent: ${txHash}`);
       await load(address);
-      await loadBundles(address);
+      await fetchBundlesWithUi(address);
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
@@ -361,11 +414,15 @@ export function DashboardClient() {
                 onClick={handleDeposit}
                 className="whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-emerald-900/50 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-800/60"
                 disabled={Boolean(fundingBlockedReason)}
-                title={fundingBlockedReason ?? "Approve and deposit to escrow"}
+                title={depositCtaTitle}
               >
-                Approve &amp; Deposit
+                {depositCtaLabel}
               </button>
             </div>
+            <p className="mt-1 text-[11px] text-emerald-100/80">
+              MetaMask may show an approval first (lets the escrow spend your ZEN), then the actual deposit. You will only
+              see the approval once unless you lower your allowance.
+            </p>
             {fundingBlockedReason && <p className="mt-2 text-xs text-amber-200">{fundingBlockedReason}</p>}
             {escrowStatus && <p className="mt-2 text-xs text-emerald-200">{escrowStatus}</p>}
             {escrowError && <p className="mt-2 text-xs text-rose-300">{escrowError}</p>}
@@ -419,6 +476,23 @@ export function DashboardClient() {
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">No positions yet.</div>
       ) : (
         <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-900/50 px-4 py-3">
+            <div className="text-xs text-slate-300">
+              <p className="font-semibold text-white">Claim data</p>
+              <p className="text-slate-400">
+              Loading claim bundles requires a one-time wallet signature (no gas). Use it before claiming to avoid
+              unexpected pop-ups.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={triggerBundleLoad}
+            disabled={bundlesLoading || !address}
+            className="rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10"
+          >
+              {bundlesLoading ? "Loading…" : bundlesRequested ? "Refresh payout data" : "Load payout data"}
+          </button>
+        </div>
           {bundleError && (
             <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3 text-amber-100">
               {bundleError}
@@ -466,7 +540,7 @@ export function DashboardClient() {
                         <button
                           type="button"
                           className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
-                          disabled={!bundle || Boolean(claimingTicket) || claimPending || chainMismatch}
+                          disabled={Boolean(claimingTicket) || claimPending || chainMismatch || bundlesLoading}
                           onClick={() => handleClaim(p.market_id, p.ticket_id)}
                         >
                           {claimingTicket === bundleKey || claimPending ? "Claiming…" : "Claim"}
