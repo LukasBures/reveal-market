@@ -195,41 +195,41 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             await session.flush()
         await session.commit()
         session.expunge_all()
-    await apply_retention_cleanup_async(session, summary)
-    backfilled = await backfill_missing_resolutions_async(session, summary)
-    if runtime.settings.factory_address and runtime.settings.rpc_url:
-        updated = await backfill_market_addresses(
-            session,
-            rpc_url=str(runtime.settings.rpc_url),
-            factory_address=str(runtime.settings.factory_address),
-            get_markets_missing_address=repository_async.list_markets_missing_address,
-        )
-        if updated:
+        await apply_retention_cleanup_async(session, summary)
+        backfilled = await backfill_missing_resolutions_async(session, summary)
+        if runtime.settings.factory_address and runtime.settings.rpc_url:
+            updated = await backfill_market_addresses(
+                session,
+                rpc_url=str(runtime.settings.rpc_url),
+                factory_address=str(runtime.settings.factory_address),
+                get_markets_missing_address=repository_async.list_markets_missing_address,
+            )
+            if updated:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.resolution.backfill_addresses",
+                    message="backfilled market addresses",
+                    count=updated,
+                )
+        if backfilled:
             log_event(
                 logger,
                 logging.INFO,
-                event="worker.resolution.backfill_addresses",
-                message="backfilled market addresses",
-                count=updated,
+                event="worker.resolution.backfill_complete",
+                message="backfilled missing resolution snapshots",
+                count=backfilled,
             )
-    if backfilled:
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.resolution.backfill_complete",
-            message="backfilled missing resolution snapshots",
-            count=backfilled,
-        )
-        gap_count = await log_resolution_gaps_async(session)
-        log_event(
-            logger,
-            logging.INFO,
-            event="worker.sync.postprocess",
-            message="post-processing completed",
-            retention_deleted=summary.markets_deleted,
-            resolutions_backfilled=summary.resolutions_backfilled,
-            resolution_gaps=gap_count,
-        )
+            gap_count = await log_resolution_gaps_async(session)
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.sync.postprocess",
+                message="post-processing completed",
+                retention_deleted=summary.markets_deleted,
+                resolutions_backfilled=summary.resolutions_backfilled,
+                resolution_gaps=gap_count,
+            )
     latency_ms = (time.perf_counter() - start) * 1000
     return summary, total_fetched, gap_count, latency_ms
 
