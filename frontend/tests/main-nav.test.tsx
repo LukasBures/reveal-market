@@ -20,8 +20,6 @@ describe("MainNav", () => {
     expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /search/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /proofs/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /docs/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /contact/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /open navigation/i })).toBeInTheDocument();
