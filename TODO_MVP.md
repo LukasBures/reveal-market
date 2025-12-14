@@ -190,4 +190,3 @@ ___
 
 • RakeManager is the on-chain contract that would hold rake config/ownership and let an admin update rake overrides. In this stack it’s optional—current flows hardcode rake in env (RM_RAKE_PERCENT) and don’t invoke on-chain rake updates, so we’ve left RM_RAKE_MANAGER_ADDRESS at 0x0 and haven’t deployed one. If you
   need on-chain rake governance later, deploy RakeManager and set the env to its address so API/worker/admin scripts can point to it.
-

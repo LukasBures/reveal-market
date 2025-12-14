@@ -39,9 +39,14 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     """Return settlement-related state from the on-chain market contract."""
 
     contract = _build_market_contract(web3, market_address)
-    commitments_root, next_ticket_id, phase_value, _commit_deadline, _reveal_deadline, winning_outcome_id = (
-        await contract.functions.marketState().call()
-    )
+    (
+        commitments_root,
+        next_ticket_id,
+        phase_value,
+        _commit_deadline,
+        _reveal_deadline,
+        winning_outcome_id,
+    ) = await contract.functions.marketState().call()
     total_escrow = await contract.functions.totalEscrow().call()
     total_liability = await contract.functions.totalLiability().call()
     pool_total_yes = await contract.functions.poolTotalYes().call()

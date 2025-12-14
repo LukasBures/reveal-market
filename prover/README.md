@@ -190,4 +190,3 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
   4. Sync artifacts on any machine/CI: cd prover/circuits && bash import_from_artifacts.sh (copies vetted artifacts into prover/circuits/build and vk caches).
   5. Run services: mount prover/artifacts/prover/circuits/build (or run the import script) for the prover; restart worker/API with RM_PROVER_ENABLED=true, RM_AUTO_SETTLEMENT_ENABLED=true, RM_AUTO_SETTLEMENT_TX_ENABLED=true, and the funded signer/RPC envs.
   6. Validate alignment: cast call <verifier> "circuitHash()(bytes32)" must equal jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json.
-
