@@ -14,6 +14,17 @@ class OnChainConfigurationError(RuntimeError):
     """Raised when required on-chain configuration is missing."""
 
 
+def _import_async_http_provider():
+    try:
+        from web3.providers.rpc import AsyncHTTPProvider  # web3>=7
+    except ModuleNotFoundError:  # pragma: no cover - compatibility with older web3
+        try:
+            from web3.providers.async_rpc import AsyncHTTPProvider  # type: ignore[import-not-found]
+        except ModuleNotFoundError as exc:  # pragma: no cover - defensive
+            raise OnChainConfigurationError("AsyncHTTPProvider is unavailable; check web3 installation") from exc
+    return AsyncHTTPProvider
+
+
 @lru_cache(maxsize=1)
 def get_async_web3(rpc_url: str | None):
     """Return a cached AsyncWeb3 instance or raise if misconfigured."""
@@ -22,14 +33,21 @@ def get_async_web3(rpc_url: str | None):
         raise OnChainConfigurationError("RM_RPC_URL is not configured")
 
     from web3 import AsyncWeb3 as _AsyncWeb3
-    from web3.providers.async_rpc import AsyncHTTPProvider  # type: ignore[import-not-found]
+
+    async_http_provider = _import_async_http_provider()
 
     try:
         from web3.middleware import async_geth_poa_middleware  # type: ignore[attr-defined]
-    except ModuleNotFoundError:  # pragma: no cover - compatible with older web3
+    except (ModuleNotFoundError, ImportError, AttributeError):  # pragma: no cover - compatible with older web3
         async_geth_poa_middleware = None
+    try:
+        from web3.middleware import ExtraDataToPOAMiddleware  # web3>=7
 
-    provider = AsyncHTTPProvider(rpc_url)
+        extra_data_to_poa_middleware = ExtraDataToPOAMiddleware
+    except (ModuleNotFoundError, ImportError, AttributeError):  # pragma: no cover - optional
+        extra_data_to_poa_middleware = None  # ruff: disable=N806
+
+    provider = async_http_provider(rpc_url)
     web3: _AsyncWeb3 = _AsyncWeb3(provider)
 
     if async_geth_poa_middleware:
@@ -37,6 +55,11 @@ def get_async_web3(rpc_url: str | None):
             web3.middleware_onion.inject(async_geth_poa_middleware, layer=0)
         except ValueError:
             # Middleware already installed; ignore.
+            pass
+    elif extra_data_to_poa_middleware:
+        try:
+            web3.middleware_onion.inject(extra_data_to_poa_middleware, layer=0)
+        except ValueError:
             pass
 
     return web3

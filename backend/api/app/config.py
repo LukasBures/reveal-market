@@ -32,6 +32,14 @@ def _preset_list(key: str) -> list[str]:
     return []
 
 
+def _empty_to_none(value):
+    """Convert empty strings to None so optional URLs/keys can be omitted."""
+
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return value
+
+
 class LenientEnvSettingsSource(EnvSettingsSource):
     """Env source that falls back to raw strings when JSON decoding fails."""
 
@@ -55,7 +63,7 @@ class LenientDotEnvSettingsSource(DotEnvSettingsSource):
 class Settings(BaseSettings):
     """Runtime configuration for the Reveal Market API service."""
 
-    model_config = SettingsConfigDict(env_prefix="RM_")
+    model_config = SettingsConfigDict(env_prefix="RM_", extra="ignore")
 
     @classmethod
     def settings_customise_sources(
@@ -243,6 +251,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return _split_csv(value)
         return value
+
+    @field_validator(
+        "goldsky_subgraph_url",
+        "goldsky_api_key",
+        mode="before",
+    )
+    @classmethod
+    def _none_on_empty(cls, value):
+        return _empty_to_none(value)
 
     @field_validator("rate_limit_enabled", mode="before")
     @classmethod

@@ -27,6 +27,14 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in items if item.strip()]
 
 
+def _empty_to_none(value):
+    """Convert empty strings to None so optional fields tolerate blank env entries."""
+
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return value
+
+
 class LenientEnvSettingsSource(EnvSettingsSource):
     """Env source that falls back to raw strings when JSON decoding fails."""
 
@@ -232,6 +240,19 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return _split_csv(value)
         return value
+
+    @field_validator(
+        "polymarket_active_filter",
+        "polymarket_archived_filter",
+        "settlement_gas_price_gwei",
+        "settlement_max_priority_fee_gwei",
+        "goldsky_subgraph_url",
+        "goldsky_api_key",
+        mode="before",
+    )
+    @classmethod
+    def _none_on_empty(cls, value):
+        return _empty_to_none(value)
 
     @property
     def total_monetisation_percent(self) -> float:

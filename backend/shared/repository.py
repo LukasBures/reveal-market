@@ -276,9 +276,16 @@ def record_factory_event(
         ).scalar_one_or_none()
     if existing:
         return existing
+    normalized_market = market_address.lower() if isinstance(market_address, str) else None
+    if normalized_market:
+        market_exists = session.execute(
+            select(models.Market.market_address).where(models.Market.market_address == normalized_market)
+        ).scalar_one_or_none()
+        if market_exists is None:
+            normalized_market = None
     record = models.FactoryEvent(
         factory_address=factory_address.lower(),
-        market_address=market_address.lower() if isinstance(market_address, str) else None,
+        market_address=normalized_market,
         event=event,
         tx_hash=normalized_tx,
         block_number=block_number,
