@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
-import app.runtime as runtime
 import pytest
-from app import models
-from app.config import get_settings
-from app.database import get_session
-from app.server import app
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+# Ensure required env vars exist before importing runtime/settings in test modules.
+os.environ.setdefault("PROVER_CIRCUIT_HASH", "0x" + "deadbeef" * 8)
+os.environ.setdefault("RM_PRICING_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
 
 
 class InMemoryCache:
@@ -69,6 +69,11 @@ def test_database(monkeypatch, tmp_path):
         "PROVER_CIRCUIT_HASH",
         "0x" + "deadbeef" * 8,
     )
+    # Mirror required signer envs to satisfy pricing/quote initialization in tests.
+    monkeypatch.setenv("RM_PRICING_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
+
+    from app import models, runtime
+    from app.config import get_settings
 
     get_settings.cache_clear()
     settings = get_settings()
@@ -136,10 +141,13 @@ def client(test_database, monkeypatch):
                 await db.rollback()
                 raise
 
-    app.dependency_overrides[get_session] = override_get_session
-    original_cache = getattr(app, "cache_client", None)
     import app.runtime as runtime
     import app.server as api_main
+    from app.database import get_session
+    from app.server import app
+
+    app.dependency_overrides[get_session] = override_get_session
+    original_cache = getattr(app, "cache_client", None)
 
     original_module_cache = getattr(api_main, "cache_client", None)
     original_runtime_cache = getattr(runtime, "cache_client", None)
