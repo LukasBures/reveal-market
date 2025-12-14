@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
-import time
 
 from shared.logging import log_event
 from shared.onchain import (
@@ -138,4 +136,3 @@ async def _send_create_market_transaction(
             return market_address, market_id
 
     raise RuntimeError("Exceeded max retries for createMarket")
-

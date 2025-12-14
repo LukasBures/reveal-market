@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from . import runtime
 from .metrics import record_retention_metrics
-from .onchain import get_next_market_id, predict_market_address
 from .polymarket import MarketPayload, _extract_timestamp_candidate, _parse_group_threshold
 from .resolution import apply_resolution
 from .summary_jobs import maybe_enqueue_summary_job
