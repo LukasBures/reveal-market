@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any, cast
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 from shared.env_presets import get_preset
 from sqlalchemy.engine.url import make_url
 
@@ -27,10 +27,58 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in items if item.strip()]
 
 
+class LenientEnvSettingsSource(EnvSettingsSource):
+    """Env source that falls back to raw strings when JSON decoding fails."""
+
+    def decode_complex_value(self, field_name, field, value):
+        try:
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
+
+
+class LenientDotEnvSettingsSource(DotEnvSettingsSource):
+    """Dotenv source that falls back to raw strings when JSON decoding fails."""
+
+    def decode_complex_value(self, field_name, field, value):
+        try:
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
+
+
 class Settings(BaseSettings):
     """Runtime options sourced from env vars/`.env` for the worker."""
 
     model_config = SettingsConfigDict(env_prefix="RM_")
+
+    @classmethod
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
+        env_source = LenientEnvSettingsSource(
+            settings_cls,
+            case_sensitive=env_settings.case_sensitive,
+            env_prefix=env_settings.env_prefix,
+            env_nested_delimiter=env_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(env_settings, "env_nested_max_split", None),
+            env_ignore_empty=env_settings.env_ignore_empty,
+            env_parse_none_str=env_settings.env_parse_none_str,
+            env_parse_enums=env_settings.env_parse_enums,
+        )
+        dotenv_source = LenientDotEnvSettingsSource(
+            settings_cls,
+            env_file=getattr(dotenv_settings, "env_file", None),
+            env_file_encoding=getattr(dotenv_settings, "env_file_encoding", None),
+            case_sensitive=dotenv_settings.case_sensitive,
+            env_prefix=dotenv_settings.env_prefix,
+            env_nested_delimiter=dotenv_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(dotenv_settings, "env_nested_max_split", None),
+            env_ignore_empty=dotenv_settings.env_ignore_empty,
+            env_parse_none_str=dotenv_settings.env_parse_none_str,
+            env_parse_enums=dotenv_settings.env_parse_enums,
+        )
+        return init_settings, env_source, dotenv_source, file_secret_settings
 
     app_name: str = Field(default="Reveal Market Worker")
     environment: str = Field(default="development")

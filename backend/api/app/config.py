@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from functools import lru_cache
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, ValidationInfo, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 from shared.env_presets import get_preset
 from sqlalchemy.engine import make_url
 
@@ -32,10 +32,58 @@ def _preset_list(key: str) -> list[str]:
     return []
 
 
+class LenientEnvSettingsSource(EnvSettingsSource):
+    """Env source that falls back to raw strings when JSON decoding fails."""
+
+    def decode_complex_value(self, field_name, field, value):
+        try:
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
+
+
+class LenientDotEnvSettingsSource(DotEnvSettingsSource):
+    """Dotenv source that falls back to raw strings when JSON decoding fails."""
+
+    def decode_complex_value(self, field_name, field, value):
+        try:
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the Reveal Market API service."""
 
     model_config = SettingsConfigDict(env_prefix="RM_")
+
+    @classmethod
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
+        env_source = LenientEnvSettingsSource(
+            settings_cls,
+            case_sensitive=env_settings.case_sensitive,
+            env_prefix=env_settings.env_prefix,
+            env_nested_delimiter=env_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(env_settings, "env_nested_max_split", None),
+            env_ignore_empty=env_settings.env_ignore_empty,
+            env_parse_none_str=env_settings.env_parse_none_str,
+            env_parse_enums=env_settings.env_parse_enums,
+        )
+        dotenv_source = LenientDotEnvSettingsSource(
+            settings_cls,
+            env_file=getattr(dotenv_settings, "env_file", None),
+            env_file_encoding=getattr(dotenv_settings, "env_file_encoding", None),
+            case_sensitive=dotenv_settings.case_sensitive,
+            env_prefix=dotenv_settings.env_prefix,
+            env_nested_delimiter=dotenv_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(dotenv_settings, "env_nested_max_split", None),
+            env_ignore_empty=dotenv_settings.env_ignore_empty,
+            env_parse_none_str=dotenv_settings.env_parse_none_str,
+            env_parse_enums=dotenv_settings.env_parse_enums,
+        )
+        return init_settings, env_source, dotenv_source, file_secret_settings
 
     app_name: str = Field(default="Reveal Market API")
     environment: str = Field(default="development")

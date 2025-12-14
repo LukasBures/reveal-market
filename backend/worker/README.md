@@ -122,7 +122,6 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_PRIME_MARKETS_CACHE_ENABLED` | Toggle for priming `/markets`. |
 | `RM_MARKETS_CACHE_LIMIT`, `RM_MARKETS_CACHE_OFFSET`, `RM_MARKETS_CACHE_TTL_SECONDS`, `RM_CACHE_PRIME_TIMEOUT_SECONDS` | Control the warmed payload + TTL. |
 | `RM_CATEGORY_CACHE_LIMIT`, `RM_TAG_CACHE_LIMIT`, `RM_SUGGEST_CACHE_LIMIT` | Limits for featured priming. |
-| `RM_FEATURED_CATEGORIES`, `RM_FEATURED_SUGGEST_QUERIES` | Comma-separated lists to warm after each batch. |
 
 ### Retention & summarization
 

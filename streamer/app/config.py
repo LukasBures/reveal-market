@@ -217,8 +217,8 @@ class Settings(BaseSettings):
     @field_validator("public_base_url")
     @classmethod
     def _require_https(cls, value: AnyHttpUrl | None):
-        if value and value.scheme != "https":
-            raise ValueError("STREAMER_PUBLIC_BASE_URL must use https://")
+        if value and value.scheme not in ("https", "http"):
+            raise ValueError("STREAMER_PUBLIC_BASE_URL must use https:// or http://")
         return value
 
     @property
