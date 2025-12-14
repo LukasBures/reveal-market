@@ -78,7 +78,7 @@ repos:
       - id: mypy-api
         name: mypy (api)
         description: "Static type checks for backend API"
-        entry: bash -c 'set -euo pipefail; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared'
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared'
         language: system
         types_or: [python]
         pass_filenames: false
@@ -86,7 +86,7 @@ repos:
       - id: mypy-worker
         name: mypy (worker)
         description: "Static type checks for worker"
-        entry: bash -c 'set -euo pipefail; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared'
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared'
         language: system
         types_or: [python]
         pass_filenames: false
@@ -94,7 +94,7 @@ repos:
       - id: mypy-streamer
         name: mypy (streamer)
         description: "Static type checks for streamer"
-        entry: bash -c 'set -euo pipefail; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project streamer -- mypy --config-file pyproject.toml streamer/app'
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project streamer -- mypy --config-file pyproject.toml streamer/app'
         language: system
         types_or: [python]
         pass_filenames: false
@@ -102,7 +102,7 @@ repos:
       - id: mypy-relayer
         name: mypy (relayer)
         description: "Static type checks for relayer"
-        entry: bash -c 'set -euo pipefail; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project relayer -- mypy --config-file pyproject.toml relayer/src/relayer'
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project relayer -- mypy --config-file pyproject.toml relayer/src/relayer'
         language: system
         types_or: [python]
         pass_filenames: false
