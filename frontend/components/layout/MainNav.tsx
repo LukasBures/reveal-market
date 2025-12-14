@@ -14,8 +14,6 @@ import { formatZenUsd } from "@/lib/fx";
 const navLinks = [
   { href: "/markets/search", label: "Search" },
   { href: "/proofs", label: "Proofs" },
-  { href: "/docs", label: "Docs" },
-  { href: "/contact", label: "Contact" },
 ] as const;
 
 const resolvedSiteUrl = (resolveUrlConfig().siteUrl ?? "").trim();

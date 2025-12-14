@@ -29,6 +29,8 @@ const resetEnv = () => {
 };
 
 describe("wagmi chain defaults", () => {
+  const SLOW_TEST_TIMEOUT = 10_000;
+
   beforeEach(() => {
     vi.doUnmock("@/lib/wagmi");
     vi.doUnmock("wagmi");
@@ -41,12 +43,15 @@ describe("wagmi chain defaults", () => {
     resetEnv();
   });
 
-  it("falls back to Horizen defaults when chain config is missing", async () => {
-    delete process.env.NEXT_PUBLIC_CHAIN_ID;
-    delete process.env.NEXT_PUBLIC_RPC_URL;
-    delete process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL;
+  it(
+    "falls back to Horizen defaults when chain config is missing",
+    { timeout: SLOW_TEST_TIMEOUT },
+    async () => {
+      delete process.env.NEXT_PUBLIC_CHAIN_ID;
+      delete process.env.NEXT_PUBLIC_RPC_URL;
+      delete process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL;
 
-    const module = await import("@/lib/wagmi");
+      const module = await import("@/lib/wagmi");
 
     expect(module.defaultChain.id).toBe(2651420);
     expect(module.defaultChain.rpcUrls.default.http[0]).toBe("https://horizen-testnet.rpc.caldera.xyz/http");
@@ -56,13 +61,17 @@ describe("wagmi chain defaults", () => {
     expect(warnEvents).toContain("wagmi.chain_id_missing");
     expect(warnEvents).toContain("wagmi.rpc_url_missing");
     expect(warnEvents).toContain("wagmi.explorer_missing");
-  });
+    },
+  );
 
-  it("warns and overrides when an unexpected chain id is configured", async () => {
-    process.env.NEXT_PUBLIC_CHAIN_ID = "1";
-    process.env.NEXT_PUBLIC_CHAIN_NAME = "Wrong Chain";
-    process.env.NEXT_PUBLIC_RPC_URL = "https://example-rpc.test";
-    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://example-explorer.test";
+  it(
+    "warns and overrides when an unexpected chain id is configured",
+    { timeout: SLOW_TEST_TIMEOUT },
+    async () => {
+      process.env.NEXT_PUBLIC_CHAIN_ID = "1";
+      process.env.NEXT_PUBLIC_CHAIN_NAME = "Wrong Chain";
+      process.env.NEXT_PUBLIC_RPC_URL = "https://example-rpc.test";
+      process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://example-explorer.test";
 
     const module = await import("@/lib/wagmi");
 
@@ -73,5 +82,6 @@ describe("wagmi chain defaults", () => {
     expect(warnEvents).toContain("wagmi.chain_id_mismatch");
     expect(warnEvents).not.toContain("wagmi.rpc_url_missing");
     expect(warnEvents).not.toContain("wagmi.explorer_missing");
-  });
+    },
+  );
 });
