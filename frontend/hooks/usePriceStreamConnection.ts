@@ -128,11 +128,17 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
       clearTimeout(conn.idleCloseTimer);
       conn.idleCloseTimer = null;
     }
-    if (conn.ws && conn.ws.readyState !== WebSocket.CLOSED && conn.ws.readyState !== WebSocket.CLOSING) {
-      try {
-        conn.ws.close(1000, "idle");
-      } catch {
-        // ignore
+    if (conn.ws) {
+      const closedState =
+        typeof WebSocket !== "undefined" && typeof WebSocket.CLOSED === "number" ? WebSocket.CLOSED : 3;
+      const closingState =
+        typeof WebSocket !== "undefined" && typeof WebSocket.CLOSING === "number" ? WebSocket.CLOSING : 2;
+      if (conn.ws.readyState !== closedState && conn.ws.readyState !== closingState) {
+        try {
+          conn.ws.close(1000, "idle");
+        } catch {
+          // ignore
+        }
       }
     }
     if (conn.sse) {

@@ -137,7 +137,6 @@ All environment variables begin with `RM_`. Notable groups:
 
 | Variable | Description |
 | --- | --- |
-| `RM_AUTO_CREATE_ONCHAIN_MARKETS` | Enable `maybe_create_onchain_market`. |
 | `RM_RPC_URL` / `RM_POLYGON_RPC_URL` | RPC endpoint used by web3 clients. |
 | `RM_FACTORY_ADDRESS`, `RM_CONDITIONAL_TOKENS_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS` | Contract addresses. |
 | `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Signer used for factory transactions when invoking helpers manually. |

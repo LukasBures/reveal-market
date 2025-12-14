@@ -76,6 +76,57 @@ export function MarketDetailMetadata({ market }: Props) {
     }
   };
 
+  const metadataItems: MetadataItem[] = [
+    {
+      label: "Resolver",
+      value: resolverLabel,
+      href: resolverHref,
+      copyDisabled: true,
+    },
+    {
+      label: "UMA status",
+      value: market.umaStatus ?? "pending",
+      copyDisabled: true,
+    },
+  ];
+
+  if (market.marketAddress) {
+    metadataItems.push({
+      label: "Market address",
+      value: market.marketAddress,
+      mono: true,
+      href: explorerHref("address", market.marketAddress),
+    });
+  }
+
+  if (market.factory) {
+    metadataItems.push({ label: "Factory address", value: market.factory, mono: true });
+  }
+
+  if (feeLabel) {
+    metadataItems.push({ label: "Rake (bps)", value: feeLabel });
+  }
+
+  if (clobPairId) {
+    metadataItems.push({ label: "CLOB pair ID", value: clobPairId, mono: true });
+  }
+
+  if (formattedTokens) {
+    metadataItems.push({ label: "Token IDs", value: formattedTokens, mono: true });
+  }
+
+  metadataItems.push({
+    label: "Commit deadline",
+    value: commitDeadline ? formatDateTime(commitDeadline) : "TBA",
+    copyDisabled: true,
+  });
+
+  metadataItems.push({
+    label: "Reveal deadline",
+    value: market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA",
+    copyDisabled: true,
+  });
+
   const renderItem = (item: MetadataItem) => {
     const content =
       item.href && item.value ? (
@@ -94,10 +145,7 @@ export function MarketDetailMetadata({ market }: Props) {
       );
 
     return (
-      <div
-        key={item.label}
-        className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200"
-      >
+      <div key={item.label} className="w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200">
         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.label}</p>
         <div className="mt-2 flex items-center gap-2">
           {content}
@@ -128,25 +176,8 @@ export function MarketDetailMetadata({ market }: Props) {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        {renderItem({
-          label: "Resolver",
-          value: resolverLabel,
-          href: resolverHref,
-          copyDisabled: true,
-        })}
-        {renderItem({ label: "UMA status", value: market.umaStatus ?? "pending", copyDisabled: true })}
-        {market.marketAddress &&
-          renderItem({
-            label: "Market address",
-            value: market.marketAddress,
-            mono: true,
-            href: explorerHref("address", market.marketAddress),
-          })}
-        {market.factory && renderItem({ label: "Factory address", value: market.factory, mono: true })}
-        {feeLabel && renderItem({ label: "Rake (bps)", value: feeLabel })}
-        {clobPairId && renderItem({ label: "CLOB pair ID", value: clobPairId, mono: true })}
-        {formattedTokens && renderItem({ label: "Token IDs", value: formattedTokens, mono: true })}
+      <div className="mt-6 grid grid-cols-1 gap-4">
+        {metadataItems.map((item) => renderItem(item))}
       </div>
 
       {market.tags && market.tags.length > 0 && (
@@ -218,20 +249,6 @@ export function MarketDetailMetadata({ market }: Props) {
         </div>
       )}
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 text-sm text-slate-300">
-        <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Commit deadline</p>
-          <p className="mt-2 text-lg font-semibold text-white">
-            {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}
-          </p>
-        </div>
-        <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Reveal deadline</p>
-          <p className="mt-2 text-lg font-semibold text-white">
-            {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}
-          </p>
-        </div>
-      </div>
     </section>
   );
 }

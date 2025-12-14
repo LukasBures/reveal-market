@@ -22,6 +22,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.constants import END_CURSOR
 from pydantic import BaseModel, Field, ValidationError
 from shared.categories import canonical_category_from_raw
+from shared.logging import log_event
 from shared.models import ResolutionStatusEnum
 from shared.polymarket import build_polymarket_events_url, build_polymarket_markets_url
 
@@ -741,8 +742,20 @@ class AsyncPolymarketClient:
             url = self._markets_url
             request_callable = partial(self._request_page, client, url, params.copy())
             try:
+                request_start = time.perf_counter()
                 response = await self._send_with_retry(request_callable)
                 payload = orjson.loads(response.content) if orjson is not None else response.json()
+                request_duration_ms = (time.perf_counter() - request_start) * 1000
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.fetch.page_http",
+                    message="fetched polymarket page via HTTP",
+                    offset=offset,
+                    limit=page_size,
+                    duration_ms=round(request_duration_ms, 2),
+                    status_code=response.status_code,
+                )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
                 raise

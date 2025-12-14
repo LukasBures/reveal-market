@@ -19,6 +19,20 @@ def get_market_by_event_id(session: Session, event_id: str) -> models.Market | N
     return session.scalars(stmt).first()
 
 
+def get_market_by_onchain_market_id(session: Session, onchain_market_id: int) -> models.Market | None:
+    """Return a market by its onchain numeric identifier."""
+
+    stmt = select(models.Market).where(models.Market.onchain_market_id == onchain_market_id)
+    return session.scalars(stmt).first()
+
+
+def get_market_by_market_address(session: Session, market_address: str) -> models.Market | None:
+    """Return a market by its onchain address."""
+
+    stmt = select(models.Market).where(models.Market.market_address == market_address)
+    return session.scalars(stmt).first()
+
+
 def upsert_market(
     session: Session,
     data: Mapping[str, Any],
@@ -43,6 +57,14 @@ def upsert_market(
     ):
         payload.pop(legacy, None)
     market = existing or get_market_by_event_id(session, payload["event_id"])
+    if market is None:
+        onchain_market_id = payload.get("onchain_market_id")
+        if onchain_market_id is not None:
+            market = get_market_by_onchain_market_id(session, int(onchain_market_id))
+    if market is None:
+        market_address = payload.get("market_address")
+        if market_address:
+            market = get_market_by_market_address(session, str(market_address))
     if market is None:
         market = models.Market(**payload)
         session.add(market)

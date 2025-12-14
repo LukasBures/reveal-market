@@ -154,7 +154,6 @@ class Settings(BaseSettings):
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
-    auto_create_onchain_markets: bool = Field(default=False)
     default_commit_lead_seconds: int = Field(default=86400, ge=60)
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
     max_web3_retries: int = Field(default=3, ge=1)
@@ -329,14 +328,6 @@ def validate_required_settings(settings: Settings) -> None:
         "RM_SETTLEMENT_RPC_URL",
         when=settings.auto_settlement_tx_enabled and not _env_present("RM_RPC_URL"),
     )
-    require("RM_WALLET_PRIVATE_KEY", when=settings.auto_create_onchain_markets)
-    require("RM_FACTORY_ADDRESS", when=settings.auto_create_onchain_markets)
-    require(
-        "RM_RPC_URL",
-        when=settings.auto_create_onchain_markets and not _env_present("RM_POLYGON_RPC_URL"),
-    )
-    require("RM_POLYGON_RPC_URL", when=settings.auto_create_onchain_markets and not _env_present("RM_RPC_URL"))
-
     if missing:
         unique = sorted(set(missing))
         raise MissingSettingsError(f"Missing required environment variables: {', '.join(unique)}")

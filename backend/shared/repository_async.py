@@ -20,6 +20,20 @@ async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models
     return (await session.scalars(stmt)).first()
 
 
+async def get_market_by_onchain_market_id(session: AsyncSession, onchain_market_id: int) -> models.Market | None:
+    """Return a market by its onchain numeric identifier."""
+
+    stmt = select(models.Market).where(models.Market.onchain_market_id == onchain_market_id)
+    return (await session.scalars(stmt)).first()
+
+
+async def get_market_by_market_address(session: AsyncSession, market_address: str) -> models.Market | None:
+    """Return a market by its onchain address."""
+
+    stmt = select(models.Market).where(models.Market.market_address == market_address)
+    return (await session.scalars(stmt)).first()
+
+
 async def upsert_market(
     session: AsyncSession,
     data: Mapping[str, Any],
@@ -44,6 +58,14 @@ async def upsert_market(
     ):
         payload.pop(legacy, None)
     market = existing or await get_market_by_event_id(session, payload["event_id"])
+    if market is None:
+        onchain_market_id = payload.get("onchain_market_id")
+        if onchain_market_id is not None:
+            market = await get_market_by_onchain_market_id(session, int(onchain_market_id))
+    if market is None:
+        market_address = payload.get("market_address")
+        if market_address:
+            market = await get_market_by_market_address(session, str(market_address))
     if market is None:
         market = models.Market(**payload)
         session.add(market)

@@ -17,7 +17,8 @@ import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
 import { fetchMarketActivity, fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
-export const DEFAULT_API_BASE = getServerEnv().apiBaseUrl;
+const resolvedEnv = getServerEnv();
+export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
@@ -488,45 +489,62 @@ export async function fetchMarketSuggestions(
   }
 }
 
+const normalizeMarketStats = (payload: any): MarketStatusStat[] | null => {
+  if (!Array.isArray(payload)) {
+    return null;
+  }
+  const normalized = payload.reduce<Record<string, number>>((acc, item) => {
+    const key = String(item?.status ?? "unknown").toLowerCase();
+    const count = Number(item?.count ?? 0);
+    acc[key] = (acc[key] ?? 0) + (Number.isFinite(count) ? count : 0);
+    return acc;
+  }, {});
+  const live = normalized["live"] ?? 0;
+  const finalized = normalized["finalized"] ?? 0;
+  const total = normalized["total"] ?? live + finalized;
+  return [
+    { status: "live", count: live },
+    { status: "finalized", count: finalized },
+    { status: "total", count: total },
+  ];
+};
+
+async function fetchMarketStatsFrom(
+  baseUrl: string,
+  scope: string,
+  revalidateSeconds = 60,
+): Promise<MarketStatusStat[] | null> {
+  try {
+    const endpoint = `${baseUrl}/markets/stats`;
+    const response = await fetch(endpoint, {
+      next: { revalidate: revalidateSeconds },
+    });
+
+    if (!response.ok) {
+      logger.error(`${scope}:failed`, { status: response.status, endpoint, baseUrl });
+      return null;
+    }
+
+    const stats = normalizeMarketStats(await response.json());
+    if (!stats) {
+      logger.warn(`${scope}:invalid_payload`, { endpoint, baseUrl });
+      return null;
+    }
+
+    logger.debug(`${scope}:success`, { count: stats.length, baseUrl });
+    return stats;
+  } catch (error) {
+    logOfflineAwareError(scope, error, { baseUrl });
+    return null;
+  }
+}
+
 export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
   if (maybeShortCircuitOffline("fetchMarketStatsBreakdown")) {
     return [];
   }
-  try {
-    const response = await fetch(`${DEFAULT_API_BASE}/markets/stats`, {
-      next: { revalidate: 60 },
-    });
-
-    if (!response.ok) {
-      logger.error("fetchMarketStatsBreakdown:failed", { status: response.status });
-      return [];
-    }
-
-    const payload = await response.json();
-    if (!Array.isArray(payload)) {
-      return [];
-    }
-
-    const normalized = payload.reduce<Record<string, number>>((acc, item) => {
-      const key = String(item?.status ?? "unknown").toLowerCase();
-      const count = Number(item?.count ?? 0);
-      acc[key] = (acc[key] ?? 0) + (Number.isFinite(count) ? count : 0);
-      return acc;
-    }, {});
-    const live = normalized["live"] ?? 0;
-    const finalized = normalized["finalized"] ?? 0;
-    const total = normalized["total"] ?? live + finalized;
-    const stats: MarketStatusStat[] = [
-      { status: "live", count: live },
-      { status: "finalized", count: finalized },
-      { status: "total", count: total },
-    ];
-    logger.debug("fetchMarketStatsBreakdown:success", { count: stats.length });
-    return stats;
-  } catch (error) {
-    logOfflineAwareError("fetchMarketStatsBreakdown", error);
-    return [];
-  }
+  const primaryStats = await fetchMarketStatsFrom(DEFAULT_API_BASE, "fetchMarketStatsBreakdown");
+  return primaryStats ?? [];
 }
 
 export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {

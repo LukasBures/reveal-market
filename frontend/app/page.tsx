@@ -32,9 +32,9 @@ export default async function HomePage({ searchParams }: PageProps) {
   const finalizedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
   const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;
   const callouts = [
-    { label: "Live markets", value: liveMarkets > 0 ? formatNumber(liveMarkets) : "—" },
-    { label: "Markets settled", value: finalizedMarkets > 0 ? formatNumber(finalizedMarkets) : "—" },
-    { label: "Total markets tracked", value: totalMarkets > 0 ? formatNumber(totalMarkets) : "—" },
+    { label: "Live markets", value: formatNumber(liveMarkets) },
+    { label: "Markets settled", value: formatNumber(finalizedMarkets) },
+    { label: "Total markets tracked", value: formatNumber(totalMarkets) },
     { label: "Access", value: "Invite only" },
   ];
   const resolvedParams = (await searchParams) ?? {};

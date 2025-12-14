@@ -1,5 +1,7 @@
 services:
   postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
     deploy:
       resources:
         limits:
@@ -87,7 +89,7 @@ services:
       RM_ENVIRONMENT: local
       LOG_LEVEL: INFO
       # Mirror production heartbeat cadence so diagnostics fire once per minute.
-      RM_POLL_INTERVAL_SECONDS: 60
+      RM_POLL_INTERVAL_SECONDS: 300
       # Keep migrations enabled so a fresh database gets the schema before the worker starts syncing.
       RM_RUN_MIGRATIONS_ON_STARTUP: "true"
     volumes:

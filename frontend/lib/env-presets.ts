@@ -50,7 +50,8 @@ const coalesceUrl = (candidate: string | undefined | null, fallback: string, lab
 };
 
 export function resolveUrlConfig() {
-  const preset = PRESETS[resolveMode()] ?? PRESETS.local;
+  const mode = resolveMode();
+  const preset = PRESETS[mode] ?? PRESETS.local;
   const runningInDocker = (process.env.RUNNING_IN_DOCKER ?? "").toLowerCase() === "true";
   const apiBaseOverride = (process.env.RM_API_BASE_URL ?? "").trim() ||
     (process.env.NEXT_PUBLIC_API_BASE_URL ?? "");
@@ -70,6 +71,7 @@ export function resolveUrlConfig() {
   );
 
   return Object.freeze({
+    mode,
     apiBaseUrl,
     apiBaseInternal,
     siteUrl,

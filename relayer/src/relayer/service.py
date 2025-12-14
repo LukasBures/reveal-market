@@ -105,6 +105,16 @@ class RelayerService:
         nonce_used = cast(int, nonce_value)
         for attempt in range(1, self.max_retries + 1):
             try:
+                logger.info(
+                    f"relayer.{action}.attempt",
+                    attempt=attempt,
+                    nonce=nonce_used,
+                    to=tx.get("to"),
+                    value=int(tx.get("value") or 0),
+                    gas_price=tx.get("gasPrice"),
+                    max_fee_per_gas=tx.get("maxFeePerGas"),
+                    max_priority_fee_per_gas=tx.get("maxPriorityFeePerGas"),
+                )
                 signed = await asyncio.to_thread(self.account.sign_transaction, tx)
                 tx_hash = await asyncio.to_thread(self.web3.eth.send_raw_transaction, signed.raw_transaction)
                 receipt: TxReceipt = await asyncio.to_thread(

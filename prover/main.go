@@ -253,6 +253,10 @@ func requireArtifactsOrExit(cfg shared.Config) {
 
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		logLine("warn", "prover.request.invalid_method", map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
@@ -260,10 +264,20 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req settlementProofRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logLine("warn", "prover.request.decode_failed", map[string]any{
+			"path":   r.URL.Path,
+			"error":  err.Error(),
+			"length": r.ContentLength,
+		})
 		writeError(w, http.StatusBadRequest, "invalid_json", "invalid json payload", err)
 		return
 	}
 	if err := validateRequest(req); err != nil {
+		logLine("warn", "prover.request.validation_failed", map[string]any{
+			"path":   r.URL.Path,
+			"error":  err.Error(),
+			"market": req.MarketID,
+		})
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), err)
 		return
 	}
@@ -336,6 +350,11 @@ func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlement
 				"request_id": requestID,
 				"status":     "cancelled",
 				"message":    ctx.Err().Error(),
+			})
+			logLine("warn", "prover.request.cancelled", map[string]any{
+				"request_id": requestID,
+				"market_id":  req.MarketID,
+				"reason":     ctx.Err().Error(),
 			})
 			return
 		case res, ok := <-resultCh:

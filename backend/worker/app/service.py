@@ -180,6 +180,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             closed=runtime.settings.polymarket_closed_filter,
             extra_params=build_filters_from_settings(runtime.settings),
         ):
+            page_start = time.perf_counter()
             page_no += 1
             total_fetched += len(page)
             log_event(
@@ -193,10 +194,34 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             )
             summary = await collect_market_changes_with_summary(session, page, redis_client, summary=summary)
             await session.flush()
-        await session.commit()
-        session.expunge_all()
+            await session.commit()
+            session.expunge_all()  # keep identity map small between pages
+            page_duration_ms = (time.perf_counter() - page_start) * 1000
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.sync.page",
+                message="processed polymarket page",
+                page=page_no,
+                count=len(page),
+                total=total_fetched,
+                duration_ms=round(page_duration_ms, 2),
+            )
         await apply_retention_cleanup_async(session, summary)
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.sync.retention_complete",
+            message="retention cleanup finished",
+        )
         backfilled = await backfill_missing_resolutions_async(session, summary)
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.sync.backfill_complete",
+            message="resolution backfill finished",
+            backfilled=backfilled,
+        )
         if runtime.settings.factory_address and runtime.settings.rpc_url:
             updated = await backfill_market_addresses(
                 session,
@@ -260,17 +285,30 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     except Exception as exc:  # pragma: no cover - defensive
         return await _handle_sync_failure(exc, tick_start, redis_client, schema_state)
 
-    summary.proofs_generated = await run_prover_jobs(summary, redis_client)
-    settlements_submitted = await run_settlement_jobs(summary, redis_client)
-    summary.settlement_txs = settlements_submitted
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.proof.jobs_complete",
-        message="processed settlement proof jobs",
-        proofs_generated=summary.proofs_generated,
-        settlements_submitted=settlements_submitted,
-    )
+    async def _run_proofs_and_settlements(summary_obj: SyncSummary) -> None:
+        try:
+            proofs_generated = await run_prover_jobs(summary_obj, redis_client)
+            settlements_submitted = await run_settlement_jobs(summary_obj, redis_client)
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.proof.jobs_complete",
+                message="processed settlement proof jobs",
+                proofs_generated=proofs_generated,
+                settlements_submitted=settlements_submitted,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.jobs_failed",
+                message="proof/settlement jobs failed",
+                error=str(exc),
+            )
+
+    asyncio.create_task(_run_proofs_and_settlements(summary))
+    summary.proofs_generated = 0
+    summary.settlement_txs = 0
     cache_report = await invalidate_cache_tags(redis_client, summary)
     summary.cache_invalidations = cache_report.total
     stats = summary.to_stats(total_fetched, latency_ms, cache_report.total)

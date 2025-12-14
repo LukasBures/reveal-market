@@ -181,6 +181,25 @@ async def maybe_generate_settlement_proof(
             if numeric_market_id is None:
                 raise ValueError("non-numeric market id")
             market_record = await session.get(shared_models.Market, numeric_market_id)
+            if market_record is None:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.no_market_record",
+                    message="skipping proof because market record missing",
+                    market_id=market_identifier,
+                )
+                return False
+            commitments_count = await shared_repository.count_commitments(session, numeric_market_id)
+            if commitments_count <= 0:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.no_commitments",
+                    message="skipping proof because no local commitments recorded",
+                    market_id=market_identifier,
+                )
+                return False
             if market_record:
                 market_event_id = market_event_id or getattr(market_record, "event_id", None)
                 record_condition = getattr(market_record, "condition_id", None)
