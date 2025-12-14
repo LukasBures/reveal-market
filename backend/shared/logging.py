@@ -147,7 +147,7 @@ def start_heartbeat_logger(
     logger: logging.Logger,
     service_name: str,
     *,
-    interval_seconds: int = 60,
+    interval_seconds: float = 60,
     message: str | None = None,
 ) -> Event:
     """Start a background thread that logs a heartbeat every interval seconds."""
