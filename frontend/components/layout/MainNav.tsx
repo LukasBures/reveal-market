@@ -101,6 +101,12 @@ export function MainNav() {
               {link.label}
             </Link>
           ))}
+          <Link
+            href="/dashboard"
+            className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          >
+            Dashboard
+          </Link>
         </nav>
         <div className="flex items-center gap-3 text-sm md:text-base">
           <button
@@ -133,6 +139,13 @@ export function MainNav() {
                     {link.label}
                   </Link>
                 ))}
+                <Link
+                  href="/dashboard"
+                  className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  Dashboard
+                </Link>
               </nav>
             </div>
           </div>

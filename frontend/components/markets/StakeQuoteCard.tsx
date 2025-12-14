@@ -8,6 +8,7 @@ import {
   submitTrade,
   type TradeCommitResponse,
 } from "@/lib/pricing-client";
+import { fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatTime } from "@/lib/formatters";
@@ -26,6 +27,7 @@ type Props = {
   marketStatus?: string | null;
   isResolved?: boolean | null;
   tradingHalted?: boolean | null;
+  initialTxHash?: string | null;
 };
 
 const PER_BET_CAP_ZEN = 0.1;
@@ -48,6 +50,7 @@ export function StakeQuoteCard({
   marketStatus,
   isResolved,
   tradingHalted = null,
+  initialTxHash = null,
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
@@ -98,8 +101,11 @@ export function StakeQuoteCard({
   });
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
-  const [txHash, setTxHash] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(initialTxHash);
   const [txConfirmed, setTxConfirmed] = useState(false);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
+  const explorerBase =
+    (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "https://horizen-testnet.explorer.caldera.xyz/tx").replace(/\/+$/, "");
   const txPending = false;
   const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
   const fxUnavailable = status === "error";
@@ -150,14 +156,17 @@ export function StakeQuoteCard({
   const isSettled = isResolved === true || settledStates.includes(statusNormalized);
   const isLocked = lockedStates.includes(statusNormalized);
   const missingMarketAddress = !marketAddress;
-  const tradingDisabled = Boolean(tradingHalted || isSettled || isLocked || missingMarketAddress);
+  const allowAutoCreate = missingMarketAddress && Boolean(marketId);
+  const tradingBlocked = Boolean(tradingHalted || isSettled || isLocked);
+  const missingAddressBlocking = missingMarketAddress && !allowAutoCreate;
+  const tradingDisabled = tradingBlocked || missingAddressBlocking;
   const tradingReason = tradingHalted
     ? "Trading halted"
     : isSettled
       ? "Market settled"
       : isLocked
         ? "Market locked"
-        : missingMarketAddress
+        : missingAddressBlocking
           ? "Market address unavailable"
           : null;
 
@@ -172,6 +181,11 @@ export function StakeQuoteCard({
       if (!address) {
         setQuote(null);
         setError("Connect wallet to request a quote");
+        return;
+      }
+      if (!marketId) {
+        setQuote(null);
+        setError("Market unavailable (missing id)");
         return;
       }
       if (!chainId || chainMismatch) {
@@ -274,9 +288,12 @@ export function StakeQuoteCard({
     // Clear quotes on account or chain changes to avoid reusing stale signatures.
     setQuote(null);
     setRefreshNonce((prev) => prev + 1);
-    setTxHash(null);
+    if (!initialTxHash) {
+      setTxHash(null);
+    }
     setTxConfirmed(false);
-  }, [chainId, address]);
+    setTxStatus(null);
+  }, [chainId, address, initialTxHash]);
 
   const profitUsd = useMemo(() => {
     if (!quote) return null;
@@ -324,6 +341,10 @@ export function StakeQuoteCard({
     setEscrowStatus(null);
     if (!address || !escrowAddress || !ZEN_TOKEN_ADDRESS) {
       setEscrowError("Missing wallet, escrow, or ZEN token config.");
+      return;
+    }
+    if (chainMismatch) {
+      setEscrowError(`Switch to ${defaultChain.name} before funding escrow.`);
       return;
     }
     const amountZen = Number(depositInput.replace(",", "."));
@@ -377,6 +398,10 @@ export function StakeQuoteCard({
       setEscrowError("Missing wallet or escrow config.");
       return;
     }
+    if (chainMismatch) {
+      setEscrowError(`Switch to ${defaultChain.name} before withdrawing.`);
+      return;
+    }
     const amountZen = Number(withdrawInput.replace(",", "."));
     if (!Number.isFinite(amountZen) || amountZen <= 0) {
       setEscrowError("Enter a withdraw amount.");
@@ -421,8 +446,8 @@ export function StakeQuoteCard({
       setTxError("Connect wallet before trading.");
       return;
     }
-    if (!marketAddress) {
-      setTxError("Market contract address missing.");
+    if (!marketId) {
+      setTxError("Market id missing.");
       return;
     }
     if (!quote) {
@@ -465,6 +490,7 @@ export function StakeQuoteCard({
       const resp: TradeCommitResponse = await submitTrade(quote.quote_id);
       if (resp.tx_hash) {
         setTxHash(resp.tx_hash);
+        setTxStatus(resp.relayer_status ?? null);
         setTxConfirmed(true);
       }
     } catch (err) {
@@ -483,6 +509,33 @@ export function StakeQuoteCard({
       setTxLoading(false);
     }
   };
+
+  // Poll transaction status if we have a hash/job id.
+  useEffect(() => {
+    if (!txHash) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const statusResp = await fetchTradeStatus(txHash);
+        if (!cancelled) {
+          setTxStatus(statusResp.status);
+          if (statusResp.status === "confirmed" || statusResp.status === "failed") {
+            setTxConfirmed(statusResp.status === "confirmed");
+            return;
+          }
+        }
+      } catch {
+        // best effort
+      }
+      if (!cancelled) {
+        setTimeout(poll, 5000);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [txHash]);
 
   return (
     <div
@@ -725,6 +778,11 @@ export function StakeQuoteCard({
             {tradingReason ?? "Trading is unavailable for this market."}
           </div>
         )}
+        {!tradingDisabled && allowAutoCreate && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
+            Market will be deployed automatically on your first trade.
+          </p>
+        )}
         {quote && (
           <p className="text-xs text-slate-300">
             Stake {formatNumber(quote.stake_zen, 3)} ZEN → Win {formatNumber(toWinZen ?? NaN, 3)} ZEN
@@ -737,7 +795,7 @@ export function StakeQuoteCard({
             fxStale ||
             fxUnavailable ||
             !fxLive ||
-            !marketAddress ||
+            !marketId ||
             !address ||
             stakeOutOfRange ||
             tradingDisabled ||
@@ -799,12 +857,21 @@ export function StakeQuoteCard({
         )}
         {txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-            Commit tx: {txHash.slice(0, 10)}…{txHash.slice(-6)}
+            Commit tx:{" "}
+            <a
+              href={`${explorerBase}/${txHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline decoration-dotted"
+            >
+              {txHash.slice(0, 10)}…{txHash.slice(-6)}
+            </a>{" "}
+            ({txStatus ?? "pending"})
           </p>
         )}
         {txConfirmed && txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-            Commit accepted by relayer.
+            Commit confirmed on-chain.
           </p>
         )}
       </div>

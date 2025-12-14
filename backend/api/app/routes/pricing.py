@@ -24,6 +24,7 @@ from app import models, repository_async, schemas
 from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
 from app.pricing import PricingEngine, fetch_fx_quote
+from app.routes import trade as trade_routes
 from app.runtime import logger, settings
 
 router = APIRouter()
@@ -191,6 +192,25 @@ async def pricing_quote(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Market is settled; new quotes are disabled",
             )
+    # Ensure the market is deployed; auto-create via factory when no address is stored.
+    ensured_market_address: str | None = (payload.market_address or "") or None
+    if payload.market_id:
+        try:
+            _, ensured_market_address, _ = await trade_routes._ensure_market(
+                session, payload.market_id, ensured_market_address
+            )
+        except HTTPException as exc:
+            # In test/offline contexts without an oracle configured, fall back to the provided address.
+            detail = getattr(exc, "detail", "")
+            if ensured_market_address and detail == "oracle_missing":
+                ensured_market_address = ensured_market_address
+            else:
+                raise
+    if ensured_market_address is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_address_missing", "message": "Market address unavailable"},
+        )
     try:
         fx_quote = await fetch_fx_quote(settings)
         if fx_quote.stale:
@@ -262,7 +282,7 @@ async def pricing_quote(
     try:
         digest = build_quote_digest(
             settings.pricing_chain_id,
-            payload.market_address,
+            ensured_market_address,
             payload.wallet_address,
             int(payload.outcome_id),
             stake_wei,
@@ -295,7 +315,7 @@ async def pricing_quote(
             "user_id": payload.user_id,
             "wallet_address": payload.wallet_address,
             "outcome_id": payload.outcome_id,
-            "market_address": payload.market_address,
+            "market_address": ensured_market_address,
             "chain_id": settings.pricing_chain_id,
         }
     )
@@ -312,7 +332,7 @@ async def pricing_quote(
                 "fx_scaled": zen_usd_scaled,
                 "zen_usd": quote.zen_usd,
                 "market_id": payload.market_id,
-                "market_address": payload.market_address,
+                "market_address": ensured_market_address,
                 "user_id": payload.user_id,
                 "wallet_address": payload.wallet_address,
                 "outcome_id": quote.outcome_id,

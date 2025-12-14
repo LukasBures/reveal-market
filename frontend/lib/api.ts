@@ -8,6 +8,7 @@ import type {
   MarketStatusStat,
   MarketSummary,
   ProofReceipt,
+  PositionRecord,
 } from "./api-types";
 import { slugify } from "./slugs";
 import { logger } from "./logging";
@@ -559,6 +560,63 @@ type ProofReceiptFilters = {
   conditionId?: string;
   requestId?: string;
 };
+
+export async function fetchTradeStatus(
+  txHash?: string | null,
+  jobId?: string | null,
+): Promise<{ status: string; txHash?: string; blockNumber?: number | null }> {
+  if (!txHash && !jobId) {
+    return { status: "unknown" };
+  }
+  const url = new URL(`${DEFAULT_API_BASE}/trade/status`);
+  if (txHash) url.searchParams.set("tx_hash", txHash);
+  if (jobId) url.searchParams.set("job_id", jobId);
+  try {
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) {
+      return { status: "unknown" };
+    }
+    const payload = await response.json();
+    return {
+      status: payload?.status ?? "unknown",
+      txHash: payload?.tx_hash ?? txHash ?? undefined,
+      blockNumber: payload?.block_number ?? null,
+    };
+  } catch {
+    return { status: "unknown" };
+  }
+}
+
+export async function fetchPositions(
+  wallet: string,
+): Promise<{ positions: PositionRecord[]; escrowBalance?: string | number | null; error?: string }> {
+  if (maybeShortCircuitOffline("fetchPositions")) {
+    return { positions: [], error: "offline" };
+  }
+  const url = new URL(`${DEFAULT_API_BASE}/positions`);
+  url.searchParams.set("wallet", wallet);
+  try {
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) {
+      const detail = await response.text();
+      const errorMessage = `Failed to fetch positions (${response.status}): ${detail}`;
+      logger.error("fetchPositions:failed", { status: response.status, endpoint: url.toString() });
+      return { positions: [], error: errorMessage };
+    }
+    const payload = await response.json();
+    if (Array.isArray(payload)) {
+      return { positions: payload as PositionRecord[] };
+    }
+    const escrow = payload?.escrow_balance_wei ?? payload?.escrowBalance ?? null;
+    return {
+      positions: Array.isArray(payload?.positions) ? (payload.positions as PositionRecord[]) : [],
+      escrowBalance: escrow,
+    };
+  } catch (error) {
+    logOfflineAwareError("fetchPositions", error);
+    return { positions: [], error: (error as Error).message };
+  }
+}
 
 export async function fetchProofReceipts(
   limit = 20,

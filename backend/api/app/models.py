@@ -2,6 +2,8 @@
 
 from shared.models import (
     Base,
+    Commitment,
+    CommitmentMerklePath,
     HedgerTreasurySnapshot,
     Market,
     MarketClobToken,
@@ -13,10 +15,14 @@ from shared.models import (
     Quote,
     QuoteStatusEnum,
     Resolution,
+    Settlement,
+    SettlementProofStatus,
 )
 
 __all__ = [
     "Base",
+    "Commitment",
+    "CommitmentMerklePath",
     "Market",
     "MarketOutcome",
     "MarketTag",
@@ -27,5 +33,7 @@ __all__ = [
     "Quote",
     "QuoteStatusEnum",
     "Resolution",
+    "Settlement",
+    "SettlementProofStatus",
     "HedgerTreasurySnapshot",
 ]

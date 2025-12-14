@@ -86,48 +86,66 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 
 ___
 
-
-
-
-• Here’s a workable MVP flow that matches the current stack (relayer + fixed-ticket commitWithAuthorization) and gives users something to see after they trade.
-
-  Happy-path flow
+• Current state vs the happy-path:
 
   1. Connect & fund
-      - User connects wallet (Horizen testnet enforced).
-      - Approve + deposit ZEN into RelayerEscrow. UI shows escrow balance. (Contract path: approve(ZEN, escrow), then escrow.deposit.)
+
+  - Implemented: RelayerEscrow approve/deposit/withdraw; balanceOf + events; UI shows escrow with funding controls and blocks on wrong chain (Horizen testnet enforced in funding actions).
+  - Tests: unit tests cover the chain guard; no full E2E flow yet.
 
   2. Market readiness
-      - If the market isn’t deployed yet, backend/worker/relayer creates or predicts it via MarketFactory and stores market_address against the event. The market will be created only when user click buy/trade it will not hide/disallow trading. It should not matter if the market is deployed or not, only for the first bet/trader it has to create that market before the user will create trade.
+
+  - Implemented: backend auto-creates markets on first quote/commit (stubs a Market row if missing); Factory has predictMarketAddress, marketAddress, and getMarketParams views; worker backfills missing market_address each sync via factory view.
+  - Requirement for market_id remains (must exist or be provided).
 
   3. Get price + caps
-      - UI requests /pricing/quote with {wallet_address, market_id, market_address, outcome_id, stake_zen}.
-      - API signs QUOTE_V1, applies caps, returns quote_id, expiry, signer, chain_id, caps, FX timestamp.
-  
+
+  - Implemented: QUOTE_V1 signing with caps; quoting works without a pre-known address (auto-create). Ensure env keys (pricing signer, factory/verifier/auth signer/oracle/wallet) are set.
+
   4. Confirm & submit
-      - Client POSTs a “trade” action (backend route) with quote_id (and optionally the full quote for drift guard).
-      - Backend calls /pricing/submit to mark the quote consumed and verify signature/FX drift.
-      - Backend derives CommitAuth (commitment hash, nonce, expiry) and calls relayer commitOnBehalf (or enqueues it) → relayer sends commitWithAuthorization to the market. Ticket size should match the quoted stake (for MVP keep ticketSize = 0.1 ZEN).
-  
+
+  - Implemented: quote→pricing_submit→CommitAuth→relayer commitWithAuthorization; ticket-size check; relayer retries with status/job id; contract enforces rake/ticket. Tests cover nonce replay/expiry/ticket size/maxCommitments/commit window/Committed event.
+
   5. Persist + notify
-      - On success, backend stores: quote_id (consumed), tx_hash, market_id, user_address, outcome_id, amount_wei, ticket_hash/leaf, merkle index (if known).
-      - Response to UI: {txHash, quoteId, marketId, outcomeId, stakeZen, entryFx, potentialPayoutZen, status: "committed"} and updated escrow balance (escrow debits ticket).
-  
-  6. Positions visibility
-      - Expose /positions?wallet=… (or session-bound) that returns live commitments with: market/title/outcome, stake, entry FX, quote_id, tx_hash, status (pending/committed/settled), potential win, and whether claimable.
-      - After resolution + proof ingestion, relayer runs claim and credits escrow; positions entry flips to claimed and shows credited amount.
-      - User can withdraw from escrow (escrow.withdraw) to wallet.
 
-  What the user sees in the UI
+  - Implemented: backend stores commitments; returns tx hash, relayer status/job id, escrow balance; UI polls /trade/status and links to explorer for receipt; relayer retries in place (no persistent queue).
 
-  - After submitting: tx hash (relayer commit), stake, outcome, implied odds, and a “position added” row.
-  - In Positions: list of open tickets with stake, entry price/FX, potential payout, market status. Show “claimable” when the backend/worker marks it so; show credited amount after claim. Escrow balance visible for withdraw.
-  - Errors that block trading: missing market_address, wrong chain, stale FX, cap exhausted, quote expired/consumed.
+  6. Positions visibility & claims
 
-  Key plumbing needed
+  - Implemented: /positions + dashboard with claim; claim rebuilds Merkle path; contract has nextTicketId, commitmentsRoot, marketState, claim flow.
+  - Added ingestion endpoints: /commitments/sync (relayer push), /settlements/ingest (prover/relayer push).
+  - Pending: wire relayer/prover to call these ingest endpoints; UI doesn’t yet auto-refresh escrow after claim (it reloads positions/escrow on claim, but credited balance depends on relayer credit timing).
 
-  - A backend “trade” endpoint to consume quotes + call relayer; mark quotes consumed.
-  - Ensure markets have market_address (predict/create if missing) before enabling trade.
-  - Persist commitments in Postgres (we already have commitments table) when relayer tx lands.
-  - Positions API + minimal UI to render them, plus escrow deposit/withdraw UI.
-  - Keep ticket size aligned with quoted stake (MVP: fix at 0.1 ZEN to match UI cap and relayer ticketSize).
+
+
+___
+  - Market readiness: market_id still must be provided/known in DB. (We auto-create on-chain and backfill addresses, but we don’t mint a Market row for arbitrary IDs.)
+___
+
+
+  Core changes (minimal, perpetual claims, keep single terminal phase = Settled)
+
+  1. Remove the claim window check:
+      - In contracts/zen/src/RevealMarket.sol, delete if (block.timestamp > revealDeadline) revert ClaimWindowClosed(); inside claim.
+      - remove the revealDeadline variable if not used, dont care about ABI compatibility - will redeploy contracts so dont be scared
+  2. Stop using Finished as a terminal state:
+      - Don’t call _finish when claimedLiability == totalLiability; just leave phase = Settled.
+      - remove Finished from the enum and from everywhere
+  3. Decide on surplus/top-up handling:
+      - Current verifyAndSettle already returns surplus to the protocol pool before claims. If you never call _finish, any residual dust stays in the market contract. If that’s acceptable, nothing else to do. -> what is the dust here? I believe there should not be dust, anything that is > than total claimable value should be sent to the protocol pool imediately once verify and setle
+      - If you need to recover unclaimed funds eventually, add a governance/timelocked sweepUnclaimed() callable only after a long inactivity period. If you don’t want that, accept the locked dust. After how long should I sweep users' funds ? if ever ? I guess I should not. But for security reason what would you recommend
+  4. Claims permissioning:
+      - If you truly want claims “forever” to be reliable, make claim permissionless (remove onlyRelayer) or allow multiple/rotatable relayers. Otherwise, a dead/censoring relayer can still block claims indefinitely, what about deposit only relayer, but clain only user ? my protocol's part will be sent to the protoocl pool automatically in verify and settle stage
+  5. Keep guards:
+      - Keep phase == Settled, claimsPaused, merkle proof check, and claimedLiability <= totalLiability as-is; they still protect against over-claims.
+
+  Cleanup and tests
+
+  - Update or remove any references to ClaimWindowClosed (events/errors/tests).
+  - Adjust tests in contracts/zen/test/* that expect claim cutoff or Finished to be reached.
+  - If you remove Finished from the enum, update any consumers (factory views, frontends) that reference it.
+
+  Optional UX/ops improvements
+
+  - Add relayer rotation and/or a second claim path (user-driven) to reduce reliance on a single relayer.
+  - Emit an event when the market is considered “fully claimed” (if you keep _finish as a counter-only signal) without changing the claimability.

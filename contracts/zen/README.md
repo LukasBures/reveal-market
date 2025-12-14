@@ -25,8 +25,11 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 ## Public Signal Order (10)
 `[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]`
 
+## Commitment Leaf
+`keccak256(ticketId, outcomeId, amount, keccak256(user, salt))` — user is bound to the leaf via a salted hash to preserve privacy while preventing redirection at claim time.
+
 ## Commit Authorization Digest
-`keccak256(abi.encode(address(market), marketId, commitment, nonce, expiry))` → `eth_sign` by `authorizationSigner`.
+`keccak256(abi.encodePacked(address(market), marketId, commitment, user, nonce, expiry, ticketValue, block.chainid))` → `eth_sign` by `authorizationSigner`.
 
 ## Build & Test
 ```bash

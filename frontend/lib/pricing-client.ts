@@ -206,19 +206,21 @@ export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
   opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
 ): Promise<PricingQuote> {
-  if (!opts.walletAddress || !opts.marketAddress || opts.outcomeId === undefined || opts.outcomeId === null) {
-    throw new Error("walletAddress, marketAddress, and outcomeId are required for signed quotes");
+  if (!opts.walletAddress || opts.outcomeId === undefined || opts.outcomeId === null || !opts.marketId) {
+    throw new Error("walletAddress, marketId, and outcomeId are required for signed quotes");
   }
+  const normalizedAddress = opts.marketAddress && opts.marketAddress.length > 0 ? opts.marketAddress : null;
+  const userId = opts.userId ?? opts.walletAddress;
   const res = await fetch(getEndpoint("/pricing/quote"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       stake_zen: stakeZen,
       market_id: opts.marketId,
-      user_id: opts.userId,
+      user_id: userId,
       wallet_address: opts.walletAddress,
       outcome_id: opts.outcomeId,
-      market_address: opts.marketAddress,
+      market_address: normalizedAddress,
     }),
   });
   if (!res.ok) {
@@ -304,6 +306,8 @@ export type TradeCommitResponse = {
   ticket_id?: number | null;
   escrow_balance_wei?: number | null;
   salt?: string | null;
+  relayer_status?: string | null;
+  relayer_job_id?: string | null;
 };
 
 export async function submitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {

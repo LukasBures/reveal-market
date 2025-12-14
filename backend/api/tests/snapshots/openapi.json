@@ -1,6 +1,154 @@
 {
   "components": {
     "schemas": {
+      "CommitmentTicket": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "leaf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaf"
+          },
+          "merkleIndex": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkleindex"
+          },
+          "merklePath": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merklepath"
+          },
+          "outcomeId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcomeid"
+          },
+          "salt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salt"
+          },
+          "ticketHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tickethash"
+          },
+          "user_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Address"
+          }
+        },
+        "title": "CommitmentTicket",
+        "type": "object"
+      },
+      "CommitmentsSyncRequest": {
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "tickets": {
+            "items": {
+              "$ref": "#/components/schemas/CommitmentTicket"
+            },
+            "title": "Tickets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tickets"
+        ],
+        "title": "CommitmentsSyncRequest",
+        "type": "object"
+      },
+      "CommitmentsSyncResponse": {
+        "properties": {
+          "recorded": {
+            "title": "Recorded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recorded"
+        ],
+        "title": "CommitmentsSyncResponse",
+        "type": "object"
+      },
       "FxQuoteResponse": {
         "properties": {
           "received_at": {
@@ -1065,6 +1213,201 @@
         "title": "MarketStatusBreakdown",
         "type": "object"
       },
+      "PositionRecord": {
+        "properties": {
+          "claimable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimable"
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "market_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Address"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "market_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Title"
+          },
+          "merkle_root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkle Root"
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "proof_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Request Id"
+          },
+          "quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Id"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "stake_wei": {
+            "title": "Stake Wei",
+            "type": "integer"
+          },
+          "stake_zen": {
+            "title": "Stake Zen",
+            "type": "number"
+          },
+          "status": {
+            "default": "committed",
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Hash"
+          },
+          "winning_outcome_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winning Outcome Id"
+          }
+        },
+        "required": [
+          "market_id",
+          "outcome_id",
+          "stake_wei",
+          "stake_zen"
+        ],
+        "title": "PositionRecord",
+        "type": "object"
+      },
+      "PositionsResponse": {
+        "properties": {
+          "escrow_balance_wei": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escrow Balance Wei"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionRecord"
+            },
+            "title": "Positions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "positions"
+        ],
+        "title": "PositionsResponse",
+        "type": "object"
+      },
       "PricingQuotePayload": {
         "properties": {
           "chain_id": {
@@ -1418,9 +1761,16 @@
       "PricingQuoteRequest": {
         "properties": {
           "market_address": {
-            "description": "Market contract address",
-            "title": "Market Address",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Market contract address (auto-created when missing)",
+            "title": "Market Address"
           },
           "market_id": {
             "description": "Market ID for cap tracking",
@@ -1462,8 +1812,7 @@
           "market_id",
           "user_id",
           "wallet_address",
-          "outcome_id",
-          "market_address"
+          "outcome_id"
         ],
         "title": "PricingQuoteRequest",
         "type": "object"
@@ -2218,6 +2567,458 @@
         "title": "ResolutionWinner",
         "type": "object"
       },
+      "SettlementIngestRequest": {
+        "properties": {
+          "circuitHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circuithash"
+          },
+          "commitmentsCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commitmentscount"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "merkleRoot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkleroot"
+          },
+          "poolTotalNo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pooltotalno"
+          },
+          "poolTotalYes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pooltotalyes"
+          },
+          "proofHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofhash"
+          },
+          "proofRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofrequestid"
+          },
+          "proof_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Status"
+          },
+          "rakeBps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rakebps"
+          },
+          "totalEscrow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalescrow"
+          },
+          "totalLiability": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalliability"
+          },
+          "winningOutcomeId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winningoutcomeid"
+          }
+        },
+        "title": "SettlementIngestRequest",
+        "type": "object"
+      },
+      "SettlementIngestResponse": {
+        "properties": {
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "updated": {
+            "default": true,
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "market_id"
+        ],
+        "title": "SettlementIngestResponse",
+        "type": "object"
+      },
+      "TradeClaimRequest": {
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "wallet_address": {
+            "title": "Wallet Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "wallet_address"
+        ],
+        "title": "TradeClaimRequest",
+        "type": "object"
+      },
+      "TradeClaimResponse": {
+        "properties": {
+          "amount_wei": {
+            "title": "Amount Wei",
+            "type": "integer"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "status": {
+            "default": "claimed",
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_id": {
+            "title": "Ticket Id",
+            "type": "integer"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tx_hash",
+          "market_id",
+          "ticket_id",
+          "outcome_id",
+          "amount_wei"
+        ],
+        "title": "TradeClaimResponse",
+        "type": "object"
+      },
+      "TradeCommitRequest": {
+        "properties": {
+          "max_fx_diff_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional FX drift guard passed to pricing submit",
+            "title": "Max Fx Diff Percent"
+          },
+          "quote_id": {
+            "description": "Quote identifier to consume and commit",
+            "title": "Quote Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quote_id"
+        ],
+        "title": "TradeCommitRequest",
+        "type": "object"
+      },
+      "TradeCommitResponse": {
+        "properties": {
+          "entry_fx": {
+            "title": "Entry Fx",
+            "type": "number"
+          },
+          "escrow_balance_wei": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escrow Balance Wei"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "potential_payout_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Payout Zen"
+          },
+          "quote_id": {
+            "title": "Quote Id",
+            "type": "string"
+          },
+          "relayer_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relayer Job Id"
+          },
+          "relayer_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relayer Status"
+          },
+          "salt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salt"
+          },
+          "stake_zen": {
+            "title": "Stake Zen",
+            "type": "number"
+          },
+          "status": {
+            "default": "committed",
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tx_hash",
+          "quote_id",
+          "market_id",
+          "outcome_id",
+          "stake_zen",
+          "entry_fx"
+        ],
+        "title": "TradeCommitResponse",
+        "type": "object"
+      },
+      "TradeStatusResponse": {
+        "properties": {
+          "block_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Number"
+          },
+          "effective_gas_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Gas Price"
+          },
+          "gas_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Used"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tx_hash",
+          "status"
+        ],
+        "title": "TradeStatusResponse",
+        "type": "object"
+      },
       "TreasurySnapshot": {
         "properties": {
           "borrowed_usdc": {
@@ -2453,6 +3254,48 @@
         "summary": "List Markets By Category",
         "tags": [
           "markets"
+        ]
+      }
+    },
+    "/commitments/sync": {
+      "post": {
+        "description": "Ingest commitments pushed by the relayer (for commits that bypassed the API).",
+        "operationId": "sync_commitments_commitments_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitmentsSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Commitments",
+        "tags": [
+          "trade"
         ]
       }
     },
@@ -2914,6 +3757,49 @@
         ]
       }
     },
+    "/positions": {
+      "get": {
+        "description": "Return committed positions for a wallet along with escrow balance.",
+        "operationId": "list_positions_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wallet",
+            "required": true,
+            "schema": {
+              "title": "Wallet",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Positions",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
     "/pricing/fx": {
       "get": {
         "operationId": "pricing_fx_pricing_fx_get",
@@ -3083,6 +3969,126 @@
         ]
       }
     },
+    "/relayer/commitments": {
+      "post": {
+        "description": "Relayer-protected hook to push commitments.",
+        "operationId": "relayer_commitments_relayer_commitments_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Relayer-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Relayer-Secret"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitmentsSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relayer Commitments",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/relayer/settlements": {
+      "post": {
+        "description": "Relayer/prover-protected hook to push settlement snapshots.",
+        "operationId": "relayer_settlements_relayer_settlements_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Relayer-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Relayer-Secret"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relayer Settlements",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
     "/resolution/{condition_id_hex}": {
       "get": {
         "description": "Return the resolution summary for a condition id with cache + Goldsky fallback.",
@@ -3123,6 +4129,198 @@
         "summary": "Read Resolution",
         "tags": [
           "markets"
+        ]
+      }
+    },
+    "/settlements/ingest": {
+      "post": {
+        "description": "Persist settlement snapshot from relayer/prover so claims can proceed.",
+        "operationId": "ingest_settlement_settlements_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Settlement",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/claim": {
+      "post": {
+        "description": "Initiate a claim via the relayer for a settled winning ticket.",
+        "operationId": "trade_claim_trade_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Claim",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/commit": {
+      "post": {
+        "description": "Consume a pricing quote, build CommitAuth, and forward to the relayer.",
+        "operationId": "trade_commit_trade_commit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeCommitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Commit",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/status": {
+      "get": {
+        "description": "Return transaction status by hash or relayer job id (best-effort).",
+        "operationId": "trade_status_trade_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tx_hash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tx Hash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Status",
+        "tags": [
+          "trade"
         ]
       }
     },

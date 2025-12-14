@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -10,7 +11,7 @@ import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 
 /// @notice Trusted relayer escrow that holds all user balances and forwards fixed-size commits to markets.
 /// Users deposit/withdraw ERC20 collateral; only the relayer (owner) may initiate commits on their behalf.
-contract RelayerEscrow is Ownable, ReentrancyGuard {
+contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
     IERC20 public immutable COLLATERAL_TOKEN;
     mapping(address => uint256) public balances;
@@ -25,11 +26,17 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
     event CommitForwarded(address indexed market, bytes32 commitment, uint256 debitedFromUser);
     event CreditReceived(address indexed market, address indexed user, uint256 amount);
 
+    /// @notice View helper matching ERC20 style balanceOf for frontends/indexers.
+    function balanceOf(address user) external view returns (uint256) {
+        return balances[user];
+    }
+
     error UnknownMarket();
     error InvalidFactory();
     error InsufficientBalance();
     error CommitFailed();
     error InvalidRelayerOwner();
+    error UserMismatch();
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -79,14 +86,13 @@ contract RelayerEscrow is Ownable, ReentrancyGuard {
         bytes calldata signature
     ) external nonReentrant onlyOwner {
         if (!allowedMarket[market]) revert UnknownMarket();
+        if (auth.user != user || user == address(0)) revert UserMismatch();
         uint256 ticket = IRevealMarket(market).ticketSize();
         if (balances[user] < ticket) revert InsufficientBalance();
 
         balances[user] -= ticket;
         COLLATERAL_TOKEN.safeTransfer(market, ticket);
-        (bool success,) =
-            market.call(abi.encodeWithSelector(IRevealMarket.commitWithAuthorization.selector, auth, signature));
-        if (!success) revert CommitFailed();
+        IRevealMarket(market).commitWithAuthorization(auth, signature);
 
         emit CommitForwarded(market, auth.commitment, ticket);
     }

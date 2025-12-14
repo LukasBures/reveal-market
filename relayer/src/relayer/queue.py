@@ -232,6 +232,16 @@ class TxQueue:
             nonce_used = int(nonce_used_raw) if nonce_used_raw is not None else None
             await asyncio.to_thread(self._mark_complete, job_id, tx_hash, nonce_used)
             QUEUE_OUTCOMES.labels(action=row["action"], status="succeeded").inc()
+            if row["action"] == "commit":
+                try:
+                    await self.service.push_commit_ingest(payload, tx_hash=tx_hash)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("queue.commit.ingest_failed", job_id=job_id, error=str(err))
+            if row["action"] == "claim":
+                try:
+                    await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("queue.claim.ingest_failed", job_id=job_id, error=str(err))
             logger.info(
                 "queue.job.succeeded",
                 job_id=job_id,

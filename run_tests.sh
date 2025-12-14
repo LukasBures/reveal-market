@@ -10,16 +10,24 @@ timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
 }
 
-log_step() {
-  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
-}
-
 log_error() {
   printf '[%s] ERROR: %s\n' "$(timestamp)" "$*" >&2
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_ARGS=("$@")
+# Default to quieter pytest output unless caller overrides.
+export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:--q --disable-warnings}"
+LOG_DIR="${ROOT_DIR}/logs/test-runs"
+mkdir -p "${LOG_DIR}"
+# Colors for TTY output.
+if [[ -t 1 ]]; then
+  GREEN="$(tput setaf 2 2>/dev/null || true)"
+  RED="$(tput setaf 1 2>/dev/null || true)"
+  RESET="$(tput sgr0 2>/dev/null || true)"
+else
+  GREEN="" ; RED="" ; RESET=""
+fi
 
 usage() {
   cat <<EOF
@@ -39,14 +47,34 @@ run_section() {
   shift 2
   local -a env_vars=("$@")
 
-  log_step "Running ${name} tests"
+  local log_file="${LOG_DIR}/$(echo "${name}" | tr '/ ' '__').log"
 
   if [[ ! -x "${script_path}" ]]; then
     log_error "${script_path} is missing or not executable"
     exit 1
   fi
 
-  (cd "$(dirname "${script_path}")" && env "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}")
+  # Compact status line similar to pre-commit output.
+  local width=68
+  local result
+  if (cd "$(dirname "${script_path}")" && env "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}") >"${log_file}" 2>&1; then
+    result="Passed"
+    local dots=$((width - ${#name} - ${#result}))
+    ((dots < 2)) && dots=2
+    printf '%s' "${name}"
+    printf '.%.0s' $(seq 1 "${dots}")
+    printf '%s%s%s\n' "${GREEN}" "${result}" "${RESET}"
+  else
+    result="Failed"
+    local dots=$((width - ${#name} - ${#result}))
+    ((dots < 2)) && dots=2
+    printf '%s' "${name}"
+    printf '.%.0s' $(seq 1 "${dots}")
+    printf '%s%s%s\n' "${RED}" "${result}" "${RESET}"
+    echo "Tail of log (${log_file}):"
+    tail -n 200 "${log_file}" || true
+    exit 1
+  fi
 }
 
 run_section "backend" "${ROOT_DIR}/backend/run_tests.sh"
@@ -58,4 +86,4 @@ run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"
 
-log_step "All test suites completed successfully"
+run_section "All test suites" "/bin/true"

@@ -3,13 +3,14 @@ pragma solidity ^0.8.24;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {ProtocolPool} from "./ProtocolPool.sol";
 import {RelayerEscrow} from "./RelayerEscrow.sol";
 import {RevealMarket} from "./RevealMarket.sol";
 
 /// @notice Deploys minimal RevealMarket clones with trusted configuration and registers them with the relayer + protocol pool.
-contract MarketFactory is Ownable {
+contract MarketFactory is Ownable2Step {
     using Clones for address;
 
     struct CreateMarketParams {
@@ -17,7 +18,6 @@ contract MarketFactory is Ownable {
         address verifier;
         bytes32 circuitHash;
         uint256 commitDeadline;
-        uint256 revealDeadline;
         uint256 fixedTicketSize;
         uint256 maxCommitments;
         address authorizationSigner;
@@ -35,6 +35,22 @@ contract MarketFactory is Ownable {
     mapping(address => bool) public isMarket;
     mapping(uint256 => address) public marketForId;
 
+    struct MarketParams {
+        address market;
+        address oracle;
+        address verifier;
+        bytes32 circuitHash;
+        uint256 commitDeadline;
+        uint256 ticketSize;
+        uint256 maxCommitments;
+        address authorizationSigner;
+        uint256 protocolLiabilityCap;
+        uint256 rakeBps;
+        address relayerEscrow;
+        address protocolPool;
+        uint256 marketId;
+    }
+
     event MarketCreated(
         uint256 indexed marketId,
         address indexed market,
@@ -42,7 +58,6 @@ contract MarketFactory is Ownable {
         bytes32 circuitHash,
         uint256 ticketSize,
         uint256 commitDeadline,
-        uint256 revealDeadline,
         uint256 liabilityCap
     );
     event RelayerEscrowUpdated(address indexed relayer);
@@ -74,9 +89,7 @@ contract MarketFactory is Ownable {
         RelayerEscrow relayerEscrow_,
         address collateralToken_,
         address owner_
-    )
-        Ownable(owner_)
-    {
+    ) Ownable(owner_) {
         if (implementation_ == address(0)) revert InvalidImplementation();
         if (address(protocolPool_) == address(0)) revert InvalidProtocolPool();
         if (address(relayerEscrow_) == address(0)) revert InvalidRelayer();
@@ -121,6 +134,13 @@ contract MarketFactory is Ownable {
         emit MarketRakeSynced(market, globalRakeBps);
     }
 
+    /// @notice Override rake for a specific market (before settlement).
+    function setMarketRake(address market, uint256 rakeBps) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).setRakeBps(rakeBps);
+        emit MarketRakeSynced(market, rakeBps);
+    }
+
     /// @notice Pause/unpause market creation.
     function setFactoryPaused(bool paused) external onlyOwner {
         factoryPaused = paused;
@@ -161,6 +181,12 @@ contract MarketFactory is Ownable {
         emit MarketLiabilityCapUpdated(market, newCap);
     }
 
+    /// @notice Extend a market's commit deadline (factory-only guard).
+    function extendMarketCommitDeadline(address market, uint256 newDeadline) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).extendCommitDeadline(newDeadline);
+    }
+
     /// @notice Deploys a new minimal market clone with the given parameters.
     function createMarket(CreateMarketParams calldata params) external onlyOwner returns (address market) {
         if (factoryPaused) revert FactoryPausedErr();
@@ -168,15 +194,13 @@ contract MarketFactory is Ownable {
         if (params.verifier == address(0)) revert InvalidVerifier();
         if (params.authorizationSigner == address(0)) revert InvalidSigner();
         if (params.fixedTicketSize == 0) revert InvalidTicketSize();
-        if (params.revealDeadline <= params.commitDeadline || params.commitDeadline <= block.timestamp) {
-            revert InvalidDeadlines();
-        }
+        if (params.commitDeadline <= block.timestamp) revert InvalidDeadlines();
         uint256 appliedRakeBps = globalRakeBps;
 
         uint256 marketId = nextMarketId++;
-        address payable marketAddress = payable(IMPLEMENTATION.cloneDeterministic(bytes32(marketId)));
+        address payable deployedMarket = payable(IMPLEMENTATION.cloneDeterministic(bytes32(marketId)));
 
-        RevealMarket(marketAddress)
+        RevealMarket(deployedMarket)
             .initialize(
                 RevealMarket.InitParams({
                     factory: address(this),
@@ -187,7 +211,6 @@ contract MarketFactory is Ownable {
                     circuitHash: params.circuitHash,
                     collateralToken: COLLATERAL_TOKEN,
                     commitDeadline: params.commitDeadline,
-                    revealDeadline: params.revealDeadline,
                     ticketSize: params.fixedTicketSize,
                     maxCommitments: params.maxCommitments,
                     authorizationSigner: params.authorizationSigner,
@@ -195,24 +218,23 @@ contract MarketFactory is Ownable {
                     marketId: marketId,
                     rakeBps: appliedRakeBps
                 })
-            );
+        );
 
-        isMarket[marketAddress] = true;
-        marketForId[marketId] = marketAddress;
+        isMarket[deployedMarket] = true;
+        marketForId[marketId] = deployedMarket;
 
-        protocolPool.registerMarket(marketAddress, params.protocolLiabilityCap);
-        relayerEscrow.registerMarket(marketAddress);
+        protocolPool.registerMarket(deployedMarket, params.protocolLiabilityCap);
+        relayerEscrow.registerMarket(deployedMarket);
 
-        market = marketAddress;
+        market = deployedMarket;
 
         emit MarketCreated(
             marketId,
-            marketAddress,
+            deployedMarket,
             params.oracle,
             params.circuitHash,
             params.fixedTicketSize,
             params.commitDeadline,
-            params.revealDeadline,
             params.protocolLiabilityCap
         );
     }
@@ -220,5 +242,33 @@ contract MarketFactory is Ownable {
     /// @notice Predicts the deterministic clone address for a given market id.
     function predictMarketAddress(uint256 marketId) external view returns (address) {
         return IMPLEMENTATION.predictDeterministicAddress(bytes32(marketId), address(this));
+    }
+
+    /// @notice Returns the deployed address for a market id or reverts if unknown.
+    function marketAddress(uint256 marketId) public view returns (address) {
+        address market = marketForId[marketId];
+        if (market == address(0)) revert UnknownMarket();
+        return market;
+    }
+
+    /// @notice Returns the initialization/runtime parameters for a given market id.
+    function getMarketParams(uint256 marketId) external view returns (MarketParams memory params) {
+        address market = marketAddress(marketId);
+        RevealMarket rm = RevealMarket(payable(market));
+        params = MarketParams({
+            market: market,
+            oracle: rm.oracle(),
+            verifier: rm.verifier(),
+            circuitHash: rm.circuitHash(),
+            commitDeadline: rm.commitDeadline(),
+            ticketSize: rm.ticketSize(),
+            maxCommitments: rm.maxCommitments(),
+            authorizationSigner: rm.authorizationSigner(),
+            protocolLiabilityCap: rm.protocolLiabilityCap(),
+            rakeBps: rm.rakeBps(),
+            relayerEscrow: rm.relayerEscrow(),
+            protocolPool: address(protocolPool),
+            marketId: marketId
+        });
     }
 }

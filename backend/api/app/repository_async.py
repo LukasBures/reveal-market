@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -59,3 +59,39 @@ async def mark_quote_status(
 
 async def upsert_resolution(session: AsyncSession, data: Mapping[str, Any]) -> shared_models.Resolution:
     return await shared_repository_async.upsert_resolution(session, data)
+
+
+async def record_commitments(session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]]) -> int:
+    return await shared_repository_async.record_commitments(session, market_id, tickets)
+
+
+async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
+    return await shared_repository_async.count_commitments(session, market_db_id)
+
+
+async def list_commitments_with_settlement(
+    session: AsyncSession, wallet_address: str
+) -> list[tuple[shared_models.Commitment, shared_models.Market, shared_models.Settlement | None]]:
+    return await shared_repository_async.list_commitments_with_settlement(session, wallet_address)
+
+
+async def get_commitment_with_path_for_wallet(
+    session: AsyncSession, market_db_id: int, wallet_address: str, outcome_id: int, ticket_id: int | None = None
+) -> tuple[shared_models.Commitment, list[shared_models.CommitmentMerklePath]] | None:
+    return await shared_repository_async.get_commitment_with_path_for_wallet(
+        session, market_db_id, wallet_address, outcome_id, ticket_id
+    )
+
+
+async def list_commitments_by_market(session: AsyncSession, market_id: int) -> list[shared_models.Commitment]:
+    return await shared_repository_async.list_commitments_by_market(session, market_id)
+
+
+async def replace_merkle_path(session: AsyncSession, commitment_id: int, siblings: list[str]) -> None:
+    await shared_repository_async.replace_merkle_path(session, commitment_id, siblings)
+
+
+async def upsert_settlement_snapshot(
+    session: AsyncSession, market_id: int, data: Mapping[str, Any]
+) -> shared_models.Settlement:
+    return await shared_repository_async.upsert_settlement_snapshot(session, market_id, data)

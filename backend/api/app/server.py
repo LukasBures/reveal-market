@@ -19,8 +19,7 @@ from shared.logging import log_event
 from app.http_middleware import attach_request_context, configure_http_middleware
 from app.pricing import fetch_fx_quote
 from app.rate_limit import RateLimiter
-from app.routes import markets, meta, pricing, proofs, treasury
-from app.routes import trade
+from app.routes import markets, meta, pricing, proofs, trade, treasury
 from app.routes.pricing import build_quote_digest
 from app.runtime import cache_client, is_production, logger, mode_env, settings
 from app.services.cache_client import get_cache_client

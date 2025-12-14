@@ -32,8 +32,15 @@ contract RevealMarketFlowTest is Test {
     uint256 private maxCommitments = 8;
     uint256 private rakeBps = 100; // 1%
     uint256 private commitDeadline;
-    uint256 private revealDeadline;
     RevealMarket private market;
+
+    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address leafUser)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(ticketId, outcomeId, amount, keccak256(abi.encodePacked(leafUser, salt))));
+    }
 
     function setUp() external {
         token = new MockERC20();
@@ -49,14 +56,12 @@ contract RevealMarketFlowTest is Test {
         relayerEscrow.setMarketFactory(address(factory));
 
         commitDeadline = block.timestamp + 1 days;
-        revealDeadline = commitDeadline + 1 days;
 
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
             oracle: oracle,
             verifier: address(verifier),
             circuitHash: circuitHash,
             commitDeadline: commitDeadline,
-            revealDeadline: revealDeadline,
             fixedTicketSize: ticketSize,
             maxCommitments: maxCommitments,
             authorizationSigner: authSigner,
@@ -80,12 +85,28 @@ contract RevealMarketFlowTest is Test {
         bytes32 salt = keccak256("salt");
         uint256 payoutAmount = 2 ether;
         uint256 outcome = 1;
-        bytes32 leaf = keccak256(abi.encodePacked(uint256(0), outcome, payoutAmount, salt));
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: leaf, nonce: 1, expiry: block.timestamp + 12 hours});
+        bytes32 leaf = _leaf(0, outcome, payoutAmount, salt, user);
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: leaf,
+            user: user,
+            nonce: 1,
+            expiry: block.timestamp + 12 hours,
+            ticketValue: ticketSize
+        });
 
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
-            keccak256(abi.encode(address(market), uint256(1), leaf, auth.nonce, auth.expiry))
+            keccak256(
+                abi.encodePacked(
+                    address(market),
+                    uint256(1),
+                    auth.commitment,
+                    auth.user,
+                    auth.nonce,
+                    auth.expiry,
+                    auth.ticketValue,
+                    block.chainid
+                )
+            )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -125,11 +146,18 @@ contract RevealMarketFlowTest is Test {
         uint256 expectedDraw = payoutAmount - netTicket;
         assertApproxEqAbs(protocolPool.consumedLiability(address(market)), expectedDraw, 1);
 
+        // Wrong user should fail because user is bound into the commitment leaf
+        address impostor = makeAddr("impostor");
+        vm.prank(relayer);
+        vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
+        market.claim(impostor, 0, outcome, payoutAmount, salt, new bytes32[](0));
+
         vm.prank(relayer);
         market.claim(user, 0, outcome, payoutAmount, salt, new bytes32[](0));
 
-        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Finished));
-        assertEq(relayerEscrow.balances(user), depositAmount - ticketSize + payoutAmount, "winnings credited");
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
+        assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "escrow debited once");
+        assertEq(token.balanceOf(user), payoutAmount, "winnings sent to user");
 
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;

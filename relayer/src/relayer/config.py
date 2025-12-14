@@ -52,6 +52,9 @@ class RelayerConfig:
     min_escrow_token_balance_wei: int
     min_relayer_token_allowance_wei: int
     http_timeout_seconds: int
+    api_base_url: str | None
+    api_bearer_token: str | None
+    api_timeout_seconds: int
 
 
 def load_config() -> RelayerConfig:
@@ -76,4 +79,7 @@ def load_config() -> RelayerConfig:
         min_escrow_token_balance_wei=_int_env("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", 0),
         min_relayer_token_allowance_wei=_int_env("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", 0),
         http_timeout_seconds=_int_env("RELAYER_HTTP_TIMEOUT_SECONDS", 10),
+        api_base_url=os.getenv("RELAYER_API_BASE_URL"),
+        api_bearer_token=os.getenv("RELAYER_API_BEARER_TOKEN"),
+        api_timeout_seconds=_int_env("RELAYER_API_TIMEOUT_SECONDS", 10),
     )

@@ -11,7 +11,9 @@ import json
 import logging
 import random
 import time
+from collections.abc import Awaitable
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from redis.exceptions import RedisError
 from shared.logging import log_event, start_heartbeat_logger
@@ -21,11 +23,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import repository_async
 from app.database import run_migrations, session_scope
 from app.metrics_registry import PRICING_COUNTER
-from app.runtime import logger, request_metrics, settings
+from app.routes.trade import _call_relayer
+from app.runtime import logger, request_metrics
+from app.runtime import settings as runtime_settings
 from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
 
 _RNG = random.SystemRandom()
+settings: Any = cast(Any, runtime_settings)
 
 
 async def record_schema_revision_tag() -> None:
@@ -208,6 +213,85 @@ async def cache_refresh_loop() -> None:
         raise
 
 
+async def relayer_queue_loop() -> None:
+    """Drain relayer job queue from Redis and replay calls to the relayer."""
+
+    if not settings.relayer_queue_enabled:
+        return
+    client = await get_cache_client()
+    if client is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="relayer.queue.disabled",
+            message="relayer queue disabled (redis unavailable)",
+        )
+        return
+    queue_key = settings.relayer_queue_key
+    try:
+        while True:
+            try:
+                item = await cast(Awaitable[Any], client.brpop([queue_key], timeout=5))
+                if item is None:
+                    continue
+                _, raw = item
+                payload = None
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="relayer.queue.payload_parse_error",
+                        message="failed to parse relayer queue payload",
+                        error=str(exc),
+                    )
+                if payload is None:
+                    continue
+                job_id = payload.get("job_id")
+                endpoint = payload.get("endpoint")
+                body = payload.get("payload") or {}
+                attempts = int(payload.get("attempts") or 0)
+                try:
+                    result = await _call_relayer(endpoint, body)
+                    await client.set(
+                        f"{queue_key}:result:{job_id}",
+                        json.dumps(result),
+                        ex=settings.relayer_queue_result_ttl_seconds,
+                    )
+                except Exception as exc:  # pragma: no cover - network retry guard
+                    attempts += 1
+                    if attempts >= settings.relayer_queue_max_attempts:
+                        await client.set(
+                            f"{queue_key}:result:{job_id}",
+                            json.dumps({"status": "failed", "error": str(exc)}),
+                            ex=settings.relayer_queue_result_ttl_seconds,
+                        )
+                    else:
+                        payload["attempts"] = attempts
+                        await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
+                        await asyncio.sleep(settings.relayer_retry_backoff_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive loop guard
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="relayer.queue.error",
+                    message="relayer queue loop error; continuing",
+                    error=str(exc),
+                )
+                await asyncio.sleep(settings.relayer_retry_backoff_seconds)
+    except asyncio.CancelledError:
+        log_event(
+            logger,
+            logging.INFO,
+            event="relayer.queue.stop",
+            message="relayer queue loop stopping",
+        )
+        raise
+
+
 async def quote_sweeper_loop(*, run_once: bool = False) -> None:
     """Expire stale quotes from Postgres on an interval or a single run for tests."""
 
@@ -322,6 +406,16 @@ async def start_background_tasks() -> None:
             task="quote_sweeper",
             interval_seconds=quote_sweep_interval,
         )
+    if settings.relayer_queue_enabled and runtime.relayer_queue_task is None:
+        runtime.relayer_queue_task = asyncio.create_task(relayer_queue_loop(), name="relayer-queue")
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.background.task_started",
+            message="started background task",
+            task="relayer_queue",
+            queue_key=settings.relayer_queue_key,
+        )
 
 
 async def stop_background_tasks() -> None:
@@ -345,9 +439,17 @@ async def stop_background_tasks() -> None:
                 await task
             except asyncio.CancelledError:
                 pass
+    for task in (runtime.relayer_queue_task,):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     runtime.metrics_task = None
     runtime.cache_refresh_task = None
     runtime.quote_sweeper_task = None
+    runtime.relayer_queue_task = None
     log_event(
         logger,
         logging.DEBUG,

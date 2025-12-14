@@ -121,6 +121,31 @@ export type ProofReceipt = {
   totalPool?: string | null;
 };
 
+export type PositionRecord = {
+  market_id: string;
+  market_title?: string | null;
+  outcome_id: number;
+  stake_wei: number;
+  stake_zen: number;
+  tx_hash?: string | null;
+  quote_id?: string | null;
+  status: string;
+  ticket_id?: number | null;
+  created_at?: string | null;
+  claimable?: boolean | null;
+  closes_at?: string | null;
+  resolved_at?: string | null;
+  proof_request_id?: string | null;
+  merkle_root?: string | null;
+  winning_outcome_id?: number | null;
+  market_address?: string | null;
+};
+
+export type PositionsResponse = {
+  positions: PositionRecord[];
+  escrow_balance_wei?: number | string | null;
+};
+
 export type MarketStatusStat = {
   status: string;
   count: number;

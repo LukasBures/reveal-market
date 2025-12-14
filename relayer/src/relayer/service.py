@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import httpx
 from eth_account.signers.local import LocalAccount
 from eth_typing import ChecksumAddress
 from structlog import get_logger
@@ -60,6 +61,9 @@ class RelayerService:
     min_escrow_token_balance_wei: int = 0
     min_relayer_token_allowance_wei: int = 0
     fee_bump_percent: float = 0.15
+    api_base_url: str | None = None
+    api_bearer_token: str | None = None
+    api_timeout_seconds: int = 10
 
     async def _build_base_tx(
         self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
@@ -134,19 +138,29 @@ class RelayerService:
     async def commit(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
-        auth = (payload["commitment"], int(payload["nonce"]), int(payload["expiry"]))
-        value = int(payload.get("ticket_value_wei") or 0)
+        ticket_value = int(payload["ticket_value_wei"])
+        chain_id = int(payload.get("chain_id") or self.chain_id)
+        if chain_id != self.chain_id:
+            raise TxSendError(f"chain_id_mismatch:{chain_id}", nonce=nonce_override)
+        auth = (
+            payload["commitment"],
+            payload["user"],
+            int(payload["nonce"]),
+            int(payload["expiry"]),
+            ticket_value,
+        )
         logger.info(
             "relayer.commit.prepare",
             user=payload.get("user"),
             market=payload.get("market"),
-            nonce=auth[1],
-            expiry=auth[2],
-            value=value,
+            nonce=auth[2],
+            expiry=auth[3],
+            value=0,
+            chain_id=chain_id,
             bump_factor=bump_factor,
             nonce_override=nonce_override,
         )
-        base_tx = await self._build_base_tx(value, nonce_override, bump_factor)
+        base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
         tx = self.escrow.functions.commitOnBehalf(
             payload["user"],
             payload["market"],
@@ -264,6 +278,72 @@ class RelayerService:
         HEALTH_CHECKS.labels(status=status).inc()
         return payload
 
+    async def push_commit_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
+        """Best-effort push of commitment metadata to the API ingest endpoint."""
+
+        if not self.api_base_url:
+            return
+        event_id = payload.get("event_id") or payload.get("market_id")
+        ticket = {
+            "ticket_hash": payload.get("commitment"),
+            "leaf": payload.get("commitment"),
+            "user": payload.get("user"),
+            "outcome_id": payload.get("outcome_id"),
+            "amount_wei": payload.get("ticket_value_wei"),
+            "salt": payload.get("salt"),
+            "leaf_index": payload.get("ticket_id"),
+            "merkle_path": payload.get("merkle_path") or [],
+        }
+        body = {"event_id": event_id, "tickets": [ticket]}
+        headers = {}
+        if self.api_bearer_token:
+            headers["Authorization"] = f"Bearer {self.api_bearer_token}"
+        try:
+            async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
+                resp = await client.post(f"{self.api_base_url}/commitments/sync", json=body, headers=headers)
+            logger.info(
+                "relayer.ingest.commit",
+                status=resp.status_code,
+                event_id=event_id,
+                market=payload.get("market"),
+                tx_hash=tx_hash,
+            )
+        except Exception as err:  # pragma: no cover - best-effort ingest
+            logger.warning("relayer.ingest.commit_failed", error=str(err), market=payload.get("market"))
+
+    async def push_settlement_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
+        """Best-effort push of settlement snapshot to the API ingest endpoint."""
+
+        if not self.api_base_url:
+            return
+        market_id = payload.get("market_id") or payload.get("event_id") or payload.get("market")
+        body = {
+            "event_id": market_id,
+            "market_id": market_id,
+            "merkle_root": payload.get("merkle_root"),
+            "commitments_count": payload.get("commitments_count"),
+            "pool_total_yes": payload.get("pool_total_yes"),
+            "pool_total_no": payload.get("pool_total_no"),
+            "total_escrow": payload.get("total_escrow"),
+            "total_liability": payload.get("total_liability"),
+            "rake_bps": payload.get("rake_bps"),
+            "proof_request_id": payload.get("proof_request_id"),
+        }
+        headers = {}
+        if self.api_bearer_token:
+            headers["Authorization"] = f"Bearer {self.api_bearer_token}"
+        try:
+            async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
+                resp = await client.post(f"{self.api_base_url}/settlements/ingest", json=body, headers=headers)
+            logger.info(
+                "relayer.ingest.settlement",
+                status=resp.status_code,
+                market_id=market_id,
+                tx_hash=tx_hash,
+            )
+        except Exception as err:  # pragma: no cover - best-effort ingest
+            logger.warning("relayer.ingest.settlement_failed", error=str(err), market=market_id)
+
 
 def build_service(
     web3: Web3,
@@ -280,6 +360,9 @@ def build_service(
     min_escrow_token_balance_wei: int = 0,
     min_relayer_token_allowance_wei: int = 0,
     fee_bump_percent: float = 0.15,
+    api_base_url: str | None = None,
+    api_bearer_token: str | None = None,
+    api_timeout_seconds: int = 10,
 ) -> RelayerService:
     escrow_addr: ChecksumAddress = web3.to_checksum_address(escrow_address)
     escrow = web3.eth.contract(address=escrow_addr, abi=COMMIT_ABI)
@@ -297,4 +380,7 @@ def build_service(
         min_escrow_token_balance_wei=min_escrow_token_balance_wei,
         min_relayer_token_allowance_wei=min_relayer_token_allowance_wei,
         fee_bump_percent=fee_bump_percent,
+        api_base_url=api_base_url,
+        api_bearer_token=api_bearer_token,
+        api_timeout_seconds=api_timeout_seconds,
     )

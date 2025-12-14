@@ -47,4 +47,5 @@ heartbeat_stop_event: Event | None = None
 metrics_task: asyncio.Task | None = None
 cache_refresh_task: asyncio.Task | None = None
 quote_sweeper_task: asyncio.Task | None = None
+relayer_queue_task: asyncio.Task | None = None
 goldsky_client: AsyncGoldskyClient | None = None

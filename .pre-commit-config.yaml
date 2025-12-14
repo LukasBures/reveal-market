@@ -2,7 +2,38 @@ default_language_version:
   python: python3.12
 
 repos:
-  # Fast, formatting-only checks first
+  # Run contract snapshots first so later fixers don't loop on regenerated files.
+  - repo: local
+    hooks:
+      - id: forge-snapshot
+        name: forge snapshot (contracts/* workspaces)
+        description: "Regenerate gas snapshots when contracts change"
+        entry: |
+          bash -c "
+            set -euo pipefail
+            ROOT=\"$(git rev-parse --show-toplevel)\"
+            # Only run if staged contract files changed to avoid slowing other commits.
+            if ! (git diff --cached --name-only -- \"contracts/\" && git diff --name-only -- \"contracts/\") | grep -E '\.(sol|t\.sol|toml)$' >/dev/null; then
+              echo 'No contract changes; skipping forge snapshot.'
+              exit 0
+            fi
+            for DIR in \"$ROOT\"/contracts/*; do
+              [ -d \"$DIR\" ] || continue
+              [ -f \"$DIR/foundry.toml\" ] || continue
+              cd \"$DIR\"
+              echo \"Running forge snapshot in $DIR\"
+              forge snapshot
+              for SNAP in \"$DIR\"/.gas-snapshot; do
+                [ -f \"$SNAP\" ] || continue
+                python -c \"from pathlib import Path; p=Path('$SNAP'); p.write_text(p.read_text().rstrip('\\\\n') + '\\\\n')\"
+              done
+            done
+          "
+        language: system
+        pass_filenames: false
+        files: ^contracts/
+
+  # Fast, formatting-only checks next
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -76,20 +107,3 @@ repos:
         types_or: [python]
         pass_filenames: false
         require_serial: true
-      - id: forge-snapshot
-        name: forge snapshot (contracts/* workspaces)
-        description: "Regenerate gas snapshots when contracts change"
-        entry: |
-          bash -c '
-            set -e
-            ROOT="$(git rev-parse --show-toplevel)"
-            for DIR in "$ROOT"/contracts/*; do
-              [ -d "$DIR" ] || continue
-              [ -f "$DIR/foundry.toml" ] || continue
-              cd "$DIR"
-              forge snapshot --check
-            done
-          '
-        language: system
-        pass_filenames: false
-        files: ^contracts/

@@ -74,6 +74,8 @@ def test_commit_route_with_queue(tmp_path):
         commitment="0x" + "0" * 64,
         nonce=1,
         expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -138,6 +140,8 @@ def test_commit_route(client):
         commitment="0x" + "0" * 64,
         nonce=1,
         expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -172,6 +176,8 @@ def test_commit_requires_auth_when_enabled():
         commitment="0x" + "0" * 64,
         nonce=1,
         expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
         signature="0x" + "1" * 130,
     ).model_dump()
 
@@ -214,6 +220,8 @@ def test_commit_invalid_address(client):
         commitment="0x" + "0" * 64,
         nonce=1,
         expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)

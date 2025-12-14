@@ -5,14 +5,15 @@ interface IRevealMarket {
     enum Phase {
         Commit,
         Locked,
-        Settled,
-        Finished
+        Settled
     }
 
     struct CommitAuth {
         bytes32 commitment;
+        address user;
         uint256 nonce;
         uint256 expiry;
+        uint256 ticketValue;
     }
 
     function commitWithAuthorization(CommitAuth calldata auth, bytes calldata signature) external payable;
@@ -26,4 +27,11 @@ interface IRevealMarket {
     function authorizationSigner() external view returns (address);
 
     function marketId() external view returns (uint256);
+
+    function nextTicketId() external view returns (uint256);
+
+    function marketState()
+        external
+        view
+        returns (bytes32 commitmentsRoot_, uint256 nextTicketId_, Phase phase_, uint256 commitDeadline_, uint256 winningOutcomeId_);
 }

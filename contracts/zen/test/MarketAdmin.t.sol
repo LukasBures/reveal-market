@@ -32,7 +32,6 @@ contract MarketAdminTest is Test {
     uint256 private protocolCap = 3 ether;
     uint256 private maxCommitments = 8;
     uint256 private commitDeadline;
-    uint256 private revealDeadline;
 
     function setUp() external {
         token = new MockERC20();
@@ -47,14 +46,12 @@ contract MarketAdminTest is Test {
         relayerEscrow.setMarketFactory(address(factory));
 
         commitDeadline = block.timestamp + 1 days;
-        revealDeadline = commitDeadline + 1 days;
 
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
             oracle: oracle,
             verifier: address(verifier),
             circuitHash: circuitHash,
             commitDeadline: commitDeadline,
-            revealDeadline: revealDeadline,
             fixedTicketSize: ticketSize,
             maxCommitments: maxCommitments,
             authorizationSigner: authSigner,
@@ -71,8 +68,13 @@ contract MarketAdminTest is Test {
         factory.updateAuthorizationSigner(address(market), newSigner);
         assertEq(market.authorizationSigner(), newSigner, "signer rotated");
 
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: keccak256("leaf"), nonce: 1, expiry: block.timestamp + 4 hours});
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("leaf"),
+            user: user,
+            nonce: 1,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
 
         token.mint(user, ticketSize);
         vm.prank(user);
@@ -81,7 +83,7 @@ contract MarketAdminTest is Test {
         relayerEscrow.deposit(ticketSize);
 
         bytes memory badSig = _signAuth(auth, authKey);
-        vm.expectRevert(RelayerEscrow.CommitFailed.selector);
+        vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, badSig);
 
@@ -92,8 +94,13 @@ contract MarketAdminTest is Test {
     }
 
     function testOracleRotation() external {
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: keccak256("leaf2"), nonce: 2, expiry: block.timestamp + 4 hours});
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("leaf2"),
+            user: user,
+            nonce: 2,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
         token.mint(user, ticketSize);
         vm.prank(user);
         token.approve(address(relayerEscrow), ticketSize);
@@ -126,8 +133,13 @@ contract MarketAdminTest is Test {
         factory.updateMarketRelayer(address(market), newRelayer);
         assertEq(market.relayerEscrow(), address(newRelayer));
 
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: keccak256("leaf3"), nonce: 3, expiry: block.timestamp + 4 hours});
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("leaf3"),
+            user: user,
+            nonce: 3,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
         token.mint(user, ticketSize);
         vm.prank(user);
         token.approve(address(newRelayer), ticketSize);
@@ -151,8 +163,13 @@ contract MarketAdminTest is Test {
         assertEq(market.protocolLiabilityCap(), newCap);
         assertEq(protocolPool.liabilityCap(address(market)), newCap);
 
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: keccak256("leaf4"), nonce: 4, expiry: block.timestamp + 4 hours});
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("leaf4"),
+            user: user,
+            nonce: 4,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
         token.mint(user, ticketSize);
         vm.prank(user);
         token.approve(address(relayerEscrow), ticketSize);
@@ -192,9 +209,102 @@ contract MarketAdminTest is Test {
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
-            keccak256(abi.encode(address(market), market.marketId(), auth.commitment, auth.nonce, auth.expiry))
+            keccak256(
+                abi.encodePacked(
+                    address(market),
+                    market.marketId(),
+                    auth.commitment,
+                    auth.user,
+                    auth.nonce,
+                    auth.expiry,
+                    auth.ticketValue,
+                    block.chainid
+                )
+            )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         return abi.encodePacked(r, s, v);
+    }
+
+    function testRakeBoundsAndOverride() external {
+        vm.prank(address(this));
+        vm.expectRevert(abi.encodeWithSelector(RevealMarket.InvalidInit.selector));
+        factory.setMarketRake(address(market), 20_000);
+
+        vm.prank(address(this));
+        factory.setMarketRake(address(market), 500);
+        assertEq(market.rakeBps(), 500);
+    }
+
+    function testExtendDeadlinesAndGuards() external {
+        uint256 newCommit = commitDeadline + 1 hours;
+        vm.prank(address(this));
+        factory.extendMarketCommitDeadline(address(market), newCommit);
+        assertEq(market.commitDeadline(), newCommit);
+
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("deadline-leaf"),
+            user: user,
+            nonce: 77,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(relayerOwner);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+
+        vm.warp(commitDeadline + 2 days);
+        vm.prank(oracle);
+        market.lock();
+
+        vm.expectRevert(RevealMarket.InvalidPhase.selector);
+        vm.prank(address(this));
+        factory.extendMarketCommitDeadline(address(market), newCommit + 1 days);
+    }
+
+    function testRelayerEscrowRotationGuard() external {
+        RelayerEscrow newEscrow = new RelayerEscrow(makeAddr("newRelayerOwnerGuard"), IERC20(address(token)));
+        vm.prank(newEscrow.owner());
+        newEscrow.setMarketFactory(address(factory));
+
+        vm.prank(address(this));
+        factory.updateMarketRelayer(address(market), newEscrow);
+        assertEq(market.relayerEscrow(), address(newEscrow));
+
+        vm.expectRevert(MarketFactory.InvalidRelayer.selector);
+        vm.prank(address(this));
+        factory.updateMarketRelayer(address(market), RelayerEscrow(address(0)));
+    }
+
+    function testAuthorizationSignerGuard() external {
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: keccak256("guard-leaf"),
+            user: user,
+            nonce: 9,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(relayerOwner);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+
+        vm.prank(address(this));
+        factory.updateAuthorizationSigner(address(market), makeAddr("newSigner"));
+        vm.warp(commitDeadline + 2 days);
+        vm.prank(oracle);
+        market.lock();
+        vm.expectRevert(RevealMarket.InvalidPhase.selector);
+        vm.prank(address(this));
+        factory.updateAuthorizationSigner(address(market), makeAddr("newerSigner"));
     }
 }

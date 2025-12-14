@@ -36,6 +36,9 @@ service = build_service(
     min_escrow_token_balance_wei=cfg.min_escrow_token_balance_wei,
     min_relayer_token_allowance_wei=cfg.min_relayer_token_allowance_wei,
     fee_bump_percent=cfg.fee_bump_percent,
+    api_base_url=cfg.api_base_url,
+    api_bearer_token=cfg.api_bearer_token,
+    api_timeout_seconds=cfg.api_timeout_seconds,
 )
 
 queue = TxQueue(

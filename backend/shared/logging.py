@@ -65,6 +65,12 @@ def reset_request_id(token: Token) -> None:
     _request_id_ctx.reset(token)
 
 
+def get_logger(name: str) -> logging.Logger:
+    """Return a namespaced logger (shim to avoid scattered imports)."""
+
+    return logging.getLogger(name)
+
+
 def get_request_id() -> str | None:
     """Return the request identifier currently in scope."""
 

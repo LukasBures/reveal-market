@@ -8,7 +8,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IProtocolPool} from "./interfaces/IProtocolPool.sol";
-import {IRelayerEscrow} from "./interfaces/IRelayerEscrow.sol";
 import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {RelayerEscrow} from "./RelayerEscrow.sol";
@@ -27,7 +26,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bytes32 circuitHash;
         address collateralToken;
         uint256 commitDeadline;
-        uint256 revealDeadline;
         uint256 ticketSize;
         uint256 maxCommitments;
         address authorizationSigner;
@@ -44,7 +42,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     bytes32 public circuitHash;
     address public collateralToken;
     uint256 public override commitDeadline;
-    uint256 public revealDeadline;
     uint256 public ticketSize;
     uint256 public maxCommitments;
     address public override authorizationSigner;
@@ -77,7 +74,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event ResultPosted(uint256 indexed winningOutcomeId);
     event Settled(uint256 totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
-    event Finished(uint256 leftoverToProtocol);
     event AuthorizationSignerUpdated(address indexed signer);
     event OracleUpdated(address indexed oracle);
     event RelayerEscrowUpdated(address indexed relayer);
@@ -101,7 +97,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error PaddingMismatch();
     error LiabilityExceedsCoverage();
     error InsufficientCoverage();
-    error ClaimWindowClosed();
     error WrongOutcome();
     error TicketAlreadyClaimed();
     error InvalidMerkleProof();
@@ -150,7 +145,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             params.factory == address(0) || params.protocolPool == address(0) || params.relayerEscrow == address(0)
                 || params.oracle == address(0) || params.verifier == address(0)
                 || params.authorizationSigner == address(0) || params.ticketSize == 0 || params.commitDeadline == 0
-                || params.revealDeadline <= params.commitDeadline || params.collateralToken == address(0)
+                || params.collateralToken == address(0)
         ) revert InvalidInit();
         if (params.rakeBps > 10_000) revert InvalidInit();
         initialized = true;
@@ -162,7 +157,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         circuitHash = params.circuitHash;
         collateralToken = params.collateralToken;
         commitDeadline = params.commitDeadline;
-        revealDeadline = params.revealDeadline;
         ticketSize = params.ticketSize;
         maxCommitments = params.maxCommitments;
         authorizationSigner = params.authorizationSigner;
@@ -184,15 +178,26 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
         if (commitsPaused) revert CommitsPaused();
         if (msg.value != 0) revert InvalidPayment();
-        uint256 requiredBalance = totalEscrow + rakeCollected + ticketSize;
-        if (IERC20(collateralToken).balanceOf(address(this)) < requiredBalance) revert InvalidPayment();
+        if (auth.ticketValue != ticketSize) revert InvalidPayment();
+        if (auth.user == address(0)) revert InvalidAddress();
+        if (IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize) revert InvalidPayment();
         if (maxCommitments != 0 && commitments.length >= maxCommitments) revert MaxCommitmentsReached();
         if (auth.expiry < block.timestamp) revert CommitExpired();
         if (usedCommitNonces[auth.nonce]) revert CommitReplay();
 
-        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
-            keccak256(abi.encode(address(this), marketId, auth.commitment, auth.nonce, auth.expiry))
+        bytes32 commitDigest = keccak256(
+            abi.encodePacked(
+                address(this),
+                marketId,
+                auth.commitment,
+                auth.user,
+                auth.nonce,
+                auth.expiry,
+                auth.ticketValue,
+                block.chainid
+            )
         );
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(commitDigest);
         if (digest.recover(signature) != authorizationSigner) revert InvalidSignature();
 
         usedCommitNonces[auth.nonce] = true;
@@ -284,26 +289,20 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 amount,
         bytes32 salt,
         bytes32[] calldata merkleProof
-    ) external onlyRelayer nonReentrant {
+    ) external nonReentrant {
         if (phase != Phase.Settled) revert InvalidPhase();
-        if (block.timestamp > revealDeadline) revert ClaimWindowClosed();
         if (claimsPaused) revert ClaimsPaused();
         if (outcomeId != winningOutcomeId) revert WrongOutcome();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
-        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt);
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, user);
         if (!_verifyLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
         claimedLiability += amount;
         if (claimedLiability > totalLiability) revert OverClaimed();
 
-        IERC20(collateralToken).safeTransfer(relayerEscrow, amount);
-        IRelayerEscrow(relayerEscrow).creditFromMarket(user, amount);
+        IERC20(collateralToken).safeTransfer(user, amount);
         emit Claimed(msg.sender, user, ticketId, amount);
-
-        if (claimedLiability == totalLiability) {
-            _finish();
-        }
     }
 
     /// @notice Returns the sealed commitment stored at an index (for off-chain auditing).
@@ -311,13 +310,23 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         return commitments[index];
     }
 
-    function _finish() internal {
-        uint256 leftover = IERC20(collateralToken).balanceOf(address(this));
-        if (leftover > 0) {
-            IERC20(collateralToken).safeTransfer(protocolPool, leftover);
-        }
-        phase = Phase.Finished;
-        emit Finished(leftover);
+    /// @notice Aggregated view for cheap off-chain polling of core state.
+    function marketState()
+        external
+        view
+        returns (
+            bytes32 commitmentsRoot_,
+            uint256 nextTicketId_,
+            Phase phase_,
+            uint256 commitDeadline_,
+            uint256 winningOutcomeId_
+        )
+    {
+        commitmentsRoot_ = commitmentsRoot;
+        nextTicketId_ = commitments.length;
+        phase_ = phase;
+        commitDeadline_ = commitDeadline;
+        winningOutcomeId_ = winningOutcomeId;
     }
 
     /// @notice Factory hook to update rake for existing markets (keeps all markets aligned to global rake).
@@ -337,7 +346,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     /// @notice Rotate oracle; allowed until settlement to handle provider changes.
     function setOracle(address newOracle) external onlyFactory {
         if (newOracle == address(0)) revert InvalidAddress();
-        if (phase == Phase.Settled || phase == Phase.Finished) revert InvalidPhase();
+        if (phase == Phase.Settled) revert InvalidPhase();
         oracle = newOracle;
         emit OracleUpdated(newOracle);
     }
@@ -351,7 +360,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     /// @notice Adjust the per-market protocol liability cap before settlement.
     function setProtocolLiabilityCap(uint256 newCap) external onlyFactory {
-        if (phase == Phase.Settled || phase == Phase.Finished) revert InvalidPhase();
+        if (phase == Phase.Settled) revert InvalidPhase();
         protocolLiabilityCap = newCap;
         emit ProtocolLiabilityCapUpdated(newCap);
     }
@@ -370,12 +379,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (newDeadline <= commitDeadline) revert DeadlineExtendOnly();
         if (phase != Phase.Commit) revert InvalidPhase();
         commitDeadline = newDeadline;
-    }
-
-    function extendRevealDeadline(uint256 newDeadline) external onlyFactory {
-        if (newDeadline <= revealDeadline) revert DeadlineExtendOnly();
-        if (phase == Phase.Finished) revert InvalidPhase();
-        revealDeadline = newDeadline;
     }
 
     function _computeCommitmentsRoot() internal view returns (bytes32) {
@@ -399,17 +402,18 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         return nodes[0];
     }
 
-    function _computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt)
+    function _computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address user)
         internal
         pure
         returns (bytes32 hash)
     {
-        assembly {
+        bytes32 userSalt = keccak256(abi.encodePacked(user, salt));
+        assembly ("memory-safe") {
             let ptr := mload(0x40)
             mstore(ptr, ticketId)
             mstore(add(ptr, 0x20), outcomeId)
             mstore(add(ptr, 0x40), amount)
-            mstore(add(ptr, 0x60), salt)
+            mstore(add(ptr, 0x60), userSalt)
             hash := keccak256(ptr, 0x80)
             mstore(0x40, add(ptr, 0x80))
         }
@@ -430,6 +434,11 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             index >>= 1;
         }
         return computed == commitmentsRoot;
+    }
+
+    /// @notice Returns the next ticket id (commitments length); useful for off-chain pre-checks.
+    function nextTicketId() external view returns (uint256) {
+        return commitments.length;
     }
 
     receive() external payable {

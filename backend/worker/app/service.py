@@ -12,10 +12,12 @@ from typing import Any
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
 from shared import models as shared_models
+from shared import repository_async
 from shared.logging import log_event, start_heartbeat_logger
 from sqlalchemy import func, select
 
 from . import runtime
+from .backfill import backfill_market_addresses
 from .cache_ops import invalidate_cache_tags, persist_resolution_cache_updates
 from .database import session_scope
 from .fetcher import build_filters_from_settings
@@ -190,18 +192,33 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             )
             summary = await collect_market_changes_with_summary(session, page, redis_client, summary=summary)
             await session.flush()
-            await session.commit()
-            session.expunge_all()
-        await apply_retention_cleanup_async(session, summary)
-        backfilled = await backfill_missing_resolutions_async(session, summary)
-        if backfilled:
+        await session.commit()
+        session.expunge_all()
+    await apply_retention_cleanup_async(session, summary)
+    backfilled = await backfill_missing_resolutions_async(session, summary)
+    if runtime.settings.factory_address and runtime.settings.rpc_url:
+        updated = await backfill_market_addresses(
+            session,
+            rpc_url=str(runtime.settings.rpc_url),
+            factory_address=str(runtime.settings.factory_address),
+            get_markets_missing_address=repository_async.list_markets_missing_address,
+        )
+        if updated:
             log_event(
                 logger,
                 logging.INFO,
-                event="worker.resolution.backfill_complete",
-                message="backfilled missing resolution snapshots",
-                count=backfilled,
+                event="worker.resolution.backfill_addresses",
+                message="backfilled market addresses",
+                count=updated,
             )
+    if backfilled:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.resolution.backfill_complete",
+            message="backfilled missing resolution snapshots",
+            count=backfilled,
+        )
         gap_count = await log_resolution_gaps_async(session)
         log_event(
             logger,

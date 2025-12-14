@@ -26,15 +26,22 @@ contract RelayerEscrowTest is Test {
         vm.prank(user);
         escrow.deposit(2 ether);
         assertEq(escrow.balances(user), 2 ether);
+        assertEq(escrow.balanceOf(user), 2 ether);
 
         vm.prank(user);
         escrow.withdraw(1 ether);
         assertEq(escrow.balances(user), 1 ether);
+        assertEq(escrow.balanceOf(user), 1 ether);
     }
 
     function testCommitFailsForUnknownMarket() external {
-        IRevealMarket.CommitAuth memory auth =
-            IRevealMarket.CommitAuth({commitment: bytes32(uint256(1)), nonce: 1, expiry: block.timestamp + 1});
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: bytes32(uint256(1)),
+            user: user,
+            nonce: 1,
+            expiry: block.timestamp + 1,
+            ticketValue: 1 ether
+        });
 
         token.mint(user, 1 ether);
         vm.prank(user);
@@ -45,6 +52,32 @@ contract RelayerEscrowTest is Test {
         vm.prank(owner);
         vm.expectRevert(RelayerEscrow.UnknownMarket.selector);
         escrow.commitOnBehalf(user, address(0xBEEF), auth, hex"");
+    }
+
+    function testCommitUserMismatchReverts() external {
+        DummyMarket market = new DummyMarket();
+        vm.prank(owner);
+        escrow.setMarketFactory(address(this));
+        escrow.registerMarket(address(market));
+
+        address other = makeAddr("other");
+        token.mint(user, 1 ether);
+        vm.prank(user);
+        token.approve(address(escrow), 1 ether);
+        vm.prank(user);
+        escrow.deposit(1 ether);
+
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: bytes32(uint256(1)),
+            user: other,
+            nonce: 1,
+            expiry: block.timestamp + 1,
+            ticketValue: 1 ether
+        });
+
+        vm.prank(owner);
+        vm.expectRevert(RelayerEscrow.UserMismatch.selector);
+        escrow.commitOnBehalf(user, address(market), auth, hex"");
     }
 }
 
@@ -71,5 +104,23 @@ contract DummyMarket is IRevealMarket {
 
     function marketId() external pure returns (uint256) {
         return 0;
+    }
+
+    function nextTicketId() external pure returns (uint256) {
+        return 0;
+    }
+
+    function marketState()
+        external
+        pure
+        returns (
+            bytes32 commitmentsRoot_,
+            uint256 nextTicketId_,
+            Phase phase_,
+            uint256 commitDeadline_,
+            uint256 winningOutcomeId_
+        )
+    {
+        return (bytes32(0), 0, Phase.Commit, 0, 0);
     }
 }

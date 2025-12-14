@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     factory_address: str | None = Field(default=None)
     market_implementation_address: str | None = Field(default=None)
     rake_manager_address: str | None = Field(default=None)
-    verifier_address: str | None = Field(default=None)
     rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen-testnet.rpc.caldera.xyz/http"))
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
@@ -133,8 +132,24 @@ class Settings(BaseSettings):
     )
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
     relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
+    relayer_retry_attempts: int = Field(default=2, ge=0, description="Retry attempts for relayer commit/claim calls")
+    relayer_retry_backoff_seconds: float = Field(default=0.5, ge=0, description="Backoff between relayer retries")
+    relayer_queue_enabled: bool = Field(default=True, description="Enable Redis-backed relayer job queue fallback")
+    relayer_queue_key: str = Field(default="reveal_market:relayer_queue", description="Redis list key for relayer jobs")
+    relayer_queue_result_ttl_seconds: int = Field(
+        default=3600, ge=60, description="TTL for relayer job results in Redis"
+    )
+    relayer_queue_max_attempts: int = Field(
+        default=5, ge=1, description="Max attempts before marking relayer job failed"
+    )
+    relayer_webhook_secret: str | None = Field(
+        default=None, description="Shared secret for relayer/prover ingestion hooks"
+    )
     ticket_size_wei: int = Field(
         default=100_000_000_000_000_000, ge=1, description="Fixed ticket size (wei) used for commitWithAuthorization"
+    )
+    relayer_escrow_address: str | None = Field(
+        default=None, description="RelayerEscrow contract address for balance lookups"
     )
     commit_nonce_ttl_seconds: int = Field(
         default=600, ge=60, description="TTL (seconds) for commit authorization signatures"
@@ -150,7 +165,9 @@ class Settings(BaseSettings):
         default=86400, ge=60, description="Seconds from now to set commit deadline when auto-creating markets"
     )
     market_reveal_lead_seconds: int = Field(
-        default=172800, ge=60, description="Seconds after commit deadline to set reveal deadline when auto-creating markets"
+        default=172800,
+        ge=60,
+        description="Seconds after commit deadline to set reveal deadline when auto-creating markets",
     )
 
     @field_validator("max_page_size")

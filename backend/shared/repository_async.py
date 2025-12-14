@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models
@@ -216,6 +216,9 @@ async def upsert_settlement_snapshot(
     payload = dict(data)
     if settlement is None:
         settlement = models.Settlement(market_id=market_id)
+        # SQLite fixtures may not auto-increment BigInteger PKs; align id to market_id for deterministic testing.
+        if getattr(settlement, "id", None) is None:
+            settlement.id = market_id  # type: ignore[assignment]
     for field, value in payload.items():
         if hasattr(settlement, field):
             setattr(settlement, field, value)
@@ -223,7 +226,7 @@ async def upsert_settlement_snapshot(
     return settlement
 
 
-async def record_commitments(session: AsyncSession, market_id: int, tickets: list[Mapping[str, Any]]) -> int:
+async def record_commitments(session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]]) -> int:
     """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
 
     existing_hashes = {
@@ -262,6 +265,17 @@ async def record_commitments(session: AsyncSession, market_id: int, tickets: lis
     return count
 
 
+async def replace_merkle_path(session: AsyncSession, commitment_id: int, siblings: list[str]) -> None:
+    """Replace merkle path rows for a commitment."""
+
+    await session.execute(
+        delete(models.CommitmentMerklePath).where(models.CommitmentMerklePath.commitment_id == commitment_id)
+    )
+    for level, sibling in enumerate(siblings):
+        session.add(models.CommitmentMerklePath(commitment_id=commitment_id, level=level, sibling_hash=str(sibling)))
+    await session.flush()
+
+
 async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
     """Return the number of commitments persisted for a market."""
 
@@ -271,7 +285,9 @@ async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
     return int(result.scalar_one() or 0)
 
 
-async def list_commitments_for_wallet(session: AsyncSession, wallet_address: str) -> list[tuple[models.Commitment, models.Market]]:
+async def list_commitments_for_wallet(
+    session: AsyncSession, wallet_address: str
+) -> list[tuple[models.Commitment, models.Market]]:
     """Return commitments with market metadata for a wallet address."""
 
     stmt = (
@@ -281,7 +297,76 @@ async def list_commitments_for_wallet(session: AsyncSession, wallet_address: str
         .order_by(models.Commitment.created_at.desc())
     )
     rows = await session.execute(stmt)
-    return rows.all()
+    return [(commitment, market) for commitment, market in rows.all()]
+
+
+async def list_commitments_with_settlement(
+    session: AsyncSession, wallet_address: str
+) -> list[tuple[models.Commitment, models.Market, models.Settlement | None]]:
+    """Return commitments joined with market + optional settlement."""
+
+    stmt = (
+        select(models.Commitment, models.Market, models.Settlement)
+        .join(models.Market, models.Market.id == models.Commitment.market_id)
+        .join(
+            models.Settlement,
+            models.Settlement.market_id == models.Commitment.market_id,
+            isouter=True,
+        )
+        .where(models.Commitment.user_address == wallet_address.lower())
+        .order_by(models.Commitment.created_at.desc())
+    )
+    rows = await session.execute(stmt)
+    return [(commitment, market, settlement) for commitment, market, settlement in rows.all()]
+
+
+async def list_commitments_by_market(session: AsyncSession, market_id: int) -> list[models.Commitment]:
+    """Return all commitments for a market ordered by leaf index then id."""
+
+    stmt = (
+        select(models.Commitment)
+        .where(models.Commitment.market_id == market_id)
+        .order_by(models.Commitment.leaf_index.asc().nulls_last(), models.Commitment.id.asc())
+    )
+    return list((await session.scalars(stmt)).all())
+
+
+async def list_markets_missing_address(session: AsyncSession) -> list[models.Market]:
+    """Return markets that are missing a contract address."""
+
+    stmt = select(models.Market).where(models.Market.market_address.is_(None))
+    return list((await session.scalars(stmt)).all())
+
+
+async def get_commitment_with_path_for_wallet(
+    session: AsyncSession, market_db_id: int, wallet_address: str, outcome_id: int, ticket_id: int | None = None
+) -> tuple[models.Commitment, list[models.CommitmentMerklePath]] | None:
+    """Return a commitment and its merkle path for a wallet/outcome (optionally by ticket id)."""
+
+    filters = [
+        models.Commitment.market_id == market_db_id,
+        models.Commitment.user_address == wallet_address.lower(),
+        models.Commitment.outcome_id == outcome_id,
+    ]
+    if ticket_id is not None:
+        filters.append(models.Commitment.leaf_index == ticket_id)
+    commitment = (
+        await session.execute(select(models.Commitment).where(*filters).order_by(models.Commitment.id.asc()))
+    ).scalar_one_or_none()
+    if commitment is None:
+        return None
+    paths = (
+        (
+            await session.execute(
+                select(models.CommitmentMerklePath)
+                .where(models.CommitmentMerklePath.commitment_id == commitment.id)
+                .order_by(models.CommitmentMerklePath.level.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return commitment, list(paths)
 
 
 async def record_factory_event(

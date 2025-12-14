@@ -243,7 +243,7 @@ class PricingQuoteRequest(BaseModel):
     user_id: str = Field(..., description="User identifier for per-market caps")
     wallet_address: str = Field(..., description="User wallet to bind quote to")
     outcome_id: int = Field(..., ge=0, description="Outcome id to bind quote to")
-    market_address: str = Field(..., description="Market contract address")
+    market_address: str | None = Field(default=None, description="Market contract address (auto-created when missing)")
 
 
 class PricingQuoteResponse(BaseModel):
@@ -343,6 +343,8 @@ class TradeCommitResponse(BaseModel):
     ticket_id: int | None = None
     escrow_balance_wei: int | None = None
     salt: str | None = None
+    relayer_status: str | None = None
+    relayer_job_id: str | None = None
 
 
 class PositionRecord(BaseModel):
@@ -356,6 +358,102 @@ class PositionRecord(BaseModel):
     status: str = "committed"
     ticket_id: int | None = None
     created_at: datetime | None = None
+    claimable: bool | None = None
+    closes_at: datetime | None = None
+    resolved_at: datetime | None = None
+    proof_request_id: str | None = None
+    merkle_root: str | None = None
+    winning_outcome_id: int | None = None
+    market_address: str | None = None
+
+
+class PositionsResponse(BaseModel):
+    positions: list[PositionRecord]
+    escrow_balance_wei: int | None = None
+
+
+class CommitmentTicket(BaseModel):
+    ticket_hash: str | None = Field(default=None, alias="ticketHash")
+    leaf: str | None = None
+    user: str | None = Field(default=None, alias="user_address")
+    outcome_id: int | None = Field(default=None, alias="outcomeId")
+    amount_wei: int | None = Field(default=None, alias="amount")
+    salt: str | None = None
+    leaf_index: int | None = Field(default=None, alias="merkleIndex")
+    merkle_path: list[str] | None = Field(default=None, alias="merklePath")
+
+
+class CommitmentsSyncRequest(BaseModel):
+    market_id: str | None = None
+    event_id: str | None = None
+    tickets: list[CommitmentTicket]
+
+
+class CommitmentsSyncResponse(BaseModel):
+    recorded: int
+
+
+class SettlementIngestRequest(BaseModel):
+    market_id: str | None = None
+    event_id: str | None = None
+    merkle_root: str | None = Field(default=None, alias="merkleRoot")
+    commitments_count: int | None = Field(default=None, alias="commitmentsCount")
+    pool_total_yes: int | None = Field(default=None, alias="poolTotalYes")
+    pool_total_no: int | None = Field(default=None, alias="poolTotalNo")
+    total_escrow: int | None = Field(default=None, alias="totalEscrow")
+    total_liability: int | None = Field(default=None, alias="totalLiability")
+    rake_bps: int | None = Field(default=None, alias="rakeBps")
+    winning_outcome_id: int | None = Field(default=None, alias="winningOutcomeId")
+    proof_status: str | None = None
+    proof_request_id: str | None = Field(default=None, alias="proofRequestId")
+    proof_hash: str | None = Field(default=None, alias="proofHash")
+    circuit_hash: str | None = Field(default=None, alias="circuitHash")
+
+
+class SettlementIngestResponse(BaseModel):
+    market_id: str
+    updated: bool = True
+
+
+class TradeStatusResponse(BaseModel):
+    tx_hash: str
+    status: str
+    block_number: int | None = None
+    gas_used: int | None = None
+    effective_gas_price: int | None = None
+
+
+class TradeClaimRequest(BaseModel):
+    wallet_address: str
+    market_id: str | None = None
+    event_id: str | None = None
+    ticket_id: int | None = None
+
+
+class TradeClaimResponse(BaseModel):
+    tx_hash: str
+    market_id: str
+    ticket_id: int
+    outcome_id: int
+    amount_wei: int
+    status: str = "claimed"
+
+
+class ClaimBundle(BaseModel):
+    market_id: str = Field(alias="marketId")
+    market_address: str = Field(alias="marketAddress")
+    commitments_root: str = Field(alias="commitmentsRoot")
+    ticket_id: int = Field(alias="ticketId")
+    outcome_id: int = Field(alias="outcomeId")
+    amount_wei: int = Field(alias="amountWei")
+    salt: str | None
+    merkle_proof: list[str] = Field(alias="merkleProof")
+    leaf: str
+    user: str
+
+
+class ClaimBundlesResponse(BaseModel):
+    bundles: list[ClaimBundle]
 
 
 class QuoteRecord(BaseModel):
