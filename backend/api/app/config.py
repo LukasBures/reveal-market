@@ -40,6 +40,15 @@ def _empty_to_none(value):
     return value
 
 
+def _normalize_circuit_hash(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    if trimmed.startswith("0x") and len(trimmed) == 66:
+        return trimmed
+    return None
+
+
 class LenientEnvSettingsSource(EnvSettingsSource):
     """Env source that falls back to raw strings when JSON decoding fails."""
 
@@ -215,7 +224,9 @@ class Settings(BaseSettings):
     )
     verifier_address: str | None = Field(default=None, description="Verifier contract address for market creation")
     authorization_signer: str | None = Field(default=None, description="Authorization signer address for markets")
-    circuit_hash: str = Field(default="0x0", description="Settlement circuit hash for market creation")
+    circuit_hash: str | None = Field(
+        default=None, description="Settlement circuit hash for market creation (requires PROVER_CIRCUIT_HASH)"
+    )
     market_max_commitments: int = Field(default=10_000, ge=1, description="Max commitments per market")
     market_protocol_liability_cap_wei: int = Field(
         default=0, ge=0, description="Protocol liability cap per market (wei); 0 = unlimited"
@@ -236,6 +247,23 @@ class Settings(BaseSettings):
         if isinstance(default_page_size, int) and value < default_page_size:
             raise ValueError("max_page_size must be >= default_page_size")
         return value
+
+    @field_validator("circuit_hash", mode="before")
+    @classmethod
+    def _hydrate_circuit_hash(cls, value: str | None) -> str:
+        env_hash = os.getenv("PROVER_CIRCUIT_HASH")
+        normalized = _normalize_circuit_hash(env_hash)
+        if normalized:
+            return normalized
+        raise ValueError("PROVER_CIRCUIT_HASH must be set to a 0x-prefixed 32-byte hash")
+
+    @field_validator("circuit_hash")
+    @classmethod
+    def _validate_circuit_hash(cls, value: str) -> str:
+        normalized = _normalize_circuit_hash(value)
+        if not normalized:
+            raise ValueError("circuit_hash must be a 0x-prefixed 32-byte hash")
+        return normalized
 
     @field_validator(
         "allowed_hosts",

@@ -65,6 +65,10 @@ def test_database(monkeypatch, tmp_path):
     db_url_async = f"sqlite+aiosqlite:///{db_file}"
     monkeypatch.setenv("RM_DATABASE_URL", db_url)
     monkeypatch.setenv("RM_DATABASE_ASYNC_URL", db_url_async)
+    monkeypatch.setenv(
+        "PROVER_CIRCUIT_HASH",
+        "0x" + "deadbeef" * 8,
+    )
 
     get_settings.cache_clear()
     settings = get_settings()

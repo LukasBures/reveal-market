@@ -31,6 +31,7 @@ type Props = {
 const PER_BET_CAP_ZEN = 0.1;
 const MIN_STAKE_ZEN = 0.01;
 const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${PER_BET_CAP_ZEN} ZEN (per bet cap)`;
+const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
@@ -222,6 +223,14 @@ export function StakeQuoteCard({
     chainMismatch,
     capExhausted,
   ]);
+
+  useEffect(() => {
+    if (!address || !marketId || tradingDisabled || fxUnavailable || chainMismatch) return;
+    const timer = setInterval(() => {
+      setRefreshNonce((prev) => prev + 1);
+    }, QUOTE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [address, marketId, tradingDisabled, fxUnavailable, chainMismatch]);
 
   useEffect(() => {
     if (!quote) {

@@ -383,16 +383,29 @@ jobs:
             set -euo pipefail
             echo ">>> Pull latest code"
             cd ~/apps/reveal-market
+            export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}"
+            # Expand leading ~ in key path if provided
+            if [[ "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" == "~/"* ]]; then
+              PROVER_ARTIFACTS_SSH_KEY_PATH="${HOME}/${PROVER_ARTIFACTS_SSH_KEY_PATH#~/}"
+            fi
             git status --short
             if ! git diff --quiet; then
               echo "Working tree dirty. Stash or commit changes before deploying." >&2
               exit 1
             fi
             git pull --rebase
-            git submodule update --init --recursive
+
+            mkdir -p ~/.ssh
+            ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+            SUBMODULE_ENV=()
+            if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH}" && -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+              SUBMODULE_ENV=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+            else
+              echo "Artifacts SSH key missing at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; submodule fetch may fail." >&2
+            fi
+            "${SUBMODULE_ENV[@]}" git submodule update --init --recursive
 
             echo ">>> Run production deployment script"
-            export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}"
             chmod +x run_prod.sh
             ./run_prod.sh
 
