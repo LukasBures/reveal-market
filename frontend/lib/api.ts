@@ -8,6 +8,7 @@ import type {
   MarketStatusStat,
   MarketSummary,
   ProofReceipt,
+  ClaimBundle,
   PositionRecord,
 } from "./api-types";
 import { slugify } from "./slugs";
@@ -615,6 +616,29 @@ export async function fetchPositions(
   } catch (error) {
     logOfflineAwareError("fetchPositions", error);
     return { positions: [], error: (error as Error).message };
+  }
+}
+
+export async function fetchClaimBundles(wallet: string): Promise<{ bundles: ClaimBundle[]; error?: string }> {
+  if (maybeShortCircuitOffline("fetchClaimBundles")) {
+    return { bundles: [], error: "offline" };
+  }
+  const url = new URL(`${DEFAULT_API_BASE}/claim/bundles`);
+  url.searchParams.set("wallet", wallet);
+  try {
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) {
+      const detail = await response.text();
+      const errorMessage = `Failed to fetch claim bundles (${response.status}): ${detail}`;
+      logger.error("fetchClaimBundles:failed", { status: response.status, endpoint: url.toString() });
+      return { bundles: [], error: errorMessage };
+    }
+    const payload = await response.json();
+    const bundles = Array.isArray(payload?.bundles) ? (payload.bundles as ClaimBundle[]) : [];
+    return { bundles };
+  } catch (error) {
+    logOfflineAwareError("fetchClaimBundles", error);
+    return { bundles: [], error: (error as Error).message };
   }
 }
 

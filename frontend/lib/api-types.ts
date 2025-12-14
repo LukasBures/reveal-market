@@ -146,6 +146,23 @@ export type PositionsResponse = {
   escrow_balance_wei?: number | string | null;
 };
 
+export type ClaimBundle = {
+  marketId: string;
+  marketAddress: string;
+  commitmentsRoot: string;
+  ticketId: number;
+  outcomeId: number;
+  amountWei: number;
+  salt?: string | null;
+  merkleProof: string[];
+  leaf: string;
+  user: string;
+};
+
+export type ClaimBundlesResponse = {
+  bundles: ClaimBundle[];
+};
+
 export type MarketStatusStat = {
   status: string;
   count: number;

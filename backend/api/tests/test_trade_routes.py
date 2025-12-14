@@ -201,6 +201,51 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
     assert body["status"] == "claimed"
 
 
+def test_claim_bundles_return_winning_ticket(client, db_session):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="bundle-mkt", address="0x6666666666666666666666666666666666666666")
+    commitment_hex = "0x" + "33" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    merkle_root = Web3.keccak(leaf_bytes + leaf_bytes).hex()
+
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=2,
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.NONE.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/claim/bundles?wallet={user.address}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["bundles"]) == 1
+    bundle = body["bundles"][0]
+    assert bundle["marketId"] == market.event_id
+    assert bundle["ticketId"] == 0
+    assert bundle["amountWei"] == 200
+    assert bundle["merkleProof"] == []
+    assert bundle["commitmentsRoot"].lower() == merkle_root.lower()
+    assert bundle["user"].lower() == user.address.lower()
+
+
 def test_sync_commitments_endpoint(client, db_session):
     market = _seed_market(db_session, event_id="sync-mkt", address="0x5555555555555555555555555555555555555555")
     payload = {

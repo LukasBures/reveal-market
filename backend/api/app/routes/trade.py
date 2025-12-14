@@ -645,14 +645,14 @@ async def list_claim_bundles(wallet: str, session: AsyncSession = Depends(get_se
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
         bundles.append(
             schemas.ClaimBundle(
-                market_id=market.event_id,
-                market_address=market.market_address,
-                commitments_root=settlement.merkle_root,
-                ticket_id=commitment.leaf_index,
-                outcome_id=commitment.outcome_id,
-                amount_wei=int(commitment.amount_wei),
+                marketId=market.event_id,
+                marketAddress=market.market_address,
+                commitmentsRoot=settlement.merkle_root,
+                ticketId=commitment.leaf_index,
+                outcomeId=commitment.outcome_id,
+                amountWei=int(commitment.amount_wei),
                 salt=commitment.salt,
-                merkle_proof=merkle_proof,
+                merkleProof=merkle_proof,
                 leaf=commitment.leaf,
                 user=commitment.user_address,
             )

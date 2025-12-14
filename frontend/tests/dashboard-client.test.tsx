@@ -18,7 +18,8 @@ const hoisted = vi.hoisted(() => ({
   useAccount: vi.fn(),
   useChainId: vi.fn(),
   fetchPositions: vi.fn(),
-  submitClaim: vi.fn(),
+  fetchClaimBundles: vi.fn(),
+  useWriteContract: vi.fn(),
 }));
 
 vi.mock("wagmi", async () => {
@@ -28,6 +29,7 @@ vi.mock("wagmi", async () => {
     defaultChain: mockDefaultChain,
     useAccount: hoisted.useAccount,
     useChainId: hoisted.useChainId,
+    useWriteContract: hoisted.useWriteContract,
   };
 });
 
@@ -38,10 +40,7 @@ vi.mock("@/lib/wagmi", () => ({
 
 vi.mock("@/lib/api", () => ({
   fetchPositions: hoisted.fetchPositions,
-}));
-
-vi.mock("@/lib/trade-client", () => ({
-  submitClaim: hoisted.submitClaim,
+  fetchClaimBundles: hoisted.fetchClaimBundles,
 }));
 
 describe("DashboardClient", () => {
@@ -49,7 +48,8 @@ describe("DashboardClient", () => {
     hoisted.useAccount.mockReset();
     hoisted.useChainId.mockReset();
     hoisted.fetchPositions.mockReset();
-    hoisted.submitClaim.mockReset();
+    hoisted.fetchClaimBundles.mockReset();
+    hoisted.useWriteContract.mockReset();
   });
 
   it("prompts to connect when wallet is disconnected", () => {
@@ -67,6 +67,12 @@ describe("DashboardClient", () => {
       isConnected: true,
     });
     hoisted.useChainId.mockReturnValue(2651420);
+    const writeContractAsync = vi.fn().mockResolvedValue("0xclaim");
+    hoisted.useWriteContract.mockReturnValue({
+      writeContractAsync,
+      isPending: false,
+      error: undefined,
+    });
     hoisted.fetchPositions.mockResolvedValue({
       positions: [
         {
@@ -85,7 +91,22 @@ describe("DashboardClient", () => {
       ],
       escrowBalance: "100000000000000000",
     });
-    hoisted.submitClaim.mockResolvedValue({ tx_hash: "0xclaim", status: "claimed" });
+    hoisted.fetchClaimBundles.mockResolvedValue({
+      bundles: [
+        {
+          marketId: "m-1",
+          marketAddress: "0x1111111111111111111111111111111111111111",
+          commitmentsRoot: "0x" + "ab" * 32,
+          ticketId: 0,
+          outcomeId: 0,
+          amountWei: 100000000000000000,
+          salt: "0x" + "00" * 32,
+          merkleProof: [],
+          leaf: "0x" + "ab" * 32,
+          user: "0x9999999999999999999999999999999999999999",
+        },
+      ],
+    });
 
     render(<DashboardClient />);
 
@@ -94,8 +115,8 @@ describe("DashboardClient", () => {
     expect(screen.getByText(/claimable/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /claim/i }));
-    await waitFor(() => expect(hoisted.submitClaim).toHaveBeenCalledTimes(1));
-    expect(hoisted.submitClaim).toHaveBeenCalledWith("m-1", "0x9999999999999999999999999999999999999999", 0);
+    await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(1));
     expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2);
+    expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(2);
   });
 });
