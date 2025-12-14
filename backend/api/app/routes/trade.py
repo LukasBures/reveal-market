@@ -429,6 +429,56 @@ async def _ensure_market(
     return market.id, expected_address, resolved_onchain_id
 
 
+async def _maybe_backfill_settlement(session: AsyncSession, market: models.Market) -> models.Settlement | None:
+    """Populate settlement snapshot from on-chain state when DB rows are missing or incomplete."""
+
+    if not settings.rpc_url or not market.market_address:
+        return None
+    try:
+        web3 = get_async_web3(str(settings.rpc_url))
+        contract = web3.eth.contract(address=to_checksum(market.market_address), abi=REVEAL_MARKET_ABI)
+        commitments_root, next_ticket_id, phase_value, _deadline, winning_outcome_id = await contract.functions.marketState().call()  # type: ignore[assignment]
+        settled = int(phase_value) == 2  # Phase.Settled
+        total_escrow = await contract.functions.totalEscrow().call()
+        total_liability = await contract.functions.totalLiability().call()
+        pool_total_yes = await contract.functions.poolTotalYes().call()
+        pool_total_no = await contract.functions.poolTotalNo().call()
+        rake_bps = await contract.functions.rakeBps().call()
+        circuit_hash = await contract.functions.circuitHash().call()
+        winning_value = int(winning_outcome_id) if settled else None
+        settlement_data = {
+            "merkle_root": commitments_root,
+            "commitments_count": int(next_ticket_id),
+            "pool_total_yes": int(pool_total_yes),
+            "pool_total_no": int(pool_total_no),
+            "total_escrow": int(total_escrow),
+            "total_liability": int(total_liability),
+            "rake_bps": int(rake_bps),
+            "winning_outcome_id": winning_value,
+            "circuit_hash": circuit_hash,
+        }
+        await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
+        if settled and settlement_data["winning_outcome_id"] is not None and not market.resolved_at:
+            market.resolved_at = datetime.now(tz=UTC)
+            session.add(market)
+        await session.flush()
+    except Exception as exc:  # pragma: no cover - best-effort backfill
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="settlement.backfill_failed",
+            message="failed to backfill settlement from chain",
+            market_id=getattr(market, "event_id", None),
+            error=str(exc),
+        )
+        return None
+
+    result = (
+        await session.execute(select(models.Settlement).where(models.Settlement.market_id == market.id))
+    ).scalar_one_or_none()
+    return result
+
+
 def _verify_wallet_signature(wallet: str, signature: str) -> None:
     """Verify that the signature was produced by the wallet for the claim-bundles scope."""
 
@@ -653,6 +703,14 @@ async def list_claim_bundles(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
     _verify_wallet_signature(wallet, wallet_signature)
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
+    needs_refresh = False
+    for _commitment, market, settlement in rows:
+        if settlement is None or not settlement.merkle_root or settlement.winning_outcome_id is None:
+            refreshed = await _maybe_backfill_settlement(session, market)
+            if refreshed is not None:
+                needs_refresh = True
+    if needs_refresh:
+        rows = await repository_async.list_commitments_with_settlement(session, wallet)
     bundles: list[schemas.ClaimBundle] = []
     for commitment, market, settlement in rows:
         if (
@@ -696,6 +754,8 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     settlement = (
         await session.execute(select(models.Settlement).where(models.Settlement.market_id == market.id))
     ).scalar_one_or_none()
+    if settlement is None or settlement.winning_outcome_id is None or not settlement.merkle_root:
+        settlement = await _maybe_backfill_settlement(session, market) or settlement
     if settlement is None or settlement.winning_outcome_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_settled")
     winning_outcome = settlement.winning_outcome_id
