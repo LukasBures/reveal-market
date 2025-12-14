@@ -7,7 +7,6 @@ from typing import Any
 
 from _pytest.logging import LogCaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
-
 from shared import logging as shared_logging
 
 

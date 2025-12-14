@@ -34,6 +34,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.production"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 FRONTEND_ENV_FILE="${ROOT_DIR}/frontend/.env.production"
+if [[ -f "${ENV_FILE}" ]]; then
+  log_step "Seeding frontend env from ${ENV_FILE} -> ${FRONTEND_ENV_FILE}"
+  cp "${ENV_FILE}" "${FRONTEND_ENV_FILE}"
+fi
+export ENV_FILE
+export FRONTEND_ENV_FILE
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_SSH_KEY_PATH="${PROVER_ARTIFACTS_SSH_KEY_PATH:-}"
@@ -166,10 +172,6 @@ Create one (cp .env.example .env) and update the secrets before running this scr
 EOF
     exit 1
   fi
-  if [[ ! -f "${FRONTEND_ENV_FILE}" ]]; then
-    log_step "Seeding frontend env from ${ENV_FILE} -> ${FRONTEND_ENV_FILE}"
-    cp "${ENV_FILE}" "${FRONTEND_ENV_FILE}"
-  fi
 }
 
 list_missing_prover_files() {
@@ -278,19 +280,19 @@ check_prover_artifacts() {
   local missing=()
   log_step "Validating prover artifacts"
   sync_prover_caches
-  missing=($(list_missing_prover_files))
+  mapfile -t missing < <(list_missing_prover_files)
   if (( ${#missing[@]} > 0 )); then
     update_prover_artifacts_submodule || true
     seed_prover_from_submodule || true
-    missing=($(list_missing_prover_files))
+    mapfile -t missing < <(list_missing_prover_files)
   fi
   if (( ${#missing[@]} > 0 )); then
     download_prover_artifacts || true
-    missing=($(list_missing_prover_files))
+    mapfile -t missing < <(list_missing_prover_files)
   fi
 
   sync_prover_caches
-  missing=($(list_missing_prover_files))
+  mapfile -t missing < <(list_missing_prover_files)
   if (( ${#missing[@]} > 0 )); then
     cat <<EOF
 Missing prover artifacts after sync attempts:

@@ -83,6 +83,8 @@ services:
     container_name: reveal-market-api
     restart: unless-stopped
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       <<: *backend-env
       RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
@@ -130,6 +132,8 @@ services:
     restart: unless-stopped
     init: true
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       <<: *backend-env
       RM_POLYMARKET_CLOSED_FILTER: "false"
@@ -182,6 +186,8 @@ services:
     container_name: reveal-market-hedger
     restart: unless-stopped
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       HEDGER_ENVIRONMENT: ${RM_ENVIRONMENT:-dev}
       HEDGER_LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -240,6 +246,8 @@ services:
         BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-relayer
     restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       RPC_URL: ${RPC_URL}
       CHAIN_ID: ${CHAIN_ID}
@@ -285,6 +293,8 @@ services:
     container_name: reveal-market-frontend
     restart: unless-stopped
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -321,6 +331,8 @@ services:
     restart: unless-stopped
     mem_swappiness: 0
     user: root
+    env_file:
+      - ${ENV_FILE:-.env.local}
     depends_on:
       - frontend
     ports:
@@ -358,6 +370,8 @@ services:
     container_name: reveal-market-prover
     restart: unless-stopped
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     volumes:
       - ./prover/circuits:/app/circuits:ro
     environment:
@@ -392,6 +406,8 @@ services:
     container_name: reveal-market-streamer
     restart: unless-stopped
     mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
     environment:
       STREAMER_REDIS_URL: ${STREAMER_REDIS_URL}
       STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL}
