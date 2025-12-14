@@ -107,6 +107,24 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     category: item.category ?? item.tags?.[0] ?? "General",
     tags: item.tags ?? item.extra_data?.tags ?? [],
     status: item.status ?? undefined,
+    resolutionStatus:
+      item.resolution_status ??
+      item.resolutionStatus ??
+      item.extra_data?.resolution_status ??
+      item.extra_data?.resolutionStatus ??
+      null,
+    resolutionReason:
+      item.resolution_reason ??
+      item.resolutionReason ??
+      item.extra_data?.resolution_reason ??
+      item.extra_data?.resolutionReason ??
+      null,
+    commitsBlockedAt:
+      item.commits_blocked_at ??
+      item.commitsBlockedAt ??
+      item.extra_data?.commits_blocked_at ??
+      item.extra_data?.commitsBlockedAt ??
+      null,
     commitDeadline:
       item.commit_deadline ??
       item.commitDeadline ??

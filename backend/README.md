@@ -101,6 +101,12 @@ Both `.venv` directories stay ignored by git. `uv` keeps them consistent with th
 - **Cache warmup**: Optional—call `/markets?limit=20` and `/pricing/fx` to prime caches/CDN. Heartbeat dashboards at `/healthz/heartbeats`.
 - **TLS/proxy**: Terminate TLS at the ingress/proxy (e.g., Caddy in `docker/caddy/Caddyfile`). API/worker remain HTTP internally; set `ALLOWED_HOSTS`/CORS as needed.
 
+## Resolution + Commit Halting Signals
+
+- Markets now carry `resolution_status` (`final`, `pending_resolution`, `disputed`), `resolution_reason`, and `commits_blocked_at` on the core `markets` table. Worker ingestion sets these flags from Gamma and locks commits when upstream marks a market pending or disputed.
+- The API enforces a configurable cutoff window (`RM_COMMIT_CUTOFF_SECONDS`, default 900s) before `closes_at` to halt new quotes/commits. Pending/disputed markets or those inside the cutoff return `400` errors with a descriptive `detail`.
+- Frontend surfaces the flags as “Waiting for resolution” / “Disputed” and disables commit buttons; positions payloads now echo the flags so wallets can show claim readiness accurately.
+
 ## Logging Consistency
 
 Each service now bootstraps a production-grade logger at process start. The format matches `timestamp | LEVEL | logger | file:line | event | message | request_id=<value>` so API, worker, and scripts emit comparable lines. Control verbosity with `LOG_LEVEL`, and opt into rotating files by setting `LOG_TO_FILE=true` (optional knobs: `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`). All logs still stream to stdout for container aggregation, ensuring Docker/Kubernetes collectors see exactly the same structure across services.

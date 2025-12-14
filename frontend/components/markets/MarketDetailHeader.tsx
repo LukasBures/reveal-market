@@ -40,6 +40,8 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   const openInterest =
     toNumber(market.openInterestUsd) ?? toNumber(extraData?.openInterest) ?? toNumber(gamma?.openInterest) ?? 0;
   const commitDeadline = getCommitDeadline(market);
+  const resolutionStatus = (market.resolutionStatus ?? "").toLowerCase();
+  const resolutionReason = market.resolutionReason ?? null;
   const backgroundStyle = coverImage
     ? {
         backgroundImage: `linear-gradient(120deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.75) 45%, rgba(0,0,0,0.6) 100%), url(${coverImage})`,
@@ -61,15 +63,23 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
             {market.status && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
                 {market.category && (
-                  <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
-                )}
-                <span className="rounded-full px-2.5 py-1 bg-brand-500/20 text-brand-100">
-                  {market.status}
-                </span>
-              </div>
+              <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
+            )}
+            <span className="rounded-full px-2.5 py-1 bg-brand-500/20 text-brand-100">
+              {market.status}
+            </span>
+            {resolutionStatus === "pending_resolution" && (
+              <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Waiting for resolution</span>
+            )}
+            {resolutionStatus === "disputed" && (
+              <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">
+                Disputed{resolutionReason ? `: ${resolutionReason}` : ""}
+              </span>
             )}
           </div>
-        </div>
+        )}
+      </div>
+    </div>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Liquidity" value={formatUsd(liquidity)} />

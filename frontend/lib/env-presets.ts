@@ -26,7 +26,12 @@ const PRESETS: Record<string, ModePreset> = {
 };
 
 const resolveMode = () => {
-  const modeEnv = (process.env.RM_ENVIRONMENT ?? process.env.NODE_ENV ?? "local").toLowerCase();
+  const modeEnv = (
+    process.env.NEXT_PUBLIC_RM_ENVIRONMENT ??
+    process.env.RM_ENVIRONMENT ??
+    process.env.NODE_ENV ??
+    "local"
+  ).toLowerCase();
   return modeEnv.includes("prod") ? "prod" : "local";
 };
 
@@ -52,14 +57,20 @@ const coalesceUrl = (candidate: string | undefined | null, fallback: string, lab
 export function resolveUrlConfig() {
   const preset = PRESETS[resolveMode()] ?? PRESETS.local;
   const runningInDocker = (process.env.RUNNING_IN_DOCKER ?? "").toLowerCase() === "true";
-  const apiBaseDefault = runningInDocker && preset.apiInternal ? preset.apiInternal : preset.apiBase;
-  const apiBaseUrl = coalesceUrl(process.env.RM_API_BASE_URL, preset.apiBase, "API base URL");
+  const apiBaseOverride =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? (runningInDocker ? process.env.RM_API_BASE_URL : undefined);
+  const apiBaseUrl = coalesceUrl(apiBaseOverride, preset.apiBase, "API base URL");
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
-  const siteUrl = coalesceUrl(process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
-  const streamerPublic = coalesceUrl(undefined, preset.streamerPublic, "Streamer URL");
+  const siteUrl = coalesceUrl(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
+  const streamerPublic = coalesceUrl(
+    process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ??
+      (runningInDocker ? process.env.STREAMER_PUBLIC_BASE_URL : undefined),
+    preset.streamerPublic,
+    "Streamer URL",
+  );
   const streamerInternal = coalesceUrl(
-    process.env.STREAMER_INTERNAL_URL ?? (runningInDocker ? preset.streamerInternal : preset.streamerPublic),
-    runningInDocker ? preset.streamerInternal : preset.streamerPublic,
+    process.env.STREAMER_INTERNAL_URL ?? (runningInDocker ? preset.streamerInternal : streamerPublic),
+    runningInDocker ? preset.streamerInternal : streamerPublic,
     "Streamer internal URL",
   );
 

@@ -52,6 +52,66 @@ def _scale_fx_value(zen_usd: float | Decimal) -> int:
     return int(quantized)
 
 
+def _assert_commits_allowed(
+    market: shared_models.Market,
+    now: datetime,
+    session: AsyncSession | None = None,
+) -> None:
+    """Raise if the market should not accept new quotes/commits."""
+
+    cutoff_seconds = getattr(settings, "commit_cutoff_seconds", 0) or 0
+    resolution_status = getattr(market, "resolution_status", shared_models.ResolutionStatusEnum.FINAL.value)
+    resolution_reason = getattr(market, "resolution_reason", None)
+    blocked_at = getattr(market, "commits_blocked_at", None)
+
+    def _normalize_ts(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+    if resolution_status in {
+        shared_models.ResolutionStatusEnum.PENDING.value,
+        shared_models.ResolutionStatusEnum.DISPUTED.value,
+    }:
+        if blocked_at is None:
+            market.commits_blocked_at = now
+            blocked_at = market.commits_blocked_at
+        if session is not None:
+            session.add(market)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "market_resolution_pending",
+                "resolution_status": resolution_status,
+                "resolution_reason": resolution_reason,
+                "commits_blocked_at": _normalize_ts(blocked_at).isoformat() if blocked_at else None,
+            },
+        )
+    closes_at = _normalize_ts(getattr(market, "closes_at", None))
+    if cutoff_seconds > 0 and closes_at is not None:
+        cutoff_time = closes_at - timedelta(seconds=int(cutoff_seconds))
+        if now >= cutoff_time:
+            if blocked_at is None:
+                market.commits_blocked_at = now
+                blocked_at = market.commits_blocked_at
+            if session is not None:
+                session.add(market)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "market_near_resolution",
+                    "closes_at": closes_at.isoformat(),
+                    "cutoff_seconds": cutoff_seconds,
+                    "commits_blocked_at": _normalize_ts(blocked_at).isoformat() if blocked_at else None,
+                },
+            )
+    if getattr(market, "closed", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Market is closed; new quotes are disabled",
+        )
+
+
 def build_quote_digest(
     chain_id: int,
     market_address: str,
@@ -172,6 +232,7 @@ async def pricing_quote(
 ) -> schemas.PricingQuoteResponse:
     """Generate a signed quote bound to stake, FX, outcome, and expiry."""
 
+    now = datetime.now(tz=UTC)
     if payload.stake_zen > settings.max_stake_zen:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -192,6 +253,8 @@ async def pricing_quote(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Market is settled; new quotes are disabled",
             )
+        if market_record:
+            _assert_commits_allowed(market_record, now, session)
     # Ensure the market is deployed; auto-create via factory when no address is stored.
     ensured_market_address: str | None = (payload.market_address or "") or None
     if payload.market_id:

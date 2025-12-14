@@ -58,6 +58,9 @@ class MarketBase(BaseModel):
     question_id: str | None = None
     image_url: str | None = None
     closed: bool | None = None
+    resolution_status: str | None = None
+    resolution_reason: str | None = None
+    commits_blocked_at: datetime | None = None
     uma_resolution_status: str | None = None
     closes_at: datetime | None = None
     starts_at: datetime | None = None
@@ -108,6 +111,9 @@ class MarketUpdate(BaseModel):
     outcome_prices: list[float] | None = None
     image_url: str | None = None
     closed: bool | None = None
+    resolution_status: str | None = None
+    resolution_reason: str | None = None
+    commits_blocked_at: datetime | None = None
     uma_resolution_status: str | None = None
     closes_at: datetime | None = None
     starts_at: datetime | None = None
@@ -365,6 +371,9 @@ class PositionRecord(BaseModel):
     merkle_root: str | None = None
     winning_outcome_id: int | None = None
     market_address: str | None = None
+    resolution_status: str | None = None
+    resolution_reason: str | None = None
+    commits_blocked_at: datetime | None = None
 
 
 class PositionsResponse(BaseModel):

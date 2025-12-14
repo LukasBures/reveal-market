@@ -350,6 +350,20 @@ async def collect_market_changes_with_summary(
             and db_market is not None
             and db_market.id is not None
         ):
+            if getattr(db_market, "resolution_status", None) not in (
+                None,
+                shared_models.ResolutionStatusEnum.FINAL.value,
+            ):
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.proof.skipped_resolution_pending",
+                        message="skipping proof job because resolution not final",
+                        event_id=db_market.event_id,
+                        resolution_status=getattr(db_market, "resolution_status", None),
+                    )
+                continue
             settlement_result = await session.execute(
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == db_market.id)
             )
@@ -456,6 +470,9 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         starts_at=record.starts_at,
         orders_opened_at=record.orders_opened_at,
         resolution_source=record.resolution_source,
+        resolution_status=getattr(record, "resolution_status", None) or shared_models.ResolutionStatusEnum.FINAL.value,
+        resolution_reason=getattr(record, "resolution_reason", None),
+        commits_blocked_at=getattr(record, "commits_blocked_at", None),
         market_maker=record.market_maker,
         order_min_size=record.order_min_size,
         price_tick_size=record.price_tick_size,
@@ -504,8 +521,21 @@ async def _record_factory_state(
     )
 
 
-def _markets_match(existing, source_updated_at: datetime | None, content_hash: str | None) -> tuple[bool, str]:
+def _markets_match(
+    existing,
+    source_updated_at: datetime | None,
+    content_hash: str | None,
+    resolution_status: str | None = None,
+    resolution_reason: str | None = None,
+    commits_blocked_at: datetime | None = None,
+) -> tuple[bool, str]:
     """Check whether incoming payload matches the existing record to skip writes."""
+    if resolution_status is not None and getattr(existing, "resolution_status", None) != resolution_status:
+        return False, "resolution_status_changed"
+    if resolution_reason is not None and getattr(existing, "resolution_reason", None) != resolution_reason:
+        return False, "resolution_reason_changed"
+    if commits_blocked_at is not None and getattr(existing, "commits_blocked_at", None) != commits_blocked_at:
+        return False, "commits_blocked_at_changed"
     if source_updated_at and getattr(existing, "source_updated_at", None) == source_updated_at:
         return True, "source_timestamp"
     existing_hash = getattr(existing, "content_hash", None)
@@ -617,6 +647,22 @@ async def _sync_market(
             payload["closes_at"] = close_deadline
     should_close = _should_close_market(close_deadline, market.closed, now)
     payload["closed"] = should_close
+    resolution_status = payload.get("resolution_status") or shared_models.ResolutionStatusEnum.FINAL.value
+    payload["resolution_status"] = resolution_status
+    resolution_reason = payload.get("resolution_reason") or getattr(existing, "resolution_reason", None)
+    if resolution_reason:
+        payload["resolution_reason"] = resolution_reason
+    existing_blocked_at = getattr(existing, "commits_blocked_at", None)
+    blocked_at = payload.get("commits_blocked_at") or existing_blocked_at
+    if resolution_status in {
+        shared_models.ResolutionStatusEnum.PENDING.value,
+        shared_models.ResolutionStatusEnum.DISPUTED.value,
+    }:
+        should_close = True
+        payload["closed"] = True
+        if blocked_at is None:
+            blocked_at = now
+    payload["commits_blocked_at"] = blocked_at
     status_value = payload.get("status") or shared_models.MarketStatusEnum.COMMIT.value
     if should_close and status_value not in {
         shared_models.MarketStatusEnum.SETTLED.value,
@@ -699,7 +745,14 @@ async def _sync_market(
                 category=payload.get("category"),
             )
     else:
-        match, match_reason = _markets_match(existing, incoming_updated_at, incoming_hash)
+        match, match_reason = _markets_match(
+            existing,
+            incoming_updated_at,
+            incoming_hash,
+            resolution_status=resolution_status,
+            resolution_reason=resolution_reason,
+            commits_blocked_at=blocked_at,
+        )
         if match:
             if logger.isEnabledFor(logging.DEBUG):
                 log_event(

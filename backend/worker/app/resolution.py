@@ -14,7 +14,7 @@ import httpx
 from shared import models as shared_models
 from shared import repository_async as shared_repository
 from shared.logging import log_event
-from shared.models import MarketStatusEnum
+from shared.models import MarketStatusEnum, ResolutionStatusEnum
 from shared.onchain.conditional_tokens import _derive_winners
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -254,6 +254,21 @@ async def apply_resolution(
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
     existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     now = datetime.now(UTC)
+    incoming_resolution_status = getattr(market, "resolution_status", None) or ResolutionStatusEnum.FINAL.value
+    incoming_resolution_reason = getattr(market, "resolution_reason", None)
+    if incoming_resolution_reason:
+        db_market.resolution_reason = incoming_resolution_reason
+    db_market.resolution_status = incoming_resolution_status
+    if incoming_resolution_status in {
+        ResolutionStatusEnum.PENDING.value,
+        ResolutionStatusEnum.DISPUTED.value,
+    }:
+        if getattr(db_market, "commits_blocked_at", None) is None:
+            db_market.commits_blocked_at = now
+        db_market.closed = True
+        if db_market.status == MarketStatusEnum.COMMIT.value:
+            db_market.status = MarketStatusEnum.LOCKED.value
+        session.add(db_market)
 
     if not _should_refresh_resolution(existing, now):
         if logger.isEnabledFor(logging.DEBUG):
@@ -318,6 +333,7 @@ async def apply_resolution(
     )
 
     if record_payload["resolved"]:
+        db_market.resolution_status = ResolutionStatusEnum.FINAL.value
         db_market.status = MarketStatusEnum.SETTLED.value
         if getattr(db_market, "closed", None) is not True:
             db_market.closed = True

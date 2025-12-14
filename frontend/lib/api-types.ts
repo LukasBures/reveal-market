@@ -20,6 +20,9 @@ export type MarketSummary = {
   category?: string;
   tags?: string[];
   status?: string;
+  resolutionStatus?: string | null;
+  resolutionReason?: string | null;
+  commitsBlockedAt?: string | null;
   commitDeadline?: string;
   revealDeadline?: string;
   liquidityUsd?: number;
@@ -139,6 +142,9 @@ export type PositionRecord = {
   merkle_root?: string | null;
   winning_outcome_id?: number | null;
   market_address?: string | null;
+  resolution_status?: string | null;
+  resolution_reason?: string | null;
+  commits_blocked_at?: string | null;
 };
 
 export type PositionsResponse = {

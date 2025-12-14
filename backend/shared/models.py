@@ -39,12 +39,22 @@ class MarketStatusEnum(str, Enum):
     CANCELLED = "cancelled"
 
 
+class ResolutionStatusEnum(str, Enum):
+    PENDING = "pending_resolution"
+    DISPUTED = "disputed"
+    FINAL = "final"
+
+
 class Market(Base):
     __tablename__ = "markets"
     __table_args__ = (
         CheckConstraint(
             "status IN ('commit','locked','settled','cancelled')",
             name="ck_markets_status",
+        ),
+        CheckConstraint(
+            "resolution_status IN ('pending_resolution','disputed','final')",
+            name="ck_markets_resolution_status",
         ),
     )
 
@@ -67,6 +77,11 @@ class Market(Base):
     question_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    resolution_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=ResolutionStatusEnum.FINAL.value, server_default=text("'final'")
+    )
+    resolution_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    commits_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uma_resolution_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -398,6 +413,9 @@ class Settlement(Base):
     proof_status: Mapped[str] = mapped_column(String(32), nullable=False, default=SettlementProofStatus.NONE.value)
     proof_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     proof_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    settlement_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    settlement_tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    settlement_block_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -515,9 +533,11 @@ class SettlementReceipt(Base):
 Index("ix_markets_status_category", Market.status, Market.category)
 Index("ix_markets_slug", Market.slug)
 Index("ix_markets_condition_id", Market.condition_id)
+Index("ix_markets_resolution_status", Market.resolution_status)
 Index("ix_commitments_user_address", Commitment.user_address)
 Index(
     "ix_quotes_expires_at_issued",
     Quote.expires_at,
     postgresql_where=Quote.status == QuoteStatusEnum.ISSUED.value,
 )
+Index("ix_settlements_tx_hash", Settlement.settlement_tx_hash)

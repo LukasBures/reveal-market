@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
+from app import models
 from app.schemas import FxQuoteResponse
 from pydantic import SecretStr
 
@@ -195,3 +196,76 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     resp = client.post("/pricing/quote", json=payload)
     assert resp.status_code == 503
     assert resp.json()["detail"]["error"] == "fx_stale"
+
+
+def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch):
+    import app.runtime as runtime
+    from eth_account import Account
+
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
+    market = models.Market(
+        event_id="pending-market",
+        title="Pending market",
+        oracle="0xoracle",
+        status=models.MarketStatusEnum.COMMIT.value,
+        resolution_status=models.ResolutionStatusEnum.PENDING.value,
+        market_address="0x1111111111111111111111111111111111111111",
+    )
+    db_session.add(market)
+    db_session.commit()
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": market.market_address,
+        "outcome_id": 0,
+        "market_id": market.event_id,
+        "user_id": "user-pending",
+    }
+    resp = client.post("/pricing/quote", json=payload)
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["error"] == "market_resolution_pending"
+    assert detail["resolution_status"] == models.ResolutionStatusEnum.PENDING.value
+
+
+def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
+    import app.runtime as runtime
+    from eth_account import Account
+
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
+    monkeypatch.setattr(settings, "commit_cutoff_seconds", 300, raising=False)
+    market = models.Market(
+        event_id="cutoff-market",
+        title="Cutoff market",
+        oracle="0xoracle",
+        status=models.MarketStatusEnum.COMMIT.value,
+        closes_at=datetime.now(tz=UTC) + timedelta(seconds=120),
+        market_address="0x2222222222222222222222222222222222222222",
+    )
+    db_session.add(market)
+    db_session.commit()
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": market.market_address,
+        "outcome_id": 1,
+        "market_id": market.event_id,
+        "user_id": "user-cutoff",
+    }
+    resp = client.post("/pricing/quote", json=payload)
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["error"] == "market_near_resolution"
+    assert detail["closes_at"]

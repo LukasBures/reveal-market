@@ -524,6 +524,15 @@ async def trade_commit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"stake_mismatch_expected_{ticket_size_wei}",
         )
+    market_record = await repository_async.get_market_by_event_id(session, quote.market_id or "")
+    if market_record and (
+        market_record.status
+        in {models.MarketStatusEnum.SETTLED.value, models.MarketStatusEnum.CANCELLED.value}
+        or market_record.resolved_at is not None
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_settled")
+    if market_record:
+        pricing_routes._assert_commits_allowed(market_record, now, session)
 
     # Validate and consume the quote using the existing submit logic (signature + drift checks).
     await pricing_routes.pricing_submit(
@@ -683,6 +692,9 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 merkle_root=settlement.merkle_root if settlement else None,
                 winning_outcome_id=settlement.winning_outcome_id if settlement else None,
                 market_address=market.market_address,
+                resolution_status=getattr(market, "resolution_status", None),
+                resolution_reason=getattr(market, "resolution_reason", None),
+                commits_blocked_at=getattr(market, "commits_blocked_at", None),
             )
         )
     escrow_balance = await _fetch_escrow_balance(wallet)
@@ -705,6 +717,11 @@ async def list_claim_bundles(
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     needs_refresh = False
     for _commitment, market, settlement in rows:
+        if (
+            getattr(market, "resolution_status", None) is not None
+            and getattr(market, "resolution_status") != models.ResolutionStatusEnum.FINAL.value
+        ):
+            continue
         if settlement is None or not settlement.merkle_root or settlement.winning_outcome_id is None:
             refreshed = await _maybe_backfill_settlement(session, market)
             if refreshed is not None:
@@ -749,6 +766,8 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     market = await repository_async.get_market_by_event_id(session, market_identifier)
     if market is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
+    if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_final")
     if not market.market_address:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="market_address_missing")
     settlement = (

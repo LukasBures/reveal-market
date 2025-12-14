@@ -150,6 +150,24 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
       payload.extra_data?.open_interest ??
       payload.extra_data?.openInterest,
   );
+  const resolutionStatus =
+    payload.resolution_status ??
+    payload.resolutionStatus ??
+    payload.extra_data?.resolution_status ??
+    payload.extra_data?.resolutionStatus ??
+    null;
+  const resolutionReason =
+    payload.resolution_reason ??
+    payload.resolutionReason ??
+    payload.extra_data?.resolution_reason ??
+    payload.extra_data?.resolutionReason ??
+    null;
+  const commitsBlockedAt =
+    payload.commits_blocked_at ??
+    payload.commitsBlockedAt ??
+    payload.extra_data?.commits_blocked_at ??
+    payload.extra_data?.commitsBlockedAt ??
+    null;
 
   return {
     eventId: eventIdValue,
@@ -157,6 +175,9 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
     category: payload.category ?? undefined,
     tags: payload.tags ?? payload.extra_data?.tags ?? [],
     status: payload.status ?? undefined,
+    resolutionStatus: resolutionStatus ?? undefined,
+    resolutionReason: resolutionReason ?? undefined,
+    commitsBlockedAt: commitsBlockedAt ?? undefined,
     commitDeadline:
       payload.commit_deadline ??
       payload.commitDeadline ??

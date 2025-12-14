@@ -22,6 +22,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.constants import END_CURSOR
 from pydantic import BaseModel, Field, ValidationError
 from shared.categories import canonical_category_from_raw
+from shared.models import ResolutionStatusEnum
 from shared.polymarket import build_polymarket_events_url, build_polymarket_markets_url
 
 regex_digits = re.compile(r"\d")
@@ -78,6 +79,9 @@ class MarketPayload(BaseModel):
     starts_at: datetime | None = None
     orders_opened_at: datetime | None = None
     resolution_source: str | None = None
+    resolution_status: str = Field(default="final")
+    resolution_reason: str | None = None
+    commits_blocked_at: datetime | None = None
     market_maker: str | None = None
     order_min_size: float | None = None
     price_tick_size: float | None = None
@@ -196,6 +200,14 @@ class MarketPayload(BaseModel):
             gamma_metadata["best_ask"] = best_ask
             gamma_metadata["spread"] = spread
             gamma_metadata["volume"] = volume_total
+        raw_resolution_state = (
+            _clean_string(raw.get("resolutionState"))
+            or _clean_string(raw.get("resolutionStatus"))
+            or uma_status
+        )
+        resolution_status, resolution_reason = _map_resolution_status(raw_resolution_state)
+        if resolution_status != ResolutionStatusEnum.FINAL.value:
+            closed = True
 
         market = cls(
             event_id=str(event_id),
@@ -219,6 +231,8 @@ class MarketPayload(BaseModel):
             image_url=str(image_url) if image_url is not None else None,
             closed=bool(closed) if isinstance(closed, bool) else None,
             uma_resolution_status=str(uma_status) if uma_status is not None else None,
+            resolution_status=resolution_status,
+            resolution_reason=resolution_reason,
             source_updated_at=updated_at,
             content_hash=None,
             closes_at=closes_at,
@@ -1261,6 +1275,23 @@ def _derive_status(closed: Any, resolution_status: Any) -> str:
     return "commit"
 
 
+def _map_resolution_status(raw_status: str | None) -> tuple[str, str | None]:
+    """Convert upstream resolution strings into internal resolution status flags."""
+
+    if raw_status is None:
+        return ResolutionStatusEnum.FINAL.value, None
+    normalized = raw_status.strip().lower()
+    if not normalized:
+        return ResolutionStatusEnum.FINAL.value, raw_status
+    if normalized in {"pending", "pending_resolution", "preliminary", "awaiting", "waiting"}:
+        return ResolutionStatusEnum.PENDING.value, raw_status
+    if normalized in {"disputed", "challenge", "challenged", "contested"}:
+        return ResolutionStatusEnum.DISPUTED.value, raw_status
+    if normalized in {"resolved", "settled", "final", "confirmed", "resolved_final"}:
+        return ResolutionStatusEnum.FINAL.value, raw_status
+    return ResolutionStatusEnum.FINAL.value, raw_status
+
+
 def _extract_updated_at(raw: dict[str, Any]) -> datetime | None:
     candidate_keys = [
         "updatedAt",
@@ -1511,6 +1542,13 @@ def _build_market_hash_payload(market: MarketPayload) -> dict[str, Any]:
             else market.orders_opened_at
         ),
         "resolution_source": market.resolution_source,
+        "resolution_status": market.resolution_status,
+        "resolution_reason": market.resolution_reason,
+        "commits_blocked_at": (
+            market.commits_blocked_at.isoformat()
+            if isinstance(market.commits_blocked_at, datetime)
+            else market.commits_blocked_at
+        ),
         "market_maker": market.market_maker,
         "order_min_size": market.order_min_size,
         "price_tick_size": market.price_tick_size,

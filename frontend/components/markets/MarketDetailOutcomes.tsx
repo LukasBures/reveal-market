@@ -37,8 +37,15 @@ export function MarketDetailOutcomes({ market }: Props) {
     [market.clobTokenIds],
   );
   const marketStatus = (market.status ?? "").toLowerCase();
+  const resolutionStatus = (market.resolutionStatus ?? "").toLowerCase();
+  const resolutionReason = market.resolutionReason ?? null;
+  const commitsBlockedAt = market.commitsBlockedAt ?? null;
+  const commitsBlocked = Boolean(commitsBlockedAt);
+  const isPendingResolution = resolutionStatus === "pending_resolution";
+  const isDisputed = resolutionStatus === "disputed";
+  const isResolutionWaiting = isPendingResolution || isDisputed;
   const isResolved = ["resolved", "settled", "cancelled", "canceled", "voided", "closed"].includes(marketStatus);
-  const isLocked = ["locked", "disputed"].includes(marketStatus);
+  const isLocked = ["locked", "disputed"].includes(marketStatus) || isResolutionWaiting || commitsBlocked;
   const { prices: livePrices, streamError, fxStale: priceFxStale } = useLiveOutcomePrices(
     market.eventId,
     prices,
@@ -123,6 +130,11 @@ export function MarketDetailOutcomes({ market }: Props) {
         clearTimeout(quoteRefreshTimer.current);
         quoteRefreshTimer.current = null;
       }
+      if (isResolutionWaiting || commitsBlocked) {
+        setQuote(null);
+        setError(isDisputed ? "Resolution disputed; commits paused." : "Waiting for resolution; commits paused.");
+        return;
+      }
       if (!chainId || chainMismatch) {
         setQuote(null);
         setError(`Switch to ${defaultChain.name} to request a quote`);
@@ -167,7 +179,21 @@ export function MarketDetailOutcomes({ market }: Props) {
         .catch((err) => setError((err as Error).message))
         .finally(() => setLoading(false));
     },
-    [fx, fxStaleCombined, stakeZen, address, market.marketAddress, market.eventId, selectedOutcome, chainId, chainMismatch, capExhausted],
+    [
+      fx,
+      fxStaleCombined,
+      stakeZen,
+      address,
+      market.marketAddress,
+      market.eventId,
+      selectedOutcome,
+      chainId,
+      chainMismatch,
+      capExhausted,
+      isResolutionWaiting,
+      commitsBlocked,
+      isDisputed,
+    ],
   );
 
   useEffect(() => {
@@ -280,6 +306,8 @@ export function MarketDetailOutcomes({ market }: Props) {
   const quoteExpired = quote ? new Date(quote.expires_at).getTime() <= Date.now() : false;
   const stakeOutOfRange = stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
+    (isResolutionWaiting && (isDisputed ? "Resolution disputed; commits paused." : "Waiting for resolution")) ||
+    (commitsBlocked && "Commits halted pending resolution") ||
     (!isTradable && `Trading disabled: ${market.status ?? "closed"}`) ||
     (chainMismatch && `Switch to ${defaultChain.name}`) ||
     (capExhausted && "Stake cap reached") ||
@@ -351,6 +379,10 @@ export function MarketDetailOutcomes({ market }: Props) {
     }
     if (!market.marketAddress) {
       setTxError("Market contract address missing.");
+      return;
+    }
+    if (isResolutionWaiting || commitsBlocked) {
+      setTxError(isDisputed ? "Resolution disputed; commits are paused." : "Waiting for resolution; commits paused.");
       return;
     }
     if (!quote) {
@@ -479,6 +511,17 @@ export function MarketDetailOutcomes({ market }: Props) {
         )}
         {fxStaleCombined && <span className="rounded-full bg-amber-500/15 px-3 py-1 text-amber-100">FX stale</span>}
         {isResolved && <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">Market resolved</span>}
+        {isPendingResolution && (
+          <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Waiting for resolution</span>
+        )}
+        {isDisputed && (
+          <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">
+            Disputed{resolutionReason ? `: ${resolutionReason}` : ""}
+          </span>
+        )}
+        {commitsBlocked && !isPendingResolution && !isDisputed && (
+          <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Commits halted</span>
+        )}
         {isLocked && !isResolved && (
           <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Trading locked</span>
         )}
@@ -510,7 +553,13 @@ export function MarketDetailOutcomes({ market }: Props) {
         </p>
         {!isTradable && (
           <p className="text-sm font-semibold text-amber-200">
-            Trading is disabled for this market (status: {market.status ?? "unknown"}).
+            {isResolutionWaiting
+              ? isDisputed
+                ? "Resolution disputed. New commits are paused until finalized."
+                : "Waiting for resolution. New commits are paused."
+              : commitsBlocked
+                ? "Commits are halted for settlement or cutoff."
+                : `Trading is disabled for this market (status: ${market.status ?? "unknown"}).`}
           </p>
         )}
       </div>
