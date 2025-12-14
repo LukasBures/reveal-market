@@ -57,9 +57,11 @@ def upgrade() -> None:
         sa.Column("settlement_block_number", sa.BigInteger(), nullable=True),
     )
     op.create_index("ix_settlements_tx_hash", "settlements", ["settlement_tx_hash"])
+    op.add_column("settlement_receipts", sa.Column("proof", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("settlement_receipts", "proof")
     op.drop_index("ix_settlements_tx_hash", table_name="settlements")
     op.drop_column("settlements", "settlement_block_number")
     op.drop_column("settlements", "settlement_tx_hash")

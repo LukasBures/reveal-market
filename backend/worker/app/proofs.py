@@ -360,6 +360,7 @@ async def maybe_generate_settlement_proof(
                     market_address=market_address,
                     request_id=response.request_id,
                     proof_hash=f"0x{proof_hash}" if proof_hash else None,
+                    proof=response.proof,
                     public_signals=response.public_signals,
                     prover_version=response.prover_version,
                     circuit_hash=response.circuit_hash,

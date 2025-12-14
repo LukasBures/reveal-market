@@ -106,6 +106,15 @@ Both `.venv` directories stay ignored by git. `uv` keeps them consistent with th
 - Markets now carry `resolution_status` (`final`, `pending_resolution`, `disputed`), `resolution_reason`, and `commits_blocked_at` on the core `markets` table. Worker ingestion sets these flags from Gamma and locks commits when upstream marks a market pending or disputed.
 - The API enforces a configurable cutoff window (`RM_COMMIT_CUTOFF_SECONDS`, default 900s) before `closes_at` to halt new quotes/commits. Pending/disputed markets or those inside the cutoff return `400` errors with a descriptive `detail`.
 - Frontend surfaces the flags as “Waiting for resolution” / “Disputed” and disables commit buttons; positions payloads now echo the flags so wallets can show claim readiness accurately.
+- Settlement automation wiring: enable `RM_PROVER_ENABLED=true`, `RM_AUTO_SETTLEMENT_ENABLED=true` to request proofs; set `RM_AUTO_SETTLEMENT_TX_ENABLED=true` plus `RM_SETTLEMENT_SIGNER_PRIVATE_KEY`, `RM_SETTLEMENT_RPC_URL` (or `RM_RPC_URL`) and optional `RM_SETTLEMENT_GAS_PRICE_GWEI`/`RM_SETTLEMENT_MAX_PRIORITY_FEE_GWEI` to auto-submit `verifyAndSettle` once proofs are ready. Proof receipts now store the raw `proof` + `publicSignals`; settlements persist tx hash/block/submitted_at.
+
+## Test Chain Runbook (Settlement E2E)
+
+- Fund the settlement signer (matches `RM_SETTLEMENT_SIGNER_PRIVATE_KEY`) with testnet gas + ZEN for fees.
+- Start prover with artifacts mounted (`prover/circuits/build/*`), set `RM_PROVER_ENABLED=true` and `RM_AUTO_SETTLEMENT_ENABLED=true`.
+- Enable tx submission: `RM_AUTO_SETTLEMENT_TX_ENABLED=true`, `RM_SETTLEMENT_RPC_URL` (or reuse `RM_RPC_URL`), optional `RM_SETTLEMENT_GAS_PRICE_GWEI`/`RM_SETTLEMENT_MAX_PRIORITY_FEE_GWEI`.
+- Monitor logs/metrics: `worker.proof.*` for proof retries/failures, `worker.settlement.*` for tx submissions/failures; ensure circuit hash/verifier on-chain match the prover outputs.
+- Dry-run: pick a seeded market, verify `circuitHash` matches, and watch `settlements` rows for `proof_status=generated` and `settlement_tx_hash` populated after submission; claims should open once tx confirms.
 
 ## Logging Consistency
 

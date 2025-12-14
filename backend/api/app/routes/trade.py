@@ -437,7 +437,13 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
     try:
         web3 = get_async_web3(str(settings.rpc_url))
         contract = web3.eth.contract(address=to_checksum(market.market_address), abi=REVEAL_MARKET_ABI)
-        commitments_root, next_ticket_id, phase_value, _deadline, winning_outcome_id = await contract.functions.marketState().call()  # type: ignore[assignment]
+        (
+            commitments_root,
+            next_ticket_id,
+            phase_value,
+            _deadline,
+            winning_outcome_id,
+        ) = await contract.functions.marketState().call()  # type: ignore[assignment]
         settled = int(phase_value) == 2  # Phase.Settled
         total_escrow = await contract.functions.totalEscrow().call()
         total_liability = await contract.functions.totalLiability().call()
@@ -526,8 +532,7 @@ async def trade_commit(
         )
     market_record = await repository_async.get_market_by_event_id(session, quote.market_id or "")
     if market_record and (
-        market_record.status
-        in {models.MarketStatusEnum.SETTLED.value, models.MarketStatusEnum.CANCELLED.value}
+        market_record.status in {models.MarketStatusEnum.SETTLED.value, models.MarketStatusEnum.CANCELLED.value}
         or market_record.resolved_at is not None
     ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_settled")
@@ -673,6 +678,11 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 claimable = True
         if market.resolved_at:
             status = "settled"
+        if (
+            getattr(market, "resolution_status", None)
+            and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
+        ):
+            status = "pending_resolution"
         positions.append(
             schemas.PositionRecord(
                 market_id=market.event_id,
@@ -719,7 +729,7 @@ async def list_claim_bundles(
     for _commitment, market, settlement in rows:
         if (
             getattr(market, "resolution_status", None) is not None
-            and getattr(market, "resolution_status") != models.ResolutionStatusEnum.FINAL.value
+            and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
             continue
         if settlement is None or not settlement.merkle_root or settlement.winning_outcome_id is None:
@@ -777,6 +787,8 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         settlement = await _maybe_backfill_settlement(session, market) or settlement
     if settlement is None or settlement.winning_outcome_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_settled")
+    if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_final")
     winning_outcome = settlement.winning_outcome_id
     if not settlement.merkle_root:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_missing")

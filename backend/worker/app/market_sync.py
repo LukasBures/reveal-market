@@ -76,6 +76,8 @@ class SyncSummary:
     proofs_generated: int = 0
     resolutions_backfilled: int = 0
     failed_markets: int = 0
+    cache_invalidations: int = 0
+    settlement_txs: int = 0
 
     def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
         return {
@@ -90,6 +92,7 @@ class SyncSummary:
             "summaries_enqueued": self.summaries_enqueued,
             "proofs_generated": self.proofs_generated,
             "cache_invalidations": cache_invalidations,
+            "settlement_txs": self.settlement_txs,
             "resolutions_backfilled": self.resolutions_backfilled,
             "market_errors": self.failed_markets,
             "gamma_metadata_updates": self.gamma_metadata_updates,

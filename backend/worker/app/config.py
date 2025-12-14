@@ -156,6 +156,18 @@ class Settings(BaseSettings):
     auto_settlement_enabled: bool = Field(
         default=False, description="Automatically request settlement proofs when data is present"
     )
+    auto_settlement_tx_enabled: bool = Field(
+        default=False,
+        description="Automatically submit verifyAndSettle transactions once proofs are ready",
+    )
+    settlement_signer_private_key: SecretStr | None = Field(
+        default=None, description="Private key for the oracle account that submits settlement transactions"
+    )
+    settlement_rpc_url: AnyUrl | None = Field(
+        default=None, description="Optional RPC override for settlement submission (defaults to RM_RPC_URL)"
+    )
+    settlement_gas_price_gwei: float | None = Field(default=None, ge=0)
+    settlement_max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)
@@ -239,6 +251,14 @@ def validate_required_settings(settings: Settings) -> None:
     require(
         "RM_PROVER_BASE_URL",
         when=settings.prover_enabled and (settings.auto_settlement_enabled or settings.prover_enabled),
+    )
+    require(
+        "RM_SETTLEMENT_SIGNER_PRIVATE_KEY",
+        when=settings.auto_settlement_tx_enabled,
+    )
+    require(
+        "RM_SETTLEMENT_RPC_URL",
+        when=settings.auto_settlement_tx_enabled and not _env_present("RM_RPC_URL"),
     )
     require("RM_WALLET_PRIVATE_KEY", when=settings.auto_create_onchain_markets)
     require("RM_FACTORY_ADDRESS", when=settings.auto_create_onchain_markets)

@@ -40,6 +40,7 @@ from .runtime import (
 )
 from .schema import SchemaSyncResult
 from .service import process_once, publish_heartbeat, record_batch_stats, run_worker
+from .settlement import run_settlement_jobs
 
 
 def main() -> None:  # pragma: no cover - CLI bootstrap
@@ -74,6 +75,7 @@ __all__ = [
     "fetch_markets_from_polymarket",
     "invalidate_cache_tags",
     "persist_resolution_cache_updates",
+    "run_settlement_jobs",
     "prime_featured_views",
     "prime_markets_cache",
     "process_once",

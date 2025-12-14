@@ -76,6 +76,7 @@ def _assert_commits_allowed(
         if blocked_at is None:
             market.commits_blocked_at = now
             blocked_at = market.commits_blocked_at
+        blocked_at_ts = _normalize_ts(blocked_at)
         if session is not None:
             session.add(market)
         raise HTTPException(
@@ -84,7 +85,7 @@ def _assert_commits_allowed(
                 "error": "market_resolution_pending",
                 "resolution_status": resolution_status,
                 "resolution_reason": resolution_reason,
-                "commits_blocked_at": _normalize_ts(blocked_at).isoformat() if blocked_at else None,
+                "commits_blocked_at": blocked_at_ts.isoformat() if blocked_at_ts else None,
             },
         )
     closes_at = _normalize_ts(getattr(market, "closes_at", None))
@@ -94,6 +95,7 @@ def _assert_commits_allowed(
             if blocked_at is None:
                 market.commits_blocked_at = now
                 blocked_at = market.commits_blocked_at
+            blocked_at_ts = _normalize_ts(blocked_at)
             if session is not None:
                 session.add(market)
             raise HTTPException(
@@ -102,7 +104,7 @@ def _assert_commits_allowed(
                     "error": "market_near_resolution",
                     "closes_at": closes_at.isoformat(),
                     "cutoff_seconds": cutoff_seconds,
-                    "commits_blocked_at": _normalize_ts(blocked_at).isoformat() if blocked_at else None,
+                    "commits_blocked_at": blocked_at_ts.isoformat() if blocked_at_ts else None,
                 },
             )
     if getattr(market, "closed", False):

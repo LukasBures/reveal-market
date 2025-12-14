@@ -178,3 +178,16 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 - `docker-compose.yml` mounts `./prover/circuits` into the container so locally generated artifacts are available.
 - The Dockerfile installs Node 20 + `rapidsnark@0.0.2`; override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
 - Running `./run_local.sh` rebuilds the prover image, so re-run after regenerating circuits.
+
+
+
+
+  Step-by-step (single source of truth = artifacts submodule):
+
+  1. Generate + stage artifacts: cd prover/circuits && bash export_artifacts.sh (writes to prover/artifacts/...).
+  2. Commit/push the submodule: cd prover/artifacts && git status -> add/commit/push; then cd .. and git add prover/artifacts to update the pointer in the main repo.
+  3. Deploy verifier from the vetted vk: use contracts/zen/cache/settlement-vk.json (populated by export/import) with your forge script ... Deploy.s.sol flow; set RM_VERIFIER_ADDRESS to the new verifier.
+  4. Sync artifacts on any machine/CI: cd prover/circuits && bash import_from_artifacts.sh (copies vetted artifacts into prover/circuits/build and vk caches).
+  5. Run services: mount prover/artifacts/prover/circuits/build (or run the import script) for the prover; restart worker/API with RM_PROVER_ENABLED=true, RM_AUTO_SETTLEMENT_ENABLED=true, RM_AUTO_SETTLEMENT_TX_ENABLED=true, and the funded signer/RPC envs.
+  6. Validate alignment: cast call <verifier> "circuitHash()(bytes32)" must equal jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json.
+

@@ -201,9 +201,7 @@ class MarketPayload(BaseModel):
             gamma_metadata["spread"] = spread
             gamma_metadata["volume"] = volume_total
         raw_resolution_state = (
-            _clean_string(raw.get("resolutionState"))
-            or _clean_string(raw.get("resolutionStatus"))
-            or uma_status
+            _clean_string(raw.get("resolutionState")) or _clean_string(raw.get("resolutionStatus")) or uma_status
         )
         resolution_status, resolution_reason = _map_resolution_status(raw_resolution_state)
         if resolution_status != ResolutionStatusEnum.FINAL.value:

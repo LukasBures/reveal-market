@@ -14,8 +14,8 @@ from shared.models import (
     MarketTag,
     Quote,
     QuoteStatusEnum,
-    ResolutionStatusEnum,
     Resolution,
+    ResolutionStatusEnum,
     Settlement,
     SettlementProofStatus,
 )

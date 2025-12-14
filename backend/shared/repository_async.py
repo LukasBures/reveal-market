@@ -61,6 +61,17 @@ async def get_resolution_by_condition_id(session: AsyncSession, condition_id: st
     return (await session.scalars(stmt)).first()
 
 
+async def get_resolution_for_market(session: AsyncSession, market_id: int) -> models.Resolution | None:
+    """Return the latest resolution linked to a market via its condition id."""
+
+    stmt = (
+        select(models.Resolution)
+        .join(models.Market, models.Resolution.condition_id == models.Market.condition_id)
+        .where(models.Market.id == market_id)
+    )
+    return (await session.scalars(stmt)).first()
+
+
 async def upsert_resolution(session: AsyncSession, data: Mapping[str, Any]) -> models.Resolution:
     """Insert or update a resolution record."""
 
@@ -415,6 +426,7 @@ async def record_settlement_receipt(
     market_address: str | None,
     request_id: str,
     proof_hash: str | None,
+    proof: str | None,
     public_signals: list[str] | None,
     prover_version: str | None,
     circuit_hash: str | None,
@@ -437,6 +449,7 @@ async def record_settlement_receipt(
         market_address=market_address.lower() if isinstance(market_address, str) else None,
         request_id=request_id,
         proof_hash=proof_hash,
+        proof=proof,
         public_signals=public_signals or [],
         prover_version=prover_version,
         circuit_hash=circuit_hash,
@@ -444,3 +457,27 @@ async def record_settlement_receipt(
     )
     session.add(receipt)
     return receipt
+
+
+async def get_settlement_receipt_by_request_id(
+    session: AsyncSession, request_id: str
+) -> models.SettlementReceipt | None:
+    """Return a settlement receipt by prover request id."""
+
+    stmt = select(models.SettlementReceipt).where(models.SettlementReceipt.request_id == request_id)
+    return (await session.scalars(stmt)).first()
+
+
+async def list_settlements_pending_tx(session: AsyncSession) -> list[tuple[models.Settlement, models.Market]]:
+    """Return settlements with generated proofs that have not been submitted on-chain."""
+
+    stmt = (
+        select(models.Settlement, models.Market)
+        .join(models.Market, models.Market.id == models.Settlement.market_id)
+        .where(
+            models.Settlement.proof_status == models.SettlementProofStatus.GENERATED.value,
+            models.Settlement.settlement_tx_hash.is_(None),
+        )
+    )
+    rows = await session.execute(stmt)
+    return [(settlement, market) for settlement, market in rows.all()]

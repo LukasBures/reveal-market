@@ -523,6 +523,7 @@ class SettlementReceipt(Base):
     prover_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     circuit_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    proof: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

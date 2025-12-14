@@ -171,3 +171,8 @@ __
   - Tests not run here; please run:
       - cd backend/api && pytest
       - cd frontend && npm test && npm run lint
+___
+
+- Settlement signer not configured: RM_SETTLEMENT_SIGNER_PRIVATE_KEY is blank in .env.local and .env.production, so I can’t verify funding; fill it and ensure the address is funded on the test chain.
+
+  - Next actions to unblock happy path: 1) align circuitHash (re-deploy verifier or roll prover back to the on-chain key); 2) set RM_SETTLEMENT_SIGNER_PRIVATE_KEY + RM_SETTLEMENT_RPC_URL and fund the signer; 3) restart worker/api with those envs so auto settlement can submit.

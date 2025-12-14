@@ -31,6 +31,7 @@ from .market_sync import (
 from .prime import prime_featured_views, prime_markets_cache
 from .proofs import run_prover_jobs
 from .schema import SchemaSyncResult, ensure_schema, propagate_schema_revision
+from .settlement import run_settlement_jobs
 
 logger = runtime.logger
 
@@ -260,14 +261,18 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         return await _handle_sync_failure(exc, tick_start, redis_client, schema_state)
 
     summary.proofs_generated = await run_prover_jobs(summary, redis_client)
+    settlements_submitted = await run_settlement_jobs(summary, redis_client)
+    summary.settlement_txs = settlements_submitted
     log_event(
         logger,
         logging.DEBUG,
         event="worker.proof.jobs_complete",
         message="processed settlement proof jobs",
         proofs_generated=summary.proofs_generated,
+        settlements_submitted=settlements_submitted,
     )
     cache_report = await invalidate_cache_tags(redis_client, summary)
+    summary.cache_invalidations = cache_report.total
     stats = summary.to_stats(total_fetched, latency_ms, cache_report.total)
     stats["resolution_gaps"] = gap_count
     stats["polymarket_ok"] = True

@@ -39,6 +39,41 @@ def _seed_market(db_session, event_id: str = "mkt-test", address: str = "0x11111
     return market
 
 
+def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch):
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    market = models.Market(
+        event_id="claim-pending",
+        title="Pending Market",
+        oracle="0x1234",
+        market_address="0x5555555555555555555555555555555555555555",
+        resolution_status=models.ResolutionStatusEnum.PENDING.value,
+    )
+    db_session.add(market)
+    db_session.flush()
+    settlement = models.Settlement(
+        id=market.id,
+        market_id=market.id,
+        merkle_root="0xabc",
+        commitments_count=1,
+        winning_outcome_id=0,
+    )
+    db_session.add(settlement)
+    db_session.commit()
+
+    payload = {
+        "event_id": market.event_id,
+        "wallet_address": user.address,
+        "ticket_id": 0,
+    }
+    resp = client.post("/trade/claim", json=payload)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_not_final"
+
+
 def test_pricing_quote_auto_creates_market_when_missing_address(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()

@@ -36,6 +36,18 @@ bash generate_keys.sh
 #   .circom-bin/              -> cached circom binary (auto-downloaded when not on PATH)
 ```
 
+To export the generated artifacts into the vetted `prover/artifacts` store (submodule), run:
+
+```bash
+bash export_artifacts.sh
+```
+
+To pull the vetted artifacts back into the live build/caches (e.g., in CI or on a fresh checkout), run:
+
+```bash
+bash import_from_artifacts.sh
+```
+
 After running the script:
 
 1. Redeploy the Solidity verifier (or rerun `forge script ... Deploy.s.sol`) so the on-chain contract picks up the new verifying key from `contracts/cache/settlement-vk.json`.
