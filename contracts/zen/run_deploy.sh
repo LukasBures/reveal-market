@@ -6,11 +6,17 @@ set -euo pipefail
 # ----------------------------------------------------------------------
 # Wraps the Deploy.s.sol script with required env checks and sensible defaults.
 # Required env:
-#   DEPLOYER_KEY           Private key for broadcasting (0x-prefixed hex)
-#   RPC_URL                Target RPC URL
-#   ORACLE_ADDRESS         Oracle address to wire into the factory
-#   AUTHORIZATION_SIGNER   Backend commit auth signer
-#   ZEN_TOKEN_ADDRESS      ERC20 collateral token address
+#   PRIVATE_KEY                  Deployer/owner key (0x-prefixed hex)
+#   RPC_URL                      Target RPC URL
+#   ORACLE_ADDRESS               Oracle address to wire into the factory
+#   AUTHORIZATION_SIGNER         Backend commit auth signer (EOA)
+#   ZEN_TOKEN_ADDRESS            ERC20 collateral token address
+#   RELAYER_ADDRESS              Relayer EOA for escrow
+#   TICKET_SIZE_WEI              Fixed ticket size (wei)
+#   MAX_COMMITMENTS              Max tickets per market
+#   RAKE_BPS                     Rake in basis points (e.g., 200 = 2%)
+#   PROTOCOL_LIABILITY_CAP_WEI   Per-market liability cap from protocol pool (wei)
+#   CIRCUIT_HASH                 Settlement circuit hash to enforce
 # Optional:
 #   USE_STUB_VERIFIER=1    Use stub verifier (skips SETTLEMENT_VK_JSON)
 #   SETTLEMENT_VK_JSON     Full verifying key JSON when USE_STUB_VERIFIER=0
@@ -27,7 +33,7 @@ if ! command -v forge >/dev/null 2>&1; then
 fi
 
 # Pick an env file to source (default to repo .env.production). Override by exporting ENV_FILE before running.
-DEFAULT_ENV_FILE="${ROOT_DIR}/../../.env.production"
+DEFAULT_ENV_FILE="${ROOT_DIR}/.env"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -45,11 +51,17 @@ require_env() {
   fi
 }
 
-require_env "DEPLOYER_KEY"
+require_env "PRIVATE_KEY"
 require_env "RPC_URL"
 require_env "ORACLE_ADDRESS"
 require_env "AUTHORIZATION_SIGNER"
 require_env "ZEN_TOKEN_ADDRESS"
+require_env "RELAYER_ADDRESS"
+require_env "TICKET_SIZE_WEI"
+require_env "MAX_COMMITMENTS"
+require_env "RAKE_BPS"
+require_env "PROTOCOL_LIABILITY_CAP_WEI"
+require_env "CIRCUIT_HASH"
 
 USE_STUB_VERIFIER="${USE_STUB_VERIFIER:-0}"
 if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
@@ -67,11 +79,17 @@ if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
   fi
 fi
 
-export DEPLOYER_KEY
+export DEPLOYER_KEY="${PRIVATE_KEY}"
 export RPC_URL
 export ORACLE_ADDRESS
 export AUTHORIZATION_SIGNER
 export ZEN_TOKEN_ADDRESS
+export RELAYER_ADDRESS
+export TICKET_SIZE_WEI
+export MAX_COMMITMENTS
+export RAKE_BPS
+export PROTOCOL_LIABILITY_CAP_WEI
+export CIRCUIT_HASH
 export USE_STUB_VERIFIER
 export SETTLEMENT_VK_JSON
 export CHAIN_ID

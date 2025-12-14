@@ -42,3 +42,25 @@ forge test
 - Deploy `ProtocolPool`, `RelayerEscrow`, `RevealMarket` implementation, `Verifier` (with regenerated vk), then `MarketFactory`.
 - Call `syncFactoryHooks()` so pool/escrow accept factory registrations.
 - Use `MarketFactory.createMarket` with desired parameters; fixed ticket size + max commitments enforce anonymity set sizing.
+
+### Environment (.env) needed for `run_deploy.sh` (Horizen testnet)
+Create `contracts/zen/.env` from `.env.example` with:
+- `RPC_URL=https://horizen-testnet.rpc.caldera.xyz/http`
+- `CHAIN_ID=2651420`
+- `PRIVATE_KEY=<deployer key>` (e.g., `0x....77`)
+- `TOKEN_ADDRESS=<ZEN ERC20>` (e.g., `0x48e96bA58969f09e86B8B22AfEd12d3aF3367795`)
+- `RELAYER_ADDRESS=<relayer EOA>` (e.g., `0xdAdEbecf077cdA5f86F60a91f76B238F675204f9`)
+- `AUTH_SIGNER_PRIVATE_KEY=<authorization signer key>` (e.g., `0x.....49`)
+- `ORACLE_ADDRESS=<oracle EOA>` (e.g., `0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369`)
+- Optional (if your scripts expect): `CIRCUIT_HASH=<expected proof circuit hash>`, `PROTOCOL_LIABILITY_CAP_WEI`, `TICKET_SIZE_WEI`, `MAX_COMMITMENTS`, `RAKE_BPS`
+
+After deployment, note the new `RelayerEscrow` address and update `.env.local` / `.env.production`:
+- `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS`, `RM_RELAYER_ESCROW_ADDRESS`, `RELAYER_ESCROW_ADDRESS` → new escrow
+- `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS`, `ZEN_TOKEN_ADDRESS` → token address
+- `RELAYER_PRIVATE_KEY` → relayer key (unchanged unless you rotate)
+
+- CIRCUIT_HASH: The expected hash of the settlement circuit (Groth16) that markets verify in verifyAndSettle. Set this to the hash of your proving circuit so on-chain verification rejects proofs for a different circuit. Use the value produced when you generated the vk/proof artifacts.
+- TICKET_SIZE_WEI: Fixed stake per commit (in wei). Every commitWithAuthorization must match this exact amount. Set to your chosen ticket size (e.g., 100000000000000000 for 0.1 ZEN).
+- MAX_COMMITMENTS: Maximum number of commits (tickets) the market will accept. Controls the anonymity set and caps liability.
+- RAKE_BPS: Rake in basis points (1 bp = 0.01%). 200 = 2% rake. Rake is skimmed on each commit and sent to ProtocolPool.
+- PROTOCOL_LIABILITY_CAP_WEI: Per-market liability cap drawn from ProtocolPool to cover shortfall. Set to 0 to disable protocol top-up; otherwise set the cap in wei.
