@@ -169,7 +169,7 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
-                    <div className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-slate-200">
+                    <div className="mt-3 space-y-3 text-slate-200">
                       <p className="text-sm font-semibold text-white">Resolution criteria</p>
                       <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{selectMarketCopy(market)}</div>
                       <ul className="mt-2 space-y-1 text-xs text-slate-400">

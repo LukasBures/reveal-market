@@ -167,7 +167,7 @@ class Settings(BaseSettings):
     max_page_size: int = Field(default=250)
     allowed_hosts: list[str] = Field(default_factory=lambda: _preset_list("api_allowed_hosts"))
     cors_allow_origins: list[str] = Field(default_factory=lambda: _preset_list("api_cors_origins"))
-    cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS"])
+    cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD", "OPTIONS", "POST"])
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)
     enable_security_headers: bool = Field(default=True)
