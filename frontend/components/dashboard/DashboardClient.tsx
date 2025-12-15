@@ -515,6 +515,7 @@ export function DashboardClient() {
                   p.tx_hash && p.tx_hash.length > 16
                     ? `${p.tx_hash.slice(0, 10)}…${p.tx_hash.slice(-6)}`
                     : p.tx_hash || null;
+                const txHref = explorerBase && p.tx_hash ? `${explorerBase}/${p.tx_hash}` : null;
                 return (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">
@@ -546,16 +547,11 @@ export function DashboardClient() {
                       <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
                       <span>
                         Tx:{" "}
-                        {p.tx_hash && explorerBase ? (
-                          <Link
-                            href={`${explorerBase}/${p.tx_hash}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline decoration-dotted"
-                          >
+                        {txHref ? (
+                          <a href={txHref} target="_blank" rel="noreferrer" className="underline decoration-dotted">
                             {txHashShort}
-                          </Link>
-                        ) : p.tx_hash ? (
+                          </a>
+                        ) : txHashShort ? (
                           txHashShort
                         ) : (
                           "—"
