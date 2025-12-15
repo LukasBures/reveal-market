@@ -25,6 +25,12 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
 > **Tip:** `docker/prover/Dockerfile` installs Node 20 and pulls `rapidsnark v0.0.7` from official releases, mounting `./prover/circuits` into `/app/circuits`. Run `bash prover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2`; stick to the bundled binary unless you need a different build.
 > **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
 
+## Current implementation snapshot
+- Artifact checks (`check_artifacts.sh`, `cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey` or WASM/witness assets are missing or hash mismatched.
+- Concurrency guarded by semaphore (`PROVER_MAX_CONCURRENCY`); per-proof timeout wraps witness + rapidsnark; temporary directories cleaned after each job.
+- Integration tests include stubbed rapidsnark/Node plus real artifact flow in CI; repo-root `./run_tests.sh` calls into the same checks.
+- Metrics: `prover_request_latency_seconds` histogram, success/failure counters, `prover_active_proofs`, `prover_artifacts_ok`, and last proof latency gauges; `/healthz` carries circuit hash/readiness.
+
 ## Architecture Overview
 
 ```

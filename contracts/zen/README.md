@@ -16,6 +16,16 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 4) Oracle calls `verifyAndSettle(proof, pubSignals)`; market enforces `totalLiability <= totalEscrow + protocolCap`, draws from `ProtocolPool` if needed, asserts proof rakeBps matches current config (rake already collected), pushes any surplus to the pool, moves to `Settled`.
 5) Relayer reveals winners via `claim(...)` with Merkle proof; payouts route to escrow, losers stay hidden. Once all liability claimed, market finishes and sends leftover to `ProtocolPool`.
 
+### Current state (what’s implemented)
+- Fixed ticket value per market (constant in storage) with per-market `maxCommitments` to size the anonymity set and cap liability.
+- Rake skimmed at commit time and tracked via pool events; settlement asserts proof rake matches current config so mismatched circuits fail.
+- Commit/reveal deadlines enforce monotonic extensions only; `setCommitsPaused`/`setClaimsPaused` allow emergency halts without killing markets.
+- Authorization signer enforced on every commit; digest binds market, id, commitment, user, nonce, expiry, ticket value, chain id. Nonces and expiries prevent replay.
+- ProtocolPool tracks per-market draws and global balance; `ProtocolPool.draw` reverts on cap breach. Surplus flows back after settlement.
+- Circuit hash stored in factory and market; settlement checks proof hash to prevent mismatched circuits.
+- Verifier is configurable; tests assert correct calldata layout from prover and circuit hash alignment.
+- Events emitted for every admin mutation (rake change, signer/oracle/relayer/escrow rotation, cap updates) to feed backend mirroring.
+
 ## Admin Controls
 - Factory owner rotates `authorizationSigner`, `oracle`, or `relayerEscrow` on existing markets; new relayers must set `marketFactory` before rotation so hooks succeed.
 - Per-market `protocolLiabilityCap` is adjustable until settlement; global rake is mutable and can be pushed to markets.
@@ -37,6 +47,8 @@ cd contracts/zen
 forge fmt
 forge test
 ```
+
+Tests cover authorization replay protection, deadline invariants, rake skim/draw accounting, protocol cap enforcement, surplus handling, pausing, oracle-only settle, claim proofs, and circuit hash validation. Gas snapshots run via `./run_local.sh full`.
 
 ## Deploy Notes
 - Deploy `ProtocolPool`, `RelayerEscrow`, `RevealMarket` implementation, `Verifier` (with regenerated vk), then `MarketFactory`.
@@ -64,3 +76,9 @@ After deployment, note the new `RelayerEscrow` address and update `.env.local` /
 - MAX_COMMITMENTS: Maximum number of commits (tickets) the market will accept. Controls the anonymity set and caps liability.
 - RAKE_BPS: Rake in basis points (1 bp = 0.01%). 200 = 2% rake. Rake is skimmed on each commit and sent to ProtocolPool.
 - PROTOCOL_LIABILITY_CAP_WEI: Per-market liability cap drawn from ProtocolPool to cover shortfall. Set to 0 to disable protocol top-up; otherwise set the cap in wei.
+
+## Operational notes
+- **Factory mirroring** – Backend worker should mirror `MarketCreated`, `RakeConfigured`, `AuthorizationSignerUpdated`, and cap/escrow/oracle rotations to keep rake/circuit hash/signer aligned across services.
+- **Verifier alignment** – Keep `contracts/cache/settlement-vk.json`, backend/prover circuit hash, and on-chain verifier in sync; mismatch forces settlement failure by design.
+- **Relayer health** – `RelayerEscrow` requires `marketFactory` to be set; deployers must call `syncFactoryHooks` after deploying a new factory or rotating escrows/relayers.
+- **Upgrades** – Market implementation is clone-based; to upgrade logic deploy a new implementation + factory and migrate addresses in backend envs. Old markets remain on the old implementation; adjust monitoring accordingly.

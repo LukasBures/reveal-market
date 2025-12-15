@@ -1,43 +1,44 @@
-# Backend MVP Checklist
+# Backend MVP + Hardening Checklist
 
-These are the only backend tasks blocking the MVP launch. Defer everything else until these land.
+The backend already runs the API, ingestion worker, quote ledger, cache priming, and prover hooks. These tasks close the remaining gaps for auditability, safety, and exchange-readiness.
 
-## 0. Signed pricing + quote storage
-- Keep the API signing ABI-packed quotes that match `RevealMarket.commitWithQuote` (`QUOTE_V1`, chainid, market, wallet, outcome, stake_wei, fx_scaled, expiry, quoteId) and reject requests missing those fields.
-- Add durable quote persistence (status, expiry, consumed_at) instead of best-effort Redis so we can audit/replay-protect even if Redis evicts.
-- Expose a health/smoke check for pricing signer envs (`RM_PRICING_CHAIN_ID`, signer key/address) and fail fast when misconfigured.
+## 0. Signed pricing + quote ledger (must ship)
+- Persist quotes durably in Postgres (`quotes` table) with statuses (`issued`/`consumed`/`expired`), requester identity, FX snapshot, and expiry timestamps; stop relying on Redis-only TTLs.
+- Enforce quote issuance against known markets: require `market_id` exists, matches stored factory address + outcome count, is not settled/blocked, and reject arbitrary addresses/outcome IDs before signing.
+- Add readiness smoke for signer config (RM_PRICING_CHAIN_ID, RM_PRICING_SIGNER_PRIVATE_KEY, PRICING_SIGNER_ADDRESS) and fail fast when misconfigured; surface signer status in `/health` with clear degraded/error states.
+- Make replay protection provable: expose quote lookups + audit endpoint gated by auth so ops can reconcile quotes vs commits; sweep expired quotes on an interval and mark consumed in a transaction inside `pricing_submit`.
 
 ## 1. AI summary provenance
-- Persist every AI-generated summary (model, prompt hash, retrieval context, requested/checked timestamps) in Postgres.
-- Expose the summary history via `/markets/{event}` and include the latest metadata in `/markets` responses so auditors can trace narrative evolution.
+- Persist every summary in Postgres with `model`, `prompt hash/template`, `source docs`, `requested/attempted/checked_at`, and `status` (generated/failed/fallback); include the rendered text.
+- Expose history per market via `/markets/{event}` and surface the latest summary metadata in `/markets` list payloads; include `summary_source`/`summary_model`/`summary_generated_at`.
+- Add DLQ/retry metrics for `summary_worker`, plus health warnings when summaries are stale or when the provider falls back to the deterministic template.
 
-## 2. Resolution ledger
-- Store resolution payloads (condition ID, payouts, winners, oracle/question IDs, block number, block timestamp, tx hash) in Postgres + Redis.
-- Return this data from `/markets`, `/markets/{event}`, and `/proofs` without needing to hit upstream APIs.
+## 2. Resolution ledger + receipts
+- Store payout vectors in Postgres + Redis (`resolutions`, `resolution_snapshots`) with condition id, question/oracle ids, block number/ts, tx hash, payouts array, and `resolution_source`.
+- Return this ledger in `/markets`, `/markets/{event}`, and `/proofs` without querying upstream; invalidate caches on refresh.
+- Cache prover receipts keyed by market/condition and surface them in `/proofs`/`/markets/{event}`; include circuit hash/verifier address alignment checks.
 
 ## 3. On-chain mirroring & automation
-- Stream MarketFactory events (MarketCreated, RakeConfigured, guardian updates) into Postgres/Redis so rake + address data never drifts.
-- Add an optional settlement automation loop that queues on-chain settlement transactions (or alerts ops) once payouts finalize, with duplicate suppression + retry logging.
+- Mirror MarketFactory/ProtocolPool/RelayerEscrow events into Postgres (MarketCreated, RakeConfigured, guardian/owner updates, factory hooks) and expose the latest rake/liability caps via the API.
+- Optional settlement automation: queue prover requests + `verifyAndSettle` tx submission with idempotency, duplicate suppression, and retry/backoff; surface per-market automation status + last error.
+- Add operator alerts/webhooks when proofs fail, automation pauses, or verifier/circuit hash mismatch is detected.
 
-Ship these three items and the backend will meet MVP expectations for provenance, settlement integrity, and ops readiness.
-
-## 4. Bet caps (off-chain + future on-chain)
-- Enforce per-bet cap (0.1 ZEN), per-user-per-market cap, and per-market ZEN cap at the API layer; surface limits in responses.
-- Mirror caps in hedger risk checks so oversized commits never hedge.
-- Add a TODO for on-chain enforcement (maxTicketStake, maxUserStakePerMarket) to close the loop in a later contract upgrade.
+## 4. Bet caps + identity alignment
+- Enforce per-bet (0.1 ZEN), per-user-per-market, and per-market caps in `pricing_quote`/`pricing_submit`; return limits in responses so the frontend can show them.
+- Derive user identity from authenticated context (wallet signature or session) instead of trusting `user_id` input; tie the identity to the quote digest and submission.
+- Mirror caps into hedger risk checks (shared settings) so oversized commits are rejected before hedging; document the future on-chain enforcement path (`maxTicketStake`, `maxUserStakePerMarket`).
 
 ## 5. CORS/FX hardening
-- Add a smoke test to ensure `/pricing/fx` responds with configured CORS origins (RM_CORS_ALLOW_ORIGINS) and flags stale/fallback FX.
-- Surface a health warning when FX feeds fall back or when streamer/API origins are missing, so frontend SSE/history calls don’t get blocked.
-- Keep pricing signer chain/env vars aligned to Horizen Testnet defaults (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`) and warn when mismatched.
+- Add health/log warnings when streamer/API origins or CORS lists are missing/misaligned; `/pricing/fx` should refuse to start if `RM_CORS_ALLOW_ORIGINS` is unset in prod.
+- Make FX drift checks explicit: reject quotes when FX is stale or when drift exceeds configured tolerance; surface fallback source (Binance REST/CryptoCompare) in health.
+- Tests: smoke that `/pricing/fx` honors CORS, stale detection, and streamer host overrides; ensure Horizen Testnet defaults stay aligned (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`).
 
-## 6. API security hardening
-- Critical – Mutation endpoints are unauthenticated. `/markets` POST/PATCH, `/pricing/quotes/{id}`, `/treasury/snapshots`, `/proofs`, `/clob/orderbook`, and `/markets/onchain` (see `backend/api/app/routes/*.py`) are operational controls with no auth; anyone can create/modify markets and poison caches. Gate them (API key/JWT/internal network) or remove from public exposure.
-- Critical – Pricing signer will sign arbitrary contracts/outcomes. In `backend/api/app/routes/pricing.py` the service accepts any `market_address`, `outcome_id`, and even non-existent `market_id`; it only blocks if a known market is already settled. An attacker can request quotes for their own contract/outcome and receive a valid signer signature, bypassing caps by inventing event IDs. Require the market to exist, match the stored factory address/outcome count, and refuse unknown/settled or mismatched addresses before signing.
-- High – Rate limiting is trivial to bypass. `RateLimitMiddleware` trusts the first `X-Forwarded-For`/`X-Real-IP` header and uses an in-process memory fallback, so a client can spoof headers or fan out across workers to evade limits and flood quote creation (which writes to Postgres). Pin the trusted proxy list or read `scope['client']`, and keep Redis as the source of truth for counters.
-- High – Caps/quotas rely on untrusted identity. The per-user cap logic in pricing_quote/pricing_submit (`backend/api/app/routes/pricing.py`) trusts the client-supplied `user_id` with no linkage to the wallet or session, so an attacker can exhaust another user’s allowance or bypass their own by rotating IDs. Derive the identifier from authenticated context (wallet signature/session) and ensure it matches the quote payload.
-- Medium – Information exposure via diagnostics. Health and diagnostic routes return sensitive internals (schema revision, pricing signer status, cache stats, worker latencies) and treasury/proof/quote data (`backend/api/app/health.py`, `backend/api/app/routes/*`). Prometheus `/metrics` is also exposed without auth. Restrict these to internal networks or add auth + redaction before MVP.
+## 6. API security hardening (critical)
+- Gate mutation endpoints (`/markets` POST/PATCH, `/pricing/quotes/{id}`, `/treasury/snapshots`, `/proofs`, `/clob/orderbook`, `/markets/onchain`) with API key/JWT/internal network; add authn/role checks and redact sensitive fields in responses.
+- Fix rate limiting: trust proxy list or `scope['client']`, remove in-process counters, and enforce Redis-backed limits for quote creation; add tests around header spoofing.
+- Lock down diagnostics: restrict `/metrics`, `/health`, treasury/proof/quote debugging routes to internal auth; redact schema revisions/signers when unauthenticated.
 
-## 7. Async + docs hygiene
-- Replace any remaining synchronous integrations (CLOB client, on-chain helpers) with async equivalents or explicit thread offloading, and trace anything that could block the event loop.
-- Keep the new inline docs and mypy config healthy; drop the shared/* ignore once those packages ship `py.typed` and type hints are stabilized.
+## 7. Async + performance hygiene
+- Audit any remaining blocking calls (CLOB clients, on-chain helpers) and offload to threads or async implementations; trace slow spans.
+- Remove `shared/*` mypy ignores after publishing `py.typed` and stabilizing type hints; keep inline docs current.
+- Add load tests for cache bypass modes (Redis down) to ensure endpoints stay non-blocking and logs/metrics remain accurate.

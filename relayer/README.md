@@ -2,6 +2,11 @@
 
 Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to the Reveal Market contracts. Runs as a FastAPI service with Web3 + EOA signer.
 
+## What it does today
+- Exposes `/commit` and `/claim` endpoints that accept backend-issued authorization payloads, build transactions, and submit them with retries/backoff; optional durable queue (Postgres preferred, SQLite fallback) adds delayed retries + fee bumping.
+- Healthcheck `/healthz` reports block freshness, signer balance, escrow token balances/allowance, configured addresses, and queue state; `/metrics` exports Prometheus counters for tx attempts/failures/fee bumps + gauges for ETH/token balances.
+- Admin endpoints list/replay/purge dead-lettered queue jobs when queue mode is on and bearer auth is configured.
+
 ## Requirements
 - Python 3.12
 - `uv` (package manager): `pip install uv` or download from https://github.com/astral-sh/uv
@@ -57,3 +62,5 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=src uv run pytest
 - Service uses a durable queue with automatic fee bumping; set `RM_DATABASE_URL` to a Postgres instance to persist across restarts (mount a volume if using SQLite).
 - Gas funding: ensure the relayer EOA is funded on the target network; health exposes ETH balance, collateral token balances/allowances, and block freshness.
 - Contracts must match the deployed ABI (commit/claim paths). Update `abi.py` if needed.
+- Queue mode recommended for production: enables DLQ, fee bumps, and replay. Synchronous mode still retries `RELAYER_MAX_RETRIES` times before surfacing errors.
+- Logs follow the global format (`timestamp | LEVEL | logger | file:line | event | request_id`) with tx hash and gas settings included for observability.

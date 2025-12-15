@@ -13,6 +13,13 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 - Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services. The API now assumes the streamer is reachable at `/fx/zen-usd`; update host/port in `backend/api/app/pricing.py` if you change it.
   - Presets: `MODE=local` uses `http://localhost:8100` + localhost CORS; `MODE=prod` pins `https://stream.revealmarket.xyz` + prod CORS union into middleware so both local + prod origins are allowed without extra overrides. Wildcard CORS is disallowed in prod.
 
+## Current implementation snapshot
+- **State & subscriptions** – `StreamState` tracks active SSE/WS clients, Redis handles cache/history, and asset refcounts ensure upstream WS only stays subscribed when needed. Placeholders swap to real `clobTokenIds` once REST discovery succeeds.
+- **FX pipeline** – Single WS connection for ZEN/USDT with staleness timers; when stale or failed, REST falls back to Binance then CryptoCompare with jump bounds. Gauges expose source + staleness; stale FX returns HTTP 503 and WS `fx_stale=true`.
+- **Market data** – CLOB WS + RTDS merge into a throttled publish path with dedupe; Redis-backed history is bounded by `STREAMER_HISTORY_LIMIT`/`TTL`. `/history` and `/clob/*` read the cached payloads, not upstream, so API/clients survive upstream hiccups.
+- **Security & access** – Optional HMAC signing (`STREAMER_SIGNING_SECRET`), bearer-style `STREAMER_ACCESS_TOKEN` for `/stream`/`/stream/ws`, and `STREAMER_CONTROL_TOKEN` for subscription control endpoints. CORS hosts/allowed methods/headers are enforced via middleware presets per MODE.
+- **Metrics/ops** – `/metrics` exposes FX source/staleness, publish/dropped counters, connection counts, and per-market staleness gauges. `/dashboard` surfaces last-seen timestamps and stale lists for quick checks. Docker healthcheck uses `python -m app.healthcheck`.
+
 ## Requirements
 - Python 3.12
 - Redis 5+

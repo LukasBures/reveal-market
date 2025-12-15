@@ -13,19 +13,41 @@ Default testnet: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testn
 
 | Directory | Purpose | Highlights |
 | --- | --- | --- |
-| `backend/api` | FastAPI service for markets, settlements, and partner endpoints. | Trusted-host & CORS controls, CSP/HSTS middleware, Redis cache hydration + tag invalidation, signed pricing quotes, Prometheus/pytest suite, docker health probe. |
-| `backend/worker` | Async ingestion + optional on-chain automation. | Alembic migrations at boot, Polymarket+CLOB ingest, Goldsky/ConditionalTokens resolution snapshots + cache priming, summary/prover hooks, structured logging, pytest suite. |
-| `frontend/` | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, marketing-ready components, zero mock fallbacks. |
-| `contracts/zen` | Foundry workspace for the Horizen deployment. | zk-ready settlement events, Forge tests/fuzzing, run scripts, roadmap for Groth16 verifier. |
+| [`backend/api`](backend/api/README.md) | FastAPI service for markets, settlements, and partner endpoints. | Trusted-host & CORS controls, CSP/HSTS middleware, Redis cache hydration + tag invalidation, signed pricing quotes, Prometheus/pytest suite, docker health probe. |
+| [`backend/worker`](backend/worker/README.md) | Async ingestion + optional on-chain automation. | Alembic migrations at boot, Polymarket+CLOB ingest, Goldsky/ConditionalTokens resolution snapshots + cache priming, summary/prover hooks, structured logging, pytest suite. |
+| [`frontend/`](frontend/README.md) | Investor-facing Next.js property. | SEO metadata helpers, CSP headers, sitemap/robots, Vitest coverage, streaming odds/FX, marketing-ready components, zero mock fallbacks. |
+| [`contracts/zen`](contracts/zen/README.md) | Foundry workspace for the Horizen deployment. | Commit/reveal markets with protocol liability caps, rake skimmed at commit, Groth16 verifier + circuit hash enforcement, forge tests/fuzz/gas snapshots. |
 | `contracts/polygon` | Foundry workspace for the Polygon deployment (LP vault, hedging plumbing). | Self-contained deps, hardened LP vault with extensive tests, gas checks, and run scripts. |
-| `prover/` | Groth16 prover + circuit artifacts. | SnarkJS-backed witness + proof generation, heartbeat endpoint, and helper scripts for refreshing proving/verifying keys (fails fast if the compiled artifacts aren’t mounted so only real proofs are ever produced). |
-| `hedger/` | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
-| `streamer/` | Polymarket price ingest + SSE/WS fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
+| [`prover/`](prover/README.md) | Groth16 prover + circuit artifacts. | rapidsnark-backed proofs with artifact gate, heartbeat/metrics, CLI to verify artifacts, integration tests, no mock mode. |
+| [`hedger/`](hedger/README.md) | Off-chain hedger + settlement orchestrator. | FastAPI admin API, Prometheus metrics, exposure + risk ledger, Redis idempotency/locks, slippage-gated hedging/unwinds, settlement payload builder from stored commits. |
+| [`streamer/`](streamer/README.md) | Polymarket price ingest + SSE/WS fanout with FX support. | Streams CLOB ticks + optional RTDS crypto feed, applies worsen/haircut/rake server-side, caches in Redis, serves `/stream` SSE + `/history` for charts. |
+| [`relayer/`](relayer/README.md) | FastAPI relayer for `commitOnBehalf`/`claim`. | Durable queue with fee bumps, health/metrics, bearer auth option, Horizen Testnet defaults. |
 | `backend/api` + `frontend` + `contracts/zen` | Signed pricing + on-chain enforcement. | API signs ABI-packed quotes (`QUOTE_V1`, chainid, market, wallet, outcome, stake_wei, fx_scaled, expiry, quoteId), frontend requests quotes with those fields and submits `commitWithQuote`, contracts enforce signatures/replay/expiry with `pricingSigner`. |
 
 Additional docs live in each directory’s README.
 
+### Component documentation + TODOs
+- Backend API – [`backend/api/README.md`](backend/api/README.md) / [`backend/TODO.md`](backend/TODO.md)
+- Worker – [`backend/worker/README.md`](backend/worker/README.md) / [`backend/TODO.md`](backend/TODO.md)
+- Frontend – [`frontend/README.md`](frontend/README.md) / [`frontend/TODO.md`](frontend/TODO.md)
+- Contracts (Zen) – [`contracts/zen/README.md`](contracts/zen/README.md) / [`contracts/zen/TODO.md`](contracts/zen/TODO.md)
+- Streamer – [`streamer/README.md`](streamer/README.md) / [`streamer/TODO.md`](streamer/TODO.md)
+- Hedger – [`hedger/README.md`](hedger/README.md) / [`hedger/TODO.md`](hedger/TODO.md)
+- Relayer – [`relayer/README.md`](relayer/README.md) / [`relayer/TODO.md`](relayer/TODO.md)
+- Prover – [`prover/README.md`](prover/README.md) / [`prover/TODO.md`](prover/TODO.md)
+
 ---
+
+**Component Overviews**
+- **Backend API** (`backend/api`) – FastAPI surface with Redis-tagged caches, normalized market/outcome/tag/clob metadata tables, signed QUOTE_V1 pricing, health/metrics, rate limiting, and startup migrations; tests via `./backend/run_tests.sh`.
+- **Worker** (`backend/worker`) – Async Polymarket Gamma ingest with retries/rate limits, Goldsky + Conditional Tokens resolution ledger, cache priming/invalidation, prover receipt requests, AI summary queue, heartbeats/batch stats, retention metrics; runs inside the same test harness.
+- **Frontend** (`frontend`) – Next.js 15 App Router with streaming odds/FX, SSR data fetches aligned to backend cache tags, signed-quote commit flow via wagmi/viem, CSP/HSTS headers, Vitest suites for hero/nav/featured/search/market cards/FX; lint/test/build via `frontend/run_tests.sh`.
+- **Contracts (Zen)** (`contracts/zen`) – Fixed-ticket commit/reveal markets (`RelayerEscrow`, `ProtocolPool`, `MarketFactory`, `RevealMarket`, Groth16 `Verifier`), rake skimmed at commit, circuit hash enforced at settle, protocol liability caps, extensive forge tests/fuzz/gas snapshots via `contracts/run_tests.sh` or `contracts/zen/run_local.sh full`.
+- **Contracts (Polygon)** (`contracts/polygon`) – LP vault/hedging workspace with its own scripts/tests; run with the same `contracts/run_tests.sh`.
+- **Streamer** (`streamer`) – FastAPI SSE/WS for Polymarket CLOB + RTDS + Binance FX with REST fallback, Redis cache/history, staleness guards, optional HMAC/access tokens, Prometheus metrics; tests via `streamer/run_tests.sh`.
+- **Hedger** (`hedger`) – FastAPI admin API with exposure/risk ledger, FX/slippage caps, Redis locks/idempotency, hedging/unwind instructions, settlement/prover payload builder, metrics; tests via `hedger/run_tests.sh`.
+- **Relayer** (`relayer`) – FastAPI relayer for `commitOnBehalf`/`claim` with retries/backoff or durable queue + fee bumps, health/metrics/admin DLQ endpoints; tests via `relayer/run_tests.sh`.
+- **Prover** (`prover`) – Go rapidsnark service with artifact gate, witness/proof pipeline, metrics/pprof, integration tests; check artifacts via `prover/cmd/verify-artifacts` and run tests with `prover/run_tests.sh`.
 
 ## Database Schema (Postgres)
 

@@ -152,13 +152,19 @@ class RelayerService:
         chain_id = int(payload.get("chain_id") or self.chain_id)
         if chain_id != self.chain_id:
             raise TxSendError(f"chain_id_mismatch:{chain_id}", nonce=nonce_override)
+        commitment = Web3.to_bytes(hexstr=payload["commitment"])
+        if len(commitment) != 32:
+            raise TxSendError("invalid_commitment_length", nonce=nonce_override)
+        user_addr: ChecksumAddress = self.web3.to_checksum_address(payload["user"])
+        market_addr: ChecksumAddress = self.web3.to_checksum_address(payload["market"])
         auth = (
-            payload["commitment"],
-            payload["user"],
+            commitment,
+            user_addr,
             int(payload["nonce"]),
             int(payload["expiry"]),
             ticket_value,
         )
+        signature_bytes = Web3.to_bytes(hexstr=payload["signature"])
         logger.info(
             "relayer.commit.prepare",
             user=payload.get("user"),
@@ -172,10 +178,10 @@ class RelayerService:
         )
         base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
         tx = self.escrow.functions.commitOnBehalf(
-            payload["user"],
-            payload["market"],
+            user_addr,
+            market_addr,
             auth,
-            payload["signature"],
+            signature_bytes,
         ).build_transaction(base_tx)
         return await self._send_and_wait(tx, "commit")
 

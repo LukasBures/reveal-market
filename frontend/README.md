@@ -42,6 +42,15 @@ Tech stack callouts:
 - **Streaming + FX resilience** – `usePriceStream`/`useLiveOutcomePrices` multiplex a shared WS stream per market with backoff and history seeding; `useFxStream` keeps one FX WS alive with HTTP fallbacks and stale guards so price cards stay safe when WS is blocked or slow.
 - **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
 
+## What’s Implemented Today
+
+- **SSR-first data** – All routes fetch directly from the FastAPI backend; cache tags mirror worker invalidation so `revalidateTag` and server actions stay aligned. Suggestions proxy through `/app/api/markets/suggest` to avoid double hits.
+- **Live pricing** – `useLiveOutcomePrices` ties SSE/WS `/stream` to market detail; history hydrates from backend/streamer and merges live ticks. FX uses WS-first `/fx/zen-usd` with HTTP fallback + stale warnings that block trades.
+- **Quote submission** – Stake panels clamp to 0.1 ZEN, require wallet + market address + outcome id, fetch signed quotes from `/pricing/quote`, and submit `commitWithQuote` via wagmi/viem; expiry/chain mismatch triggers auto-refresh.
+- **Security posture** – `next.config.mjs` ships CSP/HSTS/COOP/Permissions-Policy; GA/gtag only allowed in production. App Router routes opt into `metadata` from `lib/seo.ts` so sitemap/robots stay accurate.
+- **Testing** – Vitest covers hero CTA, navs, featured markets pagination, search suggestions, market cards/metadata, and FX/streaming hooks. `frontend/run_tests.sh` fails fast when the API `/health` is unreachable to mirror CI.
+- **Observability** – Structured logs per fetch helper, client heartbeat in `RootLayout`, and streaming hooks surface source/staleness for ops dashboards.
+
 ---
 
 ## Environment Variables

@@ -22,6 +22,18 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ---
 
+## Current implementation snapshot
+
+- **Startup** – Configures logging, builds clients (Polymarket, optional CLOB, Goldsky, Conditional Tokens, prover), connects to Redis, optionally runs Alembic migrations, and broadcasts schema revision to Redis.
+- **Ingestion loop** – `process_once` fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies resolutions (Goldsky preferred, Conditional Tokens fallback).
+- **Cache governance** – Invalidates Redis tags for market list/detail/resolution, primes homepage/categories/suggest caches, writes schema tags, and publishes batch stats + heartbeats to Redis.
+- **Resolution + proofs** – Persists payout vectors in Postgres + Redis; optional prover integration requests Groth16 proofs, caches receipts, and stores them in DB; resolved markets expire from cache 12 hours after `resolved_at`.
+- **Retention** – Reports metrics on resolved markets beyond `RM_RESOLVED_RETENTION_SECONDS` (no deletions yet); retention runner executes each loop.
+- **AI summaries** – Queues summary jobs for markets lacking narratives; `summary_worker` consumes with retries/backoff and can fall back to deterministic summaries when provider unavailable.
+- **Resilience** – Redis optional for background work (bypass on outage); Polymarket sync retries with exponential backoff; runtime is async-first (asyncpg + async HTTP) with tests covering mocked external deps.
+
+---
+
 ## Operational Notes
 
 - Startup validates required env vars in prod-like environments (DB/Redis URLs always, Polymarket base URL, and feature-specific secrets for summaries/prover/on-chain). Ensure the corresponding `RM_` envs are set before booting containers; defaults are for local only.

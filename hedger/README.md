@@ -12,6 +12,14 @@ The Hedger keeps RevealMarket economically neutral while preserving privacy. It 
 - Settlement orchestration: builds prover payloads from stored commits + outcome, persists receipts, marks markets resolved, and clears exposure (on-chain submission is stubbed).
 - Pricing guardrails: hedges refuse stale FX and enforce per-commit stake caps; defaults mirror UI (100 ZEN per bet) and haircuts/worsen/rake are applied server-side.
 
+### Current implementation snapshot
+- **State model** – `hedger_commits`, `hedger_hedge_actions`, `hedger_settlements`, `hedger_offsets`, `hedger_resolved_markets`, and `hedger_treasury_snapshots` store everything needed to replay exposure and audit hedging/settlement decisions. Hydration rebuilds YES/NO vectors and hedged USD on startup.
+- **Exposure ingestion** – Commit ingestion path expects backend/chain events with idempotency keys; Redis locks + DB uniqueness stop duplicate exposure. Offsets mark last processed commit/stream slot for replay.
+- **Risk/FX gating** – FX cache enforces staleness + haircut; slippage ceiling via `HEDGER_MAX_SLIPPAGE_BPS`. Risk checks enforce per-commit cap (100 ZEN default), optional per-market/global caps, and coverage ratio thresholds before emitting hedge instructions.
+- **Hedging actions** – Buy/sell/unwind instructions are persisted with execution payloads/response bodies; partial unwinds occur when over-hedged. Polymarket/vault bridges are stubbed but the control surface (state + retries) is in place.
+- **Settlement path** – Given stored commits + oracle outcome, the hedger builds prover payloads, requests proofs, stores receipts, marks resolved markets, and clears exposure. Tx submission is stubbed; logs/metrics cover latency and retries.
+- **API/metrics** – Admin API exposes exposures, risk config, positions, offsets, and settlements; Prometheus histograms for hedge latency, prover latency, coverage ratios, and event lag. Health probes check Postgres + Redis + FX reachability.
+
 ## Running locally
 The Docker image is wired into `docker-compose.yml` as `hedger`. To start it alongside the rest of the stack:
 

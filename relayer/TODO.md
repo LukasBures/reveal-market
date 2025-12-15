@@ -1,4 +1,5 @@
-- Queue integration and durable retries for commits/claims (basic retry/backoff is in place).
-- Further gas tuning (fee caps per-network, replacement/bump strategy).
-- Enrich health checks with escrow token balances/allowance.
-- CI job to run `uv run pytest` and lint.
+- Queue integration and durable retries for commits/claims (basic retry/backoff is in place); prefer Postgres storage, add DLQ metrics, and expose job status in `/healthz`.
+- Gas tuning: per-network base/priority fee caps, replacement/bump strategy tests, and configurable max fee percent over oracle price; surface gas params in metrics/logs.
+- Enrich health checks with escrow token balances/allowance and queue depth; mark degraded when below thresholds or when block age exceeds max.
+- CI job to run `uv run pytest` and lint; add recorded RPC fixtures for offline tests and regression cases for queue replay/fee bump flows.
+- Optional auth hardening: JWT/API key for admin + tx endpoints, rate limiting on `/commit`/`/claim`, and request_id propagation in logs/metrics.

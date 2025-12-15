@@ -19,6 +19,18 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 
 ---
 
+## Current implementation snapshot
+
+- **Lifespan** – Runs Alembic migrations on startup, configures logging/CORS/security headers, builds async Postgres/Redis clients, and exits hard when critical envs are missing in prod.
+- **Caching** – List/detail/resolution payloads cached in Redis JSON with schema + logical tags; startup and interval hydrators repopulate `/markets`, categories, and suggest. Clean bypass when Redis is down (no tag pollution).
+- **Search & detail** – Market payloads are normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns removed. `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event}` are async + cache-tagged; search uses indexed Postgres vectors (no cache).
+- **Health/metrics** – `/health` fans DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` for probes.
+- **Signed pricing** – `/pricing/quote` ignores client FX, fetches streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
+- **Rate limiting** – Async Redis-backed middleware exists; forwarded-header trust needs hardening (see backend/TODO.md).
+- **Observability** – Structured logs with request_id, Prometheus instrumentation, cache hit/miss counters, quote expiry sweeper; Python healthcheck scripts for Docker probes.
+
+---
+
 ## 2. Architecture & Request Lifecycle
 
 1. **Startup**: `app.server` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, and wires middleware (TrustedHost, CORS, security headers, Prometheus).

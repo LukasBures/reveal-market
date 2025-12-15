@@ -18,6 +18,17 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 > - Worker ingestion targets Polymarket’s Gamma API; when the upstream dataset returns `image_url = null`, the frontend falls back to deterministic placeholders. Populate `extra_data.image_url` via the worker once you negotiate richer feeds.
 > - All environments, including local Docker, rely on the live backend—mock API toggles have been removed from the frontend.
 
+## Current Implementation Snapshot (API + Worker)
+
+- **Schema-first storage** – Alembic-managed tables for markets, outcomes, tags, Gamma metadata, clob tokens, resolutions, quotes, settlements, commitments, Merkle paths, prover receipts, hedger metrics, and ops logs. Indexes cover search, status, event/category slugs, and quote expiry; updated_at triggers run everywhere.
+- **Cache tagging + hydration** – Detail/list/resolution responses are JSON cached in Redis with schema + logical tags. Startup and interval hydrators repopulate `/markets`, categories, and suggest; Redis bypass is clean when unavailable.
+- **Polymarket ingest** – Worker polls Gamma `/events` (active/non-archived defaults), flattens multi-market events, rate limits requests, retries with exponential backoff, and upserts normalized rows; optional CLOB enrichment hooks remain in place.
+- **Resolution pipeline** – Goldsky (preferred) → Conditional Tokens RPC fallback for payout vectors; stored in Postgres/Redis, cached in `/resolution/{condition_id}`, and surfaced in `/markets` detail payloads. Resolved markets drop from cache 12 hours after `resolved_at`.
+- **Signed pricing** – `/pricing/quote` ignores client FX, pulls streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and writes quote rows; `/pricing/submit` revalidates digest/expiry/FX drift and marks consumed.
+- **Health/metrics** – `/health` fans DB + Redis + worker heartbeat + Polymarket + signer/CORS checks; `/metrics` exposes Prometheus histograms/counters for HTTP, cache, ingest, and proof flows. Docker health probes use Python entrypoints instead of cURL.
+- **Automation hooks** – Worker emits heartbeats/batch stats, primes featured caches (markets/categories/suggest), can request Groth16 proofs, and has stubs for MarketFactory automation and AI summary queues. Retention currently reports metrics only.
+- **Logging** – Unified `timestamp | LEVEL | logger | file:line | event | request_id` formatter across API/worker/tests; optional file rotation.
+
 ## Proof Points For Stakeholders
 
 - **Deterministic data lineage** – Every market travels through an audited pipeline: upstream fetch → repository upsert → cache tagging → API exposure. The cycle produces traceable logs and metrics so diligence teams can replay any event.
