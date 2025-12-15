@@ -79,7 +79,7 @@ Useful scripts:
 
 Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, etc.) if you prefer a single entry point.
 
-> **API dependency:** Keep the backend stack (API + worker + Postgres + Redis + prover) running when you invoke `npm run build`, `frontend/run_tests.sh`, or the repo-root `./run_tests.sh`. Those flows ping `/health` before building to ensure data fetches hit a real FastAPI instance.
+> **Self-contained tests:** `npm run test` and `frontend/run_tests.sh` stub backend calls so the suite runs without the API stack. Opt into an online health check with `FRONTEND_REQUIRE_API=true` if you want to fail fast when the configured `/health` endpoint is unreachable.
 
 ### Wallet connections
 
@@ -223,7 +223,7 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | Start the Docker stack (`docker compose up postgres redis prover api worker`) so the API answers at the configured base before running `npm run build`. |
+| `Unable to reach backend` during build | The app tolerates offline builds; if you prefer to fail fast, set `FRONTEND_REQUIRE_API=true` and ensure the API answers at the configured base before running `npm run build`. |
 | CSP violations in dev | Update `next.config.mjs` to include any new external domains (fonts, analytics, etc.). |
 | Scroll layouts jitter on mobile | Confirm `body` retains `scrollbar-gutter` and that new sections don’t override `overflow`. |
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |

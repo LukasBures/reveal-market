@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from time import monotonic
 
 import httpx
@@ -75,6 +75,9 @@ class PricingEngine:
         refund_zen = (stake_zen - rake_zen).quantize(Decimal("0.00000001"))
         hedge_usdc = (stake_zen * zen_usd * (Decimal("1") - self.haircut_percent)).quantize(Decimal("0.00000001"))
         hedge_usdc = max(hedge_usdc, Decimal("0"))
+        # Payout is the refund plus hedged value adjusted by displayed odds.
+        hedge_zen = (hedge_usdc / zen_usd) if zen_usd != 0 else Decimal("0")
+        payout_zen = (refund_zen + hedge_zen * displayed_multiplier).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
 
         return PricingQuoteResponse(
             stake_zen=stake_zen,
@@ -83,6 +86,7 @@ class PricingEngine:
             rake_zen=rake_zen,
             refund_zen=refund_zen,
             hedge_usdc=hedge_usdc,
+            payout_zen=payout_zen,
             haircut_percent=self.haircut_percent,
             worsen_percent=self.worsen_percent,
             rake_percent=self.rake_percent,

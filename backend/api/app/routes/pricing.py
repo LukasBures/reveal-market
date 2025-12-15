@@ -162,16 +162,20 @@ async def _enforce_caps(
     user_id: str | None,
     include_stake: bool = True,
     exclude_quote: models.Quote | None = None,
+    statuses: set[str] | None = None,
 ) -> tuple[float | None, float | None, float | None, float | None]:
     """Validate stake caps and return projected totals and remaining allowances."""
 
     await repository_async.expire_stale_quotes(session)
     window = settings.bet_cap_ttl_seconds
+    status_filter = statuses
     market_total = None
     user_total = None
     if market_id:
         market_existing = float(
-            await repository_async.sum_quote_stakes(session, market_id=market_id, window_seconds=window)
+            await repository_async.sum_quote_stakes(
+                session, market_id=market_id, window_seconds=window, statuses=status_filter
+            )
         )
         if exclude_quote and exclude_quote.market_id == market_id:
             market_existing = max(0.0, market_existing - float(exclude_quote.stake_zen))
@@ -197,6 +201,7 @@ async def _enforce_caps(
                 market_id=market_id,
                 user_id=user_id,
                 window_seconds=window,
+                statuses=status_filter,
             )
         )
         if exclude_quote and exclude_quote.market_id == market_id and exclude_quote.user_id == user_id:
@@ -292,6 +297,7 @@ async def pricing_quote(
             stake_zen=payload.stake_zen,
             market_id=payload.market_id,
             user_id=payload.user_id,
+            include_stake=True,
         )
 
     if zen_usd is None:
@@ -312,6 +318,15 @@ async def pricing_quote(
         quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        hedge_zen = Decimal(str(quote.hedge_usdc)) / Decimal(str(quote.zen_usd))
+        payout_zen = (
+            Decimal(str(quote.refund_zen)) + hedge_zen * Decimal(str(quote.displayed_odds_multiplier))
+        ).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"payout_compute_failed:{exc}"
+        ) from exc
 
     expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
     expiry_ts = int(expires_at.timestamp())
@@ -372,6 +387,7 @@ async def pricing_quote(
             "outcome_id": payload.outcome_id,
             "market_address": ensured_market_address,
             "chain_id": settings.pricing_chain_id,
+            "payout_zen": payout_zen,
         }
     )
     quote_payload = quote.model_dump(mode="json")
@@ -465,16 +481,13 @@ async def pricing_quote_preview(
     user_remaining = None
     market_remaining = None
     if payload.market_id:
-        try:
-            market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
-                session,
-                stake_zen=payload.stake_zen,
-                market_id=payload.market_id,
-                user_id=payload.user_id,
-            )
-        except HTTPException:
-            # Still propagate cap errors to the caller.
-            raise
+        market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
+            session,
+            stake_zen=payload.stake_zen,
+            market_id=payload.market_id,
+            user_id=payload.user_id,
+            include_stake=True,
+        )
 
     if zen_usd is None:
         raise HTTPException(
@@ -494,6 +507,13 @@ async def pricing_quote_preview(
         quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        hedge_zen = Decimal(str(quote.hedge_usdc)) / Decimal(str(quote.zen_usd))
+        payout_zen = (
+            Decimal(str(quote.refund_zen)) + hedge_zen * Decimal(str(quote.displayed_odds_multiplier))
+        ).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
+    except Exception:
+        payout_zen = Decimal(str(payload.stake_zen))
 
     # Preview response mirrors the signed payload but omits signature/persistence/expiry.
     return quote.model_copy(
@@ -518,6 +538,7 @@ async def pricing_quote_preview(
             "outcome_id": payload.outcome_id,
             "market_address": market_address,
             "chain_id": settings.pricing_chain_id,
+            "payout_zen": payout_zen,
         }
     )
 
@@ -691,6 +712,8 @@ async def pricing_submit(
         market_id=quote.market_id,
         user_id=quote.user_id,
         exclude_quote=db_quote,
+        include_stake=False,
+        statuses={models.QuoteStatusEnum.CONSUMED.value},
     )
 
     db_quote.payload = quote.model_dump(mode="json")

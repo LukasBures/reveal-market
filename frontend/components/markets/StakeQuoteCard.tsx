@@ -73,8 +73,11 @@ export function StakeQuoteCard({
   const [error, setError] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
+  const fxValue = fx?.zen_usd;
+  const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
   const fxLive = status === "live" && !fx?.stale;
+  const fxReady = Number.isFinite(fxValue) && !fxIsStale;
   const { address } = useAccount();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
@@ -189,9 +192,9 @@ export function StakeQuoteCard({
         setError("FX feed unavailable");
         return;
       }
-      if (!fx || fx.stale || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
+      if (!fxReady || !Number.isFinite(debouncedStake) || debouncedStake <= 0) {
         setQuote(null);
-        if (fx?.stale) setError("Pricing paused (FX stale)");
+        if (fxIsStale) setError("Pricing paused (FX stale)");
         return;
       }
       const cappedStake = Math.min(debouncedStake, effectiveMaxStake);
@@ -199,7 +202,8 @@ export function StakeQuoteCard({
         setStakeZen(cappedStake);
         setError(`Adjusted stake to cap (${cappedStake.toFixed(3)} ZEN)`);
       }
-      setLoading(true);
+      const shouldBlockCta = !quote;
+      if (shouldBlockCta) setLoading(true);
       try {
         const payload = await fetchPricingQuoteWithMeta(cappedStake, {
           marketId,
@@ -212,9 +216,15 @@ export function StakeQuoteCard({
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        const message = err instanceof Error ? err.message : "Quote failed";
+        if (!cancelled) {
+          if (typeof console !== "undefined") {
+            console.error("[quote] request failed", err);
+          }
+          setError(message);
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && shouldBlockCta) setLoading(false);
       }
     };
     requestQuote();
@@ -223,7 +233,8 @@ export function StakeQuoteCard({
     };
   }, [
     debouncedStake,
-    fx,
+    fxReady,
+    fxIsStale,
     address,
     marketAddress,
     marketId,
@@ -288,25 +299,20 @@ export function StakeQuoteCard({
     setTxStatus(null);
   }, [chainId, address, initialTxHash]);
 
-  const profitUsd = useMemo(() => {
-    if (!quote) return null;
-    return quote.hedge_usdc * quote.displayed_odds_multiplier - quote.hedge_usdc;
-  }, [quote]);
-  const profitZen = useMemo(() => {
-    if (!quote) return null;
-    if (profitUsd === null) return null;
-    const fx = Number(quote.zen_usd);
-    if (!Number.isFinite(fx) || fx <= 0) return null;
-    return profitUsd / fx;
-  }, [profitUsd, quote]);
   const toWinZen = useMemo(() => {
     if (!quote) return null;
-    const fx = quote.zen_usd;
-    const profitZen = profitUsd !== null && fx ? profitUsd / fx : null;
-    const baseStake = Number.isFinite(quote.stake_zen) ? quote.stake_zen : null;
-    if (baseStake === null) return null;
-    return profitZen !== null ? baseStake + profitZen : baseStake;
-  }, [profitUsd, quote]);
+    if (quote.payout_zen !== null && quote.payout_zen !== undefined && Number.isFinite(Number(quote.payout_zen))) {
+      return Number(quote.payout_zen);
+    }
+    if (Number.isFinite(quote.stake_zen)) {
+      return Number(quote.stake_zen);
+    }
+    return null;
+  }, [quote]);
+  const profitZen = useMemo(() => {
+    if (toWinZen === null || !Number.isFinite(stakeZen)) return null;
+    return toWinZen - stakeZen;
+  }, [toWinZen, stakeZen]);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const ctaLabel = loading
     ? "Pricing…"
@@ -317,12 +323,14 @@ export function StakeQuoteCard({
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
   const quoteExpired = quote ? (quoteExpiryMs ? quoteExpiryMs <= Date.now() : true) : false;
+  const missingPayout = !quote || quote.payout_zen === null || quote.payout_zen === undefined;
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
     tradingReason ??
     (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
     (capExhausted ? "Stake cap reached" : null) ??
+    (missingPayout ? "Payout unavailable" : null) ??
     (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
     (fxUnavailable ? "FX unavailable" : null) ??
     (fxStale ? "FX stale" : null) ??
@@ -404,6 +412,9 @@ export function StakeQuoteCard({
         setTxError("Quote already consumed. Requesting a new one.");
         setRefreshNonce((prev) => prev + 1);
       } else {
+        if (typeof console !== "undefined") {
+          console.error("[trade] submit failed", err);
+        }
         setTxError(message);
       }
     } finally {
@@ -656,7 +667,8 @@ export function StakeQuoteCard({
             chainMismatch ||
             txLoading ||
             txPending ||
-            quoteExpired
+            quoteExpired ||
+            missingPayout
               ? "cursor-not-allowed bg-white/20 text-white/60"
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}

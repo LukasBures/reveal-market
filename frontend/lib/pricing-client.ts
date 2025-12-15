@@ -12,6 +12,7 @@ export type PricingQuote = {
   rake_percent: number;
   total_monetisation: number;
   chain_id: number;
+  payout_zen?: number | null;
   max_stake_zen?: number | null;
   max_user_stake_per_market_zen?: number | null;
   max_market_stake_zen?: number | null;

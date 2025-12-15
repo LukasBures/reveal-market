@@ -131,7 +131,6 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     async def _ensure_market(_session, _market_id, _expected):
         return market.id, market.market_address, 1
 
-    monkeypatch.setattr("app.routes.pricing.trade_routes._ensure_market", _ensure_market)
     monkeypatch.setattr("app.routes.trade._ensure_market", _ensure_market)
     monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market)
 

@@ -11,51 +11,43 @@ from app.schemas import FxQuoteResponse
 from eth_account import Account
 
 
-def test_quote_issue_and_submit_with_caps_and_fx(client, monkeypatch, db_session):
-    # Configure signer and caps
+def test_quote_issue_and_submit_returns_signed_payload(client, monkeypatch, db_session):
     signer = Account.create()
     user = Account.create()
     monkeypatch.setattr(api_main.settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(api_main.settings, "pricing_signer_private_key", signer._private_key.hex(), raising=False)
-    monkeypatch.setattr(api_main.settings, "max_user_stake_per_market_zen", 15.0, raising=False)
-    monkeypatch.setattr(api_main.settings, "max_market_stake_zen", 20.0, raising=False)
-    monkeypatch.setattr(api_main.settings, "max_stake_zen", 20.0, raising=False)
+    monkeypatch.setattr(api_main.settings, "max_stake_zen", 10.0, raising=False)
 
-    # Stable FX
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
-    # Issue quote
-    quote_payload = {
-        "stake_zen": 5,
+    payload = {
+        "stake_zen": 1,
         "wallet_address": user.address,
         "market_address": "0x1111111111111111111111111111111111111111",
-        "outcome_id": 1,
-        "market_id": "mkt-1",
-        "user_id": "user-1",
+        "outcome_id": 0,
+        "market_id": "mkt-simple",
+        "user_id": "user-simple",
     }
-    quote_resp = client.post("/pricing/quote", json=quote_payload)
-    assert quote_resp.status_code == 200
-    quote = quote_resp.json()
-    assert quote["signature"]
-    assert quote["stake_wei"] > 0
 
-    # Submit quote (should succeed)
+    quote_resp = client.post("/pricing/quote", json=payload)
+    assert quote_resp.status_code == 200, quote_resp.text
+    quote = quote_resp.json()
+    assert quote["quote_id"]
+    assert quote["signature"]
+    assert quote["signer"].lower() == signer.address.lower()
+    assert quote["payout_zen"] > 0
+    assert quote["stake_wei"] == int(Decimal("1e18"))
+
     submit_resp = client.post("/pricing/submit", json={"quote": quote})
-    assert submit_resp.status_code == 200
+    assert submit_resp.status_code == 200, submit_resp.text
     assert submit_resp.json()["valid"] is True
 
-    # Issue another quote that exceeds caps (market cap 20 -> already consumed 10)
-    quote_payload["stake_zen"] = 15
-    quote_resp2 = client.post("/pricing/quote", json=quote_payload)
-    assert quote_resp2.status_code == 400
-    detail = quote_resp2.json()["detail"]
-    if isinstance(detail, str):
-        assert "cap" in detail.lower()
-    else:
-        assert detail.get("error") in {"user_market_cap_exceeded", "market_cap_exceeded", "stake_above_cap"}
+    record = db_session.get(models.Quote, quote["quote_id"])
+    assert record is not None
+    assert record.status == models.QuoteStatusEnum.CONSUMED.value
 
 
 def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch, db_session):

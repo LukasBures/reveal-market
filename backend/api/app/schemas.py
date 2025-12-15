@@ -257,6 +257,7 @@ class PricingQuoteResponse(BaseModel):
     stake_wei: int = 0
     zen_usd: Decimal
     zen_usd_scaled: int = 0
+    payout_zen: Decimal
     fx_received_at: datetime | None = None
     fx_stale: bool = False
     displayed_odds_multiplier: Decimal
@@ -295,6 +296,7 @@ class PricingQuoteResponse(BaseModel):
         "worsen_percent",
         "rake_percent",
         "total_monetization",
+        "payout_zen",
         "max_stake_zen",
         "max_user_stake_per_market_zen",
         "max_market_stake_zen",

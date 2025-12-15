@@ -106,6 +106,7 @@ EXPECTED_SCHEMAS = {
             "worsen_percent",
             "rake_percent",
             "total_monetization",
+            "payout_zen",
         ],
         "properties": [
             "chain_id",
@@ -123,6 +124,7 @@ EXPECTED_SCHEMAS = {
             "max_user_stake_per_market_zen",
             "outcome_id",
             "quote_id",
+            "payout_zen",
             "rake_percent",
             "rake_zen",
             "refund_zen",

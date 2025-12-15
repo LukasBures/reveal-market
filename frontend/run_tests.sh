@@ -67,14 +67,15 @@ CHECK_URL="${DEFAULT_API_BASE%/}/health"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
 STRICT_API_CHECK="${FRONTEND_REQUIRE_API:-false}"
 
-if curl -fsS --max-time "${API_TIMEOUT}" "${CHECK_URL}" >/dev/null 2>&1; then
-  log_step "Frontend API reachable at ${CHECK_URL}"
-else
-  if [[ "${STRICT_API_CHECK}" == "true" ]]; then
+if [[ "${STRICT_API_CHECK}" == "true" ]]; then
+  if curl -fsS --max-time "${API_TIMEOUT}" "${CHECK_URL}" >/dev/null 2>&1; then
+    log_step "Frontend API reachable at ${CHECK_URL}"
+  else
     log_error "Frontend API ${CHECK_URL} is unreachable. Start the backend stack (./run_local.sh) before running frontend tests."
     exit 1
   fi
-  log_warn "Frontend API ${CHECK_URL} is unreachable; continuing with the configured base URL."
+else
+  log_step "Skipping API availability check (FRONTEND_REQUIRE_API!=true); running tests self-contained"
 fi
 
 export RM_API_BASE_URL="${RM_API_BASE_URL:-${DEFAULT_API_BASE}}"
