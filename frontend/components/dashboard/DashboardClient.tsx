@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { useSignMessage } from "wagmi";
 import type { Address, Hex } from "viem";
 import { bytesToHex, encodePacked, erc20Abi, hexToBytes, keccak256, maxUint256 } from "viem";
-import { fetchPositions, fetchClaimBundles } from "@/lib/api";
-import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
+import { fetchPositions, fetchClaimBundles, fetchMarketByEventId } from "@/lib/api";
+import type { ClaimBundle, MarketDetail, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { formatDateTime } from "@/lib/formatters";
 import Link from "next/link";
 import { useClaimTicket } from "@/lib/marketContract";
+import clsx from "clsx";
 
 export function DashboardClient() {
   const { address, isConnected } = useAccount();
@@ -28,6 +29,10 @@ export function DashboardClient() {
   const [bundlesRequested, setBundlesRequested] = useState(false);
   const [bundlesLoading, setBundlesLoading] = useState(false);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
+  const [marketDetails, setMarketDetails] = useState<Map<string, MarketDetail>>(new Map());
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "settled" | "claimable">("all");
+  const [sortBy, setSortBy] = useState<"recent" | "stake" | "closes">("recent");
+  const [searchQuery, setSearchQuery] = useState("");
   const { claimTicket, isPending: claimPending, error: claimError } = useClaimTicket();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
@@ -94,6 +99,12 @@ export function DashboardClient() {
     const [message] = raw.split("Version:");
     return message.trim() || "Transaction failed";
   };
+  const sanitizeUserActionError = useCallback((err: unknown): string => {
+    const raw = err instanceof Error ? err.message : String(err);
+    const [message] = raw.split("Version:");
+    const cleaned = message.replace(/^Details:\s*/i, "").trim();
+    return cleaned || "Action cancelled";
+  }, []);
 
   const load = useMemo(
     () => async (wallet: string) => {
@@ -125,15 +136,15 @@ export function DashboardClient() {
         const bundles = res.bundles || [];
         setClaimBundles(bundles);
         if (res.error) {
-          setBundleError(res.error);
+          setBundleError(sanitizeUserActionError(res.error));
         }
         return bundles;
       } catch (err) {
-        setBundleError(err instanceof Error ? err.message : "Failed to load claim bundles");
+        setBundleError(sanitizeUserActionError(err) || "Failed to load claim bundles");
         return [];
       }
     },
-    [bundleSignature, signMessageAsync],
+    [bundleSignature, sanitizeUserActionError, signMessageAsync],
   );
 
   const fetchBundlesWithUi = useMemo(
@@ -277,12 +288,46 @@ export function DashboardClient() {
       setClaimBundles([]);
       setBundleSignature(null);
       setBundlesRequested(false);
+      setMarketDetails(new Map());
       return;
     }
     startTransition(() => {
       void load(address);
     });
   }, [address, load]);
+
+  useEffect(() => {
+    if (!positions.length) return;
+    const knownIds = new Set(marketDetails.keys());
+    const missing = positions
+      .map((p) => p.market_id)
+      .filter((id) => id && !knownIds.has(id));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const fetched = await Promise.all(
+        missing.map(async (id) => {
+          try {
+            const detail = await fetchMarketByEventId(id);
+            return [id, detail] as const;
+          } catch {
+            return [id, null] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      setMarketDetails((prev) => {
+        const next = new Map(prev);
+        fetched.forEach(([id, detail]) => {
+          if (detail) next.set(id, detail);
+        });
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [positions, marketDetails]);
 
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
@@ -363,14 +408,6 @@ export function DashboardClient() {
     }
   };
 
-  if (!isConnected || !address) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-center text-slate-300">
-        Connect your wallet to view positions.
-      </div>
-    );
-  }
-
   const normalizedEscrow = escrowBalance !== null ? Number(escrowBalance) : null;
   const escrowDisplay =
     normalizedEscrow !== null && Number.isFinite(normalizedEscrow) ? (normalizedEscrow / 1e18).toFixed(3) : "—";
@@ -378,6 +415,93 @@ export function DashboardClient() {
     onchainEscrowBalance !== undefined && onchainEscrowBalance !== null ? BigInt(onchainEscrowBalance) : null;
   const normalizedOnchainEscrow =
     escrowBalanceBigInt !== null ? Number(escrowBalanceBigInt) : null;
+  const normalizeWei = useCallback((value: unknown): bigint | null => {
+    if (value === undefined || value === null) return null;
+    try {
+      if (typeof value === "bigint") return value;
+      if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.floor(value));
+      const asString = String(value);
+      if (!asString) return null;
+      return BigInt(asString);
+    } catch {
+      return null;
+    }
+  }, []);
+  const derivedPositions = useMemo(
+    () =>
+      positions.map((p, idx) => {
+        const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
+        const bundle = bundleLookup.get(bundleKey);
+        const outcomeLabel =
+          p.outcome_label ??
+          marketDetails.get(p.market_id)?.outcomes?.[p.outcome_id] ??
+          `Outcome ${p.outcome_id}`;
+        const potentialZen =
+          typeof p.potential_payout_zen === "number" && Number.isFinite(p.potential_payout_zen)
+            ? p.potential_payout_zen
+            : null;
+        const potentialWeiFromPosition = normalizeWei((p as any).potential_payout_wei);
+        const toWinWei =
+          (bundle && normalizeWei(bundle.amountWei)) ||
+          potentialWeiFromPosition ||
+          (potentialZen !== null ? normalizeWei(Math.round(potentialZen * 1e18)) : null);
+        const market = marketDetails.get(p.market_id);
+        const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
+        const toWinZen =
+          toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
+        const quoteId = p.quote_id ?? (p as any).quoteId ?? (bundle as any)?.quoteId ?? null;
+        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx };
+      }),
+    [bundleLookup, marketDetails, normalizeWei, positions],
+  );
+  const filteredPositions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return derivedPositions
+      .filter(({ position }) => {
+        if (statusFilter === "open" && position.status === "settled") return false;
+        if (statusFilter === "settled" && position.status !== "settled") return false;
+        if (statusFilter === "claimable" && !position.claimable) return false;
+        if (query.length === 0) return true;
+        return (position.market_title ?? position.market_id).toLowerCase().includes(query);
+      })
+      .sort((a, b) => {
+        if (sortBy === "stake") {
+          return (b.position.stake_zen || 0) - (a.position.stake_zen || 0);
+        }
+        if (sortBy === "closes") {
+          const aClose = a.position.closes_at ? Date.parse(a.position.closes_at) : 0;
+          const bClose = b.position.closes_at ? Date.parse(b.position.closes_at) : 0;
+          return bClose - aClose;
+        }
+        const aCreated = a.position.created_at ? Date.parse(a.position.created_at) : 0;
+        const bCreated = b.position.created_at ? Date.parse(b.position.created_at) : 0;
+        return bCreated - aCreated;
+      });
+  }, [derivedPositions, searchQuery, sortBy, statusFilter]);
+  const totalStakeZen = filteredPositions.reduce(
+    (acc, { position }) => acc + (Number.isFinite(position.stake_zen) ? position.stake_zen : 0),
+    0,
+  );
+  const totalToWinZen = filteredPositions.reduce(
+    (acc, { toWinZen }) => acc + (toWinZen !== null && Number.isFinite(toWinZen) ? toWinZen : 0),
+    0,
+  );
+  const totalEscrowZen =
+    normalizedEscrow !== null && Number.isFinite(normalizedEscrow)
+      ? normalizedEscrow / 1e18
+      : normalizedOnchainEscrow !== null && Number.isFinite(normalizedOnchainEscrow)
+        ? normalizedOnchainEscrow / 1e18
+        : null;
+  const pnlZen = totalToWinZen - totalStakeZen;
+  const roi = totalStakeZen > 0 ? pnlZen / totalStakeZen : null;
+
+  if (!isConnected || !address) {
+    return (
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-center text-slate-300">
+        Connect your wallet to view positions.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -477,7 +601,7 @@ export function DashboardClient() {
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">No positions yet.</div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-900/50 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-400/50 bg-slate-900/50 px-4 py-3 shadow-[0_0_0_1px_rgba(248,113,113,0.35)]">
             <div className="text-xs text-slate-300">
               <p className="font-semibold text-white">Claim data</p>
               <p className="text-slate-400">
@@ -499,18 +623,75 @@ export function DashboardClient() {
               {bundleError}
             </div>
           )}
-          {positions.map((p, idx) => (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-slate-900/70 via-slate-900/40 to-slate-800/40 px-4 py-3 shadow-inner shadow-black/30">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search markets"
+              className="min-w-[200px] flex-1 rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-sm text-white shadow-inner shadow-black/40 focus:border-white/60 focus:outline-none"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              {(["all", "open", "settled", "claimable"] as const).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setStatusFilter(filter)}
+                  className={clsx(
+                    "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition",
+                    statusFilter === filter
+                      ? "bg-white/80 text-black shadow"
+                      : "bg-white/10 text-white hover:bg-white/20",
+                  )}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              Sort
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                className="rounded-lg border border-white/30 bg-black/40 px-2 py-1 text-xs text-white shadow-inner shadow-black/40 focus:border-white/60 focus:outline-none"
+              >
+                <option value="recent">Most recent</option>
+                <option value="stake">Stake size</option>
+                <option value="closes">Closing time</option>
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-900/30 via-slate-900/60 to-slate-900/40 p-4 text-white shadow-inner shadow-black/30 sm:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">Deposited in escrow</p>
+              <p className="mt-1 text-2xl font-semibold text-white">
+                {totalEscrowZen !== null && Number.isFinite(totalEscrowZen) ? `${totalEscrowZen.toFixed(3)} ZEN` : "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">Total staked</p>
+              <p className="mt-1 text-2xl font-semibold text-white">{totalStakeZen.toFixed(3)} ZEN</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">Total to win</p>
+              <p className="mt-1 text-2xl font-semibold text-white">
+                {totalToWinZen > 0 ? `${totalToWinZen.toFixed(3)} ZEN` : "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">PnL / ROI</p>
+              <p className="mt-1 text-2xl font-semibold text-white">
+                {Number.isFinite(pnlZen) ? `${pnlZen >= 0 ? "+" : ""}${pnlZen.toFixed(3)} ZEN` : "—"}
+              </p>
+              <p className="text-xs text-slate-400">{roi !== null ? `${(roi * 100).toFixed(1)}%` : "—"}</p>
+            </div>
+          </div>
+          {filteredPositions.map(({ position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx }) => (
             <div
               key={`${p.market_id}-${p.ticket_id ?? idx}`}
               className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg shadow-black/30"
             >
               {(() => {
-                const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
-                const bundle = bundleLookup.get(bundleKey);
-                const toWinZen =
-                  bundle && bundle.amountWei !== undefined && bundle.amountWei !== null
-                    ? Number(bundle.amountWei) / 1e18
-                    : null;
                 const txHashShort =
                   p.tx_hash && p.tx_hash.length > 16
                     ? `${p.tx_hash.slice(0, 10)}…${p.tx_hash.slice(-6)}`
@@ -522,7 +703,7 @@ export function DashboardClient() {
                       <div>
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Market</p>
                         <p className="font-semibold">{p.market_title ?? p.market_id}</p>
-                        <p className="text-xs text-slate-400">Outcome: {p.outcome_id}</p>
+                        <p className="text-xs text-slate-400">Outcome: {outcomeLabel}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Stake</p>
@@ -530,10 +711,23 @@ export function DashboardClient() {
                       </div>
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Status</p>
-                        <p className={`font-semibold ${p.claimable ? "text-emerald-200" : "text-white"}`}>
-                          {p.status}
-                          {p.claimable ? " · claimable" : ""}
-                        </p>
+                        <div className="flex flex-col items-end gap-1">
+                          <span
+                            className={clsx(
+                              "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold capitalize",
+                              p.status === "settled"
+                                ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
+                                : "bg-white/10 text-white border border-white/15",
+                            )}
+                          >
+                            {p.status}
+                          </span>
+                          {p.claimable ? (
+                            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
+                              Claimable
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-6">
@@ -543,7 +737,7 @@ export function DashboardClient() {
                       <span>
                         Merkle root: {p.merkle_root ? `${p.merkle_root.slice(0, 8)}…${p.merkle_root.slice(-6)}` : "—"}
                       </span>
-                      <span>Quote: {p.quote_id ?? "—"}</span>
+                      <span>Quote: {quoteId ?? "—"}</span>
                       <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
                       <span>
                         Tx:{" "}
@@ -581,9 +775,11 @@ export function DashboardClient() {
                       <Link
                         className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
                         href={
-                          p.merkle_root || p.proof_request_id
-                            ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
-                            : "/proofs"
+                          p.proof_request_id
+                            ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
+                            : p.merkle_root
+                              ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
+                              : "/proofs"
                         }
                       >
                         View proofs

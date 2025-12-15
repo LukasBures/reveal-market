@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchPricingQuoteWithMeta,
   FX_DEFAULT_PATH,
@@ -94,12 +94,15 @@ export function StakeQuoteCard({
   const fxUnavailable = status === "error";
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
   const isBinary = outcomeOptions.length === 2;
-  const normalizedPrices = Array.isArray(outcomePrices) ? outcomePrices : [];
-  const priceForOutcome = (index: number): number | null => {
-    const value = normalizedPrices[index];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    return null;
-  };
+  const normalizedPrices = useMemo(() => (Array.isArray(outcomePrices) ? outcomePrices : []), [outcomePrices]);
+  const priceForOutcome = useCallback(
+    (index: number): number | null => {
+      const value = normalizedPrices[index];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      return null;
+    },
+    [normalizedPrices],
+  );
   const outcomeLabel =
     outcomeOptions[selectedOutcome] ??
     (selectedOutcome === 0 ? "Yes" : selectedOutcome === 1 ? "No" : `Outcome ${selectedOutcome + 1}`);
@@ -255,7 +258,7 @@ export function StakeQuoteCard({
     chainId,
     chainMismatch,
     capExhausted,
-    quote?.quote_id,
+    quote,
   ]);
 
   useEffect(() => {

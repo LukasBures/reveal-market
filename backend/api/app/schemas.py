@@ -224,6 +224,7 @@ class ProofReceipt(BaseModel):
     event_id: str | None = Field(default=None, alias="eventId")
     condition_id: str | None = Field(default=None, alias="conditionId")
     market_address: str | None = Field(default=None, alias="marketAddress")
+    settlement_tx_hash: str | None = Field(default=None, alias="settlementTxHash")
     proof_hash: str | None = Field(default=None, alias="proofHash")
     prover_version: str | None = Field(default=None, alias="proverVersion")
     circuit_hash: str | None = Field(default=None, alias="circuitHash")

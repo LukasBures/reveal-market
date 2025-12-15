@@ -210,12 +210,18 @@ def build_proof_receipt_model(
         except Exception:
             total_pool = None
 
+    settlement_tx_hash = _coalesce(
+        getattr(settlement, "settlement_tx_hash", None) if settlement is not None else None,
+        _cached_value(cached, "settlement_tx_hash", "settlementTxHash", "txHash", "transactionHash"),
+    )
+
     receipt_payload = {
         "request_id": receipt.request_id,
         "market_id": market_id_int,
         "event_id": getattr(market, "event_id", None),
         "condition_id": condition_id,
         "market_address": market_address,
+        "settlement_tx_hash": settlement_tx_hash,
         "proof_hash": proof_hash,
         "prover_version": receipt.prover_version or _cached_value(cached, "prover_version", "proverVersion"),
         "circuit_hash": circuit_hash,

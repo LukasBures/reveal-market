@@ -20,6 +20,7 @@ const hoisted = vi.hoisted(() => ({
   useChainId: vi.fn(),
   fetchPositions: vi.fn(),
   fetchClaimBundles: vi.fn(),
+  fetchMarketByEventId: vi.fn(),
   useWriteContract: vi.fn(),
   useReadContract: vi.fn(),
   usePublicClient: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("@/lib/wagmi", () => ({
 vi.mock("@/lib/api", () => ({
   fetchPositions: hoisted.fetchPositions,
   fetchClaimBundles: hoisted.fetchClaimBundles,
+  fetchMarketByEventId: hoisted.fetchMarketByEventId,
 }));
 
 describe("DashboardClient", () => {
@@ -56,6 +58,7 @@ describe("DashboardClient", () => {
     hoisted.useChainId.mockReset();
     hoisted.fetchPositions.mockReset();
     hoisted.fetchClaimBundles.mockReset();
+    hoisted.fetchMarketByEventId.mockReset();
     hoisted.useWriteContract.mockReset();
     hoisted.useReadContract.mockReset();
     hoisted.usePublicClient.mockReset();
@@ -93,6 +96,9 @@ describe("DashboardClient", () => {
     hoisted.useReadContract.mockReturnValue({ data: 0n });
     hoisted.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
     hoisted.useSignMessage.mockReturnValue({ signMessageAsync: vi.fn().mockResolvedValue("0xsig") });
+    hoisted.fetchMarketByEventId.mockResolvedValue({
+      outcomes: ["Yes", "No"],
+    });
     hoisted.fetchPositions.mockResolvedValue({
       positions: [
         {
@@ -143,9 +149,13 @@ describe("DashboardClient", () => {
 
     await waitFor(() => expect(screen.getByText(/balance: 0\.100 zen/i)).toBeInTheDocument());
     expect(screen.getByText(/yes\/no/i)).toBeInTheDocument();
-    expect(screen.getByText(/claimable/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/claimable/i)[0]).toBeInTheDocument();
+    await waitFor(() => expect(hoisted.fetchMarketByEventId).toHaveBeenCalledWith("m-1"));
+    expect(screen.getByText(/outcome: yes/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /claim/i }));
+    const claimButton = screen.getAllByRole("button").find((btn) => btn.textContent?.trim().toLowerCase() === "claim");
+    expect(claimButton).toBeTruthy();
+    fireEvent.click(claimButton!);
     await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(1));
     expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2);
     expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(2);

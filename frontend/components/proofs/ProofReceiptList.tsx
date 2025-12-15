@@ -39,6 +39,7 @@ function ProofReceiptCard({ receipt }: CardProps) {
     : "bg-amber-500/20 text-amber-100 border border-amber-300/30";
   const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
   const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
+  const settlementTxHref = hrefFor("tx", receipt.settlementTxHash);
 
   return (
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-md shadow-black/40">
@@ -77,6 +78,16 @@ function ProofReceiptCard({ receipt }: CardProps) {
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Generated at</dt>
           <dd>{formatTimestamp(receipt.generatedAt)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Settlement tx</dt>
+          <dd className="font-mono text-white">
+            {settlementTxHref ? (
+              <ExplorerLink href={settlementTxHref} label={receipt.settlementTxHash} />
+            ) : (
+              shorten(receipt.settlementTxHash, 10)
+            )}
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Winning outcome</dt>

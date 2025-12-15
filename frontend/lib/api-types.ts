@@ -107,6 +107,7 @@ export type ProofReceipt = {
   eventId?: string | null;
   conditionId?: string | null;
   marketAddress?: string | null;
+  settlementTxHash?: string | null;
   proofHash?: string | null;
   proverVersion?: string | null;
   circuitHash?: string | null;
@@ -128,6 +129,7 @@ export type PositionRecord = {
   market_id: string;
   market_title?: string | null;
   outcome_id: number;
+  outcome_label?: string | null;
   stake_wei: number;
   stake_zen: number;
   tx_hash?: string | null;
@@ -145,6 +147,8 @@ export type PositionRecord = {
   resolution_status?: string | null;
   resolution_reason?: string | null;
   commits_blocked_at?: string | null;
+  potential_payout_zen?: number | null;
+  potential_payout_wei?: number | string | null;
 };
 
 export type PositionsResponse = {
@@ -159,6 +163,7 @@ export type ClaimBundle = {
   ticketId: number;
   outcomeId: number;
   amountWei: number;
+  quoteId?: string | null;
   salt?: string | null;
   merkleProof: string[];
   leaf: string;
