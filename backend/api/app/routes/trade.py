@@ -9,6 +9,7 @@ import secrets
 import time
 from collections.abc import Awaitable
 from datetime import UTC, datetime
+from decimal import ROUND_DOWN, Decimal
 from typing import Any, cast
 
 import httpx
@@ -17,11 +18,12 @@ from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from shared import models
 from shared.logging import log_event
-from shared.onchain import get_async_web3, load_account, to_checksum
-from shared.onchain.abi import MARKET_FACTORY_ABI, REVEAL_MARKET_ABI
+from shared.onchain import OnChainConfigurationError, get_async_web3, load_account, to_checksum
+from shared.onchain.abi import ERC20_ABI, MARKET_FACTORY_ABI, PROTOCOL_POOL_ABI, REVEAL_MARKET_ABI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
+from web3.exceptions import Web3RPCError
 
 from app import repository_async, schemas
 from app.database import get_session
@@ -58,6 +60,24 @@ def _raw_tx_bytes(signed_tx: Any) -> bytes:
     return cast(bytes, raw_tx)
 
 
+def _is_placeholder_private_key(raw_key: str | None) -> bool:
+    """Return True when the provided key is effectively zeroed out."""
+
+    if not raw_key:
+        return False
+    normalized = raw_key.strip().lower()
+    if normalized.startswith("0x"):
+        normalized = normalized[2:]
+    return bool(normalized) and set(normalized) == {"0"}
+
+
+def _zen_to_wei(value: float | Decimal) -> int:
+    """Scale a ZEN-denominated value to wei using safe rounding."""
+
+    quantized = (Decimal(str(value)) * Decimal("1e18")).to_integral_value(rounding=ROUND_DOWN)
+    return int(quantized)
+
+
 async def _fetch_escrow_balance(wallet_address: str) -> int | None:
     """Return escrow balance for a wallet if escrow + RPC are configured."""
 
@@ -70,6 +90,79 @@ async def _fetch_escrow_balance(wallet_address: str) -> int | None:
         return int(balance)
     except Exception:
         return None
+
+
+async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_address: str, required_wei: int) -> None:
+    """Best-effort guard to ensure protocol pool has headroom for the projected top-up."""
+
+    if required_wei <= 0:
+        return
+    if not settings.rpc_url:
+        return
+    if market_onchain_id is None or not settings.factory_address:
+        return
+    try:
+        web3 = get_async_web3(str(settings.rpc_url))
+        factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
+        params = await factory.functions.getMarketParams(int(market_onchain_id)).call()
+        protocol_pool_address = params[12]
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="protocol_pool.params_fetch_failed",
+            message="could not fetch protocol pool params; skipping headroom check",
+            error=str(exc),
+            market_onchain_id=market_onchain_id,
+        )
+        return
+    if not protocol_pool_address or _strip_hex(protocol_pool_address) == "":
+        return
+    try:
+        pool_address = to_checksum(protocol_pool_address)
+        market_checksum = to_checksum(market_address)
+        pool = web3.eth.contract(address=pool_address, abi=PROTOCOL_POOL_ABI)
+        allowed = await pool.functions.allowedMarket(market_checksum).call()
+        capacity_wei = int(await pool.functions.capacity().call())
+        liability_cap_wei = int(await pool.functions.liabilityCap(market_checksum).call())
+        consumed_wei = int(await pool.functions.consumedLiability(market_checksum).call())
+        token_address = await pool.functions.COLLATERAL_TOKEN().call()
+        token = web3.eth.contract(address=to_checksum(token_address), abi=ERC20_ABI)
+        balance_wei = int(await token.functions.balanceOf(pool_address).call())
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="protocol_pool.headroom_fetch_failed",
+            message="could not fetch protocol pool headroom; skipping guard",
+            error=str(exc),
+            pool_address=protocol_pool_address,
+        )
+        return
+
+    remaining_cap = None
+    if liability_cap_wei > 0:
+        remaining_cap = max(0, liability_cap_wei - consumed_wei)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "protocol_pool_unregistered", "message": "Market not registered with protocol pool"},
+        )
+    if capacity_wei > 0 and required_wei > capacity_wei:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "protocol_pool_capacity", "message": "Protocol pool global capacity exceeded"},
+        )
+    if remaining_cap is not None and required_wei > remaining_cap:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "protocol_pool_cap", "message": "Protocol pool liability cap exceeded for this market"},
+        )
+    if required_wei > balance_wei:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "protocol_pool_balance", "message": "Protocol pool lacks collateral for this trade"},
+        )
 
 
 async def _enqueue_relayer_job(kind: str, endpoint: str, payload: dict[str, Any]) -> str:
@@ -227,6 +320,19 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
     raw_key = settings.wallet_private_key
     if raw_key is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="wallet_private_key_missing")
+    raw_key_value = raw_key.get_secret_value() if hasattr(raw_key, "get_secret_value") else str(raw_key)
+    if _is_placeholder_private_key(raw_key_value):
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.market_create.placeholder_key",
+            message="wallet private key is placeholder; skipping auto-create",
+            market_id=getattr(market_obj, "event_id", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "wallet_private_key_invalid", "message": "RM_WALLET_PRIVATE_KEY is placeholder/zero"},
+        )
     rpc_url = settings.rpc_url
     if not rpc_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="rpc_url_missing")
@@ -234,40 +340,130 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
     circuit_hash = settings.circuit_hash
     if not isinstance(circuit_hash, str) or len(circuit_hash) != 66 or not circuit_hash.startswith("0x"):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="circuit_hash_invalid")
-    account = load_account(raw_key.get_secret_value() if hasattr(raw_key, "get_secret_value") else str(raw_key))
-    web3 = get_async_web3(str(rpc_url))
-    factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
-    commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
-    reveal_deadline = commit_deadline + int(settings.market_reveal_lead_seconds)
-    params = (
-        to_checksum(settings.oracle_address),
-        to_checksum(settings.verifier_address),
-        settings.circuit_hash,
-        commit_deadline,
-        reveal_deadline,
-        int(settings.ticket_size_wei),
-        int(settings.market_max_commitments),
-        to_checksum(settings.authorization_signer),
-        int(settings.market_protocol_liability_cap_wei),
-    )
     try:
-        nonce = await web3.eth.get_transaction_count(account.address)
-        chain_id = await web3.eth.chain_id
-        tx = await factory.functions.createMarket(params).build_transaction(
-            {"from": account.address, "nonce": nonce, "chainId": chain_id, "gas": 1_200_000}
+        account = load_account(raw_key_value)
+        web3 = get_async_web3(str(rpc_url))
+        factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
+        commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
+        reveal_deadline = commit_deadline + int(settings.market_reveal_lead_seconds)
+        params = (
+            to_checksum(settings.oracle_address),
+            to_checksum(settings.verifier_address),
+            settings.circuit_hash,
+            commit_deadline,
+            reveal_deadline,
+            int(settings.ticket_size_wei),
+            int(settings.market_max_commitments),
+            to_checksum(settings.authorization_signer),
+            int(settings.market_protocol_liability_cap_wei),
         )
-    except Exception as exc:  # pragma: no cover - defensive guard
+        try:
+            nonce = await web3.eth.get_transaction_count(account.address, block_identifier="pending")
+            chain_id = await web3.eth.chain_id
+            tx = await factory.functions.createMarket(params).build_transaction(
+                {"from": account.address, "nonce": nonce, "chainId": chain_id, "gas": 1_200_000}
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"market_create_failed:{exc}",
+            ) from exc
+    except HTTPException:
+        raise
+    except OnChainConfigurationError as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="trade.market_create.config_error",
+            message="auto-create failed (config)",
+            market_id=getattr(market_obj, "event_id", None),
+            error=str(exc),
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"market_create_failed:{exc}",
+            detail={"error": "market_create_config_error", "message": str(exc)},
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_event(
+            logger,
+            logging.ERROR,
+            event="trade.market_create.init_failed",
+            message="auto-create failed during setup",
+            market_id=getattr(market_obj, "event_id", None),
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_create_failed", "message": str(exc)},
         ) from exc
     # Fill gas price if not set
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         gas_price = await web3.eth.gas_price
         tx["gasPrice"] = gas_price
     signed = account.sign_transaction(tx)
-    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
-    receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    raw_tx = _raw_tx_bytes(signed)
+    tx_hash = Web3.keccak(raw_tx)
+    try:
+        tx_hash = await web3.eth.send_raw_transaction(raw_tx)
+        receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    except Web3RPCError as exc:
+        message = str(exc)
+        lowered = message.lower()
+        if "already known" in lowered:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="trade.market_create.already_known",
+                message="createMarket tx already in mempool; waiting for receipt",
+                market_id=getattr(market_obj, "event_id", None),
+                tx_hash=tx_hash.hex(),
+            )
+            try:
+                receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+            except Exception as wait_exc:  # pragma: no cover - defensive fallback
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "market_create_pending", "message": str(wait_exc)},
+                ) from wait_exc
+        elif "nonce too low" in lowered:
+            try:
+                fresh_nonce = await web3.eth.get_transaction_count(account.address, block_identifier="pending")
+                tx["nonce"] = fresh_nonce
+                signed_retry = account.sign_transaction(tx)
+                raw_retry = _raw_tx_bytes(signed_retry)
+                tx_hash = await web3.eth.send_raw_transaction(raw_retry)
+                receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+            except Exception as retry_exc:  # pragma: no cover - defensive fallback
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "market_create_failed", "message": str(retry_exc)},
+                ) from retry_exc
+        else:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="trade.market_create.rpc_error",
+                message="auto-create failed via RPC",
+                market_id=getattr(market_obj, "event_id", None),
+                error=message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "market_create_failed", "message": message},
+            ) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_event(
+            logger,
+            logging.ERROR,
+            event="trade.market_create.failed",
+            message="auto-create failed",
+            market_id=getattr(market_obj, "event_id", None),
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_create_failed", "message": str(exc)},
+        ) from exc
     logs = factory.events.MarketCreated().process_receipt(receipt)
     if not logs:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="market_create_failed")
@@ -392,7 +588,7 @@ async def _build_merkle_proof_for_commitment(
 
 
 async def _ensure_market(
-    session: AsyncSession, market_id: str, expected_address: str | None
+    session: AsyncSession, market_id: str, expected_address: str | None, allow_create: bool = True
 ) -> tuple[int, str, int | None]:
     market = await repository_async.get_market_by_event_id(session, market_id)
     if market is None:
@@ -421,8 +617,44 @@ async def _ensure_market(
                 except Exception:
                     resolved_onchain_id = market.onchain_market_id
             return market.id, market.market_address, resolved_onchain_id
+        if not allow_create:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "market_address_missing",
+                    "message": "Market address not yet deployed; trade to trigger creation or provide market_address",
+                },
+            )
         # Auto-create a market on first trade when address is missing.
-        address, onchain_id = await _maybe_create_market_onchain(session, market)
+        now = datetime.now(tz=UTC)
+        deploy_ttl_seconds = 180
+        cache = await get_cache_client()
+        lock_key = f"market_deploy:{market_id}"
+        lock_acquired = True
+        if cache is not None:
+            try:
+                lock_acquired = bool(await cache.set(lock_key, now.isoformat(), ex=deploy_ttl_seconds, nx=True))
+            except Exception:
+                lock_acquired = True
+        if not lock_acquired:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "market_deploying", "message": "Market deployment in progress"},
+            )
+        try:
+            address, onchain_id = await _maybe_create_market_onchain(session, market)
+        finally:
+            if cache is not None and lock_acquired:
+                try:
+                    await cache.delete(lock_key)
+                except Exception:
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="trade.market_create.lock_cleanup_failed",
+                        message="failed to clear market deployment lock",
+                        market_id=market_id,
+                    )
         return market.id, address, onchain_id
     if market.market_address and market.market_address.lower() != expected_address.lower():
         log_event(
@@ -549,6 +781,10 @@ async def trade_commit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"stake_mismatch_expected_{ticket_size_wei}",
         )
+    # Check relayer escrow balance if available.
+    escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
+    if settings.relayer_escrow_address and escrow_balance is not None and int(escrow_balance) < int(quote.stake_wei):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_escrow_balance")
     market_record = await repository_async.get_market_by_event_id(session, quote.market_id or "")
     if market_record and (
         market_record.status in {models.MarketStatusEnum.SETTLED.value, models.MarketStatusEnum.CANCELLED.value}
@@ -563,6 +799,24 @@ async def trade_commit(
         schemas.PricingSubmitRequest(quote=quote, max_fx_diff_percent=payload.max_fx_diff_percent),
         session=session,
     )
+    stake_zen = float(quote.stake_zen)
+    entry_fx = float(quote.zen_usd)
+    potential = None
+    try:
+        profit_usd = float(quote.hedge_usdc) * float(quote.displayed_odds_multiplier) - float(quote.hedge_usdc)
+        potential = (profit_usd / entry_fx) + stake_zen if entry_fx > 0 else None
+    except Exception:
+        potential = None
+    rake_zen_value = None
+    protocol_topup = None
+    try:
+        rake_zen_value = float(quote.rake_zen)
+    except Exception:
+        rake_zen_value = None
+    if potential is not None and rake_zen_value is not None:
+        protocol_topup = max(0.0, potential - stake_zen - rake_zen_value)
+    protocol_topup_wei = _zen_to_wei(protocol_topup) if protocol_topup is not None else 0
+    await _assert_protocol_pool_headroom(market_onchain_id, market_address, protocol_topup_wei)
 
     # Derive next ticket id by counting on-chain Committed events (fallback to DB count).
     ticket_id = await _next_ticket_id_onchain(market_address, market_db_id, session)
@@ -650,17 +904,6 @@ async def trade_commit(
     )
     await session.flush()
 
-    stake_zen = float(quote.stake_zen)
-    entry_fx = float(quote.zen_usd)
-    potential = None
-    try:
-        profit_usd = float(quote.hedge_usdc) * float(quote.displayed_odds_multiplier) - float(quote.hedge_usdc)
-        potential = (profit_usd / entry_fx) + stake_zen if entry_fx > 0 else None
-    except Exception:
-        potential = None
-
-    escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
-
     return schemas.TradeCommitResponse(
         tx_hash=str(tx_hash) if tx_hash else "",
         quote_id=payload.quote_id,
@@ -669,10 +912,12 @@ async def trade_commit(
         stake_zen=stake_zen,
         entry_fx=entry_fx,
         potential_payout_zen=potential,
+        protocol_topup_zen=protocol_topup,
+        rake_zen=rake_zen_value,
         status="committed",
         ticket_id=ticket_id,
         salt=salt_hex,
-        escrow_balance_wei=escrow_balance,
+        escrow_balance_wei=int(escrow_balance) if escrow_balance is not None else None,
         relayer_status=relayer_status,
         relayer_job_id=relayer_job,
     )

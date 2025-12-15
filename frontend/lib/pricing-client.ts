@@ -17,11 +17,11 @@ export type PricingQuote = {
   max_market_stake_zen?: number | null;
   remaining_user_stake_zen?: number | null;
   remaining_market_stake_zen?: number | null;
-  quote_id: string;
-  expires_at: string;
-  expiry_ts: number;
-  signature: string;
-  signer: string;
+  quote_id?: string | null;
+  expires_at?: string | null;
+  expiry_ts?: number | null;
+  signature?: string | null;
+  signer?: string | null;
   market_id?: string | null;
   user_id?: string | null;
   wallet_address?: string | null;
@@ -202,6 +202,29 @@ export async function fetchPricingQuote(
   return fetchPricingQuoteWithMeta(stakeZen, opts);
 }
 
+export async function fetchPricingPreview(
+  stakeZen: number,
+  opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string | null },
+): Promise<PricingQuote> {
+  const res = await fetch(getEndpoint("/pricing/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      stake_zen: stakeZen,
+      market_id: opts.marketId,
+      user_id: opts.userId,
+      wallet_address: opts.walletAddress,
+      outcome_id: opts.outcomeId,
+      market_address: opts.marketAddress ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Preview quote failed (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as PricingQuote;
+}
+
 export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
   opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
@@ -246,6 +269,54 @@ export async function fetchPriceHistory(
   }
   const payload = await res.json();
   return Array.isArray(payload.data) ? payload.data : [];
+}
+
+export type TradeCommitResponse = {
+  tx_hash: string;
+  quote_id: string;
+  market_id: string;
+  outcome_id: number;
+  stake_zen: number;
+  entry_fx: number;
+  potential_payout_zen?: number | null;
+  status: string;
+  ticket_id?: number | null;
+  escrow_balance_wei?: number | null;
+  salt?: string | null;
+  relayer_status?: string | null;
+  relayer_job_id?: string | null;
+  protocol_topup_zen?: number | null;
+  rake_zen?: number | null;
+};
+
+const postTradeCommit = async (
+  quoteId: string,
+  maxFxDiffPercent?: number,
+  includeNullFxDiff = false,
+  errorLabel = "Trade failed",
+): Promise<TradeCommitResponse> => {
+  const payload: Record<string, unknown> = {
+    quote_id: quoteId,
+    ...(includeNullFxDiff
+      ? { max_fx_diff_percent: maxFxDiffPercent ?? null }
+      : maxFxDiffPercent !== undefined
+        ? { max_fx_diff_percent: maxFxDiffPercent }
+        : {}),
+  };
+  const res = await fetch(getEndpoint("/trade/commit"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`${errorLabel} (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as TradeCommitResponse;
+};
+
+export async function commitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {
+  return postTradeCommit(quoteId, maxFxDiffPercent, false, "Trade commit failed");
 }
 
 export function createMarketStream(marketId: string, tokenIds?: string[]): EventSource {
@@ -294,34 +365,6 @@ export function createFxWebSocket(path = FX_DEFAULT_PATH): WebSocket | null {
 
 export { FX_DEFAULT_PATH, normalizeFxPath };
 
-export type TradeCommitResponse = {
-  tx_hash: string;
-  quote_id: string;
-  market_id: string;
-  outcome_id: number;
-  stake_zen: number;
-  entry_fx: number;
-  potential_payout_zen?: number | null;
-  status: string;
-  ticket_id?: number | null;
-  escrow_balance_wei?: number | null;
-  salt?: string | null;
-  relayer_status?: string | null;
-  relayer_job_id?: string | null;
-};
-
 export async function submitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {
-  const res = await fetch(getEndpoint("/trade/commit"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      quote_id: quoteId,
-      max_fx_diff_percent: maxFxDiffPercent ?? null,
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Trade failed (${res.status}): ${detail}`);
-  }
-  return (await res.json()) as TradeCommitResponse;
+  return postTradeCommit(quoteId, maxFxDiffPercent, true);
 }

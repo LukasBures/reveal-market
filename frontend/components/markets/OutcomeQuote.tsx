@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH } from "@/lib/pricing-client";
+import { fetchPricingPreview, FX_DEFAULT_PATH } from "@/lib/pricing-client";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
@@ -36,8 +36,7 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
           setError("Pricing temporarily unavailable (stale FX)");
           return;
         }
-        // Quotes must be bound to wallet + market + outcome to match on-chain verification.
-        const quote = await fetchPricingQuoteWithMeta(stakeZen, {
+        const quote = await fetchPricingPreview(stakeZen, {
           marketId,
           walletAddress: address,
           outcomeId,
@@ -70,12 +69,13 @@ export function OutcomeQuote({ stakeZen, marketId, marketAddress, outcomeId = 0 
     const schedule = async () => {
       try {
         if (!fx || fxStale || !stakeZen || !address || !marketAddress) return;
-        const quote = await fetchPricingQuoteWithMeta(stakeZen, {
+        const quote = await fetchPricingPreview(stakeZen, {
           marketId,
           walletAddress: address,
           outcomeId,
           marketAddress,
         });
+        if (!quote.expires_at) return;
         const expires = new Date(quote.expires_at).getTime();
         const delay = Math.max(expires - Date.now() - 1_000, 0);
         timer = setTimeout(schedule, delay);

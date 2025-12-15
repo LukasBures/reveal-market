@@ -437,6 +437,101 @@ async def pricing_quote(
     return quote
 
 
+@router.post("/pricing/preview", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
+async def pricing_quote_preview(
+    payload: schemas.PricingQuoteRequest,
+    session: AsyncSession = Depends(get_session),
+) -> schemas.PricingQuoteResponse:
+    """Return an unsigned, non-persistent preview quote (no market creation, no signature)."""
+
+    # No creation here; best-effort fetch of existing market address.
+    market_address: str | None = payload.market_address or None
+    if payload.market_id and not market_address:
+        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+        market_address = getattr(market_record, "market_address", None)
+    try:
+        fx_quote = await fetch_fx_quote(settings)
+        if fx_quote.stale:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "fx_stale",
+                    "message": "FX price stale",
+                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+                },
+            )
+        zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
+        fx_received_at = fx_quote.received_at
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        ) from exc
+
+    market_total = None
+    user_total = None
+    user_remaining = None
+    market_remaining = None
+    if payload.market_id:
+        try:
+            market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
+                session,
+                stake_zen=payload.stake_zen,
+                market_id=payload.market_id,
+                user_id=payload.user_id,
+            )
+        except HTTPException:
+            # Still propagate cap errors to the caller.
+            raise
+
+    if zen_usd is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+        )
+    if settings.pricing_chain_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
+        )
+
+    stake_wei = _to_wei_amount(payload.stake_zen)
+    zen_usd_scaled = _scale_fx_value(zen_usd)
+    engine = PricingEngine(settings)
+    try:
+        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # Preview response mirrors the signed payload but omits signature/persistence/expiry.
+    return quote.model_copy(
+        update={
+            "max_stake_zen": settings.max_stake_zen,
+            "max_user_stake_per_market_zen": settings.max_user_stake_per_market_zen if payload.market_id else None,
+            "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
+            "remaining_user_stake_zen": user_remaining,
+            "remaining_market_stake_zen": market_remaining,
+            "stake_wei": stake_wei,
+            "zen_usd_scaled": zen_usd_scaled,
+            "quote_id": None,
+            "expires_at": None,
+            "expiry_ts": 0,
+            "fx_stale": False,
+            "fx_received_at": fx_received_at,
+            "signature": None,
+            "signer": None,
+            "market_id": payload.market_id,
+            "user_id": payload.user_id,
+            "wallet_address": payload.wallet_address,
+            "outcome_id": payload.outcome_id,
+            "market_address": market_address,
+            "chain_id": settings.pricing_chain_id,
+        }
+    )
+
+
 @router.post("/pricing/submit", response_model=schemas.PricingSubmitResponse, tags=["pricing"])
 async def pricing_submit(
     payload: schemas.PricingSubmitRequest,

@@ -451,8 +451,21 @@ async def run_worker() -> None:
     try:
         while True:
             loop_start = time.monotonic()
-            await _run_worker_tick(redis_client)
-            sleep_for = _calculate_sleep(loop_start)
+            try:
+                await _run_worker_tick(redis_client)
+                sleep_for = _calculate_sleep(loop_start)
+            except Exception as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="worker.tick.failed",
+                    message="worker tick failed; backing off before retry",
+                    error=str(exc),
+                )
+                failure_stats = _empty_sync_stats()
+                failure_stats["redis_available"] = redis_client is not None
+                await publish_heartbeat(redis_client, failure_stats)
+                sleep_for = runtime.settings.poll_interval_seconds
             log_event(
                 logger,
                 logging.INFO,

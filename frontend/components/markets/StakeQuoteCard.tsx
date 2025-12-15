@@ -33,6 +33,19 @@ const MIN_STAKE_ZEN = 0.01;
 const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${PER_BET_CAP_ZEN} ZEN (per bet cap)`;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 
+const getQuoteExpiryMs = (value: PricingQuote | null): number | null => {
+  if (!value) return null;
+  const { expiry_ts, expires_at } = value;
+  if (typeof expiry_ts === "number" && Number.isFinite(expiry_ts) && expiry_ts > 0) {
+    return expiry_ts * 1000;
+  }
+  if (expires_at) {
+    const parsed = Date.parse(expires_at);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
   return value.toFixed(decimals);
@@ -110,6 +123,7 @@ export function StakeQuoteCard({
     if (fxReceivedAt) return Math.max(0, (Date.now() - Date.parse(fxReceivedAt)) / 1000);
     return null;
   }, [ageSeconds, fxReceivedAt]);
+  const quoteExpiryMs = useMemo(() => getQuoteExpiryMs(quote), [quote]);
 
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
@@ -237,7 +251,11 @@ export function StakeQuoteCard({
       setQuoteCountdown(null);
       return;
     }
-    const expires = new Date(quote.expires_at).getTime();
+    if (!quoteExpiryMs) {
+      setQuoteCountdown(null);
+      return;
+    }
+    const expires = quoteExpiryMs;
     const updateCountdown = () => {
       const remainingMs = expires - Date.now();
       if (remainingMs <= 0) {
@@ -257,7 +275,7 @@ export function StakeQuoteCard({
       if (!alive) clearInterval(timer);
     }, 1000);
     return () => clearInterval(timer);
-  }, [quote]);
+  }, [quote, quoteExpiryMs]);
 
   useEffect(() => {
     // Clear quotes on account or chain changes to avoid reusing stale signatures.
@@ -298,7 +316,7 @@ export function StakeQuoteCard({
     selectedOutcome === 0
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
-  const quoteExpired = quote ? new Date(quote.expires_at).getTime() <= Date.now() : false;
+  const quoteExpired = quote ? (quoteExpiryMs ? quoteExpiryMs <= Date.now() : true) : false;
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
@@ -345,8 +363,13 @@ export function StakeQuoteCard({
       setTxError("Stake changed. Refresh the quote.");
       return;
     }
-    const expiresTs = new Date(quote.expires_at).getTime();
-    if (expiresTs <= Date.now()) {
+    if (!quote.quote_id) {
+      setTxError("Quote unavailable. Refreshing…");
+      setRefreshNonce((prev) => prev + 1);
+      return;
+    }
+    const expiresTs = quoteExpiryMs;
+    if (!expiresTs || expiresTs <= Date.now()) {
       setTxError("Quote expired. Refreshing…");
       setRefreshNonce((prev) => prev + 1);
       return;
@@ -429,7 +452,8 @@ export function StakeQuoteCard({
         <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
           {quote && (
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
-              Quote {quote.quote_id.slice(0, 6)}… expires {quoteCountdown ?? formatTime(quote.expires_at)}
+              Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "—"} expires{" "}
+              {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
             </span>
           )}
           {quote && (

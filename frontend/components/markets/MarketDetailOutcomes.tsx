@@ -1,14 +1,18 @@
 "use client";
 import type { MarketDetail } from "@/lib/api-types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchPricingQuoteWithMeta, FX_DEFAULT_PATH, type PricingQuote } from "@/lib/pricing-client";
+import {
+  fetchPricingQuoteWithMeta,
+  fetchPricingPreview,
+  FX_DEFAULT_PATH,
+  type PricingQuote,
+  commitTrade,
+  fetchPriceHistory,
+} from "@/lib/pricing-client";
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId, useSwitchChain, useReadContract, useWriteContract, usePublicClient } from "wagmi";
-import { BaseError, erc20Abi, maxUint256, type Address, type Hex } from "viem";
-import { buildSignedQuoteParams, useCommitWithQuote } from "@/lib/marketContract";
-import { fetchPriceHistory } from "@/lib/pricing-client";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime } from "@/lib/formatters";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
@@ -79,29 +83,13 @@ export function MarketDetailOutcomes({ market }: Props) {
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
   const missingZenToken = !ZEN_TOKEN_ADDRESS;
   const { switchChain } = useSwitchChain();
-  const { commitWithQuote, isPending: txPending, error: wagmiError } = useCommitWithQuote(
-    (market.marketAddress ?? "") as Address,
-  );
-  const publicClient = usePublicClient({ chainId });
+  const [resolvedMarketAddress, setResolvedMarketAddress] = useState<string | null>(market.marketAddress ?? null);
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const zenTokenAddress = ZEN_TOKEN_ADDRESS;
-  const allowanceEnabled = Boolean(address && market.marketAddress && zenTokenAddress);
-  const {
-    data: allowance,
-    isFetching: allowanceLoading,
-    refetch: refetchAllowance,
-  } = useReadContract({
-    address: allowanceEnabled ? (zenTokenAddress as Address) : undefined,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: allowanceEnabled ? ([address as Address, market.marketAddress as Address] as const) : undefined,
-    query: { enabled: allowanceEnabled, refetchInterval: 15_000 },
-  });
-  const {
-    writeContractAsync: writeApprovalAsync,
-    error: approvalError,
-  } = useWriteContract();
-  const [approvalHash, setApprovalHash] = useState<Hex | null>(null);
+  const txPending = false;
+  const wagmiError = null;
+  const approvalError = null;
+  const allowanceLoading = false;
+  const approvalHash = null;
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
@@ -125,7 +113,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   const capExhausted = effectiveMaxStake <= 0;
 
   const requestQuote = useCallback(
-    (_reason: string) => {
+    (reason: string) => {
       if (quoteRefreshTimer.current) {
         clearTimeout(quoteRefreshTimer.current);
         quoteRefreshTimer.current = null;
@@ -155,7 +143,7 @@ export function MarketDetailOutcomes({ market }: Props) {
         setQuote(null);
         return;
       }
-      if (!address || !market.marketAddress) {
+      if (!address) {
         setQuote(null);
         setError("Connect wallet to request a quote");
         return;
@@ -166,11 +154,11 @@ export function MarketDetailOutcomes({ market }: Props) {
         setError(`Adjusted stake to cap (${cappedStake.toFixed(3)} ZEN)`);
       }
       setLoading(true);
-      fetchPricingQuoteWithMeta(cappedStake, {
+      fetchPricingPreview(cappedStake, {
         marketId: market.eventId,
         walletAddress: address,
         outcomeId: selectedOutcome,
-        marketAddress: market.marketAddress ?? undefined,
+        marketAddress: resolvedMarketAddress ?? undefined,
       })
         .then((payload) => {
           setQuote(payload);
@@ -184,7 +172,7 @@ export function MarketDetailOutcomes({ market }: Props) {
       fxStaleCombined,
       stakeZen,
       address,
-      market.marketAddress,
+      resolvedMarketAddress,
       market.eventId,
       selectedOutcome,
       chainId,
@@ -222,7 +210,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   }, [chainId, address]);
 
   useEffect(() => {
-    if (!quote) {
+    if (!quote || !quote.expires_at) {
       setQuoteCountdown(null);
       return;
     }
@@ -267,7 +255,7 @@ export function MarketDetailOutcomes({ market }: Props) {
   }, [quote]);
 
   const expiresLabel = useMemo(() => {
-    if (!quote) return null;
+    if (!quote || !quote.expires_at) return null;
     if (quoteCountdown) return `Quote expires in ${quoteCountdown}`;
     const expiresTs = new Date(quote.expires_at).getTime();
     const remainingMs = expiresTs - Date.now();
@@ -303,7 +291,7 @@ export function MarketDetailOutcomes({ market }: Props) {
     : fxValue
       ? `FX 1 ZEN = $${fxValue} USD${fxAgeSeconds !== null ? ` (${fxAgeSeconds.toFixed(0)}s)` : ""}`
       : "FX connecting";
-  const quoteExpired = quote ? new Date(quote.expires_at).getTime() <= Date.now() : false;
+  const quoteExpired = quote?.expires_at ? new Date(quote.expires_at).getTime() <= Date.now() : false;
   const stakeOutOfRange = stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
     (isResolutionWaiting && (isDisputed ? "Resolution disputed; commits paused." : "Waiting for resolution")) ||
@@ -317,16 +305,9 @@ export function MarketDetailOutcomes({ market }: Props) {
     (quoteExpired && "Quote expired") ||
     null;
 
-  const requiredAllowance = useMemo(() => {
-    if (!quote?.stake_wei) return 0n;
-    try {
-      return BigInt(quote.stake_wei);
-    } catch {
-      return 0n;
-    }
-  }, [quote?.stake_wei]);
-  const hasAllowance = allowance !== undefined && allowance !== null && allowance >= requiredAllowance;
-  const needsApproval = allowanceEnabled && requiredAllowance > 0n && !hasAllowance;
+  const requiredAllowance = 0n;
+  const hasAllowance = true;
+  const needsApproval = false;
 
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
@@ -377,16 +358,8 @@ export function MarketDetailOutcomes({ market }: Props) {
       setTxError(`Switch to ${defaultChain.name} to trade.`);
       return;
     }
-    if (!market.marketAddress) {
-      setTxError("Market contract address missing.");
-      return;
-    }
     if (isResolutionWaiting || commitsBlocked) {
       setTxError(isDisputed ? "Resolution disputed; commits are paused." : "Waiting for resolution; commits paused.");
-      return;
-    }
-    if (!quote) {
-      setTxError("Request a quote first.");
       return;
     }
     if (capExhausted) {
@@ -397,77 +370,29 @@ export function MarketDetailOutcomes({ market }: Props) {
       setTxError(`Stake must be between ${MIN_STAKE_ZEN} and ${effectiveMaxStake.toFixed(3)} ZEN.`);
       return;
     }
-    if (stakeZen !== quote.stake_zen) {
-      setTxError("Stake changed. Refresh the quote.");
-      return;
-    }
-    // Quote must still be live and chain-aligned before submitting the tx.
-    const expiresTs = new Date(quote.expires_at).getTime();
-    if (expiresTs <= Date.now()) {
-      setTxError("Quote expired. Requesting a fresh quote.");
-      requestQuote("expired_commit");
-      return;
-    }
-    if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
-      setTxError(`Switch to chain ${quote.chain_id} to commit.`);
-      return;
-    }
-    if (fxStaleCombined) {
-      setTxError("FX is stale; wait for a fresh price.");
-      return;
-    }
-    if (missingZenToken) {
-      setTxError("ZEN token address is not configured.");
-      return;
-    }
     setTxLoading(true);
     try {
-      if (needsApproval) {
-        const hash = await writeApprovalAsync({
-          address: zenTokenAddress as Address,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [market.marketAddress as Address, maxUint256],
-          chainId,
-        });
-        setApprovalHash(hash as Hex);
-        if (publicClient) {
-          await publicClient.waitForTransactionReceipt({ hash: hash as Hex });
-          await refetchAllowance();
-        }
-      }
-      const params = buildSignedQuoteParams({
-        quote,
+      // Fetch a fresh signed quote for commit (creates market if missing).
+      const signedQuote = await fetchPricingQuoteWithMeta(stakeZen, {
+        marketId: market.eventId,
+        walletAddress: address,
         outcomeId: selectedOutcome,
-        walletAddress: address as Address,
-        amountWei: BigInt(quote.stake_wei),
+        marketAddress: resolvedMarketAddress ?? undefined,
       });
-      const tx = await commitWithQuote(params);
-      const hash = (typeof tx === "string" ? tx : (tx as any)?.hash) as Hex | undefined;
-      if (hash) {
-        setTxHash(hash);
-        if (publicClient) {
-          const receipt = await publicClient.waitForTransactionReceipt({ hash });
-          setTxConfirmed(receipt.status === "success");
-        }
+      setQuote(signedQuote);
+      if (signedQuote.market_address) {
+        setResolvedMarketAddress(signedQuote.market_address);
       }
+      if (!signedQuote.quote_id) {
+        throw new Error("Quote missing identifier");
+      }
+      const result = await commitTrade(signedQuote.quote_id);
+      setTxHash(result.tx_hash);
+      setTxConfirmed(result.status === "committed");
+      setTxError(null);
     } catch (err) {
-      const message =
-        err instanceof BaseError
-          ? err.shortMessage || err.message
-          : err instanceof Error
-            ? err.message
-            : "Transaction failed";
-      const normalized = message.toLowerCase();
-      if (normalized.includes("expired")) {
-        setTxError("Quote expired. Requesting a fresh quote.");
-        requestQuote("expired_commit");
-      } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
-        setTxError("Quote already consumed. Refreshing quote.");
-        requestQuote("consumed_commit");
-      } else {
-        setTxError(message);
-      }
+      const message = err instanceof Error ? err.message : "Transaction failed";
+      setTxError(message);
     } finally {
       setTxLoading(false);
     }
@@ -871,40 +796,21 @@ export function MarketDetailOutcomes({ market }: Props) {
                         </p>
                       )}
                       {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}
-                      {needsApproval && (
-                        <p className="mt-1 text-xs text-amber-200">Wallet will request ZEN approval before trading.</p>
-                      )}
-                        {missingZenToken && (
-                          <p className="mt-1 text-xs text-rose-200">
-                            ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.
-                          </p>
-                        )}
-                      {allowanceLoading && <p className="mt-1 text-xs text-slate-400">Checking ZEN allowance…</p>}
-                      {error && (
-                        <p className="mt-2 text-xs text-rose-300">
-                          {error}. Pricing uses live odds + FX from the streamer; if stale, retry.
+                      {missingZenToken && (
+                        <p className="mt-1 text-xs text-rose-200">
+                          ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.
                         </p>
                       )}
-                      {(txError || wagmiError || approvalError) && (
-                        <p className="mt-1 text-xs text-rose-300">
-                          {txError ??
-                            (wagmiError instanceof BaseError
-                              ? wagmiError.shortMessage
-                              : wagmiError instanceof Error
-                                ? wagmiError.message
-                                : approvalError instanceof Error
-                                  ? approvalError.message
-                                  : "Transaction failed")}
-                          . Ensure chain and quote are valid.
-                        </p>
-                      )}
-                      {approvalHash && (
-                        <p className="mt-1 text-[11px] text-emerald-200">
-                          Approval tx: {`${approvalHash.slice(0, 10)}…${approvalHash.slice(-6)}`}
-                        </p>
-                      )}
-                    </div>
+                    {error && (
+                      <p className="mt-2 text-xs text-rose-300">
+                        {error}. Pricing uses live odds + FX from the streamer; if stale, retry.
+                      </p>
+                    )}
+                    {txError && (
+                      <p className="mt-1 text-xs text-rose-300"> {txError}. Ensure chain and quote are valid.</p>
+                    )}
                   </div>
+                </div>
                 </div>
               )}
             </div>

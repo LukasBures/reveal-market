@@ -345,6 +345,8 @@ class TradeCommitResponse(BaseModel):
     stake_zen: float
     entry_fx: float
     potential_payout_zen: float | None = None
+    protocol_topup_zen: float | None = None
+    rake_zen: float | None = None
     status: str = "committed"
     ticket_id: int | None = None
     escrow_balance_wei: int | None = None

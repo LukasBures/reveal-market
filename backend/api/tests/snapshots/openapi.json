@@ -3047,9 +3047,31 @@
             ],
             "title": "Potential Payout Zen"
           },
+          "protocol_topup_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol Topup Zen"
+          },
           "quote_id": {
             "title": "Quote Id",
             "type": "string"
+          },
+          "rake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rake Zen"
           },
           "relayer_job_id": {
             "anyOf": [
@@ -4027,6 +4049,48 @@
           }
         },
         "summary": "Pricing Fx",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/pricing/preview": {
+      "post": {
+        "description": "Return an unsigned, non-persistent preview quote (no market creation, no signature).",
+        "operationId": "pricing_quote_preview_pricing_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Quote Preview",
         "tags": [
           "pricing"
         ]

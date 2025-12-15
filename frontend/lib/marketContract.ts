@@ -54,9 +54,21 @@ export function buildSignedQuoteParams(opts: {
   salt?: Hex;
 }): SignedQuoteParams {
   const saltHex = opts.salt ?? toHex(crypto.getRandomValues(new Uint8Array(32)));
-  const quoteIdHex =
-    opts.quote.quote_id.startsWith("0x") ? (opts.quote.quote_id as Hex) : (`0x${opts.quote.quote_id}` as Hex);
-  const expiry = BigInt(opts.quote.expiry_ts ?? Math.floor(new Date(opts.quote.expires_at).getTime() / 1000));
+  const quoteId = opts.quote.quote_id;
+  if (!quoteId) {
+    throw new Error("Quote id missing");
+  }
+  const quoteIdHex = quoteId.startsWith("0x") ? (quoteId as Hex) : (`0x${quoteId}` as Hex);
+  const expirySeconds =
+    typeof opts.quote.expiry_ts === "number" && Number.isFinite(opts.quote.expiry_ts) && opts.quote.expiry_ts > 0
+      ? opts.quote.expiry_ts
+      : opts.quote.expires_at
+        ? Math.floor(Date.parse(opts.quote.expires_at) / 1000)
+        : null;
+  if (!expirySeconds || Number.isNaN(expirySeconds)) {
+    throw new Error("Quote expiry missing");
+  }
+  const expiry = BigInt(expirySeconds);
   // Contracts expect stake in wei and FX scaled by 1e8; keep units consistent with backend signatures.
   const stakeWei = BigInt(opts.amountWei ?? BigInt(opts.quote.stake_wei));
   const zenUsdScaled = BigInt(opts.quote.zen_usd_scaled);
@@ -76,13 +88,14 @@ export function buildSignedQuoteParams(opts: {
   };
 }
 
-export function useCommitWithQuote(contractAddress: Address) {
+export function useCommitWithQuote(contractAddress?: Address) {
   const { address } = useAccount();
   const chainId = useChainId();
   const { writeContractAsync, isPending, error } = useWriteContract();
 
   async function commitWithQuote(params: SignedQuoteParams) {
     if (!address) throw new Error("Wallet not connected");
+    if (!contractAddress) throw new Error("Market contract address missing");
     return writeContractAsync({
       address: contractAddress,
       abi: revealMarketAbi,
