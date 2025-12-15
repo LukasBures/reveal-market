@@ -324,16 +324,26 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
     if not rpc_url:
         return db_count
     web3 = get_async_web3(str(rpc_url))
-    # Prefer on-chain view when available.
+    # Prefer on-chain view when available, but tolerate lag when the relayer queue is enabled.
     try:
         contract = web3.eth.contract(address=to_checksum(market_address), abi=REVEAL_MARKET_ABI)
         onchain_next = await contract.functions.nextTicketId().call()
-        if onchain_next != db_count:
+        if onchain_next != db_count and not settings.relayer_queue_enabled:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"ticket_counter_desync:onchain={onchain_next},db={db_count}",
             )
-        return int(onchain_next)
+        if onchain_next != db_count and settings.relayer_queue_enabled:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="ticket_counter.desync_tolerated",
+                message="On-chain ticket counter lags DB; continuing because relayer queue is enabled",
+                onchain=onchain_next,
+                db=db_count,
+                market_address=market_address,
+            )
+        return int(onchain_next if onchain_next == db_count else db_count)
     except HTTPException:
         raise
     except Exception:
@@ -352,12 +362,22 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"log_scan_failed:{exc}"
             ) from exc
-        if onchain_count != db_count:
+        if onchain_count != db_count and not settings.relayer_queue_enabled:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"ticket_counter_desync:onchain={onchain_count},db={db_count}",
             ) from None
-        return onchain_count
+        if onchain_count != db_count and settings.relayer_queue_enabled:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="ticket_counter.desync_tolerated_logs",
+                message="Log scan ticket counter lags DB; continuing because relayer queue is enabled",
+                onchain=onchain_count,
+                db=db_count,
+                market_address=market_address,
+            )
+        return onchain_count if onchain_count == db_count else db_count
 
 
 async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tuple[str, int]:
@@ -1029,7 +1049,11 @@ async def trade_commit(
 
     tx_hash = relayer_result.get("txHash") or relayer_result.get("tx_hash") or relayer_result.get("jobId")
     relayer_status = relayer_status or relayer_result.get("status") or relayer_result.get("state")
+    if relayer_status is not None:
+        relayer_status = str(relayer_status)
     relayer_job = relayer_job or relayer_result.get("jobId") or relayer_result.get("job_id")
+    if relayer_job is not None:
+        relayer_job = str(relayer_job)
 
     # Persist commitment snapshot.
     await repository_async.record_commitments(

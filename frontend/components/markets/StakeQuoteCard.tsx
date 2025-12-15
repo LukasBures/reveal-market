@@ -29,9 +29,10 @@ type Props = {
   initialTxHash?: string | null;
 };
 
-const PER_BET_CAP_ZEN = 0.1;
-const MIN_STAKE_ZEN = 0.01;
-const STAKE_RANGE_ERROR = `Enter between ${MIN_STAKE_ZEN} and ${PER_BET_CAP_ZEN} ZEN (per bet cap)`;
+const TICKET_SIZE_ZEN = 0.1;
+const PER_BET_CAP_ZEN = TICKET_SIZE_ZEN;
+const MIN_STAKE_ZEN = TICKET_SIZE_ZEN;
+const STAKE_RANGE_ERROR = `Stake must be exactly ${TICKET_SIZE_ZEN} ZEN (fixed ticket size)`;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 
 const getQuoteExpiryMs = (value: PricingQuote | null): number | null => {
@@ -53,7 +54,7 @@ const formatNumber = (value: number, decimals = 4) => {
 };
 
 export function StakeQuoteCard({
-  defaultStakeZen = PER_BET_CAP_ZEN,
+  defaultStakeZen = TICKET_SIZE_ZEN,
   marketAddress,
   marketId,
   outcomes = [],
@@ -191,6 +192,8 @@ export function StakeQuoteCard({
       if (debouncedStake < MIN_STAKE_ZEN) {
         setQuote(null);
         setError(STAKE_RANGE_ERROR);
+        setStakeZen(TICKET_SIZE_ZEN);
+        setStakeInput(TICKET_SIZE_ZEN.toFixed(2));
         return;
       }
       if (capExhausted) {
@@ -208,10 +211,14 @@ export function StakeQuoteCard({
         if (fxIsStale) setError("Pricing paused (FX stale)");
         return;
       }
-      const cappedStake = Math.min(debouncedStake, effectiveMaxStake);
-      if (cappedStake !== debouncedStake) {
+      const cappedStake = Math.min(TICKET_SIZE_ZEN, effectiveMaxStake);
+      if (cappedStake !== TICKET_SIZE_ZEN) {
         setStakeZen(cappedStake);
-        setError(`Adjusted stake to cap (${cappedStake.toFixed(3)} ZEN)`);
+        setStakeInput(cappedStake.toFixed(2));
+        setError(`Stake capped at ${cappedStake.toFixed(3)} ZEN`);
+      } else if (debouncedStake !== TICKET_SIZE_ZEN) {
+        setStakeZen(TICKET_SIZE_ZEN);
+        setStakeInput(TICKET_SIZE_ZEN.toFixed(2));
       }
       const shouldBlockCta = !quote;
       if (shouldBlockCta) setLoading(true);
@@ -557,18 +564,18 @@ export function StakeQuoteCard({
             disabled={tradingDisabled}
             onChange={(e) => {
               const raw = e.target.value;
-              const normalized = raw.replace(",", ".");
+              const normalizedInput = raw.replace(",", ".");
               const pattern = /^\d*(?:\.\d{0,2})?$/;
-              if (normalized !== "" && !pattern.test(normalized)) {
+              if (normalizedInput !== "" && !pattern.test(normalizedInput)) {
                 return;
               }
               setStakeInput(raw);
-              if (normalized === "") {
+              if (normalizedInput === "") {
                 setStakeZen(0);
                 setStakeError(STAKE_RANGE_ERROR);
                 return;
               }
-              const next = Number(normalized);
+              const next = Number(normalizedInput);
               if (Number.isNaN(next)) {
                 setStakeZen(0);
                 setStakeError(STAKE_RANGE_ERROR);
@@ -576,16 +583,18 @@ export function StakeQuoteCard({
               }
               const rounded = Math.round(next * 100) / 100;
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              setStakeZen(capped);
-              if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
+              const snapped = capped > 0 ? TICKET_SIZE_ZEN : 0;
+              setStakeZen(snapped);
+              setStakeInput(snapped.toFixed(2));
+              if (snapped !== TICKET_SIZE_ZEN || snapped > effectiveMaxStake) {
                 setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
               }
             }}
             onBlur={() => {
-              const normalized = stakeInput.replace(",", ".");
-              const next = Number(normalized);
+              const normalizedInput = stakeInput.replace(",", ".");
+              const next = Number(normalizedInput);
               if (Number.isNaN(next)) {
                 setStakeInput("0.00");
                 setStakeZen(0);
@@ -594,9 +603,10 @@ export function StakeQuoteCard({
               }
               const rounded = Math.round(next * 100) / 100;
               const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              setStakeZen(capped);
-              setStakeInput(capped.toFixed(2));
-              if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
+              const snapped = capped > 0 ? TICKET_SIZE_ZEN : 0;
+              setStakeZen(snapped);
+              setStakeInput(snapped.toFixed(2));
+              if (snapped !== TICKET_SIZE_ZEN || snapped > effectiveMaxStake) {
                 setStakeError(STAKE_RANGE_ERROR);
               } else {
                 setStakeError(null);
@@ -608,9 +618,9 @@ export function StakeQuoteCard({
             placeholder="0.00 ZEN"
           />
           <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
-            {[MIN_STAKE_ZEN, PER_BET_CAP_ZEN / 2, PER_BET_CAP_ZEN].map((preset) => (
+            {[TICKET_SIZE_ZEN, TICKET_SIZE_ZEN, TICKET_SIZE_ZEN].map((preset, idx) => (
               <button
-                key={preset}
+                key={`${preset}-${idx}`}
                 type="button"
                 onClick={() => {
                   const capped = Math.min(preset, effectiveMaxStake);

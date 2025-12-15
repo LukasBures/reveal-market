@@ -32,13 +32,15 @@ def _configure_signer():
 def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     settings = _configure_signer()
     _mock_fx(monkeypatch, price=1.5)
-    settings.max_stake_zen = 10
+    settings.max_stake_zen = 0.1
+    settings.ticket_size_wei = int(Decimal("1e17"))
     import app.runtime as runtime
 
-    runtime.settings.max_stake_zen = 10
+    runtime.settings.max_stake_zen = settings.max_stake_zen
+    runtime.settings.ticket_size_wei = settings.ticket_size_wei
 
     payload = {
-        "stake_zen": 5.0,
+        "stake_zen": 0.1,
         "market_id": "evt-quote-test",
         "user_id": "user-123",
         "wallet_address": "0x00000000000000000000000000000000000000aa",

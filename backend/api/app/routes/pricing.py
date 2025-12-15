@@ -249,6 +249,13 @@ async def pricing_quote(
                 "max_stake_zen": settings.max_stake_zen,
             },
         )
+    ticket_size_wei = int(settings.ticket_size_wei)
+    stake_wei = _to_wei_amount(payload.stake_zen)
+    if stake_wei != ticket_size_wei:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"stake_mismatch_expected_{ticket_size_wei}",
+        )
     if payload.market_id:
         market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
         if market_record and (
@@ -312,7 +319,6 @@ async def pricing_quote(
             detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
         )
 
-    stake_wei = _to_wei_amount(payload.stake_zen)
     zen_usd_scaled = _scale_fx_value(zen_usd)
     engine = PricingEngine(settings)
     try:
@@ -453,6 +459,13 @@ async def pricing_quote_preview(
 
     # No creation here; best-effort fetch of existing market address.
     user_id = payload.user_id or payload.wallet_address
+    ticket_size_wei = int(settings.ticket_size_wei)
+    stake_wei = _to_wei_amount(payload.stake_zen)
+    if stake_wei != ticket_size_wei:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"stake_mismatch_expected_{ticket_size_wei}",
+        )
     market_address: str | None = payload.market_address or None
     if payload.market_id and not market_address:
         market_record = await repository_async.get_market_by_event_id(session, payload.market_id)

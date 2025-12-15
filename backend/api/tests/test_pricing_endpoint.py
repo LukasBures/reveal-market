@@ -93,6 +93,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
@@ -100,7 +101,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
-        "stake_zen": 10,
+        "stake_zen": 0.1,
         "wallet_address": user.address,
         "market_address": "0x1111111111111111111111111111111111111111",
         "outcome_id": 1,
@@ -135,6 +136,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
@@ -142,7 +144,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
 
     quote_payload = {
-        "stake_zen": 5,
+        "stake_zen": 0.1,
         "wallet_address": user.address,
         "market_address": "0x1111111111111111111111111111111111111111",
         "outcome_id": 0,
