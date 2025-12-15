@@ -703,18 +703,81 @@ async def _ensure_market_or_create(
         deploy_ttl_seconds = 180
         cache = await get_cache_client()
         lock_key = f"market_deploy:{market_id}"
-        lock_acquired = True
-        if cache is not None:
-            try:
-                lock_acquired = bool(await cache.set(lock_key, now.isoformat(), ex=deploy_ttl_seconds, nx=True))
-            except Exception:
-                lock_acquired = True
-        if not lock_acquired:
+        if cache is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "market_deploying", "message": "Market deployment in progress"},
+                detail={"error": "market_deploy_lock_unavailable", "message": "Deploy lock unavailable"},
             )
+        lock_acquired = False
         try:
+            lock_acquired = bool(await cache.set(lock_key, now.isoformat(), ex=deploy_ttl_seconds, nx=True))
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="trade.market_create.lock_error",
+                message="failed to acquire market deployment lock",
+                market_id=market_id,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "market_deploy_lock_unavailable", "message": "Deploy lock unavailable"},
+            ) from exc
+        # If another deploy is in-flight, wait for it to finish instead of erroring immediately.
+        deadline = time.monotonic() + deploy_ttl_seconds
+        while not lock_acquired:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "market_deploying", "message": "Market deployment in progress"},
+                )
+            await asyncio.sleep(min(1.0, remaining))
+            try:
+                await session.refresh(market)
+            except Exception:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="trade.market_create.lock_refresh_failed",
+                    message="failed to refresh market while waiting for deploy",
+                    market_id=market_id,
+                )
+            if market.market_address:
+                resolved_address = market.market_address
+                return market.id, resolved_address, market.onchain_market_id
+            try:
+                lock_acquired = bool(
+                    await cache.set(lock_key, datetime.now(tz=UTC).isoformat(), ex=deploy_ttl_seconds, nx=True)
+                )
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="trade.market_create.lock_error",
+                    message="failed to acquire market deployment lock",
+                    market_id=market_id,
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "market_deploy_lock_unavailable", "message": "Deploy lock unavailable"},
+                ) from exc
+        try:
+            try:
+                await session.refresh(market)
+            except Exception:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="trade.market_create.lock_refresh_failed",
+                    message="failed to refresh market after acquiring lock",
+                    market_id=market_id,
+                )
+            if market.market_address:
+                resolved_address = market.market_address
+                return market.id, resolved_address, market.onchain_market_id
             resolved_address, onchain_id = await _maybe_create_market_onchain(session, market)
             return market.id, resolved_address, onchain_id
         finally:
@@ -822,6 +885,26 @@ async def trade_commit(
     """Consume a pricing quote, build CommitAuth, and forward to the relayer."""
 
     db_quote, quote = await _get_quote(session, payload.quote_id)
+    # Fail fast on config/quote errors before touching on-chain state.
+    now = datetime.now(tz=UTC)
+    auth_signer_key = _require_auth_signer()
+    if not settings.relayer_base_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
+    if quote.expires_at and quote.expires_at <= now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_expired")
+    if quote.outcome_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="outcome_required")
+    chain_id = settings.pricing_chain_id
+    if chain_id is None or quote.chain_id != chain_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_chain_mismatch")
+    ticket_size_wei = int(settings.ticket_size_wei)
+    if int(quote.stake_wei) != ticket_size_wei:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"stake_mismatch_expected_{ticket_size_wei}",
+        )
+    # Check relayer escrow balance if available.
+    escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
     market_db_id, market_address, market_onchain_id = await _ensure_market_or_create(
         session, quote.market_id or "", quote.market_address
     )
@@ -836,25 +919,7 @@ async def trade_commit(
         quote = _sign_quote_for_commit(quote)
         db_quote.payload = quote.model_dump(mode="json")
         await session.flush()
-    now = datetime.now(tz=UTC)
-    if quote.expires_at and quote.expires_at <= now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_expired")
-
-    if quote.outcome_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="outcome_required")
-    outcome_id = int(quote.outcome_id)
-    chain_id = settings.pricing_chain_id
-    if chain_id is None or quote.chain_id != chain_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_chain_mismatch")
-
-    ticket_size_wei = int(settings.ticket_size_wei)
-    if int(quote.stake_wei) != ticket_size_wei:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"stake_mismatch_expected_{ticket_size_wei}",
-        )
-    # Check relayer escrow balance if available.
-    escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
+    outcome_id = int(cast(int, quote.outcome_id))
     if settings.relayer_escrow_address and escrow_balance is not None and int(escrow_balance) < int(quote.stake_wei):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_escrow_balance")
     market_record = await repository_async.get_market_by_event_id(session, quote.market_id or "")
@@ -921,11 +986,8 @@ async def trade_commit(
             int(chain_id),
         ],
     )
-    auth_signer_key = _require_auth_signer()
     signed = Account.sign_message(encode_defunct(hexstr=auth_digest.hex()), auth_signer_key)
 
-    if not settings.relayer_base_url:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
     relayer_payload = {
         "user": user_address,
         "market": market_address,
