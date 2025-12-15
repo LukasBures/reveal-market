@@ -5,6 +5,7 @@ import {
   fetchPricingQuoteWithMeta,
   FX_DEFAULT_PATH,
   type PricingQuote,
+  fetchPricingPreview,
   submitTrade,
   type TradeCommitResponse,
 } from "@/lib/pricing-client";
@@ -155,8 +156,16 @@ export function StakeQuoteCard({
           : null;
 
   useEffect(() => {
+    // Switching outcomes should invalidate any issued quote.
+    setQuote(null);
+    setRefreshNonce((prev) => prev + 1);
+  }, [selectedOutcome]);
+
+  useEffect(() => {
     let cancelled = false;
     const requestQuote = async () => {
+      // Keep an issued quote intact; only refresh previews while unsigned.
+      if (quote?.quote_id) return;
       if (tradingDisabled) {
         setQuote(null);
         setError(tradingReason ?? "Trading disabled");
@@ -205,7 +214,7 @@ export function StakeQuoteCard({
       const shouldBlockCta = !quote;
       if (shouldBlockCta) setLoading(true);
       try {
-        const payload = await fetchPricingQuoteWithMeta(cappedStake, {
+        const payload = await fetchPricingPreview(cappedStake, {
           marketId,
           walletAddress: address,
           marketAddress: marketAddress ?? "",
@@ -247,6 +256,7 @@ export function StakeQuoteCard({
     chainId,
     chainMismatch,
     capExhausted,
+    quote?.quote_id,
   ]);
 
   useEffect(() => {
@@ -258,7 +268,7 @@ export function StakeQuoteCard({
   }, [address, marketId, tradingDisabled, fxUnavailable, chainMismatch]);
 
   useEffect(() => {
-    if (!quote) {
+    if (!quote?.quote_id) {
       setQuoteCountdown(null);
       return;
     }
@@ -276,7 +286,8 @@ export function StakeQuoteCard({
         return false;
       }
       const seconds = Math.ceil(remainingMs / 1000);
-      setQuoteCountdown(`${seconds}s`);
+      const displaySeconds = Math.max(0, Math.min(10, seconds));
+      setQuoteCountdown(`${displaySeconds}s`);
       return true;
     };
     const ok = updateCountdown();
@@ -300,6 +311,11 @@ export function StakeQuoteCard({
   }, [chainId, address, initialTxHash]);
 
   const toWinZen = useMemo(() => {
+    const outcomePrice = priceForOutcome(selectedOutcome);
+    if (Number.isFinite(stakeZen) && outcomePrice && outcomePrice > 0) {
+      // Derive payout from quoted probability to reflect selected outcome.
+      return stakeZen / outcomePrice;
+    }
     if (!quote) return null;
     if (quote.payout_zen !== null && quote.payout_zen !== undefined && Number.isFinite(Number(quote.payout_zen))) {
       return Number(quote.payout_zen);
@@ -308,7 +324,7 @@ export function StakeQuoteCard({
       return Number(quote.stake_zen);
     }
     return null;
-  }, [quote]);
+  }, [quote, priceForOutcome, selectedOutcome, stakeZen]);
   const profitZen = useMemo(() => {
     if (toWinZen === null || !Number.isFinite(stakeZen)) return null;
     return toWinZen - stakeZen;
@@ -322,7 +338,7 @@ export function StakeQuoteCard({
     selectedOutcome === 0
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
-  const quoteExpired = quote ? (quoteExpiryMs ? quoteExpiryMs <= Date.now() : true) : false;
+  const quoteExpired = quote?.quote_id ? (quoteExpiryMs ? quoteExpiryMs <= Date.now() : true) : false;
   const missingPayout = !quote || quote.payout_zen === null || quote.payout_zen === undefined;
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
@@ -355,7 +371,7 @@ export function StakeQuoteCard({
       return;
     }
     if (!quote) {
-      setError("Requesting quote before trading…");
+      setError("Requesting quote preview…");
       setRefreshNonce((prev) => prev + 1);
       return;
     }
@@ -365,25 +381,6 @@ export function StakeQuoteCard({
     }
     if (stakeOutOfRange) {
       setTxError(STAKE_RANGE_ERROR);
-      return;
-    }
-    if (stakeZen !== quote.stake_zen) {
-      setTxError("Stake changed. Refresh the quote.");
-      return;
-    }
-    if (!quote.quote_id) {
-      setTxError("Quote unavailable. Refreshing…");
-      setRefreshNonce((prev) => prev + 1);
-      return;
-    }
-    const expiresTs = quoteExpiryMs;
-    if (!expiresTs || expiresTs <= Date.now()) {
-      setTxError("Quote expired. Refreshing…");
-      setRefreshNonce((prev) => prev + 1);
-      return;
-    }
-    if (quote.chain_id && chainId && Number(quote.chain_id) !== chainId) {
-      setTxError(`Switch to chain ${quote.chain_id} to trade.`);
       return;
     }
     if (!chainId || chainMismatch) {
@@ -396,7 +393,27 @@ export function StakeQuoteCard({
     }
     setTxLoading(true);
     try {
-      const resp: TradeCommitResponse = await submitTrade(quote.quote_id);
+      const issuedQuote = await fetchPricingQuoteWithMeta(stakeZen, {
+        marketId,
+        walletAddress: address,
+        marketAddress: marketAddress ?? "",
+        outcomeId: selectedOutcome,
+      });
+      setQuote(issuedQuote);
+      if (!issuedQuote.quote_id) {
+        throw new Error("Quote unavailable");
+      }
+      const issuedExpiry = getQuoteExpiryMs(issuedQuote);
+      if (!issuedExpiry || issuedExpiry <= Date.now()) {
+        throw new Error("Quote expired");
+      }
+      if (issuedQuote.chain_id && chainId && Number(issuedQuote.chain_id) !== chainId) {
+        throw new Error(`Switch to chain ${issuedQuote.chain_id} to trade.`);
+      }
+      if (stakeZen !== issuedQuote.stake_zen) {
+        throw new Error("Stake changed. Refresh the quote.");
+      }
+      const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id);
       if (resp.tx_hash) {
         setTxHash(resp.tx_hash);
         setTxStatus(resp.relayer_status ?? null);
@@ -465,12 +482,6 @@ export function StakeQuoteCard({
             <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
               Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "—"} expires{" "}
               {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
-            </span>
-          )}
-          {quote && (
-            <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-white/70">
-              Caps — user {quote.remaining_user_stake_zen?.toFixed(2) ?? "n/a"} ZEN · market{" "}
-              {quote.remaining_market_stake_zen?.toFixed(2) ?? "n/a"} ZEN
             </span>
           )}
         </div>
@@ -623,7 +634,7 @@ export function StakeQuoteCard({
           </div>
         </label>
         <div className="grid grid-cols-1 gap-3 text-xs">
-          <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 2)} ZEN`} highlight />
+          <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 3)} ZEN`} highlight />
         </div>
       </div>
 
@@ -676,6 +687,12 @@ export function StakeQuoteCard({
           {submitBlockedReason ?? (txLoading || txPending ? "Submitting…" : ctaLabel)}
         </button>
         {quote && (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
+            Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "—"} expires{" "}
+            {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
+          </span>
+        )}
+        {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
             Caps — user:{" "}
             {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
@@ -725,19 +742,6 @@ export function StakeQuoteCard({
           </p>
         )}
       </div>
-      {quote && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3 text-xs text-slate-300">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Trade summary</p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <span>Stake: {formatNumber(quote.stake_zen, 3)} ZEN</span>
-            <span>Refund: {formatNumber(quote.refund_zen, 3)} ZEN</span>
-            <span>Profit: {formatNumber(profitZen ?? NaN, 3)} ZEN</span>
-            <span>Haircut: {formatNumber(quote.haircut_percent * 100, 2)}%</span>
-            <span>Worsen: {formatNumber(quote.worsen_percent * 100, 2)}%</span>
-            <span>Rake: {formatNumber(quote.rake_percent * 100, 2)}%</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
