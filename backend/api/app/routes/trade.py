@@ -78,6 +78,16 @@ def _zen_to_wei(value: float | Decimal) -> int:
     return int(quantized)
 
 
+def _relayer_url(path: str) -> str:
+    """Normalize relayer base URL and join a path without duplicate slashes."""
+
+    if not settings.relayer_base_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
+    base = str(settings.relayer_base_url).rstrip("/")
+    suffix = path.lstrip("/")
+    return f"{base}/{suffix}"
+
+
 def _sign_quote_for_commit(quote: schemas.PricingQuotePayload) -> schemas.PricingQuotePayload:
     if settings.pricing_chain_id is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="pricing_chain_missing")
@@ -1006,11 +1016,12 @@ async def trade_commit(
     }
     relayer_status = None
     relayer_job = None
+    commit_url = _relayer_url("commit")
     try:
-        relayer_result = await _call_relayer(f"{settings.relayer_base_url}/commit", relayer_payload)
+        relayer_result = await _call_relayer(commit_url, relayer_payload)
     except HTTPException as exc:
         if settings.relayer_queue_enabled:
-            relayer_job = await _enqueue_relayer_job("commit", f"{settings.relayer_base_url}/commit", relayer_payload)
+            relayer_job = await _enqueue_relayer_job("commit", commit_url, relayer_payload)
             relayer_status = "queued"
             relayer_result = {}
         else:
@@ -1218,10 +1229,11 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         headers["Authorization"] = f"Bearer {settings.relayer_bearer_token}"
     relayer_job = None
     try:
-        result = await _call_relayer(f"{settings.relayer_base_url}/claim", relayer_payload)
+        claim_url = _relayer_url("claim")
+        result = await _call_relayer(claim_url, relayer_payload)
     except HTTPException as exc:
         if settings.relayer_queue_enabled:
-            relayer_job = await _enqueue_relayer_job("claim", f"{settings.relayer_base_url}/claim", relayer_payload)
+            relayer_job = await _enqueue_relayer_job("claim", claim_url, relayer_payload)
             result = {}
         else:
             raise exc
@@ -1352,7 +1364,8 @@ async def trade_status(tx_hash: str | None = None, job_id: str | None = None):
                     return schemas.TradeStatusResponse(tx_hash="", status=status_str)
         if not settings.relayer_base_url:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
-        result = await _call_relayer(f"{settings.relayer_base_url}/status", {"jobId": job_id})
+        status_url = _relayer_url("status")
+        result = await _call_relayer(status_url, {"jobId": job_id})
         resolved_tx = result.get("txHash") or result.get("tx_hash") or None
         if not resolved_tx:
             status_str = result.get("status") or result.get("state") or "unknown"

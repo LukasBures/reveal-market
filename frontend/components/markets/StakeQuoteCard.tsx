@@ -88,8 +88,7 @@ export function StakeQuoteCard({
   const [txHash, setTxHash] = useState<string | null>(initialTxHash);
   const [txConfirmed, setTxConfirmed] = useState(false);
   const [txStatus, setTxStatus] = useState<string | null>(null);
-  const explorerBase =
-    (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "https://horizen-testnet.explorer.caldera.xyz/tx").replace(/\/+$/, "");
+  const explorerBase = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
   const txPending = false;
   const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
   const fxUnavailable = status === "error";
@@ -683,7 +682,7 @@ export function StakeQuoteCard({
         </button>
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-            Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "preview"} expires in{" "}
+            Quote {quote.quote_id ? quote.quote_id : "preview"} expires in{" "}
             {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
           </p>
         )}
@@ -720,7 +719,7 @@ export function StakeQuoteCard({
         {txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
             Commit tx:{" "}
-            {txHashIsHex ? (
+            {txHashIsHex && explorerBase ? (
               <a
                 href={`${explorerBase}/${txHash}`}
                 target="_blank"
@@ -729,6 +728,8 @@ export function StakeQuoteCard({
               >
                 {txHash.slice(0, 10)}…{txHash.slice(-6)}
               </a>
+            ) : txHashIsHex ? (
+              `${txHash.slice(0, 10)}…${txHash.slice(-6)}`
             ) : (
               <span className="underline decoration-dotted">{txHash}</span>
             )}{" "}

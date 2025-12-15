@@ -32,6 +32,7 @@ export function DashboardClient() {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
   const { signMessageAsync } = useSignMessage();
+  const explorerBase = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
   const escrowAddress = RELAYER_ESCROW_ADDRESS;
   const tokenAddress = ZEN_TOKEN_ADDRESS;
   const [depositInput, setDepositInput] = useState<string>("0.10");
@@ -506,6 +507,14 @@ export function DashboardClient() {
               {(() => {
                 const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
                 const bundle = bundleLookup.get(bundleKey);
+                const toWinZen =
+                  bundle && bundle.amountWei !== undefined && bundle.amountWei !== null
+                    ? Number(bundle.amountWei) / 1e18
+                    : null;
+                const txHashShort =
+                  p.tx_hash && p.tx_hash.length > 16
+                    ? `${p.tx_hash.slice(0, 10)}…${p.tx_hash.slice(-6)}`
+                    : p.tx_hash || null;
                 return (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">
@@ -526,7 +535,7 @@ export function DashboardClient() {
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-4">
+                    <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-6">
                       <span>Ticket: {p.ticket_id ?? "—"}</span>
                       <span>Created: {formatDateTime(p.created_at ?? undefined)}</span>
                       <span>Closes: {formatDateTime(p.closes_at ?? p.resolved_at ?? undefined)}</span>
@@ -534,6 +543,24 @@ export function DashboardClient() {
                         Merkle root: {p.merkle_root ? `${p.merkle_root.slice(0, 8)}…${p.merkle_root.slice(-6)}` : "—"}
                       </span>
                       <span>Quote: {p.quote_id ?? "—"}</span>
+                      <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
+                      <span>
+                        Tx:{" "}
+                        {p.tx_hash && explorerBase ? (
+                          <Link
+                            href={`${explorerBase}/${p.tx_hash}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline decoration-dotted"
+                          >
+                            {txHashShort}
+                          </Link>
+                        ) : p.tx_hash ? (
+                          txHashShort
+                        ) : (
+                          "—"
+                        )}
+                      </span>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                       {p.status === "settled" && p.claimable ? (
