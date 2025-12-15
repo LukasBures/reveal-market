@@ -78,6 +78,50 @@ def _zen_to_wei(value: float | Decimal) -> int:
     return int(quantized)
 
 
+def _sign_quote_for_commit(quote: schemas.PricingQuotePayload) -> schemas.PricingQuotePayload:
+    if settings.pricing_chain_id is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="pricing_chain_missing")
+    if not quote.quote_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_missing_id")
+    if not quote.market_address or not quote.wallet_address or quote.outcome_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="wallet_address, market_address, and outcome_id are required for signed quotes",
+        )
+    expiry_ts = quote.expiry_ts
+    if not expiry_ts:
+        expires_at = quote.expires_at
+        if isinstance(expires_at, str):
+            try:
+                normalized = expires_at.replace("Z", "+00:00")
+                expires_at = datetime.fromisoformat(normalized)
+            except Exception:
+                expires_at = None
+        expiry_ts = int(expires_at.timestamp()) if expires_at else 0
+    if not expiry_ts:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_expiry_missing")
+    raw_signer_key = settings.pricing_signer_private_key
+    signer_key = raw_signer_key.get_secret_value() if hasattr(raw_signer_key, "get_secret_value") else raw_signer_key
+    if not signer_key:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="pricing_signer_unavailable")
+    signer_account = load_account(str(signer_key))
+    digest = pricing_routes.build_quote_digest(
+        settings.pricing_chain_id,
+        quote.market_address,
+        quote.wallet_address,
+        int(quote.outcome_id),
+        int(quote.stake_wei),
+        int(quote.zen_usd_scaled),
+        int(expiry_ts),
+        quote.quote_id,
+    )
+    signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
+    quote.signature = signed.signature.hex()
+    quote.signer = signer_account.address
+    quote.expiry_ts = int(expiry_ts)
+    return quote
+
+
 async def _fetch_escrow_balance(wallet_address: str) -> int | None:
     """Return escrow balance for a wallet if escrow + RPC are configured."""
 
@@ -588,13 +632,51 @@ async def _build_merkle_proof_for_commitment(
 
 
 async def _ensure_market(
-    session: AsyncSession, market_id: str, expected_address: str | None, allow_create: bool = True
+    session: AsyncSession, market_id: str, expected_address: str | None
+) -> tuple[int, str, int | None]:
+    market = await repository_async.get_market_by_event_id(session, market_id)
+    if market is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_address_missing", "message": "Market address unavailable"},
+        )
+    if market.market_address and expected_address and market.market_address.lower() != expected_address.lower():
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.market_address_mismatch",
+            message="Market address mismatch between quote and DB",
+            market_id=market_id,
+            quote_address=expected_address,
+            db_address=market.market_address,
+        )
+    resolved_address = market.market_address or expected_address
+    if not resolved_address:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_address_missing", "message": "Market address unavailable"},
+        )
+    resolved_onchain_id = market.onchain_market_id
+    if resolved_onchain_id is None and settings.rpc_url:
+        try:
+            web3 = get_async_web3(str(settings.rpc_url))
+            contract = web3.eth.contract(address=to_checksum(resolved_address), abi=REVEAL_MARKET_ABI)
+            resolved_onchain_id = int(await contract.functions.marketId().call())
+            market.onchain_market_id = resolved_onchain_id
+            session.add(market)
+            await session.flush()
+        except Exception:
+            resolved_onchain_id = market.onchain_market_id
+    return market.id, resolved_address, resolved_onchain_id
+
+
+async def _ensure_market_or_create(
+    session: AsyncSession, market_id: str, expected_address: str | None
 ) -> tuple[int, str, int | None]:
     market = await repository_async.get_market_by_event_id(session, market_id)
     if market is None:
         if not settings.oracle_address:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="oracle_missing")
-        # Create a stub market row on-the-fly to allow first-trade creation without prior ingestion.
         market = models.Market(
             event_id=market_id,
             title=f"Market {market_id}",
@@ -603,29 +685,22 @@ async def _ensure_market(
         )
         session.add(market)
         await session.flush()
-    if not expected_address:
-        if market.market_address:
-            resolved_onchain_id = market.onchain_market_id
-            if resolved_onchain_id is None and settings.rpc_url:
-                try:
-                    web3 = get_async_web3(str(settings.rpc_url))
-                    contract = web3.eth.contract(address=to_checksum(market.market_address), abi=REVEAL_MARKET_ABI)
-                    resolved_onchain_id = int(await contract.functions.marketId().call())
-                    market.onchain_market_id = resolved_onchain_id
-                    session.add(market)
-                    await session.flush()
-                except Exception:
-                    resolved_onchain_id = market.onchain_market_id
-            return market.id, market.market_address, resolved_onchain_id
-        if not allow_create:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "market_address_missing",
-                    "message": "Market address not yet deployed; trade to trigger creation or provide market_address",
-                },
+
+    if expected_address:
+        if market.market_address and market.market_address.lower() != expected_address.lower():
+            log_event(
+                logger,
+                logging.WARNING,
+                event="trade.market_address_mismatch",
+                message="Market address mismatch between quote and DB",
+                market_id=market_id,
+                quote_address=expected_address,
+                db_address=market.market_address,
             )
-        # Auto-create a market on first trade when address is missing.
+        resolved_address = expected_address
+    elif market.market_address:
+        resolved_address = market.market_address
+    else:
         now = datetime.now(tz=UTC)
         deploy_ttl_seconds = 180
         cache = await get_cache_client()
@@ -642,7 +717,8 @@ async def _ensure_market(
                 detail={"error": "market_deploying", "message": "Market deployment in progress"},
             )
         try:
-            address, onchain_id = await _maybe_create_market_onchain(session, market)
+            resolved_address, onchain_id = await _maybe_create_market_onchain(session, market)
+            return market.id, resolved_address, onchain_id
         finally:
             if cache is not None and lock_acquired:
                 try:
@@ -655,29 +731,19 @@ async def _ensure_market(
                         message="failed to clear market deployment lock",
                         market_id=market_id,
                     )
-        return market.id, address, onchain_id
-    if market.market_address and market.market_address.lower() != expected_address.lower():
-        log_event(
-            logger,
-            logging.WARNING,
-            event="trade.market_address_mismatch",
-            message="Market address mismatch between quote and DB",
-            market_id=market_id,
-            quote_address=expected_address,
-            db_address=market.market_address,
-        )
+
     resolved_onchain_id = market.onchain_market_id
-    if resolved_onchain_id is None and settings.rpc_url and expected_address:
+    if resolved_onchain_id is None and settings.rpc_url:
         try:
             web3 = get_async_web3(str(settings.rpc_url))
-            contract = web3.eth.contract(address=to_checksum(expected_address), abi=REVEAL_MARKET_ABI)
+            contract = web3.eth.contract(address=to_checksum(resolved_address), abi=REVEAL_MARKET_ABI)
             resolved_onchain_id = int(await contract.functions.marketId().call())
             market.onchain_market_id = resolved_onchain_id
             session.add(market)
             await session.flush()
         except Exception:
             resolved_onchain_id = market.onchain_market_id
-    return market.id, expected_address, resolved_onchain_id
+    return market.id, resolved_address, resolved_onchain_id
 
 
 async def _maybe_backfill_settlement(session: AsyncSession, market: models.Market) -> models.Settlement | None:
@@ -758,16 +824,24 @@ async def trade_commit(
     """Consume a pricing quote, build CommitAuth, and forward to the relayer."""
 
     db_quote, quote = await _get_quote(session, payload.quote_id)
-    if not quote.market_address:
-        _, ensured_address, _ = await _ensure_market(session, quote.market_id or "", quote.market_address)
-        quote.market_address = ensured_address
+    market_db_id, market_address, market_onchain_id = await _ensure_market_or_create(
+        session, quote.market_id or "", quote.market_address
+    )
+    if not market_address:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "market_address_missing", "message": "Market address unavailable"},
+        )
+    if not quote.market_address or quote.market_address.lower() != market_address.lower() or not quote.signature:
+        quote.market_address = market_address
+        db_quote.market_address = market_address
+        quote = _sign_quote_for_commit(quote)
+        db_quote.payload = quote.model_dump(mode="json")
+        await session.flush()
     now = datetime.now(tz=UTC)
     if quote.expires_at and quote.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_expired")
 
-    market_db_id, market_address, market_onchain_id = await _ensure_market(
-        session, quote.market_id or "", quote.market_address
-    )
     if quote.outcome_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="outcome_required")
     outcome_id = int(quote.outcome_id)

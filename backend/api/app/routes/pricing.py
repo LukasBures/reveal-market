@@ -24,7 +24,6 @@ from app import models, repository_async, schemas
 from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
 from app.pricing import PricingEngine, fetch_fx_quote
-from app.routes import trade as trade_routes
 from app.runtime import logger, settings
 
 router = APIRouter()
@@ -257,25 +256,11 @@ async def pricing_quote(
             )
         if market_record:
             _assert_commits_allowed(market_record, now, session)
-    # Ensure the market is deployed; auto-create via factory when no address is stored.
+    # Best-effort resolve a market address without creating one; quotes can be issued pre-deploy.
     ensured_market_address: str | None = (payload.market_address or "") or None
-    if payload.market_id:
-        try:
-            _, ensured_market_address, _ = await trade_routes._ensure_market(
-                session, payload.market_id, ensured_market_address
-            )
-        except HTTPException as exc:
-            # In test/offline contexts without an oracle configured, fall back to the provided address.
-            detail = getattr(exc, "detail", "")
-            if ensured_market_address and detail == "oracle_missing":
-                ensured_market_address = ensured_market_address
-            else:
-                raise
-    if ensured_market_address is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "market_address_missing", "message": "Market address unavailable"},
-        )
+    if payload.market_id and not ensured_market_address:
+        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+        ensured_market_address = getattr(market_record, "market_address", None)
     try:
         fx_quote = await fetch_fx_quote(settings)
         if fx_quote.stale:
@@ -344,21 +329,26 @@ async def pricing_quote(
     else:
         signer_key = cast(str | None, raw_signer_key)
     signer_account = await asyncio.to_thread(load_account, signer_key)
-    try:
-        digest = build_quote_digest(
-            settings.pricing_chain_id,
-            ensured_market_address,
-            payload.wallet_address,
-            int(payload.outcome_id),
-            stake_wei,
-            zen_usd_scaled,
-            expiry_ts,
-            quote_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    message = encode_defunct(hexstr=digest.hex())
-    signed = Account.sign_message(message, signer_account.key)
+    signature: str | None = None
+    signer_address: str | None = None
+    if ensured_market_address:
+        try:
+            digest = build_quote_digest(
+                settings.pricing_chain_id,
+                ensured_market_address,
+                payload.wallet_address,
+                int(payload.outcome_id),
+                stake_wei,
+                zen_usd_scaled,
+                expiry_ts,
+                quote_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        message = encode_defunct(hexstr=digest.hex())
+        signed = Account.sign_message(message, signer_account.key)
+        signature = signed.signature.hex()
+        signer_address = signer_account.address
 
     quote = quote.model_copy(
         update={
@@ -374,8 +364,8 @@ async def pricing_quote(
             "expiry_ts": expiry_ts,
             "fx_stale": False,
             "fx_received_at": fx_received_at,
-            "signature": signed.signature.hex(),
-            "signer": signer_account.address,
+            "signature": signature,
+            "signer": signer_address,
             "market_id": payload.market_id,
             "user_id": payload.user_id,
             "wallet_address": payload.wallet_address,
@@ -604,6 +594,7 @@ async def pricing_submit(
 
     expiry_reference = quote_expires_at or db_expires_at or now
     expiry_ts = quote.expiry_ts or int(expiry_reference.timestamp())
+    quote.expiry_ts = expiry_ts
     stake_wei = quote.stake_wei
     zen_usd_scaled = quote.zen_usd_scaled
     recalculated_stake = _to_wei_amount(quote.stake_zen)
@@ -611,6 +602,24 @@ async def pricing_submit(
     if recalculated_stake != stake_wei or recalculated_fx != zen_usd_scaled:
         PRICING_COUNTER.labels(event="submit", result="scaled_mismatch").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote fields do not match scaled values")
+    if not quote.signature:
+        try:
+            digest = build_quote_digest(
+                settings.pricing_chain_id,
+                quote.market_address,
+                quote.wallet_address,
+                int(quote.outcome_id),
+                stake_wei,
+                zen_usd_scaled,
+                expiry_ts,
+                quote_id,
+            )
+            signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
+            quote.signature = signed.signature.hex()
+            quote.signer = signer_account.address
+        except Exception as exc:
+            PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
     try:
         digest = build_quote_digest(
             settings.pricing_chain_id,

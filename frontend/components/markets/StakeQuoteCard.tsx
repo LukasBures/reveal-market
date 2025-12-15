@@ -651,7 +651,6 @@ export function StakeQuoteCard({
             fxUnavailable ||
             !fxLive ||
             !address ||
-            !marketAddress ||
             tradingDisabled ||
             capExhausted ||
             chainMismatch ||

@@ -74,7 +74,7 @@ def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch)
     assert resp.json()["detail"] == "market_not_final"
 
 
-def test_pricing_quote_auto_creates_market_when_missing_address(client, db_session, monkeypatch):
+def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()
     market = _seed_market(db_session, event_id="auto-mkt", address=None)
@@ -89,12 +89,6 @@ def test_pricing_quote_auto_creates_market_when_missing_address(client, db_sessi
         return FxQuoteResponse(zen_usd=Decimal("2"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
-    ensured_address = "0x2222222222222222222222222222222222222222"
-
-    async def _ensure_market(_session, _market_id, _expected):
-        return market.id, ensured_address, 1
-
-    monkeypatch.setattr("app.routes.pricing.trade_routes._ensure_market", _ensure_market)
 
     payload = {
         "stake_zen": 0.1,
@@ -107,9 +101,9 @@ def test_pricing_quote_auto_creates_market_when_missing_address(client, db_sessi
     resp = client.post("/pricing/quote", json=payload)
     assert resp.status_code == 200
     quote = resp.json()
-    assert quote["market_address"].lower() == ensured_address.lower()
+    assert quote["market_address"] is None
     assert quote["quote_id"]
-    assert quote["signature"]
+    assert quote["signature"] is None
 
 
 def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
@@ -139,6 +133,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
 
     monkeypatch.setattr("app.routes.pricing.trade_routes._ensure_market", _ensure_market)
     monkeypatch.setattr("app.routes.trade._ensure_market", _ensure_market)
+    monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market)
 
     async def _next_ticket_id(*_args, **_kwargs):
         return 0
