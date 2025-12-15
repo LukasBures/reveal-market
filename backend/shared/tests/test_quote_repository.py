@@ -23,7 +23,7 @@ def _seed_quote(
     created_at: datetime | None = None,
     stake_zen: Decimal = Decimal("1"),
     market_id: str | None = None,
-    user_id: str | None = None,
+    wallet_address: str | None = None,
 ) -> models.Quote:
     payload = {
         "quote_id": quote_id,
@@ -35,7 +35,7 @@ def _seed_quote(
         "zen_usd": float(stake_zen),
         "expires_at": expires_at,
         "market_id": market_id,
-        "user_id": user_id,
+        "wallet_address": wallet_address,
     }
     if created_at:
         payload["created_at"] = created_at
@@ -86,7 +86,7 @@ def test_sum_quote_stakes_respects_window_and_filters():
         created_at=recent,
         stake_zen=Decimal("1.5"),
         market_id="m1",
-        user_id="u1",
+        wallet_address="w1",
     )
     _seed_quote(
         session,
@@ -95,7 +95,7 @@ def test_sum_quote_stakes_respects_window_and_filters():
         created_at=old,
         stake_zen=Decimal("2.0"),
         market_id="m1",
-        user_id="u1",
+        wallet_address="w1",
     )
     _seed_quote(
         session,
@@ -104,16 +104,22 @@ def test_sum_quote_stakes_respects_window_and_filters():
         created_at=recent,
         stake_zen=Decimal("3.0"),
         market_id="m2",
-        user_id="u1",
+        wallet_address="w1",
         status=models.QuoteStatusEnum.CONSUMED,
     )
     session.commit()
 
-    window_sum = repository.sum_quote_stakes(session, market_id="m1", user_id="u1", window_seconds=300, statuses=None)
-    # Only q1 is within the window for market m1 + user u1.
+    window_sum = repository.sum_quote_stakes(
+        session, market_id="m1", wallet_address="w1", window_seconds=300, statuses=None
+    )
+    # Only q1 is within the window for market m1 + wallet w1.
     assert window_sum == Decimal("1.5")
 
     all_status_sum = repository.sum_quote_stakes(
-        session, market_id="m2", user_id="u1", window_seconds=300, statuses={models.QuoteStatusEnum.CONSUMED.value}
+        session,
+        market_id="m2",
+        wallet_address="w1",
+        window_seconds=300,
+        statuses={models.QuoteStatusEnum.CONSUMED.value},
     )
     assert all_status_sum == Decimal("3.0")

@@ -48,9 +48,13 @@ async def _send_create_market_transaction(
     private_key: str,
     event_id: str,
     commit_deadline: int,
-    reveal_deadline: int,
     oracle: str,
-    collateral: str | None,
+    verifier: str,
+    authorization_signer: str,
+    circuit_hash: str,
+    ticket_size_wei: int,
+    max_commitments: int,
+    protocol_liability_cap_wei: int,
     gas_price_wei: int | None,
     max_priority_fee_wei: int | None,
     max_retries: int,
@@ -61,11 +65,8 @@ async def _send_create_market_transaction(
     account = load_account(private_key)
     factory = web3.eth.contract(address=to_checksum(factory_address), abi=MARKET_FACTORY_ABI)
     oracle_checksum = to_checksum(oracle)
-    collateral_checksum = (
-        to_checksum(collateral)
-        if collateral
-        else web3.to_checksum_address("0x0000000000000000000000000000000000000000")
-    )
+    verifier_checksum = to_checksum(verifier)
+    signer_checksum = to_checksum(authorization_signer)
 
     try:
         from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -104,12 +105,16 @@ async def _send_create_market_transaction(
                 )
 
             create_fn = factory.functions.createMarket(
-                event_id,
-                commit_deadline,
-                reveal_deadline,
-                oracle_checksum,
-                collateral_checksum,
-                0,
+                (
+                    oracle_checksum,
+                    verifier_checksum,
+                    circuit_hash,
+                    commit_deadline,
+                    ticket_size_wei,
+                    max_commitments,
+                    signer_checksum,
+                    protocol_liability_cap_wei,
+                )
             )
             estimate_kwargs = dict(tx_params)
             gas_estimate = await create_fn.estimate_gas(estimate_kwargs)

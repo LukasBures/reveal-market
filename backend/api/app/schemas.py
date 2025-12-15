@@ -246,10 +246,13 @@ class ProofReceipt(BaseModel):
 class PricingQuoteRequest(BaseModel):
     stake_zen: Decimal = Field(..., gt=0)
     market_id: str = Field(..., description="Market ID for cap tracking")
-    user_id: str = Field(..., description="User identifier for per-market caps")
-    wallet_address: str = Field(..., description="User wallet to bind quote to")
+    wallet_address: str = Field(..., description="User wallet to bind quote to (used for caps)")
     outcome_id: int = Field(..., ge=0, description="Outcome id to bind quote to")
     market_address: str | None = Field(default=None, description="Market contract address (auto-created when missing)")
+    user_id: str | None = Field(
+        default=None,
+        description="(Deprecated) User identifier; defaults to wallet_address for cap tracking",
+    )
 
 
 class PricingQuoteResponse(BaseModel):

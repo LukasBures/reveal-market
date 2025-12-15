@@ -165,7 +165,7 @@ async def sum_quote_stakes(
     session: AsyncSession,
     *,
     market_id: str | None = None,
-    user_id: str | None = None,
+    wallet_address: str | None = None,
     window_seconds: int | None = None,
     statuses: set[str] | None = None,
 ) -> Decimal:
@@ -179,8 +179,8 @@ async def sum_quote_stakes(
     stmt = stmt.where(models.Quote.status.in_(active_statuses))
     if market_id:
         stmt = stmt.where(models.Quote.market_id == market_id)
-    if user_id:
-        stmt = stmt.where(models.Quote.user_id == user_id)
+    if wallet_address:
+        stmt = stmt.where(models.Quote.wallet_address == wallet_address)
     if window_seconds and window_seconds > 0:
         cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
         stmt = stmt.where(models.Quote.created_at >= cutoff)

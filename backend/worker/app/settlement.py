@@ -53,7 +53,6 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         next_ticket_id,
         phase_value,
         _commit_deadline,
-        _reveal_deadline,
         winning_outcome_id,
     ) = await contract.functions.marketState().call()
     total_escrow = await contract.functions.totalEscrow().call()

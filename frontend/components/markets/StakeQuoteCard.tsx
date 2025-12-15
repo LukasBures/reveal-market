@@ -261,14 +261,15 @@ export function StakeQuoteCard({
 
   useEffect(() => {
     if (!address || !marketId || tradingDisabled || fxUnavailable || chainMismatch) return;
+    if (quote) return;
     const timer = setInterval(() => {
       setRefreshNonce((prev) => prev + 1);
     }, QUOTE_REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [address, marketId, tradingDisabled, fxUnavailable, chainMismatch]);
+  }, [address, marketId, tradingDisabled, fxUnavailable, chainMismatch, quote]);
 
   useEffect(() => {
-    if (!quote?.quote_id) {
+    if (!quote) {
       setQuoteCountdown(null);
       return;
     }
@@ -286,7 +287,7 @@ export function StakeQuoteCard({
         return false;
       }
       const seconds = Math.ceil(remainingMs / 1000);
-      const displaySeconds = Math.max(0, Math.min(10, seconds));
+      const displaySeconds = Math.max(0, seconds);
       setQuoteCountdown(`${displaySeconds}s`);
       return true;
     };
@@ -330,6 +331,7 @@ export function StakeQuoteCard({
     return toWinZen - stakeZen;
   }, [toWinZen, stakeZen]);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
+  const txHashIsHex = typeof txHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(txHash);
   const ctaLabel = loading
     ? "Pricing…"
     : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
@@ -414,8 +416,9 @@ export function StakeQuoteCard({
         throw new Error("Stake changed. Refresh the quote.");
       }
       const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id);
-      if (resp.tx_hash) {
-        setTxHash(resp.tx_hash);
+      const respHash = resp.tx_hash || resp.relayer_job_id || resp.quote_id;
+      if (respHash) {
+        setTxHash(respHash);
         setTxStatus(resp.relayer_status ?? null);
         setTxConfirmed(true);
       }
@@ -476,14 +479,6 @@ export function StakeQuoteCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold text-white">Buy {outcomeLabel}</p>
-        </div>
-        <div className="flex flex-col items-end gap-2 text-[11px] uppercase tracking-[0.2em]">
-          {quote && (
-            <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
-              Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "—"} expires{" "}
-              {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
-            </span>
-          )}
         </div>
       </div>
 
@@ -687,10 +682,10 @@ export function StakeQuoteCard({
           {submitBlockedReason ?? (txLoading || txPending ? "Submitting…" : ctaLabel)}
         </button>
         {quote && (
-          <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
-            Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "—"} expires{" "}
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Quote {quote.quote_id ? `${quote.quote_id.slice(0, 6)}…` : "preview"} expires in{" "}
             {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
-          </span>
+          </p>
         )}
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
@@ -725,14 +720,18 @@ export function StakeQuoteCard({
         {txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
             Commit tx:{" "}
-            <a
-              href={`${explorerBase}/${txHash}`}
-              target="_blank"
-              rel="noreferrer"
-              className="underline decoration-dotted"
-            >
-              {txHash.slice(0, 10)}…{txHash.slice(-6)}
-            </a>{" "}
+            {txHashIsHex ? (
+              <a
+                href={`${explorerBase}/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-dotted"
+              >
+                {txHash.slice(0, 10)}…{txHash.slice(-6)}
+              </a>
+            ) : (
+              <span className="underline decoration-dotted">{txHash}</span>
+            )}{" "}
             ({txStatus ?? "pending"})
           </p>
         )}

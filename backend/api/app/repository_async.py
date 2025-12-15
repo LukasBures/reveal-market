@@ -22,14 +22,14 @@ async def sum_quote_stakes(
     session: AsyncSession,
     *,
     market_id: str | None = None,
-    user_id: str | None = None,
+    wallet_address: str | None = None,
     window_seconds: int | None = None,
     statuses: set[str] | None = None,
 ) -> Decimal:
     return await shared_repository_async.sum_quote_stakes(
         session,
         market_id=market_id,
-        user_id=user_id,
+        wallet_address=wallet_address,
         window_seconds=window_seconds,
         statuses=statuses,
     )

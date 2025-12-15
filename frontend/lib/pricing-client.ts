@@ -198,22 +198,25 @@ export async function fetchFxQuote(): Promise<FxQuote> {
 
 export async function fetchPricingQuote(
   stakeZen: number,
-  opts: { walletAddress: string; marketAddress: string; outcomeId: number; marketId?: string; userId?: string },
+  opts: { walletAddress: string; marketAddress: string; outcomeId: number; marketId?: string },
 ): Promise<PricingQuote> {
   return fetchPricingQuoteWithMeta(stakeZen, opts);
 }
 
 export async function fetchPricingPreview(
   stakeZen: number,
-  opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string | null },
+  opts: { marketId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string | null },
 ): Promise<PricingQuote> {
+  const userId = opts.walletAddress;
+  if (!userId) {
+    throw new Error("walletAddress is required for preview quotes");
+  }
   const res = await fetch(getEndpoint("/pricing/preview"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       stake_zen: stakeZen,
       market_id: opts.marketId,
-      user_id: opts.userId,
       wallet_address: opts.walletAddress,
       outcome_id: opts.outcomeId,
       market_address: opts.marketAddress ?? null,
@@ -228,20 +231,18 @@ export async function fetchPricingPreview(
 
 export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
-  opts: { marketId?: string; userId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
+  opts: { marketId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
 ): Promise<PricingQuote> {
   if (!opts.walletAddress || opts.outcomeId === undefined || opts.outcomeId === null || !opts.marketId) {
     throw new Error("walletAddress, marketId, and outcomeId are required for signed quotes");
   }
   const normalizedAddress = opts.marketAddress && opts.marketAddress.length > 0 ? opts.marketAddress : null;
-  const userId = opts.userId ?? opts.walletAddress;
   const res = await fetch(getEndpoint("/pricing/quote"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       stake_zen: stakeZen,
       market_id: opts.marketId,
-      user_id: userId,
       wallet_address: opts.walletAddress,
       outcome_id: opts.outcomeId,
       market_address: normalizedAddress,

@@ -159,7 +159,7 @@ async def _enforce_caps(
     *,
     stake_zen: Decimal,
     market_id: str | None,
-    user_id: str | None,
+    wallet_address: str | None,
     include_stake: bool = True,
     exclude_quote: models.Quote | None = None,
     statuses: set[str] | None = None,
@@ -194,17 +194,17 @@ async def _enforce_caps(
             )
         market_total = projected_market
 
-    if market_id and user_id:
+    if market_id and wallet_address:
         user_existing = float(
             await repository_async.sum_quote_stakes(
                 session,
                 market_id=market_id,
-                user_id=user_id,
+                wallet_address=wallet_address,
                 window_seconds=window,
                 statuses=status_filter,
             )
         )
-        if exclude_quote and exclude_quote.market_id == market_id and exclude_quote.user_id == user_id:
+        if exclude_quote and exclude_quote.market_id == market_id and exclude_quote.wallet_address == wallet_address:
             user_existing = max(0.0, user_existing - float(exclude_quote.stake_zen))
         projected_user = user_existing + (float(stake_zen) if include_stake else 0.0)
         if projected_user > settings.max_user_stake_per_market_zen:
@@ -217,7 +217,7 @@ async def _enforce_caps(
                     "remaining_user_stake_zen": remaining_user_cap,
                     "stake_zen": float(stake_zen),
                     "market_id": market_id,
-                    "user_id": user_id,
+                    "wallet_address": wallet_address,
                 },
             )
         user_total = projected_user
@@ -239,6 +239,7 @@ async def pricing_quote(
     """Generate a signed quote bound to stake, FX, outcome, and expiry."""
 
     now = datetime.now(tz=UTC)
+    user_id = payload.user_id or payload.wallet_address
     if payload.stake_zen > settings.max_stake_zen:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -296,7 +297,7 @@ async def pricing_quote(
             session,
             stake_zen=payload.stake_zen,
             market_id=payload.market_id,
-            user_id=payload.user_id,
+            wallet_address=payload.wallet_address,
             include_stake=True,
         )
 
@@ -382,7 +383,7 @@ async def pricing_quote(
             "signature": signature,
             "signer": signer_address,
             "market_id": payload.market_id,
-            "user_id": payload.user_id,
+            "user_id": user_id,
             "wallet_address": payload.wallet_address,
             "outcome_id": payload.outcome_id,
             "market_address": ensured_market_address,
@@ -404,7 +405,7 @@ async def pricing_quote(
                 "zen_usd": quote.zen_usd,
                 "market_id": payload.market_id,
                 "market_address": ensured_market_address,
-                "user_id": payload.user_id,
+                "user_id": user_id,
                 "wallet_address": payload.wallet_address,
                 "outcome_id": quote.outcome_id,
                 "chain_id": settings.pricing_chain_id,
@@ -451,6 +452,7 @@ async def pricing_quote_preview(
     """Return an unsigned, non-persistent preview quote (no market creation, no signature)."""
 
     # No creation here; best-effort fetch of existing market address.
+    user_id = payload.user_id or payload.wallet_address
     market_address: str | None = payload.market_address or None
     if payload.market_id and not market_address:
         market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
@@ -485,7 +487,7 @@ async def pricing_quote_preview(
             session,
             stake_zen=payload.stake_zen,
             market_id=payload.market_id,
-            user_id=payload.user_id,
+            wallet_address=payload.wallet_address,
             include_stake=True,
         )
 
@@ -516,6 +518,8 @@ async def pricing_quote_preview(
         payout_zen = Decimal(str(payload.stake_zen))
 
     # Preview response mirrors the signed payload but omits signature/persistence/expiry.
+    expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
+    expiry_ts = int(expires_at.timestamp())
     return quote.model_copy(
         update={
             "max_stake_zen": settings.max_stake_zen,
@@ -526,14 +530,14 @@ async def pricing_quote_preview(
             "stake_wei": stake_wei,
             "zen_usd_scaled": zen_usd_scaled,
             "quote_id": None,
-            "expires_at": None,
-            "expiry_ts": 0,
+            "expires_at": expires_at,
+            "expiry_ts": expiry_ts,
             "fx_stale": False,
             "fx_received_at": fx_received_at,
             "signature": None,
             "signer": None,
             "market_id": payload.market_id,
-            "user_id": payload.user_id,
+            "user_id": user_id,
             "wallet_address": payload.wallet_address,
             "outcome_id": payload.outcome_id,
             "market_address": market_address,
@@ -710,7 +714,7 @@ async def pricing_submit(
         session,
         stake_zen=quote.stake_zen,
         market_id=quote.market_id,
-        user_id=quote.user_id,
+        wallet_address=quote.wallet_address,
         exclude_quote=db_quote,
         include_stake=False,
         statuses={models.QuoteStatusEnum.CONSUMED.value},

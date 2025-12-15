@@ -149,7 +149,7 @@ async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_a
         web3 = get_async_web3(str(settings.rpc_url))
         factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
         params = await factory.functions.getMarketParams(int(market_onchain_id)).call()
-        protocol_pool_address = params[12]
+        protocol_pool_address = params[11]
     except Exception as exc:
         log_event(
             logger,
@@ -389,13 +389,11 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
         web3 = get_async_web3(str(rpc_url))
         factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
         commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
-        reveal_deadline = commit_deadline + int(settings.market_reveal_lead_seconds)
         params = (
             to_checksum(settings.oracle_address),
             to_checksum(settings.verifier_address),
             settings.circuit_hash,
             commit_deadline,
-            reveal_deadline,
             int(settings.ticket_size_wei),
             int(settings.market_max_commitments),
             to_checksum(settings.authorization_signer),

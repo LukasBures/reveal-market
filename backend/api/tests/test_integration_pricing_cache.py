@@ -29,7 +29,6 @@ def test_quote_issue_and_submit_returns_signed_payload(client, monkeypatch, db_s
         "market_address": "0x1111111111111111111111111111111111111111",
         "outcome_id": 0,
         "market_id": "mkt-simple",
-        "user_id": "user-simple",
     }
 
     quote_resp = client.post("/pricing/quote", json=payload)
@@ -70,7 +69,6 @@ def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch, db_session
         "market_address": "0x1111111111111111111111111111111111111111",
         "outcome_id": 0,
         "market_id": "mkt-2",
-        "user_id": "user-2",
     }
     quote = client.post("/pricing/quote", json=payload).json()
     assert quote["quote_id"]
@@ -113,7 +111,6 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
         "market_address": "0x1111111111111111111111111111111111111111",
         "outcome_id": 1,
         "market_id": "cap-mkt",
-        "user_id": "user-cap-1",
     }
 
     # At-cap bet should succeed and surface remaining limits.
@@ -124,7 +121,7 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     assert data["remaining_market_stake_zen"] == pytest.approx(0.1)
 
     # Above per-bet cap should be rejected with structured error.
-    over_bet = dict(base_payload, stake_zen=0.11, user_id="user-cap-2", wallet_address=other_user.address)
+    over_bet = dict(base_payload, stake_zen=0.11, wallet_address=other_user.address)
     resp = client.post("/pricing/quote", json=over_bet)
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "stake_above_cap"
@@ -138,12 +135,12 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     assert detail["remaining_user_stake_zen"] == pytest.approx(0.05)
 
     # Another user places a valid bet, pushing market totals near the cap.
-    valid_other = dict(base_payload, stake_zen=0.08, user_id="user-cap-2b", wallet_address=other_user.address)
+    valid_other = dict(base_payload, stake_zen=0.08, wallet_address=other_user.address)
     resp_valid_other = client.post("/pricing/quote", json=valid_other)
     assert resp_valid_other.status_code == 200, resp_valid_other.json()
 
     # Market cap breach with different user.
-    market_over = dict(base_payload, stake_zen=0.05, user_id="user-cap-3", wallet_address=other_user.address)
+    market_over = dict(base_payload, stake_zen=0.05, wallet_address=other_user.address)
     resp_market = client.post("/pricing/quote", json=market_over)
     assert resp_market.status_code == 400
     m_detail = resp_market.json()["detail"]

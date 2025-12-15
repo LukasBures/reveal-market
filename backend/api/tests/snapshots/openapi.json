@@ -1,1390 +1,38 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Reveal Market API",
-    "version": "1.0.0"
-  },
-  "paths": {
-    "/": {
-      "get": {
-        "tags": [
-          "meta"
-        ],
-        "summary": "Read Root",
-        "description": "Basic service metadata for quick smoke tests.",
-        "operationId": "read_root__get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Read Root  Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/healthz": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Health Check",
-        "description": "Readiness probe that fans out to DB/Redis/worker/Polymarket checks.",
-        "operationId": "health_check_healthz_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ready": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Readiness Check",
-        "description": "Alias for /healthz used by Kubernetes readiness probes.",
-        "operationId": "readiness_check_ready_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/live": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Liveness Check",
-        "description": "Cheap liveness probe that never touches dependencies.",
-        "operationId": "liveness_check_live_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Liveness Check Live Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/healthz/heartbeats": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Heartbeat Dashboard",
-        "description": "Return worker/API heartbeat snapshots stored in Redis.",
-        "operationId": "heartbeat_dashboard_healthz_heartbeats_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HeartbeatDashboard"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pricing/quote": {
-      "post": {
-        "tags": [
-          "pricing"
-        ],
-        "summary": "Pricing Quote",
-        "description": "Generate a signed quote bound to stake, FX, outcome, and expiry.",
-        "operationId": "pricing_quote_pricing_quote_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PricingQuoteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingQuoteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pricing/preview": {
-      "post": {
-        "tags": [
-          "pricing"
-        ],
-        "summary": "Pricing Quote Preview",
-        "description": "Return an unsigned, non-persistent preview quote (no market creation, no signature).",
-        "operationId": "pricing_quote_preview_pricing_preview_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PricingQuoteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingQuoteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pricing/submit": {
-      "post": {
-        "tags": [
-          "pricing"
-        ],
-        "summary": "Pricing Submit",
-        "description": "Validate and mark a quote as consumed, re-checking FX drift if requested.",
-        "operationId": "pricing_submit_pricing_submit_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PricingSubmitRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingSubmitResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pricing/quotes/{quote_id}": {
-      "get": {
-        "tags": [
-          "pricing"
-        ],
-        "summary": "Pricing Quote State",
-        "operationId": "pricing_quote_state_pricing_quotes__quote_id__get",
-        "parameters": [
-          {
-            "name": "quote_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Quote Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuoteRecord"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pricing/fx": {
-      "get": {
-        "tags": [
-          "pricing"
-        ],
-        "summary": "Pricing Fx",
-        "operationId": "pricing_fx_pricing_fx_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FxQuoteResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/treasury/snapshots": {
-      "get": {
-        "tags": [
-          "treasury"
-        ],
-        "summary": "Treasury Snapshots",
-        "description": "Return the latest treasury snapshots (optionally filtered by market).",
-        "operationId": "treasury_snapshots_treasury_snapshots_get",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "market_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Market Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TreasurySnapshot"
-                  },
-                  "title": "Response Treasury Snapshots Treasury Snapshots Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/markets": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "List Markets",
-        "description": "List markets with optional filters and heavy reliance on Redis caches.",
-        "operationId": "list_markets_markets_get",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter markets by status",
-              "title": "Status"
-            },
-            "description": "Filter markets by status"
-          },
-          {
-            "name": "category",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter markets by category",
-              "title": "Category"
-            },
-            "description": "Filter markets by category"
-          },
-          {
-            "name": "oracle",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter markets by oracle address",
-              "title": "Oracle"
-            },
-            "description": "Filter markets by oracle address"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 2,
-                  "maxLength": 200
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Case-insensitive search over market titles",
-              "title": "Search"
-            },
-            "description": "Case-insensitive search over market titles"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 250,
-              "minimum": 1,
-              "description": "Maximum number of markets to return",
-              "default": 50,
-              "title": "Limit"
-            },
-            "description": "Maximum number of markets to return"
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Offset into the result set",
-              "default": 0,
-              "title": "Offset"
-            },
-            "description": "Offset into the result set"
-          },
-          {
-            "name": "order_by",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Order results (popularity|recent|volume_24h_usd|volume)",
-              "title": "Order By"
-            },
-            "description": "Order results (popularity|recent|volume_24h_usd|volume)"
-          },
-          {
-            "name": "trending",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return trending slice first",
-              "title": "Trending"
-            },
-            "description": "Return trending slice first"
-          },
-          {
-            "name": "only_featured",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return only featured markets",
-              "title": "Only Featured"
-            },
-            "description": "Return only featured markets"
-          },
-          {
-            "name": "coalesce_groups",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return a single representative per group_slug",
-              "title": "Coalesce Groups"
-            },
-            "description": "Return a single representative per group_slug"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MarketResponse"
-                  },
-                  "title": "Response List Markets Markets Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/categories/{category_slug}": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "List Markets By Category",
-        "description": "List markets for a category, with fallbacks when slugs are unfamiliar.",
-        "operationId": "list_markets_by_category_categories__category_slug__get",
-        "parameters": [
-          {
-            "name": "category_slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Category Slug"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 250,
-              "minimum": 1,
-              "description": "Maximum number of markets to return",
-              "default": 50,
-              "title": "Limit"
-            },
-            "description": "Maximum number of markets to return"
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Offset into the result set",
-              "default": 0,
-              "title": "Offset"
-            },
-            "description": "Offset into the result set"
-          },
-          {
-            "name": "coalesce_groups",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return a single representative per group_slug",
-              "title": "Coalesce Groups"
-            },
-            "description": "Return a single representative per group_slug"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MarketResponse"
-                  },
-                  "title": "Response List Markets By Category Categories  Category Slug  Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/markets/group/{group_slug}": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "List Grouped Markets",
-        "description": "Return markets that belong to a group_slug plus aggregate metrics.",
-        "operationId": "list_grouped_markets_markets_group__group_slug__get",
-        "parameters": [
-          {
-            "name": "group_slug",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Group Slug"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupedMarketsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/markets/stats": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "Market Stats",
-        "description": "Return counts of markets per status, cached for fast health checks.",
-        "operationId": "market_stats_markets_stats_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MarketStatusBreakdown"
-                  },
-                  "type": "array",
-                  "title": "Response Market Stats Markets Stats Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/markets/suggest": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "Suggest Markets",
-        "description": "Return a short suggestion list, caching the normalized query payload.",
-        "operationId": "suggest_markets_markets_suggest_get",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 2,
-              "maxLength": 200,
-              "description": "Search term for suggestions",
-              "title": "Q"
-            },
-            "description": "Search term for suggestions"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 25,
-              "minimum": 1,
-              "description": "Maximum number of suggestions to return",
-              "default": 5,
-              "title": "Limit"
-            },
-            "description": "Maximum number of suggestions to return"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MarketResponse"
-                  },
-                  "title": "Response Suggest Markets Markets Suggest Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/resolution/{condition_id_hex}": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "Read Resolution",
-        "description": "Return the resolution summary for a condition id with cache + Goldsky fallback.",
-        "operationId": "read_resolution_resolution__condition_id_hex__get",
-        "parameters": [
-          {
-            "name": "condition_id_hex",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Condition Id Hex"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResolutionSummary"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/markets/{event_id}": {
-      "get": {
-        "tags": [
-          "markets"
-        ],
-        "summary": "Read Market",
-        "description": "Return a single market detail record, hydrating siblings when cached.",
-        "operationId": "read_market_markets__event_id__get",
-        "parameters": [
-          {
-            "name": "event_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Event Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MarketResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/trade/commit": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Trade Commit",
-        "description": "Consume a pricing quote, build CommitAuth, and forward to the relayer.",
-        "operationId": "trade_commit_trade_commit_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TradeCommitRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TradeCommitResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/positions": {
-      "get": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "List Positions",
-        "description": "Return committed positions for a wallet along with escrow balance.",
-        "operationId": "list_positions_positions_get",
-        "parameters": [
-          {
-            "name": "wallet",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Wallet"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PositionsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/claim/bundles": {
-      "get": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "List Claim Bundles",
-        "description": "Return claim bundles for settled winning tickets belonging to a wallet.",
-        "operationId": "list_claim_bundles_claim_bundles_get",
-        "parameters": [
-          {
-            "name": "wallet",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Wallet"
-            }
-          },
-          {
-            "name": "X-Wallet-Signature",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Wallet-Signature"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClaimBundlesResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/trade/claim": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Trade Claim",
-        "description": "Initiate a claim via the relayer for a settled winning ticket.",
-        "operationId": "trade_claim_trade_claim_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TradeClaimRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TradeClaimResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/commitments/sync": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Sync Commitments",
-        "description": "Ingest commitments pushed by the relayer (for commits that bypassed the API).",
-        "operationId": "sync_commitments_commitments_sync_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CommitmentsSyncRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/settlements/ingest": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Ingest Settlement",
-        "description": "Persist settlement snapshot from relayer/prover so claims can proceed.",
-        "operationId": "ingest_settlement_settlements_ingest_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettlementIngestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettlementIngestResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/relayer/commitments": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Relayer Commitments",
-        "description": "Relayer-protected hook to push commitments.",
-        "operationId": "relayer_commitments_relayer_commitments_post",
-        "parameters": [
-          {
-            "name": "X-Relayer-Secret",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Relayer-Secret"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CommitmentsSyncRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/relayer/settlements": {
-      "post": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Relayer Settlements",
-        "description": "Relayer/prover-protected hook to push settlement snapshots.",
-        "operationId": "relayer_settlements_relayer_settlements_post",
-        "parameters": [
-          {
-            "name": "X-Relayer-Secret",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Relayer-Secret"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettlementIngestRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettlementIngestResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/trade/status": {
-      "get": {
-        "tags": [
-          "trade"
-        ],
-        "summary": "Trade Status",
-        "description": "Return transaction status by hash or relayer job id (best-effort).",
-        "operationId": "trade_status_trade_status_get",
-        "parameters": [
-          {
-            "name": "tx_hash",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Tx Hash"
-            }
-          },
-          {
-            "name": "job_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TradeStatusResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
   "components": {
     "schemas": {
       "ClaimBundle": {
         "properties": {
-          "marketId": {
-            "type": "string",
-            "title": "Marketid"
-          },
-          "marketAddress": {
-            "type": "string",
-            "title": "Marketaddress"
+          "amountWei": {
+            "title": "Amountwei",
+            "type": "integer"
           },
           "commitmentsRoot": {
-            "type": "string",
-            "title": "Commitmentsroot"
+            "title": "Commitmentsroot",
+            "type": "string"
           },
-          "ticketId": {
-            "type": "integer",
-            "title": "Ticketid"
+          "leaf": {
+            "title": "Leaf",
+            "type": "string"
+          },
+          "marketAddress": {
+            "title": "Marketaddress",
+            "type": "string"
+          },
+          "marketId": {
+            "title": "Marketid",
+            "type": "string"
+          },
+          "merkleProof": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Merkleproof",
+            "type": "array"
           },
           "outcomeId": {
-            "type": "integer",
-            "title": "Outcomeid"
-          },
-          "amountWei": {
-            "type": "integer",
-            "title": "Amountwei"
+            "title": "Outcomeid",
+            "type": "integer"
           },
           "salt": {
             "anyOf": [
@@ -1397,23 +45,15 @@
             ],
             "title": "Salt"
           },
-          "merkleProof": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Merkleproof"
-          },
-          "leaf": {
-            "type": "string",
-            "title": "Leaf"
+          "ticketId": {
+            "title": "Ticketid",
+            "type": "integer"
           },
           "user": {
-            "type": "string",
-            "title": "User"
+            "title": "User",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "marketId",
           "marketAddress",
@@ -1426,7 +66,8 @@
           "leaf",
           "user"
         ],
-        "title": "ClaimBundle"
+        "title": "ClaimBundle",
+        "type": "object"
       },
       "ClaimBundlesResponse": {
         "properties": {
@@ -1434,62 +75,18 @@
             "items": {
               "$ref": "#/components/schemas/ClaimBundle"
             },
-            "type": "array",
-            "title": "Bundles"
+            "title": "Bundles",
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "bundles"
         ],
-        "title": "ClaimBundlesResponse"
+        "title": "ClaimBundlesResponse",
+        "type": "object"
       },
       "CommitmentTicket": {
         "properties": {
-          "ticketHash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tickethash"
-          },
-          "leaf": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Leaf"
-          },
-          "user_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User Address"
-          },
-          "outcomeId": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcomeid"
-          },
           "amount": {
             "anyOf": [
               {
@@ -1501,7 +98,7 @@
             ],
             "title": "Amount"
           },
-          "salt": {
+          "leaf": {
             "anyOf": [
               {
                 "type": "string"
@@ -1510,7 +107,7 @@
                 "type": "null"
               }
             ],
-            "title": "Salt"
+            "title": "Leaf"
           },
           "merkleIndex": {
             "anyOf": [
@@ -1536,14 +133,19 @@
               }
             ],
             "title": "Merklepath"
-          }
-        },
-        "type": "object",
-        "title": "CommitmentTicket"
-      },
-      "CommitmentsSyncRequest": {
-        "properties": {
-          "market_id": {
+          },
+          "outcomeId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcomeid"
+          },
+          "salt": {
             "anyOf": [
               {
                 "type": "string"
@@ -1552,8 +154,36 @@
                 "type": "null"
               }
             ],
-            "title": "Market Id"
+            "title": "Salt"
           },
+          "ticketHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tickethash"
+          },
+          "user_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Address"
+          }
+        },
+        "title": "CommitmentTicket",
+        "type": "object"
+      },
+      "CommitmentsSyncRequest": {
+        "properties": {
           "event_id": {
             "anyOf": [
               {
@@ -1565,75 +195,86 @@
             ],
             "title": "Event Id"
           },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
           "tickets": {
             "items": {
               "$ref": "#/components/schemas/CommitmentTicket"
             },
-            "type": "array",
-            "title": "Tickets"
+            "title": "Tickets",
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "tickets"
         ],
-        "title": "CommitmentsSyncRequest"
+        "title": "CommitmentsSyncRequest",
+        "type": "object"
       },
       "CommitmentsSyncResponse": {
         "properties": {
           "recorded": {
-            "type": "integer",
-            "title": "Recorded"
+            "title": "Recorded",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "recorded"
         ],
-        "title": "CommitmentsSyncResponse"
+        "title": "CommitmentsSyncResponse",
+        "type": "object"
       },
       "FxQuoteResponse": {
         "properties": {
-          "zen_usd": {
-            "type": "number",
-            "title": "Zen Usd"
-          },
-          "stale": {
-            "type": "boolean",
-            "title": "Stale",
-            "default": false
-          },
           "received_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Received At"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "zen_usd": {
+            "title": "Zen Usd",
+            "type": "number"
           }
         },
-        "type": "object",
         "required": [
           "zen_usd"
         ],
-        "title": "FxQuoteResponse"
+        "title": "FxQuoteResponse",
+        "type": "object"
       },
       "GroupedMarketsResponse": {
         "properties": {
-          "group_slug": {
-            "type": "string",
-            "title": "Group Slug"
-          },
-          "markets": {
-            "items": {
-              "$ref": "#/components/schemas/MarketResponse"
-            },
-            "type": "array",
-            "title": "Markets"
+          "aggregate_liquidity_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Liquidity Usd"
           },
           "aggregate_volume_24h_usd": {
             "anyOf": [
@@ -1646,24 +287,24 @@
             ],
             "title": "Aggregate Volume 24H Usd"
           },
-          "aggregate_liquidity_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aggregate Liquidity Usd"
+          "group_slug": {
+            "title": "Group Slug",
+            "type": "string"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketResponse"
+            },
+            "title": "Markets",
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "group_slug",
           "markets"
         ],
-        "title": "GroupedMarketsResponse"
+        "title": "GroupedMarketsResponse",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1671,24 +312,15 @@
             "items": {
               "$ref": "#/components/schemas/ValidationError"
             },
-            "type": "array",
-            "title": "Detail"
+            "title": "Detail",
+            "type": "array"
           }
         },
-        "type": "object",
-        "title": "HTTPValidationError"
+        "title": "HTTPValidationError",
+        "type": "object"
       },
       "HealthComponent": {
         "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "ok",
-              "degraded",
-              "error"
-            ],
-            "title": "Status"
-          },
           "detail": {
             "anyOf": [
               {
@@ -1703,53 +335,33 @@
           "latency_ms": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Latency Ms"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "HealthComponent"
-      },
-      "HealthResponse": {
-        "properties": {
+          },
           "status": {
-            "type": "string",
             "enum": [
               "ok",
               "degraded",
               "error"
             ],
-            "title": "Status"
-          },
-          "service": {
-            "type": "string",
-            "title": "Service"
-          },
-          "version": {
-            "type": "string",
-            "title": "Version"
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Timestamp"
-          },
-          "components": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/HealthComponent"
-            },
-            "type": "object",
-            "title": "Components"
-          },
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthComponent",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
           "cache_stats": {
             "anyOf": [
               {
@@ -1763,9 +375,37 @@
               }
             ],
             "title": "Cache Stats"
+          },
+          "components": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HealthComponent"
+            },
+            "title": "Components",
+            "type": "object"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "status",
           "service",
@@ -1773,14 +413,25 @@
           "timestamp",
           "components"
         ],
-        "title": "HealthResponse"
+        "title": "HealthResponse",
+        "type": "object"
       },
       "HeartbeatDashboard": {
         "properties": {
+          "api": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "generated_at": {
-            "type": "string",
             "format": "date-time",
-            "title": "Generated At"
+            "title": "Generated At",
+            "type": "string"
           },
           "worker": {
             "anyOf": [
@@ -1791,48 +442,36 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        "required": [
+          "generated_at"
+        ],
+        "title": "HeartbeatDashboard",
+        "type": "object"
+      },
+      "HeartbeatMetrics": {
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
           },
-          "api": {
+          "detail": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/HeartbeatMetrics"
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "generated_at"
-        ],
-        "title": "HeartbeatDashboard"
-      },
-      "HeartbeatMetrics": {
-        "properties": {
-          "service": {
-            "type": "string",
-            "title": "Service"
-          },
-          "component": {
-            "type": "string",
-            "title": "Component"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "ok",
-              "degraded",
-              "error"
             ],
-            "title": "Status"
+            "title": "Detail"
           },
           "last_heartbeat": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1851,17 +490,6 @@
             ],
             "title": "Latency Ms"
           },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
           "metrics": {
             "anyOf": [
               {
@@ -1873,18 +501,42 @@
               }
             ],
             "title": "Metrics"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "service",
           "component",
           "status"
         ],
-        "title": "HeartbeatMetrics"
+        "title": "HeartbeatMetrics",
+        "type": "object"
       },
       "MarketCaps": {
         "properties": {
+          "max_market_stake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Market Stake Zen"
+          },
           "max_stake_zen": {
             "anyOf": [
               {
@@ -1907,7 +559,7 @@
             ],
             "title": "Max User Stake Per Market Zen"
           },
-          "max_market_stake_zen": {
+          "remaining_market_stake_zen": {
             "anyOf": [
               {
                 "type": "number"
@@ -1916,7 +568,7 @@
                 "type": "null"
               }
             ],
-            "title": "Max Market Stake Zen"
+            "title": "Remaining Market Stake Zen"
           },
           "remaining_user_stake_zen": {
             "anyOf": [
@@ -1928,8 +580,19 @@
               }
             ],
             "title": "Remaining User Stake Zen"
-          },
-          "remaining_market_stake_zen": {
+          }
+        },
+        "required": [
+          "max_stake_zen",
+          "max_user_stake_per_market_zen",
+          "max_market_stake_zen"
+        ],
+        "title": "MarketCaps",
+        "type": "object"
+      },
+      "MarketResponse": {
+        "properties": {
+          "best_ask": {
             "anyOf": [
               {
                 "type": "number"
@@ -1938,26 +601,28 @@
                 "type": "null"
               }
             ],
-            "title": "Remaining Market Stake Zen"
-          }
-        },
-        "type": "object",
-        "required": [
-          "max_stake_zen",
-          "max_user_stake_per_market_zen",
-          "max_market_stake_zen"
-        ],
-        "title": "MarketCaps"
-      },
-      "MarketResponse": {
-        "properties": {
-          "event_id": {
-            "type": "string",
-            "title": "Event Id"
+            "title": "Best Ask"
           },
-          "title": {
-            "type": "string",
-            "title": "Title"
+          "best_bid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Bid"
+          },
+          "caps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketCaps"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "category": {
             "anyOf": [
@@ -1970,7 +635,7 @@
             ],
             "title": "Category"
           },
-          "slug": {
+          "clob_pair_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -1979,284 +644,7 @@
                 "type": "null"
               }
             ],
-            "title": "Slug"
-          },
-          "metadata_uri": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata Uri"
-          },
-          "oracle": {
-            "type": "string",
-            "title": "Oracle"
-          },
-          "factory": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Factory"
-          },
-          "market_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market Address"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "default": "commit"
-          },
-          "outcomes": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcomes"
-          },
-          "outcome_prices": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "number"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome Prices"
-          },
-          "tags": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tags"
-          },
-          "rake_bps": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rake Bps"
-          },
-          "condition_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Condition Id"
-          },
-          "question_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question Id"
-          },
-          "image_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Url"
-          },
-          "closed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Closed"
-          },
-          "resolution_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Status"
-          },
-          "resolution_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Reason"
-          },
-          "commits_blocked_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Commits Blocked At"
-          },
-          "uma_resolution_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Uma Resolution Status"
-          },
-          "closes_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Closes At"
-          },
-          "starts_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Starts At"
-          },
-          "orders_opened_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orders Opened At"
-          },
-          "resolution_source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Source"
-          },
-          "market_maker": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market Maker"
-          },
-          "order_min_size": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Order Min Size"
-          },
-          "price_tick_size": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Tick Size"
-          },
-          "enable_order_book": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Order Book"
+            "title": "Clob Pair Id"
           },
           "clob_token_ids": {
             "anyOf": [
@@ -2272,6 +660,164 @@
             ],
             "title": "Clob Token Ids"
           },
+          "closed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed"
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "commits_blocked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commits Blocked At"
+          },
+          "condition_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Condition Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enable_order_book": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Order Book"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "factory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factory"
+          },
+          "featured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured"
+          },
+          "group_item_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Item Threshold"
+          },
+          "group_item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Item Title"
+          },
+          "group_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Position"
+          },
+          "group_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Slug"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
           "image_variants": {
             "anyOf": [
               {
@@ -2286,118 +832,6 @@
             ],
             "title": "Image Variants"
           },
-          "featured": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Featured"
-          },
-          "group_slug": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group Slug"
-          },
-          "group_item_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group Item Title"
-          },
-          "group_item_threshold": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group Item Threshold"
-          },
-          "group_position": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group Position"
-          },
-          "summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary"
-          },
-          "summary_source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary Source"
-          },
-          "summary_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary Model"
-          },
-          "summary_metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary Metadata"
-          },
-          "summary_checked_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary Checked At"
-          },
           "liquidity_usd": {
             "anyOf": [
               {
@@ -2409,82 +843,38 @@
             ],
             "title": "Liquidity Usd"
           },
-          "volume_24h_usd": {
+          "market_address": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Volume 24H Usd"
+            "title": "Market Address"
           },
-          "orderbook_volume_usd": {
+          "market_maker": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Orderbook Volume Usd"
+            "title": "Market Maker"
           },
-          "trades_quantity": {
+          "metadata_uri": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Trades Quantity"
-          },
-          "best_bid": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Best Bid"
-          },
-          "best_ask": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Best Ask"
-          },
-          "spread": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Spread"
-          },
-          "volume": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Volume"
+            "title": "Metadata Uri"
           },
           "open_interest": {
             "anyOf": [
@@ -2497,117 +887,23 @@
             ],
             "title": "Open Interest"
           },
-          "id": {
-            "type": "integer",
-            "title": "Id"
+          "oracle": {
+            "title": "Oracle",
+            "type": "string"
           },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "description": {
+          "order_min_size": {
             "anyOf": [
               {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Description"
+            "title": "Order Min Size"
           },
-          "clob_pair_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Clob Pair Id"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResolutionSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caps": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MarketCaps"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "siblings": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/MarketSibling"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Siblings"
-          }
-        },
-        "type": "object",
-        "required": [
-          "event_id",
-          "title",
-          "oracle",
-          "id",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "MarketResponse"
-      },
-      "MarketSibling": {
-        "properties": {
-          "event_id": {
-            "type": "string",
-            "title": "Event Id"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "group_item_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group Item Title"
-          },
-          "group_item_threshold": {
+          "orderbook_volume_usd": {
             "anyOf": [
               {
                 "type": "number"
@@ -2616,18 +912,19 @@
                 "type": "null"
               }
             ],
-            "title": "Group Item Threshold"
+            "title": "Orderbook Volume Usd"
           },
-          "group_position": {
+          "orders_opened_at": {
             "anyOf": [
               {
-                "type": "integer"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Group Position"
+            "title": "Orders Opened At"
           },
           "outcome_prices": {
             "anyOf": [
@@ -2643,7 +940,123 @@
             ],
             "title": "Outcome Prices"
           },
-          "liquidity_usd": {
+          "outcomes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcomes"
+          },
+          "price_tick_size": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Tick Size"
+          },
+          "question_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id"
+          },
+          "rake_bps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rake Bps"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolutionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Reason"
+          },
+          "resolution_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Source"
+          },
+          "resolution_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Status"
+          },
+          "siblings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MarketSibling"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Siblings"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "spread": {
             "anyOf": [
               {
                 "type": "number"
@@ -2652,7 +1065,137 @@
                 "type": "null"
               }
             ],
-            "title": "Liquidity Usd"
+            "title": "Spread"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "status": {
+            "default": "commit",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "summary_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Checked At"
+          },
+          "summary_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Metadata"
+          },
+          "summary_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Model"
+          },
+          "summary_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Source"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "trades_quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trades Quantity"
+          },
+          "uma_resolution_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uma Resolution Status"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
           },
           "volume_24h_usd": {
             "anyOf": [
@@ -2666,37 +1209,35 @@
             "title": "Volume 24H Usd"
           }
         },
-        "type": "object",
         "required": [
-          "event_id"
+          "event_id",
+          "title",
+          "oracle",
+          "id",
+          "created_at",
+          "updated_at"
         ],
-        "title": "MarketSibling"
+        "title": "MarketResponse",
+        "type": "object"
       },
-      "MarketStatusBreakdown": {
+      "MarketSibling": {
         "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status"
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
           },
-          "count": {
-            "type": "integer",
-            "title": "Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "count"
-        ],
-        "title": "MarketStatusBreakdown"
-      },
-      "PositionRecord": {
-        "properties": {
-          "market_id": {
-            "type": "string",
-            "title": "Market Id"
+          "group_item_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Item Threshold"
           },
-          "market_title": {
+          "group_item_title": {
             "anyOf": [
               {
                 "type": "string"
@@ -2705,48 +1246,9 @@
                 "type": "null"
               }
             ],
-            "title": "Market Title"
+            "title": "Group Item Title"
           },
-          "outcome_id": {
-            "type": "integer",
-            "title": "Outcome Id"
-          },
-          "stake_wei": {
-            "type": "integer",
-            "title": "Stake Wei"
-          },
-          "stake_zen": {
-            "type": "number",
-            "title": "Stake Zen"
-          },
-          "tx_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tx Hash"
-          },
-          "quote_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quote Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "default": "committed"
-          },
-          "ticket_id": {
+          "group_position": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2755,20 +1257,82 @@
                 "type": "null"
               }
             ],
-            "title": "Ticket Id"
+            "title": "Group Position"
           },
-          "created_at": {
+          "liquidity_usd": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Created At"
+            "title": "Liquidity Usd"
           },
+          "outcome_prices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Prices"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "volume_24h_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume 24H Usd"
+          }
+        },
+        "required": [
+          "event_id"
+        ],
+        "title": "MarketSibling",
+        "type": "object"
+      },
+      "MarketStatusBreakdown": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "count"
+        ],
+        "title": "MarketStatusBreakdown",
+        "type": "object"
+      },
+      "PositionRecord": {
+        "properties": {
           "claimable": {
             "anyOf": [
               {
@@ -2783,8 +1347,8 @@
           "closes_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2792,19 +1356,31 @@
             ],
             "title": "Closes At"
           },
-          "resolved_at": {
+          "commits_blocked_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Resolved At"
+            "title": "Commits Blocked At"
           },
-          "proof_request_id": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "market_address": {
             "anyOf": [
               {
                 "type": "string"
@@ -2813,7 +1389,22 @@
                 "type": "null"
               }
             ],
-            "title": "Proof Request Id"
+            "title": "Market Address"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "market_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Title"
           },
           "merkle_root": {
             "anyOf": [
@@ -2826,18 +1417,11 @@
             ],
             "title": "Merkle Root"
           },
-          "winning_outcome_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Winning Outcome Id"
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
           },
-          "market_address": {
+          "proof_request_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -2846,9 +1430,9 @@
                 "type": "null"
               }
             ],
-            "title": "Market Address"
+            "title": "Proof Request Id"
           },
-          "resolution_status": {
+          "quote_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -2857,7 +1441,7 @@
                 "type": "null"
               }
             ],
-            "title": "Resolution Status"
+            "title": "Quote Id"
           },
           "resolution_reason": {
             "anyOf": [
@@ -2870,37 +1454,87 @@
             ],
             "title": "Resolution Reason"
           },
-          "commits_blocked_at": {
+          "resolution_status": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Commits Blocked At"
+            "title": "Resolution Status"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "stake_wei": {
+            "title": "Stake Wei",
+            "type": "integer"
+          },
+          "stake_zen": {
+            "title": "Stake Zen",
+            "type": "number"
+          },
+          "status": {
+            "default": "committed",
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Hash"
+          },
+          "winning_outcome_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winning Outcome Id"
           }
         },
-        "type": "object",
         "required": [
           "market_id",
           "outcome_id",
           "stake_wei",
           "stake_zen"
         ],
-        "title": "PositionRecord"
+        "title": "PositionRecord",
+        "type": "object"
       },
       "PositionsResponse": {
         "properties": {
-          "positions": {
-            "items": {
-              "$ref": "#/components/schemas/PositionRecord"
-            },
-            "type": "array",
-            "title": "Positions"
-          },
           "escrow_balance_wei": {
             "anyOf": [
               {
@@ -2911,67 +1545,62 @@
               }
             ],
             "title": "Escrow Balance Wei"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionRecord"
+            },
+            "title": "Positions",
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "positions"
         ],
-        "title": "PositionsResponse"
+        "title": "PositionsResponse",
+        "type": "object"
       },
       "PricingQuotePayload": {
         "properties": {
-          "stake_zen": {
+          "chain_id": {
+            "default": 0,
+            "title": "Chain Id",
+            "type": "integer"
+          },
+          "displayed_odds_multiplier": {
             "anyOf": [
               {
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
-            "title": "Stake Zen"
+            "title": "Displayed Odds Multiplier"
           },
-          "stake_wei": {
-            "type": "integer",
-            "title": "Stake Wei",
-            "default": 0
-          },
-          "zen_usd": {
+          "expires_at": {
             "anyOf": [
               {
-                "type": "number"
+                "format": "date-time",
+                "type": "string"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "null"
               }
             ],
-            "title": "Zen Usd"
+            "title": "Expires At"
           },
-          "zen_usd_scaled": {
-            "type": "integer",
-            "title": "Zen Usd Scaled",
-            "default": 0
-          },
-          "payout_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Payout Zen"
+          "expiry_ts": {
+            "default": 0,
+            "title": "Expiry Ts",
+            "type": "integer"
           },
           "fx_received_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2980,57 +1609,9 @@
             "title": "Fx Received At"
           },
           "fx_stale": {
-            "type": "boolean",
+            "default": false,
             "title": "Fx Stale",
-            "default": false
-          },
-          "displayed_odds_multiplier": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Displayed Odds Multiplier"
-          },
-          "rake_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Rake Zen"
-          },
-          "refund_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Refund Zen"
-          },
-          "hedge_usdc": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Hedge Usdc"
+            "type": "boolean"
           },
           "haircut_percent": {
             "anyOf": [
@@ -3038,52 +1619,60 @@
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
             "title": "Haircut Percent"
           },
-          "worsen_percent": {
+          "hedge_usdc": {
             "anyOf": [
               {
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
-            "title": "Worsen Percent"
+            "title": "Hedge Usdc"
           },
-          "rake_percent": {
+          "market_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Address"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "max_market_stake_zen": {
             "anyOf": [
               {
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Rake Percent"
-          },
-          "total_monetization": {
-            "anyOf": [
-              {
-                "type": "number"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "null"
               }
             ],
-            "title": "Total Monetization"
-          },
-          "chain_id": {
-            "type": "integer",
-            "title": "Chain Id",
-            "default": 0
+            "title": "Max Market Stake Zen"
           },
           "max_stake_zen": {
             "anyOf": [
@@ -3091,8 +1680,8 @@
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3106,8 +1695,8 @@
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3115,50 +1704,28 @@
             ],
             "title": "Max User Stake Per Market Zen"
           },
-          "max_market_stake_zen": {
+          "outcome_id": {
             "anyOf": [
               {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Max Market Stake Zen"
+            "title": "Outcome Id"
           },
-          "remaining_user_stake_zen": {
+          "payout_zen": {
             "anyOf": [
               {
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              },
-              {
-                "type": "null"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
-            "title": "Remaining User Stake Zen"
-          },
-          "remaining_market_stake_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remaining Market Stake Zen"
+            "title": "Payout Zen"
           },
           "quote_id": {
             "anyOf": [
@@ -3171,22 +1738,71 @@
             ],
             "title": "Quote Id"
           },
-          "expires_at": {
+          "rake_percent": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Rake Percent"
+          },
+          "rake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Rake Zen"
+          },
+          "refund_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Refund Zen"
+          },
+          "remaining_market_stake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Expires At"
+            "title": "Remaining Market Stake Zen"
           },
-          "expiry_ts": {
-            "type": "integer",
-            "title": "Expiry Ts",
-            "default": 0
+          "remaining_user_stake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining User Stake Zen"
           },
           "signature": {
             "anyOf": [
@@ -3210,16 +1826,34 @@
             ],
             "title": "Signer"
           },
-          "market_id": {
+          "stake_wei": {
+            "default": 0,
+            "title": "Stake Wei",
+            "type": "integer"
+          },
+          "stake_zen": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
-                "type": "null"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
-            "title": "Market Id"
+            "title": "Stake Zen"
+          },
+          "total_monetization": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total Monetization"
           },
           "user_id": {
             "anyOf": [
@@ -3243,30 +1877,36 @@
             ],
             "title": "Wallet Address"
           },
-          "outcome_id": {
+          "worsen_percent": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome Id"
-          },
-          "market_address": {
-            "anyOf": [
-              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
-              },
-              {
-                "type": "null"
               }
             ],
-            "title": "Market Address"
+            "title": "Worsen Percent"
+          },
+          "zen_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Zen Usd"
+          },
+          "zen_usd_scaled": {
+            "default": 0,
+            "title": "Zen Usd Scaled",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "stake_zen",
           "zen_usd",
@@ -3280,44 +1920,11 @@
           "rake_percent",
           "total_monetization"
         ],
-        "title": "PricingQuotePayload"
+        "title": "PricingQuotePayload",
+        "type": "object"
       },
       "PricingQuoteRequest": {
         "properties": {
-          "stake_zen": {
-            "anyOf": [
-              {
-                "type": "number",
-                "exclusiveMinimum": 0.0
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Stake Zen"
-          },
-          "market_id": {
-            "type": "string",
-            "title": "Market Id",
-            "description": "Market ID for cap tracking"
-          },
-          "user_id": {
-            "type": "string",
-            "title": "User Id",
-            "description": "User identifier for per-market caps"
-          },
-          "wallet_address": {
-            "type": "string",
-            "title": "Wallet Address",
-            "description": "User wallet to bind quote to"
-          },
-          "outcome_id": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Outcome Id",
-            "description": "Outcome id to bind quote to"
-          },
           "market_address": {
             "anyOf": [
               {
@@ -3327,81 +1934,66 @@
                 "type": "null"
               }
             ],
-            "title": "Market Address",
-            "description": "Market contract address (auto-created when missing)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "stake_zen",
-          "market_id",
-          "user_id",
-          "wallet_address",
-          "outcome_id"
-        ],
-        "title": "PricingQuoteRequest"
-      },
-      "PricingQuoteResponse": {
-        "properties": {
+            "description": "Market contract address (auto-created when missing)",
+            "title": "Market Address"
+          },
+          "market_id": {
+            "description": "Market ID for cap tracking",
+            "title": "Market Id",
+            "type": "string"
+          },
+          "outcome_id": {
+            "description": "Outcome id to bind quote to",
+            "minimum": 0.0,
+            "title": "Outcome Id",
+            "type": "integer"
+          },
           "stake_zen": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
                 "type": "number"
               },
               {
-                "type": "null"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               }
             ],
             "title": "Stake Zen"
           },
-          "stake_wei": {
-            "type": "integer",
-            "title": "Stake Wei",
-            "default": 0
-          },
-          "zen_usd": {
+          "user_id": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Zen Usd"
+            "description": "(Deprecated) User identifier; defaults to wallet_address for cap tracking",
+            "title": "User Id"
           },
-          "zen_usd_scaled": {
-            "type": "integer",
-            "title": "Zen Usd Scaled",
-            "default": 0
-          },
-          "payout_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Payout Zen"
-          },
-          "fx_received_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fx Received At"
-          },
-          "fx_stale": {
-            "type": "boolean",
-            "title": "Fx Stale",
-            "default": false
+          "wallet_address": {
+            "description": "User wallet to bind quote to (used for caps)",
+            "title": "Wallet Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stake_zen",
+          "market_id",
+          "wallet_address",
+          "outcome_id"
+        ],
+        "title": "PricingQuoteRequest",
+        "type": "object"
+      },
+      "PricingQuoteResponse": {
+        "properties": {
+          "chain_id": {
+            "default": 0,
+            "title": "Chain Id",
+            "type": "integer"
           },
           "displayed_odds_multiplier": {
             "anyOf": [
@@ -3414,38 +2006,39 @@
             ],
             "title": "Displayed Odds Multiplier"
           },
-          "rake_zen": {
+          "expires_at": {
             "anyOf": [
               {
-                "type": "number"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rake Zen"
+            "title": "Expires At"
           },
-          "refund_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refund Zen"
+          "expiry_ts": {
+            "default": 0,
+            "title": "Expiry Ts",
+            "type": "integer"
           },
-          "hedge_usdc": {
+          "fx_received_at": {
             "anyOf": [
               {
-                "type": "number"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Hedge Usdc"
+            "title": "Fx Received At"
+          },
+          "fx_stale": {
+            "default": false,
+            "title": "Fx Stale",
+            "type": "boolean"
           },
           "haircut_percent": {
             "anyOf": [
@@ -3458,7 +2051,7 @@
             ],
             "title": "Haircut Percent"
           },
-          "worsen_percent": {
+          "hedge_usdc": {
             "anyOf": [
               {
                 "type": "number"
@@ -3467,9 +2060,31 @@
                 "type": "null"
               }
             ],
-            "title": "Worsen Percent"
+            "title": "Hedge Usdc"
           },
-          "rake_percent": {
+          "market_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Address"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "max_market_stake_zen": {
             "anyOf": [
               {
                 "type": "number"
@@ -3478,23 +2093,7 @@
                 "type": "null"
               }
             ],
-            "title": "Rake Percent"
-          },
-          "total_monetization": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Monetization"
-          },
-          "chain_id": {
-            "type": "integer",
-            "title": "Chain Id",
-            "default": 0
+            "title": "Max Market Stake Zen"
           },
           "max_stake_zen": {
             "anyOf": [
@@ -3518,18 +2117,18 @@
             ],
             "title": "Max User Stake Per Market Zen"
           },
-          "max_market_stake_zen": {
+          "outcome_id": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Max Market Stake Zen"
+            "title": "Outcome Id"
           },
-          "remaining_user_stake_zen": {
+          "payout_zen": {
             "anyOf": [
               {
                 "type": "number"
@@ -3538,18 +2137,7 @@
                 "type": "null"
               }
             ],
-            "title": "Remaining User Stake Zen"
-          },
-          "remaining_market_stake_zen": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remaining Market Stake Zen"
+            "title": "Payout Zen"
           },
           "quote_id": {
             "anyOf": [
@@ -3562,22 +2150,60 @@
             ],
             "title": "Quote Id"
           },
-          "expires_at": {
+          "rake_percent": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Expires At"
+            "title": "Rake Percent"
           },
-          "expiry_ts": {
-            "type": "integer",
-            "title": "Expiry Ts",
-            "default": 0
+          "rake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rake Zen"
+          },
+          "refund_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refund Zen"
+          },
+          "remaining_market_stake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Market Stake Zen"
+          },
+          "remaining_user_stake_zen": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining User Stake Zen"
           },
           "signature": {
             "anyOf": [
@@ -3601,16 +2227,32 @@
             ],
             "title": "Signer"
           },
-          "market_id": {
+          "stake_wei": {
+            "default": 0,
+            "title": "Stake Wei",
+            "type": "integer"
+          },
+          "stake_zen": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Market Id"
+            "title": "Stake Zen"
+          },
+          "total_monetization": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Monetization"
           },
           "user_id": {
             "anyOf": [
@@ -3634,30 +2276,34 @@
             ],
             "title": "Wallet Address"
           },
-          "outcome_id": {
+          "worsen_percent": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Outcome Id"
+            "title": "Worsen Percent"
           },
-          "market_address": {
+          "zen_usd": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Market Address"
+            "title": "Zen Usd"
+          },
+          "zen_usd_scaled": {
+            "default": 0,
+            "title": "Zen Usd Scaled",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "stake_zen",
           "zen_usd",
@@ -3671,87 +2317,110 @@
           "rake_percent",
           "total_monetization"
         ],
-        "title": "PricingQuoteResponse"
+        "title": "PricingQuoteResponse",
+        "type": "object"
       },
       "PricingSubmitRequest": {
         "properties": {
-          "quote": {
-            "$ref": "#/components/schemas/PricingQuotePayload"
-          },
           "max_fx_diff_percent": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Max Fx Diff Percent",
-            "description": "Optional max FX drift percent vs live"
+            "description": "Optional max FX drift percent vs live",
+            "title": "Max Fx Diff Percent"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/PricingQuotePayload"
           }
         },
-        "type": "object",
         "required": [
           "quote"
         ],
-        "title": "PricingSubmitRequest"
+        "title": "PricingSubmitRequest",
+        "type": "object"
       },
       "PricingSubmitResponse": {
         "properties": {
+          "current_fx": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Current Fx",
+            "type": "string"
+          },
           "quote": {
             "$ref": "#/components/schemas/PricingQuoteResponse"
           },
-          "current_fx": {
-            "type": "string",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Current Fx"
-          },
           "valid": {
-            "type": "boolean",
+            "default": true,
             "title": "Valid",
-            "default": true
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "quote",
           "current_fx"
         ],
-        "title": "PricingSubmitResponse"
+        "title": "PricingSubmitResponse",
+        "type": "object"
       },
       "QuoteRecord": {
         "properties": {
-          "quoteId": {
-            "type": "string",
-            "title": "Quoteid"
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chainid"
           },
-          "status": {
-            "type": "string",
-            "title": "Status"
+          "consumedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumedat"
           },
-          "stakeZen": {
-            "type": "string",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Stakezen"
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
           },
-          "stakeWei": {
-            "type": "integer",
-            "title": "Stakewei"
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
           },
           "fxScaled": {
-            "type": "integer",
-            "title": "Fxscaled"
+            "title": "Fxscaled",
+            "type": "integer"
           },
-          "zenUsd": {
-            "type": "string",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Zenusd"
+          "marketAddress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketaddress"
           },
           "marketId": {
             "anyOf": [
@@ -3764,16 +2433,43 @@
             ],
             "title": "Marketid"
           },
-          "marketAddress": {
+          "outcomeId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Marketaddress"
+            "title": "Outcomeid"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "quoteId": {
+            "title": "Quoteid",
+            "type": "string"
+          },
+          "stakeWei": {
+            "title": "Stakewei",
+            "type": "integer"
+          },
+          "stakeZen": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Stakezen",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
           },
           "userId": {
             "anyOf": [
@@ -3797,62 +2493,12 @@
             ],
             "title": "Walletaddress"
           },
-          "outcomeId": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcomeid"
-          },
-          "chainId": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Chainid"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Expiresat"
-          },
-          "consumedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Consumedat"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Createdat"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updatedat"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Payload"
+          "zenUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Zenusd",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "quoteId",
           "status",
@@ -3865,125 +2511,11 @@
           "updatedAt",
           "payload"
         ],
-        "title": "QuoteRecord"
+        "title": "QuoteRecord",
+        "type": "object"
       },
       "ResolutionSummary": {
         "properties": {
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "conditionId": {
-            "type": "string",
-            "title": "Conditionid"
-          },
-          "resolved": {
-            "type": "boolean",
-            "title": "Resolved"
-          },
-          "outcomes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Outcomes"
-          },
-          "payouts": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "title": "Payouts"
-          },
-          "winners": {
-            "items": {
-              "$ref": "#/components/schemas/ResolutionWinner"
-            },
-            "type": "array",
-            "title": "Winners"
-          },
-          "checkedAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Checkedat"
-          },
-          "marketId": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Marketid"
-          },
-          "eventId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Eventid"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "slug": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slug"
-          },
-          "oracle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Oracle"
-          },
-          "questionId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Questionid"
-          },
-          "transactionHash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Transactionhash"
-          },
           "blockNumber": {
             "anyOf": [
               {
@@ -3998,8 +2530,8 @@
           "blockTimestamp": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4007,7 +2539,39 @@
             ],
             "title": "Blocktimestamp"
           },
-          "winningOutcomeId": {
+          "checkedAt": {
+            "format": "date-time",
+            "title": "Checkedat",
+            "type": "string"
+          },
+          "conditionId": {
+            "title": "Conditionid",
+            "type": "string"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eventid"
+          },
+          "marketId": {
             "anyOf": [
               {
                 "type": "integer"
@@ -4016,7 +2580,43 @@
                 "type": "null"
               }
             ],
-            "title": "Winningoutcomeid"
+            "title": "Marketid"
+          },
+          "oracle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oracle"
+          },
+          "outcomes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "payouts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Payouts",
+            "type": "array"
+          },
+          "questionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionid"
           },
           "rakeBps": {
             "anyOf": [
@@ -4040,45 +2640,92 @@
             ],
             "title": "Requestid"
           },
-          "createdAt": {
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "slug": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Createdat"
+            "title": "Slug"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "transactionHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transactionhash"
           },
           "updatedAt": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Updatedat"
+          },
+          "winners": {
+            "items": {
+              "$ref": "#/components/schemas/ResolutionWinner"
+            },
+            "title": "Winners",
+            "type": "array"
+          },
+          "winningOutcomeId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winningoutcomeid"
           }
         },
-        "type": "object",
         "required": [
           "source",
           "conditionId",
           "resolved",
           "checkedAt"
         ],
-        "title": "ResolutionSummary"
+        "title": "ResolutionSummary",
+        "type": "object"
       },
       "ResolutionWinner": {
         "properties": {
           "index": {
-            "type": "integer",
-            "title": "Index"
+            "title": "Index",
+            "type": "integer"
           },
           "label": {
             "anyOf": [
@@ -4092,20 +2739,20 @@
             "title": "Label"
           },
           "payout": {
-            "type": "integer",
-            "title": "Payout"
+            "title": "Payout",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "index",
           "payout"
         ],
-        "title": "ResolutionWinner"
+        "title": "ResolutionWinner",
+        "type": "object"
       },
       "SettlementIngestRequest": {
         "properties": {
-          "market_id": {
+          "circuitHash": {
             "anyOf": [
               {
                 "type": "string"
@@ -4114,29 +2761,7 @@
                 "type": "null"
               }
             ],
-            "title": "Market Id"
-          },
-          "event_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Event Id"
-          },
-          "merkleRoot": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Merkleroot"
+            "title": "Circuithash"
           },
           "commitmentsCount": {
             "anyOf": [
@@ -4149,16 +2774,38 @@
             ],
             "title": "Commitmentscount"
           },
-          "poolTotalYes": {
+          "event_id": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Pooltotalyes"
+            "title": "Event Id"
+          },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
+          "merkleRoot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkleroot"
           },
           "poolTotalNo": {
             "anyOf": [
@@ -4170,6 +2817,61 @@
               }
             ],
             "title": "Pooltotalno"
+          },
+          "poolTotalYes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pooltotalyes"
+          },
+          "proofHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofhash"
+          },
+          "proofRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofrequestid"
+          },
+          "proof_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Status"
+          },
+          "rakeBps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rakebps"
           },
           "totalEscrow": {
             "anyOf": [
@@ -4193,17 +2895,6 @@
             ],
             "title": "Totalliability"
           },
-          "rakeBps": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rakebps"
-          },
           "winningOutcomeId": {
             "anyOf": [
               {
@@ -4214,90 +2905,31 @@
               }
             ],
             "title": "Winningoutcomeid"
-          },
-          "proof_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Proof Status"
-          },
-          "proofRequestId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Proofrequestid"
-          },
-          "proofHash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Proofhash"
-          },
-          "circuitHash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Circuithash"
           }
         },
-        "type": "object",
-        "title": "SettlementIngestRequest"
+        "title": "SettlementIngestRequest",
+        "type": "object"
       },
       "SettlementIngestResponse": {
         "properties": {
           "market_id": {
-            "type": "string",
-            "title": "Market Id"
+            "title": "Market Id",
+            "type": "string"
           },
           "updated": {
-            "type": "boolean",
+            "default": true,
             "title": "Updated",
-            "default": true
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "market_id"
         ],
-        "title": "SettlementIngestResponse"
+        "title": "SettlementIngestResponse",
+        "type": "object"
       },
       "TradeClaimRequest": {
         "properties": {
-          "wallet_address": {
-            "type": "string",
-            "title": "Wallet Address"
-          },
-          "market_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market Id"
-          },
           "event_id": {
             "anyOf": [
               {
@@ -4309,6 +2941,17 @@
             ],
             "title": "Event Id"
           },
+          "market_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Id"
+          },
           "ticket_id": {
             "anyOf": [
               {
@@ -4319,43 +2962,46 @@
               }
             ],
             "title": "Ticket Id"
+          },
+          "wallet_address": {
+            "title": "Wallet Address",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "wallet_address"
         ],
-        "title": "TradeClaimRequest"
+        "title": "TradeClaimRequest",
+        "type": "object"
       },
       "TradeClaimResponse": {
         "properties": {
-          "tx_hash": {
-            "type": "string",
-            "title": "Tx Hash"
+          "amount_wei": {
+            "title": "Amount Wei",
+            "type": "integer"
           },
           "market_id": {
-            "type": "string",
-            "title": "Market Id"
-          },
-          "ticket_id": {
-            "type": "integer",
-            "title": "Ticket Id"
+            "title": "Market Id",
+            "type": "string"
           },
           "outcome_id": {
-            "type": "integer",
-            "title": "Outcome Id"
-          },
-          "amount_wei": {
-            "type": "integer",
-            "title": "Amount Wei"
+            "title": "Outcome Id",
+            "type": "integer"
           },
           "status": {
-            "type": "string",
+            "default": "claimed",
             "title": "Status",
-            "default": "claimed"
+            "type": "string"
+          },
+          "ticket_id": {
+            "title": "Ticket Id",
+            "type": "integer"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "tx_hash",
           "market_id",
@@ -4363,63 +3009,63 @@
           "outcome_id",
           "amount_wei"
         ],
-        "title": "TradeClaimResponse"
+        "title": "TradeClaimResponse",
+        "type": "object"
       },
       "TradeCommitRequest": {
         "properties": {
-          "quote_id": {
-            "type": "string",
-            "title": "Quote Id",
-            "description": "Quote identifier to consume and commit"
-          },
           "max_fx_diff_percent": {
             "anyOf": [
               {
                 "type": "number"
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Max Fx Diff Percent",
-            "description": "Optional FX drift guard passed to pricing submit"
+            "description": "Optional FX drift guard passed to pricing submit",
+            "title": "Max Fx Diff Percent"
+          },
+          "quote_id": {
+            "description": "Quote identifier to consume and commit",
+            "title": "Quote Id",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "quote_id"
         ],
-        "title": "TradeCommitRequest"
+        "title": "TradeCommitRequest",
+        "type": "object"
       },
       "TradeCommitResponse": {
         "properties": {
-          "tx_hash": {
-            "type": "string",
-            "title": "Tx Hash"
+          "entry_fx": {
+            "title": "Entry Fx",
+            "type": "number"
           },
-          "quote_id": {
-            "type": "string",
-            "title": "Quote Id"
+          "escrow_balance_wei": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escrow Balance Wei"
           },
           "market_id": {
-            "type": "string",
-            "title": "Market Id"
+            "title": "Market Id",
+            "type": "string"
           },
           "outcome_id": {
-            "type": "integer",
-            "title": "Outcome Id"
-          },
-          "stake_zen": {
-            "type": "number",
-            "title": "Stake Zen"
-          },
-          "entry_fx": {
-            "type": "number",
-            "title": "Entry Fx"
+            "title": "Outcome Id",
+            "type": "integer"
           },
           "potential_payout_zen": {
             "anyOf": [
@@ -4443,6 +3089,10 @@
             ],
             "title": "Protocol Topup Zen"
           },
+          "quote_id": {
+            "title": "Quote Id",
+            "type": "string"
+          },
           "rake_zen": {
             "anyOf": [
               {
@@ -4454,34 +3104,7 @@
             ],
             "title": "Rake Zen"
           },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "default": "committed"
-          },
-          "ticket_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ticket Id"
-          },
-          "escrow_balance_wei": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Escrow Balance Wei"
-          },
-          "salt": {
+          "relayer_job_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -4490,7 +3113,7 @@
                 "type": "null"
               }
             ],
-            "title": "Salt"
+            "title": "Relayer Job Id"
           },
           "relayer_status": {
             "anyOf": [
@@ -4503,7 +3126,7 @@
             ],
             "title": "Relayer Status"
           },
-          "relayer_job_id": {
+          "salt": {
             "anyOf": [
               {
                 "type": "string"
@@ -4512,10 +3135,33 @@
                 "type": "null"
               }
             ],
-            "title": "Relayer Job Id"
+            "title": "Salt"
+          },
+          "stake_zen": {
+            "title": "Stake Zen",
+            "type": "number"
+          },
+          "status": {
+            "default": "committed",
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "tx_hash",
           "quote_id",
@@ -4524,18 +3170,11 @@
           "stake_zen",
           "entry_fx"
         ],
-        "title": "TradeCommitResponse"
+        "title": "TradeCommitResponse",
+        "type": "object"
       },
       "TradeStatusResponse": {
         "properties": {
-          "tx_hash": {
-            "type": "string",
-            "title": "Tx Hash"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
           "block_number": {
             "anyOf": [
               {
@@ -4546,6 +3185,17 @@
               }
             ],
             "title": "Block Number"
+          },
+          "effective_gas_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Gas Price"
           },
           "gas_used": {
             "anyOf": [
@@ -4558,86 +3208,82 @@
             ],
             "title": "Gas Used"
           },
-          "effective_gas_price": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effective Gas Price"
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tx_hash": {
+            "title": "Tx Hash",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "tx_hash",
           "status"
         ],
-        "title": "TradeStatusResponse"
+        "title": "TradeStatusResponse",
+        "type": "object"
       },
       "TreasurySnapshot": {
         "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "market_id": {
-            "type": "string",
-            "title": "Market Id"
-          },
-          "outcome": {
-            "type": "string",
-            "title": "Outcome"
-          },
-          "stake_zen": {
-            "type": "number",
-            "title": "Stake Zen"
-          },
-          "refund_zen": {
-            "type": "number",
-            "title": "Refund Zen"
-          },
-          "rake_zen": {
-            "type": "number",
-            "title": "Rake Zen"
-          },
-          "payout_profit_usdc": {
-            "type": "number",
-            "title": "Payout Profit Usdc"
-          },
           "borrowed_usdc": {
-            "type": "number",
-            "title": "Borrowed Usdc"
-          },
-          "lp_share_usdc": {
-            "type": "number",
-            "title": "Lp Share Usdc"
-          },
-          "repay_amount_usdc": {
-            "type": "number",
-            "title": "Repay Amount Usdc"
-          },
-          "platform_usdc_revenue": {
-            "type": "number",
-            "title": "Platform Usdc Revenue"
-          },
-          "zen_balance": {
-            "type": "number",
-            "title": "Zen Balance"
-          },
-          "usdc_balance": {
-            "type": "number",
-            "title": "Usdc Balance"
+            "title": "Borrowed Usdc",
+            "type": "number"
           },
           "created_at": {
-            "type": "string",
             "format": "date-time",
-            "title": "Created At"
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lp_share_usdc": {
+            "title": "Lp Share Usdc",
+            "type": "number"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "payout_profit_usdc": {
+            "title": "Payout Profit Usdc",
+            "type": "number"
+          },
+          "platform_usdc_revenue": {
+            "title": "Platform Usdc Revenue",
+            "type": "number"
+          },
+          "rake_zen": {
+            "title": "Rake Zen",
+            "type": "number"
+          },
+          "refund_zen": {
+            "title": "Refund Zen",
+            "type": "number"
+          },
+          "repay_amount_usdc": {
+            "title": "Repay Amount Usdc",
+            "type": "number"
+          },
+          "stake_zen": {
+            "title": "Stake Zen",
+            "type": "number"
+          },
+          "usdc_balance": {
+            "title": "Usdc Balance",
+            "type": "number"
+          },
+          "zen_balance": {
+            "title": "Zen Balance",
+            "type": "number"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "market_id",
@@ -4654,7 +3300,8 @@
           "usdc_balance",
           "created_at"
         ],
-        "title": "TreasurySnapshot"
+        "title": "TreasurySnapshot",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -4669,25 +3316,1384 @@
                 }
               ]
             },
-            "type": "array",
-            "title": "Location"
+            "title": "Location",
+            "type": "array"
           },
           "msg": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           },
           "type": {
-            "type": "string",
-            "title": "Error Type"
+            "title": "Error Type",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "loc",
           "msg",
           "type"
         ],
-        "title": "ValidationError"
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Reveal Market API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "description": "Basic service metadata for quick smoke tests.",
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Read Root  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Root",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/categories/{category_slug}": {
+      "get": {
+        "description": "List markets for a category, with fallbacks when slugs are unfamiliar.",
+        "operationId": "list_markets_by_category_categories__category_slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category_slug",
+            "required": true,
+            "schema": {
+              "title": "Category Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of markets to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of markets to return",
+              "maximum": 250,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Offset into the result set",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset into the result set",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Return a single representative per group_slug",
+            "in": "query",
+            "name": "coalesce_groups",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return a single representative per group_slug",
+              "title": "Coalesce Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketResponse"
+                  },
+                  "title": "Response List Markets By Category Categories  Category Slug  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Markets By Category",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/claim/bundles": {
+      "get": {
+        "description": "Return claim bundles for settled winning tickets belonging to a wallet.",
+        "operationId": "list_claim_bundles_claim_bundles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wallet",
+            "required": true,
+            "schema": {
+              "title": "Wallet",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimBundlesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Claim Bundles",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/commitments/sync": {
+      "post": {
+        "description": "Ingest commitments pushed by the relayer (for commits that bypassed the API).",
+        "operationId": "sync_commitments_commitments_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitmentsSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Commitments",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Readiness probe that fans out to DB/Redis/worker/Polymarket checks.",
+        "operationId": "health_check_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/healthz/heartbeats": {
+      "get": {
+        "description": "Return worker/API heartbeat snapshots stored in Redis.",
+        "operationId": "heartbeat_dashboard_healthz_heartbeats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Heartbeat Dashboard",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/live": {
+      "get": {
+        "description": "Cheap liveness probe that never touches dependencies.",
+        "operationId": "liveness_check_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Liveness Check Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/markets": {
+      "get": {
+        "description": "List markets with optional filters and heavy reliance on Redis caches.",
+        "operationId": "list_markets_markets_get",
+        "parameters": [
+          {
+            "description": "Filter markets by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by status",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter markets by category",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by category",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "Filter markets by oracle address",
+            "in": "query",
+            "name": "oracle",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by oracle address",
+              "title": "Oracle"
+            }
+          },
+          {
+            "description": "Case-insensitive search over market titles",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive search over market titles",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "Maximum number of markets to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of markets to return",
+              "maximum": 250,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Offset into the result set",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset into the result set",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Order results (popularity|recent|volume_24h_usd|volume)",
+            "in": "query",
+            "name": "order_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Order results (popularity|recent|volume_24h_usd|volume)",
+              "title": "Order By"
+            }
+          },
+          {
+            "description": "Return trending slice first",
+            "in": "query",
+            "name": "trending",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return trending slice first",
+              "title": "Trending"
+            }
+          },
+          {
+            "description": "Return only featured markets",
+            "in": "query",
+            "name": "only_featured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only featured markets",
+              "title": "Only Featured"
+            }
+          },
+          {
+            "description": "Return a single representative per group_slug",
+            "in": "query",
+            "name": "coalesce_groups",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return a single representative per group_slug",
+              "title": "Coalesce Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketResponse"
+                  },
+                  "title": "Response List Markets Markets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Markets",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/markets/group/{group_slug}": {
+      "get": {
+        "description": "Return markets that belong to a group_slug plus aggregate metrics.",
+        "operationId": "list_grouped_markets_markets_group__group_slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_slug",
+            "required": true,
+            "schema": {
+              "title": "Group Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupedMarketsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Grouped Markets",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/markets/stats": {
+      "get": {
+        "description": "Return counts of markets per status, cached for fast health checks.",
+        "operationId": "market_stats_markets_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketStatusBreakdown"
+                  },
+                  "title": "Response Market Stats Markets Stats Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Market Stats",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/markets/suggest": {
+      "get": {
+        "description": "Return a short suggestion list, caching the normalized query payload.",
+        "operationId": "suggest_markets_markets_suggest_get",
+        "parameters": [
+          {
+            "description": "Search term for suggestions",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Search term for suggestions",
+              "maxLength": 200,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of suggestions to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "description": "Maximum number of suggestions to return",
+              "maximum": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketResponse"
+                  },
+                  "title": "Response Suggest Markets Markets Suggest Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suggest Markets",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/markets/{event_id}": {
+      "get": {
+        "description": "Return a single market detail record, hydrating siblings when cached.",
+        "operationId": "read_market_markets__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Market",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/positions": {
+      "get": {
+        "description": "Return committed positions for a wallet along with escrow balance.",
+        "operationId": "list_positions_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wallet",
+            "required": true,
+            "schema": {
+              "title": "Wallet",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Positions",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/pricing/fx": {
+      "get": {
+        "operationId": "pricing_fx_pricing_fx_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxQuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pricing Fx",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/pricing/preview": {
+      "post": {
+        "description": "Return an unsigned, non-persistent preview quote (no market creation, no signature).",
+        "operationId": "pricing_quote_preview_pricing_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Quote Preview",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/pricing/quote": {
+      "post": {
+        "description": "Generate a signed quote bound to stake, FX, outcome, and expiry.",
+        "operationId": "pricing_quote_pricing_quote_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Quote",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/pricing/quotes/{quote_id}": {
+      "get": {
+        "operationId": "pricing_quote_state_pricing_quotes__quote_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quote_id",
+            "required": true,
+            "schema": {
+              "title": "Quote Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Quote State",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/pricing/submit": {
+      "post": {
+        "description": "Validate and mark a quote as consumed, re-checking FX drift if requested.",
+        "operationId": "pricing_submit_pricing_submit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingSubmitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Submit",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Alias for /healthz used by Kubernetes readiness probes.",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/relayer/commitments": {
+      "post": {
+        "description": "Relayer-protected hook to push commitments.",
+        "operationId": "relayer_commitments_relayer_commitments_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Relayer-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Relayer-Secret"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitmentsSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitmentsSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relayer Commitments",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/relayer/settlements": {
+      "post": {
+        "description": "Relayer/prover-protected hook to push settlement snapshots.",
+        "operationId": "relayer_settlements_relayer_settlements_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Relayer-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Relayer-Secret"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relayer Settlements",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/resolution/{condition_id_hex}": {
+      "get": {
+        "description": "Return the resolution summary for a condition id with cache + Goldsky fallback.",
+        "operationId": "read_resolution_resolution__condition_id_hex__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "condition_id_hex",
+            "required": true,
+            "schema": {
+              "title": "Condition Id Hex",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolutionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Resolution",
+        "tags": [
+          "markets"
+        ]
+      }
+    },
+    "/settlements/ingest": {
+      "post": {
+        "description": "Persist settlement snapshot from relayer/prover so claims can proceed.",
+        "operationId": "ingest_settlement_settlements_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Settlement",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/claim": {
+      "post": {
+        "description": "Initiate a claim via the relayer for a settled winning ticket.",
+        "operationId": "trade_claim_trade_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Claim",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/commit": {
+      "post": {
+        "description": "Consume a pricing quote, build CommitAuth, and forward to the relayer.",
+        "operationId": "trade_commit_trade_commit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeCommitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Commit",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/trade/status": {
+      "get": {
+        "description": "Return transaction status by hash or relayer job id (best-effort).",
+        "operationId": "trade_status_trade_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tx_hash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tx Hash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trade Status",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/treasury/snapshots": {
+      "get": {
+        "description": "Return the latest treasury snapshots (optionally filtered by market).",
+        "operationId": "treasury_snapshots_treasury_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TreasurySnapshot"
+                  },
+                  "title": "Response Treasury Snapshots Treasury Snapshots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Treasury Snapshots",
+        "tags": [
+          "treasury"
+        ]
       }
     }
   }
