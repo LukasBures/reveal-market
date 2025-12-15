@@ -20,6 +20,7 @@ import { defaultChain } from "@/lib/wagmi";
 
 type Props = {
   market: MarketDetail;
+  initialOutcomeId?: number;
 };
 
 const PER_BET_CAP_ZEN = 0.1;
@@ -33,7 +34,7 @@ const formatZen = (value: number | undefined): string => {
   return `${value.toFixed(3)} ZEN`;
 };
 
-export function MarketDetailOutcomes({ market }: Props) {
+export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = useMemo(() => market.outcomePrices ?? [], [market.outcomePrices]);
   const tokenIds = useMemo(
@@ -56,7 +57,9 @@ export function MarketDetailOutcomes({ market }: Props) {
     tokenIds,
   );
   const liveStore = usePriceStreamStore(market.eventId, tokenIds);
-  const [selectedOutcome, setSelectedOutcome] = useState(0);
+  const [selectedOutcome, setSelectedOutcome] = useState(
+    initialOutcomeId >= 0 ? Math.min(initialOutcomeId, Math.max(outcomes.length - 1, 0)) : 0,
+  );
   const [stakeZen, setStakeZen] = useState(DEFAULT_STAKE_ZEN);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +72,11 @@ export function MarketDetailOutcomes({ market }: Props) {
   const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxStaleCombined = fxStale || priceFxStale;
+  useEffect(() => {
+    if (initialOutcomeId >= 0 && initialOutcomeId < outcomes.length) {
+      setSelectedOutcome(initialOutcomeId);
+    }
+  }, [initialOutcomeId, outcomes.length]);
   const fxValue = formatZenUsd(fx?.zen_usd);
   const fxAgeSeconds = useMemo(() => {
     if (typeof ageSeconds === "number") return Math.max(0, ageSeconds);

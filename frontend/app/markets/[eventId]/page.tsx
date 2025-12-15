@@ -33,6 +33,7 @@ type MarketDetailParams = {
 
 type MarketDetailPageProps = {
   params: Promise<MarketDetailParams>;
+  searchParams?: Promise<{ outcome?: string }>;
 };
 
 const MARKET_CONTEXT_FALLBACK =
@@ -210,8 +211,10 @@ export async function generateMetadata({ params }: MarketDetailPageProps): Promi
   });
 }
 
-export default async function MarketDetailPage({ params }: MarketDetailPageProps) {
+export default async function MarketDetailPage({ params, searchParams }: MarketDetailPageProps) {
   const { eventId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const requestedOutcome = resolvedSearchParams?.outcome ? Number(resolvedSearchParams.outcome) : null;
   const market = await loadMarket(eventId);
   if (!market) {
     notFound();
@@ -236,6 +239,10 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
     null;
   const resolverLabel = typeof resolverSource === "string" && resolverSource.trim() ? resolverSource.trim() : "Not provided";
   const commitDeadline = getCommitDeadline(market);
+  const initialOutcomeId =
+    typeof requestedOutcome === "number" && Number.isFinite(requestedOutcome) && requestedOutcome >= 0
+      ? Math.min(requestedOutcome, (market.outcomes?.length ?? 1) - 1)
+      : 0;
   const selectorSiblings =
     siblings.length > 0
       ? siblings
@@ -299,16 +306,18 @@ export default async function MarketDetailPage({ params }: MarketDetailPageProps
               <MarketDetailMetadataPanel market={market} />
             </div>
             <div className="space-y-4">
-              <StakeQuoteCard
-                marketAddress={market.marketAddress}
-                marketId={canonicalEventId}
-                outcomes={market.outcomes ?? []}
-                outcomePrices={market.outcomePrices ?? []}
-                initialOutcomeId={0}
-                marketTitle={market.title}
-                marketStatus={market.status}
-                isResolved={market.resolution?.resolved ?? null}
-              />
+              <div id="trade-panel">
+                <StakeQuoteCard
+                  marketAddress={market.marketAddress}
+                  marketId={canonicalEventId}
+                  outcomes={market.outcomes ?? []}
+                  outcomePrices={market.outcomePrices ?? []}
+                  initialOutcomeId={initialOutcomeId}
+                  marketTitle={market.title}
+                  marketStatus={market.status}
+                  isResolved={market.resolution?.resolved ?? null}
+                />
+              </div>
             </div>
           </div>
         </div>

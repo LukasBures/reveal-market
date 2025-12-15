@@ -1,3 +1,5 @@
+"use client";
+
 import type { MarketSummary } from "@/lib/api-types";
 import type { Route } from "next";
 import Link from "next/link";
@@ -95,13 +97,22 @@ export function MarketCard({ market }: Props) {
                       : "transition hover:bg-white/10";
                 const probability = idx === 0 ? primaryProbability : secondaryProbability;
                 return (
-                  <div
+                  <button
                     key={outcome}
-                    className={`flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 ${hoverColor}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const href = `${targetHref}?outcome=${idx}#trade-panel`;
+                      if (typeof window !== "undefined") {
+                        window.location.href = href;
+                      }
+                    }}
+                    className={`flex w-full items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 text-left ${hoverColor}`}
                   >
                     <span className="truncate">{outcome}</span>
                     <span className="font-semibold text-white">{probability}</span>
-                  </div>
+                  </button>
                 );
               })}
             </div>

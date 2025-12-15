@@ -124,6 +124,7 @@ export function DashboardClient() {
     () => async (wallet: string) => {
       try {
         setBundleError(null);
+        setClaimMessage(null);
         const message = `claim-bundles:${wallet.toLowerCase()}`;
         const signature =
           bundleSignature && bundleSignature.length > 0
@@ -137,6 +138,9 @@ export function DashboardClient() {
         setClaimBundles(bundles);
         if (res.error) {
           setBundleError(sanitizeUserActionError(res.error));
+        }
+        if (!res.error && bundles.length === 0) {
+          setClaimMessage("No new payouts to load yet. Check again after markets settle.");
         }
         return bundles;
       } catch (err) {

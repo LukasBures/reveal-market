@@ -24,6 +24,7 @@ const hooks = vi.hoisted(() => ({
 
 const pricingMocks = vi.hoisted(() => ({
   fetchPricingQuoteWithMeta: vi.fn(),
+  fetchPricingPreview: vi.fn(),
   submitTrade: vi.fn(),
 }));
 
@@ -54,6 +55,7 @@ vi.mock("@/hooks/useFxStream", () => ({
 
 vi.mock("@/lib/pricing-client", () => ({
   fetchPricingQuoteWithMeta: pricingMocks.fetchPricingQuoteWithMeta,
+  fetchPricingPreview: pricingMocks.fetchPricingPreview,
   submitTrade: pricingMocks.submitTrade,
   FX_DEFAULT_PATH: "/fx/zen-usd",
 }));
