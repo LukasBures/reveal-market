@@ -148,8 +148,18 @@ class TxQueue:
 
     def _reserve_job_sync(self, job_id: int | None = None) -> dict[str, Any] | None:
         now = int(time.time())
+        # Unlock stale running jobs that exceeded the tx timeout window so the queue can't stall forever.
+        stale_cutoff = now - int(getattr(self.service, "tx_timeout_seconds", 120)) - 10
         if self.use_postgres:
             with self._lock, self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'pending'
+                    WHERE status = 'running' AND updated_at < %s
+                    """,
+                    (stale_cutoff,),
+                )
                 if job_id is None:
                     cur = conn.execute(
                         """
@@ -179,6 +189,10 @@ class TxQueue:
                 row = cur.fetchone()
                 return dict(row) if row else None
         with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET status = 'pending' WHERE status = 'running' AND updated_at < ?",
+                (stale_cutoff,),
+            )
             if job_id is None:
                 row = conn.execute(
                     "SELECT * FROM jobs WHERE status IN ('pending', 'running') ORDER BY id ASC LIMIT 1"
@@ -281,6 +295,16 @@ class TxQueue:
             if isinstance(err, TxSendError) and err.nonce is not None:
                 nonce_to_store = err.nonce
             next_status = "pending" if attempts < self.max_attempts else "deadletter"
+            logger.warning(
+                "queue.job.error",
+                job_id=row["id"],
+                action=row["action"],
+                attempts=attempts,
+                next_status=next_status,
+                error=str(err),
+                nonce=nonce_to_store,
+                **summary,
+            )
             await asyncio.to_thread(self._mark_failure, row["id"], next_status, attempts, str(err), nonce_to_store)
             QUEUE_OUTCOMES.labels(action=row["action"], status=next_status).inc()
             if next_status == "deadletter":

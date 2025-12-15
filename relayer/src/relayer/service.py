@@ -11,7 +11,7 @@ from eth_typing import ChecksumAddress
 from structlog import get_logger
 from web3 import Web3
 from web3.contract import Contract
-from web3.exceptions import TimeExhausted, Web3Exception
+from web3.exceptions import TimeExhausted, TransactionNotFound, Web3Exception
 from web3.types import BlockData, TxParams, TxReceipt, Wei
 
 from .abi import CLAIM_ABI, COMMIT_ABI
@@ -116,27 +116,42 @@ class RelayerService:
                     max_priority_fee_per_gas=tx.get("maxPriorityFeePerGas"),
                 )
                 signed = await asyncio.to_thread(self.account.sign_transaction, tx)
-                tx_hash = await asyncio.to_thread(self.web3.eth.send_raw_transaction, signed.raw_transaction)
-                receipt: TxReceipt = await asyncio.to_thread(
-                    self.web3.eth.wait_for_transaction_receipt, tx_hash, self.tx_timeout_seconds
+                send_timeout = min(self.tx_timeout_seconds, 30)
+                try:
+                    raw_tx = self._raw_tx_bytes(signed)
+                    tx_hash = await asyncio.wait_for(
+                        asyncio.to_thread(self.web3.eth.send_raw_transaction, raw_tx),
+                        timeout=send_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    raise TxSendError(f"{action}_send_timeout", nonce=nonce_used)
+                logger.info(
+                    f"relayer.{action}.broadcast",
+                    attempt=attempt,
+                    tx_hash=tx_hash.hex(),
+                    nonce=nonce_used,
                 )
+                receipt = await self._poll_receipt(tx_hash, action, nonce_used, start, attempt=attempt)
                 status = int(receipt["status"])
-                logger.info(f"relayer.{action}.sent", tx_hash=tx_hash.hex(), status=status, attempt=attempt)
-                TX_OUTCOMES.labels(action=action, outcome="success").inc()
-                TX_LATENCY.labels(action=action).observe(time.perf_counter() - start)
                 return {"txHash": tx_hash.hex(), "status": status, "nonce": nonce_used}
-            except TimeExhausted as err:
+            except (TxSendError, TimeExhausted) as err:
                 last_err = err
                 logger.warning(
                     f"relayer.{action}.timeout",
                     attempt=attempt,
                     timeout=self.tx_timeout_seconds,
-                    error=str(err),
+                    error=f"{type(err).__name__}:{err}",
+                    nonce=nonce_used,
                 )
                 TX_OUTCOMES.labels(action=action, outcome="timeout").inc()
-            except (Web3Exception, ValueError) as err:
+            except (Web3Exception, ValueError, Exception) as err:
                 last_err = err
-                logger.warning(f"relayer.{action}.error", attempt=attempt, error=str(err))
+                logger.warning(
+                    f"relayer.{action}.error",
+                    attempt=attempt,
+                    error=f"{type(err).__name__}:{err}",
+                    nonce=nonce_used,
+                )
                 TX_OUTCOMES.labels(action=action, outcome="error").inc()
 
             await asyncio.sleep(self.retry_backoff_seconds * attempt)
@@ -144,6 +159,62 @@ class RelayerService:
         logger.error(f"relayer.{action}.failed", error=str(last_err))
         TX_OUTCOMES.labels(action=action, outcome="failed").inc()
         raise TxSendError(str(last_err) if last_err else f"{action} failed without error", nonce=nonce_used)
+
+    @staticmethod
+    def _raw_tx_bytes(signed_tx) -> bytes:
+        # Prefer snake_case (newer eth-account/web3) and fall back to camelCase for compatibility.
+        raw_tx = getattr(signed_tx, "raw_transaction", None)
+        if raw_tx is None:
+            raw_tx = getattr(signed_tx, "rawTransaction", None)
+        if raw_tx is None:
+            raise TxSendError("signed_tx_missing_raw_transaction")
+        return raw_tx
+
+    async def _poll_receipt(
+        self, tx_hash, action: str, nonce_used: int, start: float, *, attempt: int
+    ) -> TxReceipt:
+        """Poll for a receipt with a hard timeout so jobs do not hang forever."""
+
+        deadline = start + self.tx_timeout_seconds
+        poll_interval = min(5.0, max(0.5, self.tx_timeout_seconds / 30))
+        single_call_timeout = max(5.0, min(15.0, self.tx_timeout_seconds / 2))
+        last_err: Exception | None = None
+        while True:
+            now = time.perf_counter()
+            if now >= deadline:
+                TX_OUTCOMES.labels(action=action, outcome="timeout").inc()
+                raise TxSendError(f"{action}_receipt_timeout", nonce=nonce_used)
+            try:
+                receipt: TxReceipt = await asyncio.wait_for(
+                    asyncio.to_thread(self.web3.eth.get_transaction_receipt, tx_hash),
+                    timeout=single_call_timeout,
+                )
+                status = int(receipt["status"])
+                logger.info(
+                    f"relayer.{action}.sent",
+                    tx_hash=tx_hash.hex(),
+                    status=status,
+                    attempt=attempt,
+                )
+                TX_OUTCOMES.labels(action=action, outcome="success").inc()
+                TX_LATENCY.labels(action=action).observe(time.perf_counter() - start)
+                return receipt
+            except TransactionNotFound as err:  # Not mined yet.
+                last_err = err
+            except (Web3Exception, ValueError) as err:
+                last_err = err
+            except asyncio.TimeoutError as err:
+                last_err = err
+
+            if last_err is not None:
+                logger.info(
+                    f"relayer.{action}.waiting",
+                    tx_hash=tx_hash.hex(),
+                    attempt=attempt,
+                    error=f"{type(last_err).__name__}:{last_err}",
+                    poll_interval=poll_interval,
+                )
+            await asyncio.sleep(poll_interval)
 
     async def commit(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0

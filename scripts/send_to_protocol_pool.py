@@ -254,9 +254,9 @@ def main() -> int:
 
     def send_and_wait(tx_dict):
         signed_tx = account.sign_transaction(tx_dict)
-        raw_tx = getattr(signed_tx, "rawTransaction", None) or getattr(signed_tx, "raw_transaction", None)
+        raw_tx = getattr(signed_tx, "raw_transaction", None) or getattr(signed_tx, "rawTransaction", None)
         if raw_tx is None:
-            raise RuntimeError("Signed transaction missing rawTransaction")
+            raise RuntimeError("Signed transaction missing raw transaction bytes")
         tx_hash = web3.eth.send_raw_transaction(raw_tx)
         tx_hex = tx_hash.hex()
         log.info("Sent tx %s", tx_hex)

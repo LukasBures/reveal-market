@@ -171,9 +171,9 @@ class OnChainLpVaultClient(BaseLpVaultClient):
 
     async def _send_tx(self, tx: dict[str, Any]) -> dict[str, Any]:
         signed = self.account.sign_transaction(tx)
-        raw_tx = getattr(signed, "rawTransaction", None)
+        raw_tx = getattr(signed, "raw_transaction", None)
         if raw_tx is None:
-            raw_tx = getattr(signed, "raw_transaction", None)
+            raw_tx = getattr(signed, "rawTransaction", None)
         if raw_tx is None:  # pragma: no cover - defensive for web3 variants
             raise ValueError("Signed transaction is missing raw transaction bytes")
         tx_hash = self.w3.eth.send_raw_transaction(raw_tx)

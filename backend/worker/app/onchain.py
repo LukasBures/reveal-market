@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import Any, cast
 
 from shared.logging import log_event
 from shared.onchain import (
@@ -16,13 +17,13 @@ logger = logging.getLogger("reveal_market.worker")
 DEPLOY_LOCK = threading.Lock()
 
 
-def _raw_tx_bytes(signed_tx) -> bytes:
-    raw_tx = getattr(signed_tx, "rawTransaction", None)
+def _raw_tx_bytes(signed_tx: Any) -> bytes:
+    raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
-        raw_tx = getattr(signed_tx, "raw_transaction", None)
+        raw_tx = getattr(signed_tx, "rawTransaction", None)
     if raw_tx is None:  # pragma: no cover - defensive for web3 variants
         raise ValueError("Signed transaction is missing raw transaction bytes")
-    return raw_tx
+    return cast(bytes, raw_tx)
 
 
 async def get_next_market_id(rpc_url: str, factory_address: str) -> int:

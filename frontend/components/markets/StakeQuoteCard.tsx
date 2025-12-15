@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPricingQuoteWithMeta,
   FX_DEFAULT_PATH,
@@ -34,6 +34,7 @@ const PER_BET_CAP_ZEN = TICKET_SIZE_ZEN;
 const MIN_STAKE_ZEN = TICKET_SIZE_ZEN;
 const STAKE_RANGE_ERROR = `Stake must be exactly ${TICKET_SIZE_ZEN} ZEN (fixed ticket size)`;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
+const PREVIEW_MIN_INTERVAL_MS = QUOTE_REFRESH_INTERVAL_MS;
 
 const getQuoteExpiryMs = (value: PricingQuote | null): number | null => {
   if (!value) return null;
@@ -51,6 +52,25 @@ const getQuoteExpiryMs = (value: PricingQuote | null): number | null => {
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
   return value.toFixed(decimals);
+};
+
+const buildPreviewKey = (
+  address: string | undefined,
+  marketId: string | undefined,
+  outcomeId: number | undefined,
+  stakeZen: number,
+  chainId: number | undefined,
+): string | null => {
+  if (!address || !marketId || outcomeId === undefined || outcomeId === null || !Number.isFinite(stakeZen)) return null;
+  return `${address.toLowerCase()}|${marketId}|${outcomeId}|${stakeZen.toFixed(4)}|${chainId ?? "chain"}`;
+};
+
+const shortenHash = (hash?: string | null): string | null => {
+  if (!hash) return null;
+  const trimmed = hash.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= 16) return trimmed;
+  return `${trimmed.slice(0, 10)}…${trimmed.slice(-6)}`;
 };
 
 export function StakeQuoteCard({
@@ -74,6 +94,9 @@ export function StakeQuoteCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const previewKeyRef = useRef<string | null>(null);
+  const previewInFlightRef = useRef(false);
+  const lastPreviewAtRef = useRef(0);
   const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
   const fxValue = fx?.zen_usd;
   const fxIsStale = Boolean(fx?.stale);
@@ -166,7 +189,7 @@ export function StakeQuoteCard({
 
   useEffect(() => {
     let cancelled = false;
-    const requestQuote = async () => {
+    const requestPreview = async () => {
       // Keep an issued quote intact; only refresh previews while unsigned.
       if (quote?.quote_id) return;
       if (tradingDisabled) {
@@ -220,6 +243,16 @@ export function StakeQuoteCard({
         setStakeZen(TICKET_SIZE_ZEN);
         setStakeInput(TICKET_SIZE_ZEN.toFixed(2));
       }
+      const previewKey = buildPreviewKey(address, marketId, selectedOutcome, cappedStake, chainId);
+      if (previewKey && previewKeyRef.current === previewKey) {
+        return;
+      }
+      if (previewInFlightRef.current) return;
+      const now = Date.now();
+      if (now - lastPreviewAtRef.current < PREVIEW_MIN_INTERVAL_MS) return;
+      lastPreviewAtRef.current = now;
+      previewInFlightRef.current = true;
+      previewKeyRef.current = previewKey;
       const shouldBlockCta = !quote;
       if (shouldBlockCta) setLoading(true);
       try {
@@ -242,31 +275,36 @@ export function StakeQuoteCard({
           setError(message);
         }
       } finally {
+        previewInFlightRef.current = false;
         if (!cancelled && shouldBlockCta) setLoading(false);
       }
     };
-    requestQuote();
+    requestPreview();
     return () => {
       cancelled = true;
     };
   }, [
-    debouncedStake,
-    fxReady,
-    fxIsStale,
     address,
-    marketAddress,
-    marketId,
-    selectedOutcome,
-    fxUnavailable,
-    refreshNonce,
-    effectiveMaxStake,
-    tradingDisabled,
-    tradingReason,
+    capExhausted,
     chainId,
     chainMismatch,
-    capExhausted,
+    debouncedStake,
+    effectiveMaxStake,
+    fxIsStale,
+    fxReady,
+    fxUnavailable,
+    marketAddress,
+    marketId,
     quote,
+    refreshNonce,
+    selectedOutcome,
+    tradingDisabled,
+    tradingReason,
   ]);
+
+  useEffect(() => {
+    previewKeyRef.current = null;
+  }, [refreshNonce]);
 
   useEffect(() => {
     if (!address || !marketId || tradingDisabled || fxUnavailable || chainMismatch) return;
@@ -292,7 +330,6 @@ export function StakeQuoteCard({
       if (remainingMs <= 0) {
         setQuoteCountdown("Expired");
         setQuote(null);
-        setRefreshNonce((prev) => prev + 1);
         return false;
       }
       const seconds = Math.ceil(remainingMs / 1000);
@@ -344,6 +381,7 @@ export function StakeQuoteCard({
   const ctaLabel = loading
     ? "Pricing…"
     : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
+  const shortQuoteId = shortenHash(quote?.quote_id ?? null);
 
   const highlightClass =
     selectedOutcome === 0
@@ -693,9 +731,14 @@ export function StakeQuoteCard({
         >
           {submitBlockedReason ?? (txLoading || txPending ? "Submitting…" : ctaLabel)}
         </button>
+        {shortQuoteId && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Quote id: <span className="font-semibold text-white">{shortQuoteId}</span>
+          </p>
+        )}
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-            Quote {quote.quote_id ? quote.quote_id : "preview"} expires in{" "}
+            Quote {shortQuoteId ?? "preview"} expires in{" "}
             {quoteCountdown ?? formatTime(quote.expires_at ?? quoteExpiryMs ?? undefined)}
           </p>
         )}

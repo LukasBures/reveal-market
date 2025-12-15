@@ -52,9 +52,9 @@ def _strip_hex(value: str) -> str:
 
 
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
-    raw_tx = getattr(signed_tx, "rawTransaction", None)
+    raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
-        raw_tx = getattr(signed_tx, "raw_transaction", None)
+        raw_tx = getattr(signed_tx, "rawTransaction", None)
     if raw_tx is None:  # pragma: no cover - defensive for web3 variants
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="signed_tx_missing_raw_transaction")
     return cast(bytes, raw_tx)

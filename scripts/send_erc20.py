@@ -245,9 +245,9 @@ def main() -> int:
     )
 
     signed_tx = account.sign_transaction(tx)
-    raw_tx = getattr(signed_tx, "rawTransaction", None)
+    raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
-        raw_tx = getattr(signed_tx, "raw_transaction", None)
+        raw_tx = getattr(signed_tx, "rawTransaction", None)
     if raw_tx is None:  # pragma: no cover - defensive for unexpected web3 variants
         log.error("Signed transaction is missing raw transaction bytes")
         return 1

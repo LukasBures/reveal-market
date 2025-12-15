@@ -29,9 +29,10 @@ logger = runtime.logger
 
 
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
-    raw_tx = getattr(signed_tx, "rawTransaction", None)
+    # Prefer snake_case (web3/eth-account v7) with camelCase fallback for older versions.
+    raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
-        raw_tx = getattr(signed_tx, "raw_transaction", None)
+        raw_tx = getattr(signed_tx, "rawTransaction", None)
     if raw_tx is None:  # pragma: no cover - defensive for web3 variants
         raise ValueError("Signed transaction is missing raw transaction bytes")
     return cast(bytes, raw_tx)
