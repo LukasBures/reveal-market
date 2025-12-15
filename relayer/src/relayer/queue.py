@@ -209,6 +209,7 @@ class TxQueue:
         payload: dict[str, Any] = json.loads(row["payload"])
         nonce = row.get("nonce")
         bump_factor = (1 + self.fee_bump_percent) ** max(0, attempts - 1)
+        summary = self._payload_summary(row["action"], payload)
         logger.info(
             "queue.job.start",
             job_id=row["id"],
@@ -216,9 +217,32 @@ class TxQueue:
             attempts=attempts,
             bump_factor=round(bump_factor, 4),
             nonce_override=nonce,
+            **summary,
         )
 
         try:
+            # Drop stale commit authorizations so the queue does not get stuck retrying expired jobs.
+            if row["action"] == "commit":
+                expiry = payload.get("expiry")
+                if expiry is not None and int(expiry) < int(time.time()):
+                    await asyncio.to_thread(
+                        self._mark_failure,
+                        row["id"],
+                        "deadletter",
+                        attempts,
+                        "commit_expired",
+                        nonce,
+                    )
+                    QUEUE_OUTCOMES.labels(action=row["action"], status="deadletter").inc()
+                    logger.warning(
+                        "queue.commit.expired",
+                        job_id=row["id"],
+                        expiry=int(expiry),
+                        now=int(time.time()),
+                        **summary,
+                    )
+                    return {"jobId": row["id"], "status": "deadletter", "error": "commit_expired"}
+
             if row["action"] == "commit":
                 result = await self.service.commit(payload, nonce_override=nonce, bump_factor=bump_factor)
             elif row["action"] == "claim":
@@ -249,6 +273,7 @@ class TxQueue:
                 tx_hash=tx_hash,
                 nonce=nonce_used,
                 attempts=attempts,
+                **summary,
             )
             return {"jobId": job_id, "status": "succeeded", "txHash": tx_hash, "nonce": nonce_used}
         except (TxSendError, Web3Exception, ValueError, RuntimeError) as err:
@@ -266,6 +291,7 @@ class TxQueue:
                     attempts=attempts,
                     error=str(err),
                     nonce=nonce_to_store,
+                    **summary,
                 )
             else:
                 logger.warning(
@@ -276,6 +302,7 @@ class TxQueue:
                     error=str(err),
                     nonce=nonce_to_store,
                     next_status=next_status,
+                    **summary,
                 )
             return {"jobId": row["id"], "status": next_status, "nonce": nonce_to_store, "error": str(err)}
 
@@ -422,3 +449,22 @@ class TxQueue:
         await asyncio.to_thread(_purge)
         await asyncio.to_thread(self._update_depth)
         return {"jobId": job_id, "status": "purged"}
+
+    def _payload_summary(self, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Surface small identifying fields in logs for tracing."""
+
+        summary: dict[str, Any] = {}
+        if action == "commit":
+            summary["user"] = payload.get("user")
+            summary["market"] = payload.get("market")
+            summary["outcome_id"] = payload.get("outcome_id")
+            summary["event_id"] = payload.get("event_id") or payload.get("market_id")
+            summary["ticket_value_wei"] = payload.get("ticket_value_wei")
+            summary["expiry"] = payload.get("expiry")
+        elif action == "claim":
+            summary["user"] = payload.get("user")
+            summary["market"] = payload.get("market")
+            summary["ticket_id"] = payload.get("ticket_id")
+            summary["outcome_id"] = payload.get("outcome_id")
+            summary["amount"] = payload.get("amount")
+        return summary
