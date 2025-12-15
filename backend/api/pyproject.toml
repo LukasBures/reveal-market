@@ -22,7 +22,7 @@ dependencies = [
     "prometheus-client>=0.23.1,<1.0",
     "python-json-logger>=2.0.7,<3.0",
     "tenacity>=9.0.0,<10.0",
-    "web3==7.14.0",
+    "web3>=7.0,<8.0",
     "py-clob-client>=0.28.0,<0.29",
     "greenlet>=3.0,<4.0",
     "hatchling>=1.8.0",

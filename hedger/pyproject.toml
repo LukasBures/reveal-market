@@ -19,7 +19,7 @@ dependencies = [
     "prometheus-client>=0.20,<1.0",
     "tenacity>=9.0,<10.0",
     "python-json-logger>=2.0,<3.0",
-    "web3>=6.20,<7.0",
+    "web3>=7.0,<8.0",
 ]
 
 [project.optional-dependencies]
