@@ -115,7 +115,7 @@ class RelayerService:
                     max_fee_per_gas=tx.get("maxFeePerGas"),
                     max_priority_fee_per_gas=tx.get("maxPriorityFeePerGas"),
                 )
-                signed = await asyncio.to_thread(self.account.sign_transaction, tx)
+                signed = await asyncio.to_thread(self.account.sign_transaction, cast(dict[str, Any], tx))
                 send_timeout = min(self.tx_timeout_seconds, 30)
                 try:
                     raw_tx = self._raw_tx_bytes(signed)
@@ -123,8 +123,8 @@ class RelayerService:
                         asyncio.to_thread(self.web3.eth.send_raw_transaction, raw_tx),
                         timeout=send_timeout,
                     )
-                except asyncio.TimeoutError:
-                    raise TxSendError(f"{action}_send_timeout", nonce=nonce_used)
+                except TimeoutError as err:
+                    raise TxSendError(f"{action}_send_timeout", nonce=nonce_used) from err
                 logger.info(
                     f"relayer.{action}.broadcast",
                     attempt=attempt,
@@ -170,9 +170,7 @@ class RelayerService:
             raise TxSendError("signed_tx_missing_raw_transaction")
         return raw_tx
 
-    async def _poll_receipt(
-        self, tx_hash, action: str, nonce_used: int, start: float, *, attempt: int
-    ) -> TxReceipt:
+    async def _poll_receipt(self, tx_hash, action: str, nonce_used: int, start: float, *, attempt: int) -> TxReceipt:
         """Poll for a receipt with a hard timeout so jobs do not hang forever."""
 
         deadline = start + self.tx_timeout_seconds
@@ -203,7 +201,7 @@ class RelayerService:
                 last_err = err
             except (Web3Exception, ValueError) as err:
                 last_err = err
-            except asyncio.TimeoutError as err:
+            except TimeoutError as err:
                 last_err = err
 
             if last_err is not None:
