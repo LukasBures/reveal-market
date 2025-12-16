@@ -367,6 +367,7 @@ class Commitment(Base):
     ticket_hash: Mapped[str] = mapped_column(String(66), nullable=False)
     leaf: Mapped[str] = mapped_column(String(66), nullable=False)
     leaf_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

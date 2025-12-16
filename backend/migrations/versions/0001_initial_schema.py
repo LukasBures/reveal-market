@@ -384,11 +384,13 @@ def upgrade() -> None:
         sa.Column("ticket_hash", sa.String(length=66), nullable=False),
         sa.Column("leaf", sa.String(length=66), nullable=False),
         sa.Column("leaf_index", sa.Integer(), nullable=True),
+        sa.Column("tx_hash", sa.String(length=66), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_commitments_market_id", "commitments", ["market_id"])
     op.create_index("ix_commitments_market_user", "commitments", ["market_id", "user_address"])
     op.create_index("ix_commitments_user_address", "commitments", ["user_address"])
+    op.create_index("ix_commitments_tx_hash", "commitments", ["tx_hash"])
 
     op.create_table(
         "commitment_merkle_paths",
@@ -746,6 +748,7 @@ def downgrade() -> None:
     op.drop_table("settlements")
     op.drop_index("ix_commitment_merkle_paths_commitment_level", table_name="commitment_merkle_paths")
     op.drop_table("commitment_merkle_paths")
+    op.drop_index("ix_commitments_tx_hash", table_name="commitments")
     op.drop_index("ix_commitments_market_user", table_name="commitments")
     op.drop_index("ix_commitments_user_address", table_name="commitments")
     op.drop_index("ix_commitments_market_id", table_name="commitments")

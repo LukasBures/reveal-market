@@ -457,6 +457,8 @@ export function StakeQuoteCard({
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
     tradingReason ??
+    (!address ? "Connect wallet" : null) ??
+    (!marketId ? "Market unavailable" : null) ??
     (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
     (capExhausted ? "Stake cap reached" : null) ??
     (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
@@ -499,15 +501,21 @@ export function StakeQuoteCard({
     }
     setTxLoading(true);
     try {
-      const issuedQuote =
-        quote && !quoteExpired
-          ? quote
-          : await fetchPricingQuoteWithMeta(stakeZen, {
-              marketId,
-              walletAddress: address,
-              marketAddress: marketAddress ?? "",
-              outcomeId: selectedOutcome,
-            });
+      const previewQuote = quote && !quoteExpired ? quote : null;
+      const needsFreshQuote =
+        !previewQuote ||
+        !previewQuote.quote_id ||
+        (previewQuote.market_id ?? marketId) !== marketId ||
+        (previewQuote.outcome_id ?? selectedOutcome) !== selectedOutcome ||
+        Math.abs(Number(previewQuote.stake_zen ?? NaN) - stakeZen) > 1e-6;
+      const issuedQuote = needsFreshQuote
+        ? await fetchPricingQuoteWithMeta(stakeZen, {
+            marketId,
+            walletAddress: address,
+            marketAddress: marketAddress ?? "",
+            outcomeId: selectedOutcome,
+          })
+        : previewQuote;
       setQuote(issuedQuote);
       if (!issuedQuote.quote_id) {
         throw new Error("Quote unavailable");
@@ -744,7 +752,7 @@ export function StakeQuoteCard({
       </div>
 
       <div className="mt-4 flex flex-col gap-2">
-        {tradingDisabled && (
+        {tradingDisabled && tradingReason !== "Market settled" && (
           <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
             {tradingReason ?? "Trading is unavailable for this market."}
           </div>
@@ -800,7 +808,7 @@ export function StakeQuoteCard({
               : "n/a"}
           </p>
         )}
-        {error && <p className="text-xs text-rose-300">{error}</p>}
+        {error && error !== "Market settled" && <p className="text-xs text-rose-300">{error}</p>}
         {txError && <p className="text-xs text-rose-300">{txError}</p>}
         {stakeError && <p className="text-xs text-rose-300">{stakeError}</p>}
         {fxStale && (

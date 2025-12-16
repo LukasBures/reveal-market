@@ -62,19 +62,39 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     );
   };
 
-  try {
-    const response = await fetch(`${API_BASE_OVERRIDE}/markets?limit=200`, {
-      next: { revalidate: 60 * 30 },
-    });
-    if (response.ok) {
+  const candidates = Array.from(
+    new Set(
+      [
+        API_BASE_OVERRIDE,
+        urls.apiBaseUrl?.replace(/\/$/, ""),
+        DEFAULT_API_BASE.replace(/\/$/, ""),
+        process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, ""),
+        "http://localhost:8000",
+        "http://api.localhost",
+      ].filter(Boolean) as string[],
+    ),
+  );
+
+  for (const base of candidates) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(`${base}/markets?limit=200`, {
+        next: { revalidate: 60 * 30 },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!response.ok) {
+        console.warn("Sitemap markets fetch returned non-200", response.status, base);
+        continue;
+      }
       const payload = await response.json();
       const markets = Array.isArray(payload) ? payload : payload?.items ?? [];
       pushMarketEntries(markets);
-    } else {
-      console.warn("Sitemap markets fetch returned non-200", response.status);
+      break;
+    } catch (error) {
+      console.warn("Failed to build dynamic sitemap entries", base, error);
     }
-  } catch (error) {
-    console.warn("Failed to build dynamic sitemap entries", error);
   }
 
   return entries;

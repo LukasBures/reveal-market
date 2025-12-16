@@ -1068,8 +1068,11 @@ async def trade_commit(
                 "amount": ticket_size_wei,
                 "salt": salt_hex,
                 "merkleIndex": ticket_id,
+                "merklePath": [],
+                "txHash": tx_hash,
             }
         ],
+        tx_hash=str(tx_hash) if tx_hash else None,
     )
     await session.flush()
 
@@ -1105,6 +1108,11 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
         stake_zen = stake_wei / 1e18
         claimable = False
         status = "committed"
+        # Surface market status transitions for UI (committed/locked/settled/cancelled/pending).
+        if getattr(market, "status", None) == models.MarketStatusEnum.LOCKED.value:
+            status = "locked"
+        if getattr(market, "status", None) == models.MarketStatusEnum.CANCELLED.value:
+            status = "cancelled"
         if settlement and settlement.winning_outcome_id is not None:
             status = "settled"
             if settlement.winning_outcome_id == commitment.outcome_id:
@@ -1123,7 +1131,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 outcome_id=commitment.outcome_id,
                 stake_wei=stake_wei,
                 stake_zen=stake_zen,
-                tx_hash=None,
+                tx_hash=getattr(commitment, "tx_hash", None),
                 quote_id=None,
                 status=status,
                 ticket_id=commitment.leaf_index,

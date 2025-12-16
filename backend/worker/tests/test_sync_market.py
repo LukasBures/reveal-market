@@ -117,6 +117,69 @@ async def test_sync_market_reuses_prefetched_instance(monkeypatch):
         await engine.dispose()
 
 
+async def test_sync_market_preserves_onchain_fields():
+    """Ensure worker sync does not wipe stored market address/onchain ids when payload omits them."""
+
+    engine, session_factory = await create_async_in_memory_db()
+    try:
+        initial = MarketPayload(
+            event_id="evt-onchain",
+            title="Onchain Market",
+            slug="onchain-market",
+            category="finance",
+            metadata_uri=None,
+            oracle="polymarket",
+            factory="0xfac7ory",
+            market_address="0xabc0000000000000000000000000000000000000",
+            onchain_market_id=42,
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.55, 0.45],
+        )
+
+        async with session_factory() as session:
+            await sync_market(session, initial)
+            await session.commit()
+
+        updated = MarketPayload(
+            event_id=initial.event_id,
+            title="Updated Title",
+            slug=initial.slug,
+            category=initial.category,
+            metadata_uri=initial.metadata_uri,
+            oracle=initial.oracle,
+            status="commit",
+            outcomes=initial.outcomes,
+            outcome_prices=initial.outcome_prices,
+            source_updated_at=datetime.now(UTC),
+        )
+
+        async with session_factory() as session:
+            await sync_market(session, updated)
+            await session.commit()
+
+        conflicting = updated.model_copy(
+            update={
+                "market_address": "0xdef0000000000000000000000000000000000000",
+                "onchain_market_id": 999,
+                "factory": "0xdeadbeef",
+            }
+        )
+
+        async with session_factory() as session:
+            await sync_market(session, conflicting)
+            await session.commit()
+
+        async with session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == initial.event_id))).scalar_one()
+            assert stored.title == "Updated Title"
+            assert stored.market_address == initial.market_address
+            assert stored.onchain_market_id == initial.onchain_market_id
+            assert stored.factory == initial.factory
+    finally:
+        await engine.dispose()
+
+
 async def test_sync_market_persists_resolution(monkeypatch):
     engine, session_factory = await create_async_in_memory_db()
 

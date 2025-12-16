@@ -176,6 +176,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     assert pos["ticket_id"] == 0
     assert pos["status"] == "committed"
     assert pos["claimable"] is False
+    assert pos["tx_hash"] == "0xabc"
 
 
 def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):

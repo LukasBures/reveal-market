@@ -61,8 +61,10 @@ async def upsert_resolution(session: AsyncSession, data: Mapping[str, Any]) -> s
     return await shared_repository_async.upsert_resolution(session, data)
 
 
-async def record_commitments(session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]]) -> int:
-    return await shared_repository_async.record_commitments(session, market_id, tickets)
+async def record_commitments(
+    session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]], tx_hash: str | None = None
+) -> int:
+    return await shared_repository_async.record_commitments(session, market_id, tickets, tx_hash=tx_hash)
 
 
 async def count_commitments(session: AsyncSession, market_db_id: int) -> int:

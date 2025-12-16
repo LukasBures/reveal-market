@@ -205,3 +205,98 @@ deposit withdraw -> do I sponsor withdraw fee ? https://horizen-testnet.explorer
 - `postResult`/`verifyAndSettle` are also `onlyOracle`, so only the oracle key can advance the market, set the winning outcome, and accept Groth16 proofs. The settlement signer (`RM_SETTLEMENT_SIGNER_PRIVATE_KEY`, address `0x5B5A…A9D`) is not the oracle and cannot call these functions.
 - The prover can emit Groth16 calldata, but without a real commitmentsRoot (lock) and resultPosted=true, `verifyAndSettle` will revert on-chain. Proofs generated against zero roots/liability are invalid by contract checks.
 - To settle immediately for testing: either (a) wait for commitDeadline, then use the oracle key to `lock()`, regenerate proof with the real root/totals, `postResult(Yes)`, and `verifyAndSettle`; or (b) deploy a short-window test market where you control the oracle and repeat the flow. The current oracle ownership prevents off-schedule settlement—this is working-as-designed security.
+
+### Privacy/anonymity notes
+- Commit flow is hash-based: the on-chain commitment is a hash of (ticketId, outcomeId, amount, salt, user). The market contract only ever sees the hash until settlement; salts/amounts stay off-chain.
+- Settlement uses Groth16: the proof attests to totals/liability/merkle root without revealing individual tickets. Public signals include commitmentsRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, pools, and circuitHash—no per-user data.
+- Claims require the user address + merkle proof for their leaf. Only the claiming user address is revealed on-chain at claim time; salts stay private, and non-claimed tickets remain sealed.
+- Backend bundles (/claim/bundles) must stay wallet-scoped and authenticated to avoid leaking salts/paths. Frontend should validate the leaf/root locally if stronger assurances are needed.
+
+
+• They can’t steal funds, even if they know every address:
+
+  - The Merkle leaf binds the user address: leaf = hash(ticketId, outcomeId, amount, salt, user). The contract recomputes the leaf and sends the payout to the user passed in. If an attacker calls claim with their own address, the hash won’t match; if they call with your address, the funds still go to you.
+  - A malicious caller could front‑run and pay gas to claim on your behalf (a “helpful” claim), but they can’t redirect the payout.
+
+  What they can do if /claim/bundles is unauthenticated:
+
+  - Enumerate addresses, fetch salts/paths, and learn position details (privacy leak).
+  - Front‑run claims and burn your gas expectations (but still pay you).
+  - Attempt spam/DoS with bogus calls.
+
+  Mitigations:
+
+  - Keep /claim/bundles wallet‑scoped: require a signature from the connected wallet (or authenticated session) and rate‑limit. Don’t serve bundles to arbitrary addresses.
+  - Optionally validate leaf/root client‑side before calling claim to catch tampering.
+  - If you want only the user to claim, add a msg.sender == user check (would require users to pay gas themselves).
+
+
+› is this implemented? Keep /claim/bundles wallet‑scoped: require a signature from the connected wallet
+
+
+• Explored
+  └ Search claim/bundles in api
+    Read trade.py
+
+─ Worked for 8s ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Yes. /claim/bundles is wallet‑scoped and requires a signature:
+
+  - The route expects wallet query param and X-Wallet-Signature header.
+  - _verify_wallet_signature checks the signature against the wallet address; missing/invalid signatures return 401.
+  - Bundles are fetched for that wallet only.
+
+  So the endpoint already enforces a per‑wallet signature to avoid arbitrary bundle leakage.
+
+• Your factory on Horizen testnet has 18 markets deployed. From the chain (factory 0xa7735E3790d58C737CB708b6a2E7CcFDa0afE7B8, nextMarketId=19):
+
+  1 → 0x2D3A511b79623aE25e0F97fa31a9373a5933143D
+  2 → 0xCeaC9436b4BC24847D02712817518c296Bf8b7E0
+  3 → 0xa700fcBcfEb5f0e5d97Be1E57c84e3d8bb72Cd24
+  4 → 0x238C49eD34f4cb53Dae368fe91BE34594C8cC100
+  5 → 0x8905c20a610DE2BCDa9beCED0E5000e3A65D9CdA
+  6 → 0x9332E16FD2B731E20eA40fB15c3b354cA3bB7316
+  7 → 0x25bE1AEC69FC6399C02a5BabcDD09C8e398f3AD1
+  8 → 0x0ed8B0cdB77e3ac3F374685c0725D07778D1e1d2
+  9 → 0x7e82d9c77a0263373Dc2b770bf26B9AB2dE1596f
+  10 → 0xcBEDbAeEA922fCd5c85AB286DBe8663db7e8D7Eb
+  11 → 0xF4bF354b6aD13941a16a5bA1A4B3883cc6F390C3
+  12 → 0xcaFD7080b64FE62Ef933D166223077aD55E2345d
+  13 → 0xCd70B9be6E54968976A93D967E0340eC6E341eF4
+  14 → 0x26BB3f2Dc826F2F7c903208711372606C71015CA
+  15 → 0x6C685DD0E3215C0466798801697838995ba0aa17
+  16 → 0xf2f53881Ec07B6B5b5E13cE61c60c0cd883F5B35
+  17 → 0x5F456487de28b1c30e2b1420f3B26e0fF8131643
+  18 → 0xBd49951FABB68d2109bD4862e0A3A3b7FE2B3D0C
+
+
+
+  Endpoints not used by the UI (safe to ignore)
+
+  - /pricing/submit isn’t called anywhere in the frontend.
+  - /relayer/commitments and /relayer/settlements are relayer-only hooks; the UI should never hit them.
+  - /commitments/sync and /settlements/ingest are for relayer/prover backfills, not normal buys.
+
+
+
+• Here’s the definitive path the UI must follow to get addresses persisted, and what’s not needed:
+
+  Required commit path
+
+  - /pricing/preview → /pricing/quote (UI already calls these).
+  - /trade/commit (must be called on every buy; this is the only place that deploys and stores market_address/onchain_market_id via _ensure_market_or_create → _maybe_create_market_onchain).
+  - /trade/status (optional poll after commit; doesn’t affect persistence).
+
+Why addresses are missing
+
+  - A successful /trade/commit hasn’t run (or is failing). That’s the only write to markets.market_address/onchain_market_id.
+  - If /trade/commit returns 5xx, check trade.market_create_failed logs; env must include RM_FACTORY_ADDRESS, RM_ORACLE_ADDRESS, RM_VERIFIER_ADDRESS, RM_RPC_URL, RM_RELAYER_BASE_URL, and RM_PRICING_SIGNER_PRIVATE_KEY.
+  - If the request omits market_id or uses a different ID than the Polymarket event_id, _ensure_market_or_create can’t key the row.
+
+  What to verify now
+
+  1. In the browser network tab, confirm POST /trade/commit fires on the Buy button and returns 200.
+  2. Tail API logs for trade.market_created (success) or trade.market_create_failed (failure) when you click Buy.
+  3. Re-check the DB after a successful commit: select event_id, market_address, onchain_market_id from markets where market_address is not null; should show the new address.
+
+  No duplicate/unused paths beyond the relayer/prover hooks noted above; the core flow is strictly preview → quote → commit.

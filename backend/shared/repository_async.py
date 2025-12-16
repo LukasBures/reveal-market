@@ -70,6 +70,11 @@ async def upsert_market(
         market = models.Market(**payload)
         session.add(market)
     else:
+        # Preserve on-chain identifiers already persisted; upstream payloads must never override these.
+        for protected in ("market_address", "onchain_market_id", "factory"):
+            existing_value = getattr(market, protected, None)
+            if existing_value not in (None, ""):
+                payload.pop(protected, None)
         for field, value in payload.items():
             if hasattr(market, field):
                 setattr(market, field, value)
@@ -259,7 +264,9 @@ async def upsert_settlement_snapshot(
     return settlement
 
 
-async def record_commitments(session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]]) -> int:
+async def record_commitments(
+    session: AsyncSession, market_id: int, tickets: Sequence[Mapping[str, Any]], tx_hash: str | None = None
+) -> int:
     """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
 
     existing_hashes = {
@@ -282,6 +289,7 @@ async def record_commitments(session: AsyncSession, market_id: int, tickets: Seq
             ticket_hash=ticket_hash,
             leaf=str(ticket.get("leaf") or ""),
             leaf_index=int(ticket.get("merkleIndex") or ticket.get("leaf_index") or 0),
+            tx_hash=str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
         )
         session.add(commitment)
         await session.flush()

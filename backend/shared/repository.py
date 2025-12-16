@@ -69,6 +69,11 @@ def upsert_market(
         market = models.Market(**payload)
         session.add(market)
     else:
+        # Preserve on-chain identifiers already stored; Polymarket feeds must never override these.
+        for protected in ("market_address", "onchain_market_id", "factory"):
+            existing_value = getattr(market, protected, None)
+            if existing_value not in (None, ""):
+                payload.pop(protected, None)
         for field, value in payload.items():
             if hasattr(market, field):
                 setattr(market, field, value)
@@ -235,7 +240,7 @@ def upsert_settlement_snapshot(session: Session, market_id: int, data: Mapping[s
     return settlement
 
 
-def record_commitments(session: Session, market_id: int, tickets: list[Mapping[str, Any]]) -> int:
+def record_commitments(session: Session, market_id: int, tickets: list[Mapping[str, Any]], tx_hash: str | None = None) -> int:
     """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
 
     count = 0
@@ -258,6 +263,7 @@ def record_commitments(session: Session, market_id: int, tickets: list[Mapping[s
             ticket_hash=ticket_hash,
             leaf=str(ticket.get("leaf") or ""),
             leaf_index=int(ticket.get("merkleIndex") or ticket.get("leaf_index") or 0),
+            tx_hash=str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
         )
         session.add(commitment)
         session.flush()

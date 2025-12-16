@@ -436,10 +436,16 @@ export function DashboardClient() {
       positions.map((p, idx) => {
         const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
         const bundle = bundleLookup.get(bundleKey);
+        const market = marketDetails.get(p.market_id);
+        const outcomes = market?.outcomes ?? [];
         const outcomeLabel =
           p.outcome_label ??
-          marketDetails.get(p.market_id)?.outcomes?.[p.outcome_id] ??
+          outcomes[p.outcome_id] ??
           `Outcome ${p.outcome_id}`;
+        const marketTitle =
+          p.market_title ??
+          market?.title ??
+          (outcomes.length > 1 ? outcomes.join("/") : p.market_id);
         const potentialZen =
           typeof p.potential_payout_zen === "number" && Number.isFinite(p.potential_payout_zen)
             ? p.potential_payout_zen
@@ -449,12 +455,11 @@ export function DashboardClient() {
           (bundle && normalizeWei(bundle.amountWei)) ||
           potentialWeiFromPosition ||
           (potentialZen !== null ? normalizeWei(Math.round(potentialZen * 1e18)) : null);
-        const market = marketDetails.get(p.market_id);
         const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
         const toWinZen =
           toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
         const quoteId = p.quote_id ?? (p as any).quoteId ?? (bundle as any)?.quoteId ?? null;
-        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx };
+        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle };
       }),
     [bundleLookup, marketDetails, normalizeWei, positions],
   );
@@ -462,13 +467,16 @@ export function DashboardClient() {
     const query = searchQuery.trim().toLowerCase();
     return derivedPositions
       .filter(({ position }) => {
-        // Hide positions that never produced an on-chain transaction to reduce noise.
-        if (!position.tx_hash) return false;
         if (statusFilter === "open" && position.status === "settled") return false;
         if (statusFilter === "settled" && position.status !== "settled") return false;
         if (statusFilter === "claimable" && !position.claimable) return false;
         if (query.length === 0) return true;
-        return (position.market_title ?? position.market_id).toLowerCase().includes(query);
+        const market = marketDetails.get(position.market_id);
+        const candidateTitle =
+          position.market_title ??
+          market?.title ??
+          (market?.outcomes && market.outcomes.length > 1 ? market.outcomes.join("/") : position.market_id);
+        return candidateTitle.toLowerCase().includes(query);
       })
       .sort((a, b) => {
         if (sortBy === "stake") {
@@ -483,7 +491,7 @@ export function DashboardClient() {
         const bCreated = b.position.created_at ? Date.parse(b.position.created_at) : 0;
         return bCreated - aCreated;
       });
-  }, [derivedPositions, searchQuery, sortBy, statusFilter]);
+  }, [derivedPositions, searchQuery, sortBy, statusFilter, marketDetails]);
   const totalStakeZen = filteredPositions.reduce(
     (acc, { position }) => acc + (Number.isFinite(position.stake_zen) ? position.stake_zen : 0),
     0,
@@ -692,7 +700,7 @@ export function DashboardClient() {
               <p className="text-xs text-slate-400">{roi !== null ? `${(roi * 100).toFixed(1)}%` : "—"}</p>
             </div>
           </div>
-          {filteredPositions.map(({ position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx }) => (
+          {filteredPositions.map(({ position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle }) => (
             <div
               key={`${p.market_id}-${p.ticket_id ?? idx}`}
               className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg shadow-black/30"
@@ -702,13 +710,13 @@ export function DashboardClient() {
                   p.tx_hash && p.tx_hash.length > 16
                     ? `${p.tx_hash.slice(0, 10)}…${p.tx_hash.slice(-6)}`
                     : p.tx_hash || null;
-                const txHref = explorerBase && p.tx_hash ? `${explorerBase}/${p.tx_hash}` : null;
+                const txHref = explorerBase && p.tx_hash ? `${explorerBase}/tx/${p.tx_hash}` : null;
                 return (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">
                       <div>
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Market</p>
-                        <p className="font-semibold">{p.market_title ?? p.market_id}</p>
+                        <p className="font-semibold">{marketTitle}</p>
                         <p className="text-xs text-slate-400">Outcome: {outcomeLabel}</p>
                       </div>
                       <div className="text-right">
