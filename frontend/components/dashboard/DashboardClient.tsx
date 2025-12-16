@@ -462,6 +462,8 @@ export function DashboardClient() {
     const query = searchQuery.trim().toLowerCase();
     return derivedPositions
       .filter(({ position }) => {
+        // Hide positions that never produced an on-chain transaction to reduce noise.
+        if (!position.tx_hash) return false;
         if (statusFilter === "open" && position.status === "settled") return false;
         if (statusFilter === "settled" && position.status !== "settled") return false;
         if (statusFilter === "claimable" && !position.claimable) return false;
@@ -741,7 +743,6 @@ export function DashboardClient() {
                       <span>
                         Merkle root: {p.merkle_root ? `${p.merkle_root.slice(0, 8)}…${p.merkle_root.slice(-6)}` : "—"}
                       </span>
-                      <span>Quote: {quoteId ?? "—"}</span>
                       <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
                       <span>
                         Tx:{" "}
@@ -788,6 +789,16 @@ export function DashboardClient() {
                       >
                         View proofs
                       </Link>
+                      {txHref ? (
+                        <a
+                          className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                          href={txHref}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View tx
+                        </a>
+                      ) : null}
                     </div>
                   </>
                 );

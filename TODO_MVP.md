@@ -197,3 +197,11 @@ ___
 
 
 deposit withdraw -> do I sponsor withdraw fee ? https://horizen-testnet.explorer.caldera.xyz/address/0x33c65aAC00aCE0b48876D9b87990E0c44F780708?tab=coin_balance_history
+
+## Observation: testnet settlement guardrails
+
+- The Solana price market (`0xCd70…1eF4`, marketId 13) remains in `Phase.Commit` with `commitmentsRoot=0` and `resultPosted=false`; commitDeadline is `1765933201` (future). The authorization signer is `0x38C574…5Fd`, and the oracle is `0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369` (key in `scripts/generated/testnet_oracle_random_1764808324.txt`).
+- `lock()` is `onlyOracle` and reverts with `CommitWindowClosed` until the deadline passes; you cannot prematurely lock with the settlement signer or relayer. Until lock runs, commitmentsRoot stays zero and proofs will fail TotalsMismatch checks.
+- `postResult`/`verifyAndSettle` are also `onlyOracle`, so only the oracle key can advance the market, set the winning outcome, and accept Groth16 proofs. The settlement signer (`RM_SETTLEMENT_SIGNER_PRIVATE_KEY`, address `0x5B5A…A9D`) is not the oracle and cannot call these functions.
+- The prover can emit Groth16 calldata, but without a real commitmentsRoot (lock) and resultPosted=true, `verifyAndSettle` will revert on-chain. Proofs generated against zero roots/liability are invalid by contract checks.
+- To settle immediately for testing: either (a) wait for commitDeadline, then use the oracle key to `lock()`, regenerate proof with the real root/totals, `postResult(Yes)`, and `verifyAndSettle`; or (b) deploy a short-window test market where you control the oracle and repeat the flow. The current oracle ownership prevents off-schedule settlement—this is working-as-designed security.
