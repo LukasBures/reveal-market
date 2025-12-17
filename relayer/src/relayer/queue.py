@@ -418,6 +418,27 @@ class TxQueue:
     async def list_deadletter(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._list_deadletter_sync)
 
+    def _get_job_sync(self, job_id: int) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            row = (
+                conn.execute("SELECT * FROM jobs WHERE id = %s", (job_id,)).fetchone()
+                if self.use_postgres
+                else conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            )
+            if row is None:
+                raise RuntimeError("job_not_found")
+            return {
+                "jobId": int(row["id"]),
+                "status": row["status"],
+                "txHash": row["tx_hash"],
+                "nonce": row["nonce"],
+                "error": row["last_error"],
+                "attempts": row["attempts"],
+            }
+
+    async def get_job(self, job_id: int) -> dict[str, Any]:
+        return await asyncio.to_thread(self._get_job_sync, job_id)
+
     async def replay_job(self, job_id: int) -> dict[str, Any]:
         def _replay():
             with self._lock, self._connect() as conn:

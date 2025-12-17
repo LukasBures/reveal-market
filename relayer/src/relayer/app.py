@@ -71,6 +71,21 @@ def create_app(
     async def healthz() -> dict[str, Any]:
         return await relayer_service.health()
 
+    @app.post("/status")
+    async def status_lookup(body: dict[str, Any], _: None = Depends(require_auth)) -> Any:
+        job_id = body.get("jobId") or body.get("job_id")
+        if job_id is None:
+            raise HTTPException(status_code=400, detail="job_id_required")
+        if tx_queue is None:
+            raise HTTPException(status_code=503, detail="queue_disabled")
+        try:
+            job = await tx_queue.get_job(int(job_id))
+        except RuntimeError as err:
+            if str(err) == "job_not_found":
+                raise HTTPException(status_code=404, detail="job_not_found") from err
+            raise
+        return job
+
     @app.post("/commit")
     async def commit(
         req: CommitRequest,

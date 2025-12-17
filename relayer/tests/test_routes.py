@@ -252,6 +252,25 @@ def test_claim_requires_auth_when_enabled():
     app = create_app(service, 1, "http://localhost", bearer_token=bearer)
     client = TestClient(app)
 
+
+def test_status_returns_tx_hash(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    job_id = asyncio.run(queue.enqueue("commit", {"foo": "bar"}))
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'succeeded', tx_hash = '0xabc', nonce = 1 WHERE id = ?",
+            (job_id,),
+        )
+
+    resp = client.post("/status", json={"jobId": job_id})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["txHash"] == "0xabc"
+
     payload = ClaimRequest(
         market="0x0000000000000000000000000000000000000002",
         user="0x0000000000000000000000000000000000000001",
