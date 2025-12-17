@@ -17,7 +17,7 @@ import clsx from "clsx";
 const POSITION_LIFECYCLE_STAGES = [
   { key: "committed", label: "Committed", description: "Stake recorded" },
   { key: "locked", label: "Locked", description: "Market closed" },
-  { key: "pending_resolution", label: "Resolving", description: "Waiting on oracle & proofs" },
+  { key: "pending_resolution", label: "Resolved", description: "Oracle & Proof" },
   { key: "settled", label: "Settled", description: "Payout path ready" },
 ] as const;
 
@@ -96,14 +96,14 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
         {!isCancelled ? (
           <div className="pointer-events-none absolute inset-0 bg-[length:220%_140%] bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.18)_35%,rgba(123,240,94,0)_70%)] opacity-70 mix-blend-screen animate-[statusFlow_4.2s_linear_infinite]" />
         ) : null}
-        <div className="relative flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="relative flex items-center gap-2 overflow-x-auto pb-1 md:justify-between md:gap-3">
           {stages.map((stage, idx) => {
             const stageState = idx < currentIndex ? "complete" : idx === currentIndex ? "current" : "upcoming";
             return (
               <Fragment key={stage.key}>
                 <div
                   className={clsx(
-                    "flex min-w-[140px] flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                    "flex min-w-[140px] flex-1 flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
                     stageState === "complete"
                       ? bubbleCompleteClass
                       : stageState === "current"
@@ -115,10 +115,10 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
                   <span className="text-[11px] text-slate-300">{stage.description}</span>
                 </div>
                 {idx < stages.length - 1 ? (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 md:flex-1 md:justify-center">
                     <div
                       className={clsx(
-                        "h-[2px] w-12 rounded-full bg-gradient-to-r transition-colors md:w-16",
+                        "h-[2px] w-12 rounded-full bg-gradient-to-r transition-colors md:w-full",
                         currentIndex > idx ? connectorActiveClass : "from-white/15 via-white/10 to-white/15",
                       )}
                     />

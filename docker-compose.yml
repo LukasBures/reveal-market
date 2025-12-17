@@ -136,6 +136,7 @@ services:
       - ${ENV_FILE:-.env.local}
     environment:
       <<: *backend-env
+      RM_DATABASE_ASYNC_URL: ${RM_DATABASE_ASYNC_URL}
       RM_POLYMARKET_CLOSED_FILTER: "false"
       RM_POLYMARKET_MAX_PAGES: ${RM_POLYMARKET_MAX_PAGES}
       RM_POLYMARKET_PAGE_SIZE: ${RM_POLYMARKET_PAGE_SIZE}

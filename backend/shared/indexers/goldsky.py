@@ -40,6 +40,16 @@ query ConditionResolution($conditionId: Bytes!) {
 }
 """
 
+CONDITION_QUERY = """
+query Condition($conditionId: Bytes!) {
+  condition(id: $conditionId) {
+    id
+    payoutNumerators
+    payoutDenominator
+  }
+}
+"""
+
 
 def _normalize_hex(value: str | None) -> str | None:
     if not isinstance(value, str):
@@ -154,26 +164,49 @@ class AsyncGoldskyClient:
             "query": CONDITION_RESOLUTION_QUERY,
             "variables": {"conditionId": condition_id.lower()},
         }
+        resolutions: list[dict[str, Any]] = []
+        record: dict[str, Any] = {}
+        block_number = None
+        block_timestamp = None
         try:
             data = await self._run_with_retry(lambda: self._post(payload))
-        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
-            log_event(
-                self._logger,
-                logging.ERROR,
-                event="goldsky.request.failed",
-                message="failed to query goldsky subgraph",
-                error=str(exc),
-            )
-            raise
-        resolutions = data.get("conditionResolutions") or []
+            resolutions = data.get("conditionResolutions") or []
+        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
+            resolutions = []
+
         if not resolutions:
-            return None
-        record = resolutions[0]
-        payouts = _as_int_list(record.get("payoutNumerators"))
-        if not payouts and isinstance(outcome_count_hint, int) and outcome_count_hint > 0:
-            payouts = [0] * outcome_count_hint
-        resolved = bool(resolutions)
-        block_timestamp = _as_datetime(record.get("blockTimestamp"))
+            # Fall back to querying the Condition entity directly (pnl-subgraph schema).
+            payload["query"] = CONDITION_QUERY
+            try:
+                data = await self._run_with_retry(lambda: self._post(payload))
+            except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
+                log_event(
+                    self._logger,
+                    logging.ERROR,
+                    event="goldsky.request.failed",
+                    message="failed to query goldsky condition",
+                    error=str(exc),
+                )
+                raise
+            condition = data.get("condition") or {}
+            if not condition:
+                return None
+            payouts = _as_int_list(condition.get("payoutNumerators"))
+            den = condition.get("payoutDenominator")
+            if not payouts and isinstance(outcome_count_hint, int) and outcome_count_hint > 0:
+                payouts = [0] * outcome_count_hint
+            resolved = bool(payouts) or bool(den)
+            record = condition
+            block_number = None
+            block_timestamp = None
+        else:
+            record = resolutions[0]
+            payouts = _as_int_list(record.get("payoutNumerators"))
+            if not payouts and isinstance(outcome_count_hint, int) and outcome_count_hint > 0:
+                payouts = [0] * outcome_count_hint
+            resolved = bool(resolutions)
+            block_number = int(record["blockNumber"]) if record.get("blockNumber") is not None else None
+            block_timestamp = _as_datetime(record.get("blockTimestamp"))
         checked_at = datetime.now(tz=UTC)
         summary = {
             "source": "goldsky_subgraph",
@@ -186,10 +219,12 @@ class AsyncGoldskyClient:
             "oracle": record.get("oracle"),
             "questionId": _normalize_hex(record.get("questionId")),
             "transactionHash": _normalize_hex(record.get("transactionHash")),
-            "blockNumber": int(record["blockNumber"]) if record.get("blockNumber") is not None else None,
+            "blockNumber": block_number,
             "blockTimestamp": block_timestamp,
         }
-        summary["winners"] = _derive_winners(summary["payouts"], summary["outcomes"])
+        payout_seq: list[int] = list(payouts) if isinstance(payouts, list) else []
+        outcomes_seq: list[str] = list(outcomes) if isinstance(outcomes, Sequence) else []
+        summary["winners"] = _derive_winners(payout_seq, outcomes_seq)
         return summary
 
     async def aclose(self) -> None:

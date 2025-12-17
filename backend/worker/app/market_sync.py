@@ -13,9 +13,10 @@ from redis.asyncio import Redis
 from shared import models as shared_models
 from shared import repository_async as shared_repository
 from shared.logging import log_event
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.state import InstanceState
 
 from . import runtime
 from .metrics import record_retention_metrics
@@ -319,9 +320,11 @@ async def collect_market_changes_with_summary(
                 message="failed to synchronise single market",
                 event_id=getattr(market, "event_id", None),
                 error=str(exc),
+                exc_info=exc,
             )
             try:
                 await session.rollback()
+                session.expunge_all()
             except Exception as rollback_exc:  # pragma: no cover - defensive
                 log_event(
                     logger,
@@ -333,6 +336,8 @@ async def collect_market_changes_with_summary(
                 )
                 raise
             summary.failed_markets += 1
+            # Drop prefetched rows so later iterations do not reuse expired instances after a rollback.
+            existing_records = {}
             continue
         if db_market and isinstance(db_market.event_id, str):
             existing_records[db_market.event_id] = db_market
@@ -647,6 +652,13 @@ async def _sync_market(
     """Async implementation that upserts market state + resolutions."""
     now = datetime.now(UTC)
     existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
+    if existing is not None:
+        state: InstanceState[shared_models.Market] | None = inspect(existing)
+        if state.detached:
+            existing = await shared_repository.get_market_by_event_id(session, market.event_id)
+            state = inspect(existing) if existing is not None else None
+        if existing is not None and state is not None and state.expired_attributes:
+            await session.refresh(existing)
     previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
     payload = market.model_dump()
     if payload.get("closed") is None:

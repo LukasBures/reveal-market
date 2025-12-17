@@ -16,6 +16,7 @@ from shared import repository_async as shared_repository
 from shared.logging import log_event
 from shared.models import MarketStatusEnum, ResolutionStatusEnum
 from shared.onchain.conditional_tokens import _derive_winners
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import runtime
@@ -253,6 +254,7 @@ async def apply_resolution(
     normalized_condition_id = condition_id.lower()
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
     existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
+    existing_resolved = bool(existing and existing.resolved)
     now = datetime.now(UTC)
     incoming_resolution_status = getattr(market, "resolution_status", None) or ResolutionStatusEnum.FINAL.value
     incoming_resolution_reason = getattr(market, "resolution_reason", None)
@@ -305,7 +307,7 @@ async def apply_resolution(
     ):
         log_event(
             logger,
-            logging.WARNING,
+            logging.DEBUG,
             event="worker.resolution.partial_payload",
             message="resolution payload missing block metadata",
             condition_id=normalized_condition_id,
@@ -332,13 +334,41 @@ async def apply_resolution(
         block_number=record_payload["block_number"],
     )
 
+    market_state = inspect(db_market) if db_market is not None else None
+    newly_resolved = record_payload["resolved"] and not existing_resolved
     if record_payload["resolved"]:
         db_market.resolution_status = ResolutionStatusEnum.FINAL.value
         db_market.status = MarketStatusEnum.SETTLED.value
         if getattr(db_market, "closed", None) is not True:
             db_market.closed = True
         db_market.resolved_at = checked_at_dt
-        session.add(db_market)
+        if market_state and market_state.detached:
+            session.add(db_market)
+        if newly_resolved:
+            # Best-effort: hydrate settlement snapshot from chain so proofs/claims can proceed.
+            try:
+                from .settlement import _upsert_settlement_from_chain  # local import to avoid cycles
+
+                if getattr(db_market, "market_address", None):
+                    await _upsert_settlement_from_chain(session, db_market)
+            except Exception as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.resolution.settlement_backfill_failed",
+                    message="failed to backfill settlement after resolution",
+                    condition_id=normalized_condition_id,
+                    error=str(exc),
+                )
+        else:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.skip_settlement_fetch",
+                message="skipping settlement snapshot fetch (not newly resolved)",
+                condition_id=normalized_condition_id,
+                existing_resolved=existing_resolved,
+            )
         log_event(
             logger,
             logging.DEBUG,
@@ -350,7 +380,8 @@ async def apply_resolution(
         )
     else:
         db_market.resolved_at = None
-        session.add(db_market)
+        if market_state and market_state.detached:
+            session.add(db_market)
     return ResolutionOutcome(
         changed=True,
         condition_id=normalized_condition_id,

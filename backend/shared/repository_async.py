@@ -394,6 +394,13 @@ async def list_markets_missing_address(session: AsyncSession) -> list[models.Mar
     return list((await session.scalars(stmt)).all())
 
 
+async def get_settlement_by_market_id(session: AsyncSession, market_id: int) -> models.Settlement | None:
+    """Return the settlement snapshot for a market when it exists."""
+
+    stmt = select(models.Settlement).where(models.Settlement.market_id == market_id)
+    return (await session.scalars(stmt)).first()
+
+
 async def get_commitment_with_path_for_wallet(
     session: AsyncSession, market_db_id: int, wallet_address: str, outcome_id: int, ticket_id: int | None = None
 ) -> tuple[models.Commitment, list[models.CommitmentMerklePath]] | None:

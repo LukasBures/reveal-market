@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import os
 from functools import lru_cache
 from typing import Any, cast
@@ -10,6 +11,7 @@ from typing import Any, cast
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 from shared.env_presets import get_preset
+from shared.logging import log_event
 from sqlalchemy.engine.url import make_url
 
 PRESET = get_preset()
@@ -118,7 +120,7 @@ class Settings(BaseSettings):
     polymarket_rate_limit_window_seconds: float | None = Field(default=8.0, gt=0)
     polymarket_empty_page_tolerance: int = Field(default=2, ge=0)
     polymarket_stream_persist: bool = Field(default=False)
-    poll_interval_seconds: int = Field(default=60, ge=1)
+    poll_interval_seconds: int = Field(default=300, ge=1)
     api_base_url: str | None = Field(
         default_factory=lambda: str(PRESET.get("api_internal_base_url", "http://localhost:8000"))
     )
@@ -261,6 +263,21 @@ class Settings(BaseSettings):
     def resolved_async_database_url(self) -> str:
         """Return an async-compatible database URL, deriving from the sync URL when needed."""
 
+        override_async = os.getenv("RM_ASYNC_DATABASE_URL")
+        if override_async:
+            try:
+                async_url = make_url(override_async)
+                return async_url.render_as_string(hide_password=False)
+            except Exception:
+                # If the override is invalid, fall back to configured values.
+                local_logger = logging.getLogger("reveal_market.worker.config")
+                log_event(
+                    local_logger,
+                    logging.WARNING,
+                    event="worker.config.async_db_url_invalid",
+                    message="invalid RM_ASYNC_DATABASE_URL; falling back to derived async URL",
+                    url=override_async,
+                )
         if self.database_async_url:
             async_url = make_url(self.database_async_url)
             return async_url.render_as_string(hide_password=False)

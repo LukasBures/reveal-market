@@ -82,6 +82,9 @@ def log_event(
     level: int,
     event: str,
     message: str,
+    *,
+    exc_info: BaseException | bool | tuple | None = None,
+    stack_info: bool = False,
     **fields: object,
 ) -> None:
     """Emit a formatted log message that embeds event metadata."""
@@ -93,7 +96,7 @@ def log_event(
 
     extra_fields = {key: value for key, value in structured_fields.items() if key not in _LOG_RECORD_RESERVED}
     extra_fields["event"] = event
-    logger.log(level, f"[{event}] {message}", extra=extra_fields)
+    logger.log(level, f"[{event}] {message}", extra=extra_fields, exc_info=exc_info, stack_info=stack_info)
 
 
 class StructuredFormatter(logging.Formatter):
@@ -124,6 +127,10 @@ class StructuredFormatter(logging.Formatter):
             payload[key] = value
         if record.getMessage():
             payload.setdefault("message", record.getMessage())
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack_info"] = self.formatStack(record.stack_info)
         payload.setdefault("service", self.service_name)
         serialized = self._compact_payload(payload)
         line = f"{timestamp} | {level} | {logger_name} | {location} | {event} | {request_id} | {serialized}"

@@ -28,6 +28,19 @@ from .database import session_scope
 logger = runtime.logger
 
 
+def _normalize_bytes32(value: Any) -> str | None:
+    """Return a 0x-prefixed hex string for bytes/HexBytes values."""
+
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + value.hex()
+    hex_value = getattr(value, "hex", None)
+    if callable(hex_value):
+        return str(hex_value())
+    return str(value)
+
+
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
     # Prefer snake_case (web3/eth-account v7) with camelCase fallback for older versions.
     raw_tx = getattr(signed_tx, "raw_transaction", None)
@@ -67,7 +80,6 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     except Exception:
         result_posted = winning_outcome_id is not None
     return {
-        "commitments_root": commitments_root,
         "commitments_count": int(next_ticket_id),
         "phase": int(phase_value),
         "winning_outcome_id": int(winning_outcome_id) if winning_outcome_id is not None else None,
@@ -76,7 +88,8 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         "pool_total_yes": int(pool_total_yes),
         "pool_total_no": int(pool_total_no),
         "rake_bps": int(rake_bps),
-        "circuit_hash": circuit_hash,
+        "commitments_root": _normalize_bytes32(commitments_root),
+        "circuit_hash": _normalize_bytes32(circuit_hash),
         "result_posted": result_posted,
     }
 
@@ -88,6 +101,9 @@ async def _upsert_settlement_from_chain(
 
     if not market.market_address or not runtime.settings.rpc_url:
         return None
+    existing = await shared_repository.get_settlement_by_market_id(session, market.id)
+    if existing is not None:
+        return existing
     web3 = get_async_web3(str(runtime.settings.rpc_url))
     try:
         snapshot = await _fetch_onchain_snapshot(web3, market.market_address)
