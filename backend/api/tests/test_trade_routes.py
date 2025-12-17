@@ -215,8 +215,9 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
 
     settings = runtime.settings
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+    tx_hash = "0x" + "c" * 64
     monkeypatch.setattr(
-        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": "0xclaim"})
+        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": tx_hash})
     )
 
     resp = client.post(
@@ -228,7 +229,7 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["tx_hash"] == "0xclaim"
+    assert body["tx_hash"] == tx_hash
     assert body["ticket_id"] == 0
     assert body["status"] == "claimed"
 
