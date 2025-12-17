@@ -252,6 +252,23 @@ def test_claim_requires_auth_when_enabled():
     app = create_app(service, 1, "http://localhost", bearer_token=bearer)
     client = TestClient(app)
 
+    payload = ClaimRequest(
+        market="0x0000000000000000000000000000000000000002",
+        user="0x0000000000000000000000000000000000000001",
+        ticket_id=0,
+        outcome_id=1,
+        amount=10,
+        salt="0x" + "1" * 64,
+        merkle_proof=[],
+    ).model_dump()
+
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 401
+
+    resp = client.post("/claim", json=payload, headers={"Authorization": f"Bearer {bearer}"})
+    assert resp.status_code == 200
+    assert resp.json()["txHash"] == "0xclaim"
+
 
 def test_status_returns_tx_hash(tmp_path):
     service = FakeService()
@@ -270,23 +287,6 @@ def test_status_returns_tx_hash(tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     assert body["txHash"] == "0xabc"
-
-    payload = ClaimRequest(
-        market="0x0000000000000000000000000000000000000002",
-        user="0x0000000000000000000000000000000000000001",
-        ticket_id=0,
-        outcome_id=1,
-        amount=10,
-        salt="0x" + "1" * 64,
-        merkle_proof=[],
-    ).model_dump()
-
-    resp = client.post("/claim", json=payload)
-    assert resp.status_code == 401
-
-    resp = client.post("/claim", json=payload, headers={"Authorization": f"Bearer {bearer}"})
-    assert resp.status_code == 200
-    assert resp.json()["txHash"] == "0xclaim"
 
 
 def test_commit_invalid_address(client):

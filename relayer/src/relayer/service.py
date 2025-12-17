@@ -133,7 +133,10 @@ class RelayerService:
                 )
                 receipt = await self._poll_receipt(tx_hash, action, nonce_used, start, attempt=attempt)
                 status = int(receipt["status"])
-                return {"txHash": tx_hash.hex(), "status": status, "nonce": nonce_used}
+                tx_hex = tx_hash.hex()
+                if not tx_hex.startswith("0x"):
+                    tx_hex = f"0x{tx_hex}"
+                return {"txHash": tx_hex, "status": status, "nonce": nonce_used}
             except (TxSendError, TimeExhausted) as err:
                 last_err = err
                 logger.warning(
@@ -378,6 +381,7 @@ class RelayerService:
             "salt": payload.get("salt"),
             "leaf_index": payload.get("ticket_id"),
             "merkle_path": payload.get("merkle_path") or [],
+            "tx_hash": tx_hash,
         }
         body = {"event_id": event_id, "tickets": [ticket]}
         headers = {}

@@ -398,6 +398,7 @@ class CommitmentTicket(BaseModel):
     salt: str | None = None
     leaf_index: int | None = Field(default=None, alias="merkleIndex")
     merkle_path: list[str] | None = Field(default=None, alias="merklePath")
+    tx_hash: str | None = Field(default=None, alias="txHash")
 
 
 class CommitmentsSyncRequest(BaseModel):

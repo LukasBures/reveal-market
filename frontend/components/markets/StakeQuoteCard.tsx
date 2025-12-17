@@ -110,7 +110,10 @@ export function StakeQuoteCard({
   const [relayerJobId, setRelayerJobId] = useState<string | null>(null);
   const [txConfirmed, setTxConfirmed] = useState(false);
   const [txStatus, setTxStatus] = useState<string | null>(null);
-  const explorerBase = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
+  const explorerBaseRaw =
+    process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ||
+    (defaultChain.blockExplorers?.default?.url ? defaultChain.blockExplorers.default.url : "");
+  const explorerBase = explorerBaseRaw ? explorerBaseRaw.replace(/\/+$/, "") : "";
   const txPending = false;
   const [quoteCountdown, setQuoteCountdown] = useState<string | null>(null);
   const [quoteRefreshing, setQuoteRefreshing] = useState(false);

@@ -145,22 +145,33 @@
             ],
             "title": "Outcomeid"
           },
-          "salt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salt"
-          },
-          "ticketHash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
+        "salt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Salt"
+        },
+        "txHash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Txhash"
+        },
+        "ticketHash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
               {
                 "type": "null"
               }

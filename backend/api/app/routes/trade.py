@@ -306,8 +306,23 @@ async def _get_quote(session: AsyncSession, quote_id: str) -> tuple[Any, schemas
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid_quote_payload: {exc}") from exc
 
 
+def _normalize_tx_hash(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if stripped.lower().startswith("0x"):
+        stripped = stripped.lower()
+        return stripped if len(stripped) == 66 else None
+    # Allow bare 64-hex strings (some relayer/web3 variants omit 0x).
+    if len(stripped) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in stripped):
+        return f"0x{stripped.lower()}"
+    return None
+
+
 def _is_hex_tx(value: str | None) -> bool:
-    return isinstance(value, str) and len(value) == 66 and value.lower().startswith("0x")
+    return _normalize_tx_hash(value) is not None
 
 
 def _extract_tx_hash(data: Mapping[str, Any] | None) -> str | None:
@@ -315,8 +330,9 @@ def _extract_tx_hash(data: Mapping[str, Any] | None) -> str | None:
         return None
     for key in ("txHash", "tx_hash", "transactionHash", "transaction_hash"):
         value = data.get(key)
-        if value:
-            return str(value)
+        normalized = _normalize_tx_hash(value)
+        if normalized:
+            return normalized
     return None
 
 
@@ -1131,6 +1147,7 @@ async def trade_commit(
     # When the relayer only returns a job id, stash it so /trade/status can later swap in the real tx hash.
     if tx_hash is None and relayer_job is not None:
         tx_hash = relayer_job
+    tx_hash = _normalize_tx_hash(tx_hash) or tx_hash
 
     # Persist commitment snapshot.
     await repository_async.record_commitments(
@@ -1379,6 +1396,7 @@ async def sync_commitments(payload: schemas.CommitmentsSyncRequest, session: Asy
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     tickets = []
     for ticket in payload.tickets:
+        tx_hash = getattr(ticket, "tx_hash", None)
         tickets.append(
             {
                 "ticketHash": ticket.ticket_hash or ticket.leaf,
@@ -1389,6 +1407,7 @@ async def sync_commitments(payload: schemas.CommitmentsSyncRequest, session: Asy
                 "salt": ticket.salt,
                 "merkleIndex": ticket.leaf_index,
                 "merklePath": ticket.merkle_path or [],
+                "txHash": tx_hash,
             }
         )
     recorded = await repository_async.record_commitments(session, market.id, tickets)
@@ -1474,6 +1493,8 @@ async def trade_status(
         if not job_id_value:
             job_id_value = resolved_tx
         resolved_tx = None
+    if resolved_tx:
+        resolved_tx = _normalize_tx_hash(resolved_tx) or resolved_tx
     if resolved_tx and job_id_value:
         await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
     if not resolved_tx and job_id_value:

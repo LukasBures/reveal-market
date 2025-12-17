@@ -143,8 +143,9 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
         return 4242
 
     monkeypatch.setattr("app.routes.trade._fetch_escrow_balance", _escrow_balance)
+    tx_hash = "0x" + "a" * 64
     monkeypatch.setattr(
-        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": "0xabc"})
+        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": tx_hash})
     )
 
     quote_payload = {
@@ -162,7 +163,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     commit_resp = client.post("/trade/commit", json={"quote_id": quote["quote_id"]})
     assert commit_resp.status_code == 200
     commit_body = commit_resp.json()
-    assert commit_body["tx_hash"] == "0xabc"
+    assert commit_body["tx_hash"] == tx_hash
     assert commit_body["escrow_balance_wei"] == 4242
 
     positions_resp = client.get(f"/positions?wallet={user.address}")
@@ -176,7 +177,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     assert pos["ticket_id"] == 0
     assert pos["status"] == "committed"
     assert pos["claimable"] is False
-    assert pos["tx_hash"] == "0xabc"
+    assert pos["tx_hash"] == tx_hash
 
 
 def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):

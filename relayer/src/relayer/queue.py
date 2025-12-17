@@ -266,6 +266,8 @@ class TxQueue:
 
             job_id = int(row["id"])
             tx_hash = cast(str | None, result.get("txHash"))
+            if tx_hash and not str(tx_hash).startswith("0x"):
+                tx_hash = f"0x{tx_hash}"
             nonce_used_raw = result.get("nonce", nonce)
             nonce_used = int(nonce_used_raw) if nonce_used_raw is not None else None
             await asyncio.to_thread(self._mark_complete, job_id, tx_hash, nonce_used)
