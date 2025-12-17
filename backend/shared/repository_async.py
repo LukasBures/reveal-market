@@ -372,6 +372,21 @@ async def list_commitments_by_market(session: AsyncSession, market_id: int) -> l
     return list((await session.scalars(stmt)).all())
 
 
+async def update_commitment_tx_hash(session: AsyncSession, old_hash: str, new_hash: str) -> int:
+    """Replace a stored tx hash/job id with the finalized transaction hash."""
+
+    stmt = select(models.Commitment).where(models.Commitment.tx_hash == old_hash).with_for_update()
+    rows = (await session.scalars(stmt)).all()
+    updated = 0
+    for row in rows:
+        row.tx_hash = new_hash
+        session.add(row)
+        updated += 1
+    if updated:
+        await session.flush()
+    return updated
+
+
 async def list_markets_missing_address(session: AsyncSession) -> list[models.Market]:
     """Return markets that are missing a contract address."""
 

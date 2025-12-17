@@ -7,7 +7,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, cast
@@ -304,6 +304,80 @@ async def _get_quote(session: AsyncSession, quote_id: str) -> tuple[Any, schemas
         return db_quote, schemas.PricingQuotePayload.model_validate(payload)
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid_quote_payload: {exc}") from exc
+
+
+def _is_hex_tx(value: str | None) -> bool:
+    return isinstance(value, str) and len(value) == 66 and value.lower().startswith("0x")
+
+
+def _extract_tx_hash(data: Mapping[str, Any] | None) -> str | None:
+    if not data:
+        return None
+    for key in ("txHash", "tx_hash", "transactionHash", "transaction_hash"):
+        value = data.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _extract_job_id(data: Mapping[str, Any] | None) -> str | None:
+    if not data:
+        return None
+    for key in ("jobId", "job_id", "job"):
+        value = data.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+async def _maybe_replace_job_tx_hash(session: AsyncSession, job_id: str, resolved_tx: str) -> None:
+    """Replace a stored job id with the finalized tx hash (best-effort)."""
+
+    if not job_id or not resolved_tx or not _is_hex_tx(resolved_tx):
+        return
+    try:
+        await repository_async.update_commitment_tx_hash(session, job_id, resolved_tx)
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.status.tx_hash_update_failed",
+            message="failed to replace relayer job id with tx hash",
+            job_id=job_id,
+            tx_hash=resolved_tx,
+            error=str(exc),
+        )
+
+
+async def _resolve_job_tx_hash(session: AsyncSession, job_id: str) -> str | None:
+    """Best-effort resolution of a relayer job id to a real tx hash, updating commitments if found."""
+
+    if not job_id:
+        return None
+    cache = await get_cache_client()
+    if cache is not None:
+        cached = await cache.get(f"{settings.relayer_queue_key}:result:{job_id}")
+        if cached:
+            try:
+                cached_result = json.loads(cached)
+            except Exception:
+                cached_result = {}
+            resolved = _extract_tx_hash(cached_result)
+            if resolved and _is_hex_tx(resolved):
+                await _maybe_replace_job_tx_hash(session, job_id, resolved)
+                return resolved
+    if not settings.relayer_base_url:
+        return None
+    try:
+        status_url = _relayer_url("status")
+        result = await _call_relayer(status_url, {"jobId": job_id})
+    except Exception:
+        return None
+    resolved_tx = _extract_tx_hash(result)
+    if resolved_tx and _is_hex_tx(resolved_tx):
+        await _maybe_replace_job_tx_hash(session, job_id, resolved_tx)
+        return resolved_tx
+    return None
 
 
 def _require_auth_signer():
@@ -1047,13 +1121,16 @@ async def trade_commit(
         else:
             raise exc
 
-    tx_hash = relayer_result.get("txHash") or relayer_result.get("tx_hash") or relayer_result.get("jobId")
+    tx_hash = _extract_tx_hash(relayer_result)
     relayer_status = relayer_status or relayer_result.get("status") or relayer_result.get("state")
     if relayer_status is not None:
         relayer_status = str(relayer_status)
-    relayer_job = relayer_job or relayer_result.get("jobId") or relayer_result.get("job_id")
+    relayer_job = relayer_job or _extract_job_id(relayer_result)
     if relayer_job is not None:
         relayer_job = str(relayer_job)
+    # When the relayer only returns a job id, stash it so /trade/status can later swap in the real tx hash.
+    if tx_hash is None and relayer_job is not None:
+        tx_hash = relayer_job
 
     # Persist commitment snapshot.
     await repository_async.record_commitments(
@@ -1104,6 +1181,13 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     positions: list[schemas.PositionRecord] = []
     for commitment, market, settlement in rows:
+        tx_hash_value = getattr(commitment, "tx_hash", None)
+        if tx_hash_value and not _is_hex_tx(tx_hash_value):
+            resolved_tx = await _resolve_job_tx_hash(session, str(tx_hash_value))
+            if resolved_tx:
+                tx_hash_value = resolved_tx
+        if tx_hash_value and not _is_hex_tx(tx_hash_value):
+            tx_hash_value = None
         stake_wei = int(commitment.amount_wei)
         stake_zen = stake_wei / 1e18
         claimable = False
@@ -1131,7 +1215,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 outcome_id=commitment.outcome_id,
                 stake_wei=stake_wei,
                 stake_zen=stake_zen,
-                tx_hash=getattr(commitment, "tx_hash", None),
+                tx_hash=tx_hash_value,
                 quote_id=None,
                 status=status,
                 ticket_id=commitment.leaf_index,
@@ -1272,7 +1356,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     except Exception as exc:  # pragma: no cover - network errors
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    tx_hash = result.get("txHash") or result.get("tx_hash") or result.get("jobId") or relayer_job or ""
+    tx_hash = _extract_tx_hash(result) or _extract_job_id(result) or relayer_job or ""
     return schemas.TradeClaimResponse(
         tx_hash=str(tx_hash),
         market_id=market.event_id,
@@ -1374,36 +1458,65 @@ async def relayer_settlements(
 
 
 @router.get("/trade/status", response_model=schemas.TradeStatusResponse, tags=["trade"])
-async def trade_status(tx_hash: str | None = None, job_id: str | None = None):
+async def trade_status(
+    tx_hash: str | None = None,
+    job_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
     """Return transaction status by hash or relayer job id (best-effort)."""
 
     if not tx_hash and not job_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tx_hash_or_job_id_required")
     resolved_tx = tx_hash
-    if not resolved_tx and job_id:
+    job_id_value = job_id
+    if resolved_tx and not _is_hex_tx(resolved_tx):
+        # Treat non-hex payloads as relayer job ids.
+        if not job_id_value:
+            job_id_value = resolved_tx
+        resolved_tx = None
+    if resolved_tx and job_id_value:
+        await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
+    if not resolved_tx and job_id_value:
         cache = await get_cache_client()
         if cache is not None:
-            cached = await cache.get(f"{settings.relayer_queue_key}:result:{job_id}")
+            cached = await cache.get(f"{settings.relayer_queue_key}:result:{job_id_value}")
             if cached:
                 try:
                     cached_result = json.loads(cached)
                 except Exception:
                     cached_result = {}
-                if cached_result.get("txHash") or cached_result.get("tx_hash"):
-                    resolved_tx = cached_result.get("txHash") or cached_result.get("tx_hash")
+                cached_tx = _extract_tx_hash(cached_result)
+                if cached_tx and _is_hex_tx(cached_tx):
+                    resolved_tx = cached_tx
+                    await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
                 else:
                     status_str = cached_result.get("status") or "pending"
                     return schemas.TradeStatusResponse(tx_hash="", status=status_str)
         if not settings.relayer_base_url:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
         status_url = _relayer_url("status")
-        result = await _call_relayer(status_url, {"jobId": job_id})
-        resolved_tx = result.get("txHash") or result.get("tx_hash") or None
-        if not resolved_tx:
+        try:
+            result = await _call_relayer(status_url, {"jobId": job_id_value})
+        except HTTPException as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.status.relayer_error",
+                message="relayer status lookup failed",
+                job_id=job_id_value,
+                error=str(exc.detail) if hasattr(exc, "detail") else str(exc),
+            )
+            return schemas.TradeStatusResponse(tx_hash="", status="unknown")
+        resolved_tx = _extract_tx_hash(result)
+        if not resolved_tx or not _is_hex_tx(resolved_tx):
             status_str = result.get("status") or result.get("state") or "unknown"
             return schemas.TradeStatusResponse(tx_hash="", status=status_str)
+        # If the job id was stored on commitments, replace it with the resolved tx hash.
+        await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
     if not resolved_tx:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tx_hash_not_found")
+    if not _is_hex_tx(resolved_tx):
+        return schemas.TradeStatusResponse(tx_hash="", status="unknown")
     if not settings.rpc_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="rpc_url_missing")
     try:

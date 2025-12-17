@@ -89,6 +89,10 @@ async def list_commitments_by_market(session: AsyncSession, market_id: int) -> l
     return await shared_repository_async.list_commitments_by_market(session, market_id)
 
 
+async def update_commitment_tx_hash(session: AsyncSession, old_hash: str, new_hash: str) -> int:
+    return await shared_repository_async.update_commitment_tx_hash(session, old_hash, new_hash)
+
+
 async def replace_merkle_path(session: AsyncSession, commitment_id: int, siblings: list[str]) -> None:
     await shared_repository_async.replace_merkle_path(session, commitment_id, siblings)
 

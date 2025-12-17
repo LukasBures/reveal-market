@@ -107,6 +107,7 @@ export function StakeQuoteCard({
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(initialTxHash);
+  const [relayerJobId, setRelayerJobId] = useState<string | null>(null);
   const [txConfirmed, setTxConfirmed] = useState(false);
   const [txStatus, setTxStatus] = useState<string | null>(null);
   const explorerBase = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
@@ -418,6 +419,7 @@ export function StakeQuoteCard({
     if (!initialTxHash) {
       setTxHash(null);
     }
+    setRelayerJobId(null);
     setTxConfirmed(false);
     setTxStatus(null);
   }, [chainId, address, initialTxHash]);
@@ -446,6 +448,16 @@ export function StakeQuoteCard({
   const ctaLabel = txLoading
     ? "Submitting…"
     : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
+  const txStatusLabel =
+    txLoading
+      ? "Committing…"
+      : txStatus === "failed"
+        ? "Commit failed"
+        : txConfirmed || txStatus === "confirmed"
+          ? "Committed"
+          : txStatus === "pending" || relayerJobId
+            ? "Confirming…"
+            : null;
   const shortQuoteId = shortenHash(quote?.quote_id ?? null);
 
   const highlightClass =
@@ -469,6 +481,7 @@ export function StakeQuoteCard({
   const handleTrade = async () => {
     setTxError(null);
     setTxHash(null);
+    setRelayerJobId(null);
     setTxConfirmed(false);
     if (tradingDisabled) {
       setTxError(tradingReason ?? "Trading disabled");
@@ -531,11 +544,14 @@ export function StakeQuoteCard({
         throw new Error("Stake changed. Refresh the quote.");
       }
       const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id);
-      const respHash = resp.tx_hash || resp.relayer_job_id || resp.quote_id;
-      if (respHash) {
-        setTxHash(respHash);
-        setTxStatus(resp.relayer_status ?? null);
-        setTxConfirmed(true);
+      const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;
+      const respHash = resp.tx_hash && typeof resp.tx_hash === "string" ? resp.tx_hash : null;
+      if (respHash || respJob) {
+        setTxHash(respHash || null);
+        setRelayerJobId(respJob);
+        const initialStatus = resp.relayer_status || (respHash ? "pending" : null);
+        setTxStatus(initialStatus);
+        setTxConfirmed(initialStatus === "confirmed");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Trade failed";
@@ -559,13 +575,20 @@ export function StakeQuoteCard({
 
   // Poll transaction status if we have a hash/job id.
   useEffect(() => {
-    if (!txHash) return;
+    if (!txHash && !relayerJobId) return;
     let cancelled = false;
     const poll = async () => {
       try {
-        const statusResp = await fetchTradeStatus(txHash);
+        const isHexHash = txHash && /^0x[0-9a-fA-F]{64}$/.test(txHash);
+        const statusResp = await fetchTradeStatus(
+          isHexHash ? txHash : undefined,
+          relayerJobId || (!isHexHash && txHash ? txHash : undefined),
+        );
         if (!cancelled) {
           setTxStatus(statusResp.status);
+          if (statusResp.txHash && statusResp.txHash !== txHash) {
+            setTxHash(statusResp.txHash);
+          }
           if (statusResp.status === "confirmed" || statusResp.status === "failed") {
             setTxConfirmed(statusResp.status === "confirmed");
             return;
@@ -582,7 +605,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [txHash]);
+  }, [txHash, relayerJobId]);
 
   return (
     <div
@@ -826,27 +849,40 @@ export function StakeQuoteCard({
             Switch to {defaultChain.name} (chain {expectedChainId}) to trade.
           </p>
         )}
-        {txHash && (
+        {txStatusLabel && (
+          <p
+            className={`text-[11px] uppercase tracking-[0.2em] ${
+              txStatus === "failed" ? "text-rose-200" : "text-emerald-200"
+            }`}
+          >
+            {txStatusLabel}{" "}
+            {relayerJobId && !txHashIsHex ? `(job ${relayerJobId})` : null}
+          </p>
+        )}
+        {relayerJobId && !txHashIsHex && (
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
+            Waiting for the relayer to return the commit transaction hash…
+          </p>
+        )}
+        {txHashIsHex && txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
             Commit tx:{" "}
-            {txHashIsHex && explorerBase ? (
+            {explorerBase ? (
               <a
-                href={`${explorerBase}/${txHash}`}
+                href={`${explorerBase}/tx/${txHash}`}
                 target="_blank"
                 rel="noreferrer"
                 className="underline decoration-dotted"
               >
                 {txHash.slice(0, 10)}…{txHash.slice(-6)}
               </a>
-            ) : txHashIsHex ? (
-              `${txHash.slice(0, 10)}…${txHash.slice(-6)}`
             ) : (
-              <span className="underline decoration-dotted">{txHash}</span>
+              `${txHash.slice(0, 10)}…${txHash.slice(-6)}`
             )}{" "}
             ({txStatus ?? "pending"})
           </p>
         )}
-        {txConfirmed && txHash && (
+        {txConfirmed && txHashIsHex && txHash && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-200">
             Commit confirmed on-chain.
           </p>

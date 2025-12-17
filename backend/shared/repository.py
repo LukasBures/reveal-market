@@ -240,7 +240,9 @@ def upsert_settlement_snapshot(session: Session, market_id: int, data: Mapping[s
     return settlement
 
 
-def record_commitments(session: Session, market_id: int, tickets: list[Mapping[str, Any]], tx_hash: str | None = None) -> int:
+def record_commitments(
+    session: Session, market_id: int, tickets: list[Mapping[str, Any]], tx_hash: str | None = None
+) -> int:
     """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
 
     count = 0

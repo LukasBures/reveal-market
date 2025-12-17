@@ -86,6 +86,6 @@ describe("Trade status polling", () => {
       />,
     );
 
-    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith("0xtx"));
+    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(undefined, "0xtx"));
   });
 });

@@ -37,7 +37,9 @@ export function DashboardClient() {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
   const { signMessageAsync } = useSignMessage();
-  const explorerBase = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
+  const explorerBaseEnv = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
+  const explorerBase =
+    explorerBaseEnv || (defaultChain.blockExplorers?.default?.url?.replace(/\/+$/, "") ?? "");
   const escrowAddress = RELAYER_ESCROW_ADDRESS;
   const tokenAddress = ZEN_TOKEN_ADDRESS;
   const [depositInput, setDepositInput] = useState<string>("0.10");
@@ -706,11 +708,8 @@ export function DashboardClient() {
               className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg shadow-black/30"
             >
               {(() => {
-                const txHashShort =
-                  p.tx_hash && p.tx_hash.length > 16
-                    ? `${p.tx_hash.slice(0, 10)}…${p.tx_hash.slice(-6)}`
-                    : p.tx_hash || null;
-                const txHref = explorerBase && p.tx_hash ? `${explorerBase}/tx/${p.tx_hash}` : null;
+                const txIsHash = typeof p.tx_hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(p.tx_hash);
+                const txHref = explorerBase && txIsHash ? `${explorerBase}/tx/${p.tx_hash}` : null;
                 return (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">
@@ -752,18 +751,6 @@ export function DashboardClient() {
                         Merkle root: {p.merkle_root ? `${p.merkle_root.slice(0, 8)}…${p.merkle_root.slice(-6)}` : "—"}
                       </span>
                       <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
-                      <span>
-                        Tx:{" "}
-                        {txHref ? (
-                          <a href={txHref} target="_blank" rel="noreferrer" className="underline decoration-dotted">
-                            {txHashShort}
-                          </a>
-                        ) : txHashShort ? (
-                          txHashShort
-                        ) : (
-                          "—"
-                        )}
-                      </span>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                       {p.status === "settled" && p.claimable ? (
@@ -789,15 +776,15 @@ export function DashboardClient() {
                         className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
                         href={
                           p.proof_request_id
-                            ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
-                            : p.merkle_root
-                              ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
-                              : "/proofs"
+                          ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
+                          : p.merkle_root
+                            ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
+                            : "/proofs"
                         }
                       >
                         View proofs
                       </Link>
-                      {txHref ? (
+                      {p.tx_hash && txHref ? (
                         <a
                           className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
                           href={txHref}
