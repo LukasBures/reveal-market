@@ -124,16 +124,33 @@ def build_market_caps() -> schemas.MarketCaps:
 
 
 def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
-    """Apply optional category allowlists to hide markets outside curated sets."""
+    """Apply visibility rules (category allowlist, active-only, de-dupe by event_id)."""
 
     category_allow = {item.lower() for item in settings.market_category_allowlist if isinstance(item, str)}
-    if not category_allow:
-        return markets
-
+    allowed_statuses = {"", "active", "open", "live", "commit"}
     filtered: list[schemas.MarketResponse] = []
+    seen_events: set[str] = set()
+
     for market in markets:
-        if isinstance(market.category, str) and market.category.lower() in category_allow:
-            filtered.append(market)
+        # Filter by category allowlist when configured.
+        if category_allow:
+            if not isinstance(market.category, str) or market.category.lower() not in category_allow:
+                continue
+
+        # Only surface active markets (skip closed/locked/settled/cancelled).
+        status_normalized = str(getattr(market, "status", "") or "").lower()
+        if getattr(market, "closed", False) is True or (
+            status_normalized and status_normalized not in allowed_statuses
+        ):
+            continue
+
+        event_id = getattr(market, "event_id", None)
+        if isinstance(event_id, str):
+            if event_id in seen_events:
+                continue
+            seen_events.add(event_id)
+
+        filtered.append(market)
 
     removed = len(markets) - len(filtered)
     if removed > 0:
@@ -141,10 +158,10 @@ def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list
             logger,
             logging.DEBUG,
             event="markets.list.filtered",
-            message="filtered markets via allowlists",
+            message="filtered markets via visibility rules",
             removed=removed,
             remaining=len(filtered),
-            category_allowlist=list(category_allow),
+            category_allowlist=list(category_allow) if category_allow else None,
         )
     return filtered
 
@@ -178,7 +195,12 @@ def resolved_cache_ttl(status: str | None, resolved_at: datetime | None) -> int:
 def should_cache_market_list(limit: int, offset: int, search_query: str | None, order_by: str | None = None) -> bool:
     """Gate caching so deep pagination/search traffic doesn't pollute Redis."""
 
+    normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
     if search_query:
+        return False
+    if normalized_order_by == "volume" and (
+        offset >= settings.cache_hydrate_limit or offset + limit > settings.cache_hydrate_limit
+    ):
         return False
     if offset > settings.cacheable_market_offset_limit:
         return False
@@ -276,6 +298,19 @@ def safe_float(value: Any) -> float | None:
     return None if numeric != numeric else numeric
 
 
+def _group_slug_expression():
+    return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug)
+
+
+def _total_volume_expression():
+    return func.coalesce(
+        models.MarketGammaMetadata.volume,
+        models.MarketGammaMetadata.volume_clob,
+        models.Market.orderbook_volume_usd,
+        0,
+    )
+
+
 def parse_group_threshold(value: Any) -> float | None:
     """Extract numeric threshold values from Gamma metadata fields."""
 
@@ -349,16 +384,18 @@ async def load_group_aggregates(session: AsyncSession, slugs: set[str]) -> dict[
 
     if not slugs:
         return {}
+    group_expr = _group_slug_expression()
+    total_volume_expr = _total_volume_expression()
     stmt = (
         select(
-            models.Market.group_slug,
+            group_expr.label("group_slug"),
             func.sum(models.Market.volume_24h_usd),
             func.sum(models.Market.liquidity_usd),
-            func.sum(models.MarketGammaMetadata.volume),
+            func.sum(total_volume_expr),
         )
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
-        .where(models.Market.group_slug.in_(list(slugs)))
-        .group_by(models.Market.group_slug)
+        .where(group_expr.in_(list(slugs)))
+        .group_by(group_expr)
     )
     aggregates: dict[str, dict[str, float | None]] = {}
     result = await session.execute(stmt)
@@ -521,8 +558,12 @@ def sum_sibling_liquidity(siblings: list[schemas.MarketSibling]) -> float | None
 
 
 def market_volume_value(market: schemas.MarketResponse, *, use_total: bool = False) -> float:
-    primary = getattr(market, "volume", None) if use_total else getattr(market, "volume_24h_usd", None)
-    fallback = getattr(market, "volume_24h_usd", None) if use_total else getattr(market, "volume", None)
+    if use_total:
+        primary = getattr(market, "volume", None)
+        fallback = getattr(market, "orderbook_volume_usd", None)
+    else:
+        primary = getattr(market, "volume_24h_usd", None)
+        fallback = getattr(market, "orderbook_volume_usd", None)
     value = safe_float(primary)
     if value is None:
         value = safe_float(fallback)
@@ -996,18 +1037,28 @@ async def invalidate_market_cache(
 
 
 async def hydrate_markets_cache(
-    source: str = "manual", *, limit: int | None = None, order_by: str | None = None
+    source: str = "manual",
+    *,
+    limit: int | None = None,
+    order_by: str | None = None,
+    status: str | None = "active",
+    coalesce_groups: bool = True,
 ) -> dict[str, Any]:
     """Populate the hottest markets into Redis directly from Postgres."""
 
     cache = await get_cache_client()
     target_limit = limit or settings.cache_hydrate_limit or settings.cacheable_market_limit
     target_order_by = order_by or settings.cache_hydrate_order_by
+    if target_order_by == "volume_24h_usd":
+        target_order_by = "volume"
+    target_status = status or "active"
     summary = {
         "source": source,
         "status": "skipped",
         "limit": target_limit,
         "order_by": target_order_by,
+        "status_filter": target_status,
+        "coalesce_groups": coalesce_groups,
     }
     if cache is None:
         summary["reason"] = "redis_unavailable"
@@ -1034,20 +1085,74 @@ async def hydrate_markets_cache(
         summary["reason"] = "hydrate_in_progress"
         return summary
     async with session_scope() as session:
-        records = await crud.get_markets(session, limit=hydrated_limit, offset=0, order_by=target_order_by)
+        records = await crud.get_markets(
+            session,
+            status=target_status,
+            limit=hydrated_limit,
+            offset=0,
+            order_by=target_order_by,
+            coalesce_groups=coalesce_groups,
+        )
         market_models = filter_markets_for_visibility(
             await enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
+        )
+    if coalesce_groups:
+        market_models = coalesce_grouped_markets(market_models, use_total_volume=target_order_by == "volume")
+    if target_order_by == "volume":
+        market_models.sort(
+            key=lambda m: (
+                market_volume_value(m, use_total=True),
+                getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+            ),
+            reverse=True,
         )
     if not market_models:
         if cache is not None and lock_acquired:
             await cache.delete(lock_key)
         summary["reason"] = "no_markets"
         return summary
-    cache_key = markets_list_cache_key(None, None, None, None, hydrated_limit, 0, order_by=target_order_by)
+    max_items = min(len(market_models), settings.cache_hydrate_limit)
+    market_models = market_models[:max_items]
     schema_tag = await get_schema_tag(cache, settings.schema_version_key)
+    cache_key = markets_list_cache_key(
+        target_status,
+        None,
+        None,
+        None,
+        hydrated_limit,
+        0,
+        order_by=target_order_by,
+        coalesce_groups=coalesce_groups,
+    )
     await write_market_list_cache(cache, cache_key, market_models)
     await add_tag(cache, schema_tag, cache_key)
     await add_tag(cache, "markets:list", cache_key)
+
+    page_size = min(
+        max(1, settings.cache_hydrate_page_size),
+        settings.cacheable_market_limit,
+        settings.max_page_size,
+        hydrated_limit,
+    )
+    total_to_cache = min(len(market_models), settings.cache_hydrate_limit)
+    page_cache_keys: list[str] = []
+    for start in range(0, total_to_cache, page_size):
+        slice_items = market_models[start : start + page_size]
+        slice_key = markets_list_cache_key(
+            target_status,
+            None,
+            None,
+            None,
+            page_size,
+            start,
+            order_by=target_order_by,
+            coalesce_groups=coalesce_groups,
+        )
+        await write_market_list_cache(cache, slice_key, slice_items)
+        await add_tag(cache, schema_tag, slice_key)
+        await add_tag(cache, "markets:list", slice_key)
+        page_cache_keys.append(slice_key)
+
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
     log_event(
         logger,
@@ -1059,6 +1164,7 @@ async def hydrate_markets_cache(
         order_by=target_order_by,
         result_count=len(market_models),
         cache_key=cache_key,
+        page_cache_keys=page_cache_keys,
         duration_ms=duration_ms,
     )
     summary.update(
@@ -1067,6 +1173,7 @@ async def hydrate_markets_cache(
             "limit": hydrated_limit,
             "result_count": len(market_models),
             "cache_key": cache_key,
+            "page_cache_keys": page_cache_keys,
             "duration_ms": duration_ms,
         }
     )

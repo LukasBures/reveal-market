@@ -51,7 +51,11 @@ export function FeaturedMarketsClient({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [autoLoadTriggered, setAutoLoadTriggered] = useState(false);
+  const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [intersectionSupported, setIntersectionSupported] = useState(
+    typeof window !== "undefined" && "IntersectionObserver" in window,
+  );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const setSentinel = useCallback((node: HTMLDivElement | null) => {
     sentinelRef.current = node;
@@ -118,6 +122,10 @@ export function FeaturedMarketsClient({
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
   useEffect(() => {
+    setIntersectionSupported(typeof window !== "undefined" && "IntersectionObserver" in window);
+  }, []);
+
+  useEffect(() => {
     if (!refreshedMarkets) {
       return;
     }
@@ -136,6 +144,7 @@ export function FeaturedMarketsClient({
       }
       const fetchOffset = offset;
       setIsLoadingMore(true);
+      setShowLoadingState(true);
       startTransition(async () => {
         try {
           const additions = await fetchFeaturedMarkets(nextLimit, {
@@ -162,6 +171,7 @@ export function FeaturedMarketsClient({
           setHasMore(false);
         } finally {
           setIsLoadingMore(false);
+          setShowLoadingState(false);
         }
       });
     },
@@ -180,12 +190,15 @@ export function FeaturedMarketsClient({
       normalizeMarkets,
       batchSize,
       orderBy,
+      maxItems,
     ],
   );
 
   const isBusy = isPending || isLoadingMore;
-  const canAutoLoad = hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
-  const showManualButton = markets.length > 0 && hasMore && (!autoLoadTriggered || autoLoadCount >= AUTO_LOAD_BATCHES);
+  const canAutoLoad = intersectionSupported && hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
+  const showManualButton =
+    markets.length > 0 && hasMore && (!intersectionSupported || autoLoadCount >= AUTO_LOAD_BATCHES);
+  const showLoadingIndicator = showLoadingState && !showManualButton;
 
   useEffect(() => {
     if (!canAutoLoad || isBusy) {
@@ -193,6 +206,9 @@ export function FeaturedMarketsClient({
     }
     const target = sentinelRef.current;
     if (!target) {
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
       return;
     }
     const observer = new IntersectionObserver((entries) => {
@@ -233,19 +249,28 @@ export function FeaturedMarketsClient({
         <MarketGrid markets={markets} />
       )}
       {hasMore && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
-      {showManualButton && (
-        <div className="flex items-center justify-center">
-          <button
-            type="button"
-            disabled={!hasMore || isBusy}
-            aria-busy={isBusy}
-            onClick={() => handleLoadMore("manual")}
-            className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {isBusy ? "Loading…" : hasMore ? "Load more markets" : "All markets loaded"}
-          </button>
+      {showLoadingIndicator && (
+        <div
+          className="flex items-center justify-center text-sm text-slate-300"
+          role="status"
+          data-testid="auto-loading-indicator"
+        >
+          Loading...
         </div>
       )}
-    </section>
-  );
+    {showManualButton && (
+      <div className="flex items-center justify-center">
+        <button
+          type="button"
+          disabled={!hasMore || isBusy}
+          aria-busy={isBusy}
+          onClick={() => handleLoadMore("manual")}
+          className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isBusy ? "Loading..." : hasMore ? "Load more markets" : "All markets loaded"}
+        </button>
+      </div>
+    )}
+  </section>
+);
 }

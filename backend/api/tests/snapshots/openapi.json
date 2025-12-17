@@ -3751,7 +3751,7 @@
             }
           },
           {
-            "description": "Order results (popularity|recent|volume_24h_usd|volume)",
+            "description": "Order results (popularity|recent|volume)",
             "in": "query",
             "name": "order_by",
             "required": false,
@@ -3764,7 +3764,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Order results (popularity|recent|volume_24h_usd|volume)",
+              "description": "Order results (popularity|recent|volume)",
               "title": "Order By"
             }
           },

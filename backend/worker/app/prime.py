@@ -26,7 +26,8 @@ async def prime_markets_cache(
 
     limit = runtime.settings.markets_cache_limit
     base_offset = runtime.settings.markets_cache_offset
-    order_by = runtime.settings.markets_cache_order_by
+    order_by_setting = runtime.settings.markets_cache_order_by
+    order_by = "volume" if order_by_setting == "volume_24h_usd" else order_by_setting
     max_pages = max(1, runtime.settings.markets_cache_prime_pages)
     cache_key = markets_list_cache_key(None, None, None, None, limit, base_offset, order_by=order_by)
     summary: dict[str, Any] = {

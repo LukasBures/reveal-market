@@ -49,9 +49,7 @@ async def list_markets(
         ),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
-    order_by: Annotated[
-        str | None, Query(description="Order results (popularity|recent|volume_24h_usd|volume)")
-    ] = None,
+    order_by: Annotated[str | None, Query(description="Order results (popularity|recent|volume)")] = None,
     trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
     featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
     coalesce_groups: Annotated[
@@ -62,10 +60,10 @@ async def list_markets(
     """List markets with optional filters and heavy reliance on Redis caches."""
 
     coalesce_mode = bool(coalesce_groups)
-    popularity_mode = order_by == "popularity" or bool(trending)
-    volume_24h_mode = order_by == "volume_24h_usd"
-    total_volume_mode = order_by == "volume"
-    volume_mode = volume_24h_mode or total_volume_mode
+    normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
+    popularity_mode = normalized_order_by == "popularity" or bool(trending)
+    total_volume_mode = normalized_order_by == "volume"
+    volume_mode = total_volume_mode
     if popularity_mode and not status:
         status = "active"
     normalized_search = search
@@ -81,7 +79,7 @@ async def list_markets(
         normalized_search,
         limit,
         offset,
-        order_by=order_by or ("popularity" if popularity_mode else None),
+        order_by=normalized_order_by or ("popularity" if popularity_mode else None),
         trending=trending,
         featured=featured,
         coalesce_groups=coalesce_groups,
@@ -99,14 +97,14 @@ async def list_markets(
         search=normalized_search,
         limit=limit,
         offset=offset,
-        order_by=order_by,
+        order_by=normalized_order_by,
         trending=bool(trending),
         featured=featured,
         coalesce_groups=coalesce_mode,
     )
     start = time.perf_counter()
     cache_enabled = cache is not None and market_svc.should_cache_market_list(
-        limit, offset, normalized_search, order_by
+        limit, offset, normalized_search, normalized_order_by
     )
     if cache_enabled:
         cached_payload = await get_json(cache, cache_key)
@@ -119,6 +117,14 @@ async def list_markets(
             cached_models = market_svc.filter_markets_for_visibility(hydrated)
             if coalesce_mode and cached_models:
                 cached_models = market_svc.coalesce_grouped_markets(cached_models, use_total_volume=total_volume_mode)
+            if volume_mode and cached_models:
+                cached_models.sort(
+                    key=lambda m: (
+                        market_svc.market_volume_value(m, use_total=total_volume_mode),
+                        getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+                    ),
+                    reverse=True,
+                )
             cached_models = cached_models[:limit]
             log_event(
                 logger,
@@ -151,10 +157,14 @@ async def list_markets(
         query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
         query_offset = 0
     elif volume_mode:
-        query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+        if total_volume_mode and coalesce_mode:
+            query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+        else:
+            query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
         query_offset = offset
     if coalesce_mode:
-        query_limit = min(settings.max_page_size, max(query_limit, limit * 3))
+        multiplier = 1 if total_volume_mode else 3
+        query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
     markets = await crud.get_markets(
         session,
         status=status,
@@ -164,7 +174,8 @@ async def list_markets(
         featured=featured,
         limit=query_limit,
         offset=query_offset,
-        order_by=order_by,
+        order_by=normalized_order_by,
+        coalesce_groups=coalesce_mode,
     )
     market_models = await market_svc.enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets]
@@ -189,10 +200,10 @@ async def list_markets(
             reverse=True,
         )
         market_models = selected
-    elif order_by in {"volume_24h_usd", "volume"}:
+    elif normalized_order_by == "volume":
         market_models.sort(
             key=lambda m: (
-                market_svc.market_volume_value(m, use_total=order_by == "volume"),
+                market_svc.market_volume_value(m, use_total=True),
                 getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
             ),
             reverse=True,
@@ -211,7 +222,7 @@ async def list_markets(
             search=search,
             limit=limit,
             offset=offset,
-            order_by=order_by,
+            order_by=normalized_order_by,
             trending=bool(trending),
         )
     if cache_enabled and market_models:
@@ -240,7 +251,7 @@ async def list_markets(
             limit=limit,
             offset=offset,
             result_count=len(market_models),
-            order_by=order_by,
+            order_by=normalized_order_by,
             trending=bool(trending),
         )
     else:
@@ -260,7 +271,7 @@ async def list_markets(
             limit=limit,
             offset=offset,
             result_count=len(market_models),
-            order_by=order_by,
+            order_by=normalized_order_by,
             trending=bool(trending),
         )
     return market_models
@@ -283,8 +294,9 @@ async def list_markets_by_category(
     """List markets for a category, with fallbacks when slugs are unfamiliar."""
 
     order_by = request.query_params.get("order_by")
-    volume_mode = order_by in {"volume_24h_usd", "volume"}
-    total_volume_mode = order_by == "volume"
+    normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
+    volume_mode = normalized_order_by == "volume"
+    total_volume_mode = normalized_order_by == "volume"
     coalesce_mode = bool(coalesce_groups)
     start = time.perf_counter()
     cache = await get_cache_client()
@@ -296,7 +308,7 @@ async def list_markets_by_category(
         category_slug=category_slug,
         limit=limit,
         offset=offset,
-        order_by=order_by,
+        order_by=normalized_order_by,
         coalesce_groups=bool(coalesce_groups),
     )
     category_value = market_svc.decode_slug(category_slug)
@@ -313,9 +325,16 @@ async def list_markets_by_category(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="category_not_found")
     category_slug_key, category_label = lookup
     cache_key = markets_list_cache_key(
-        category_slug_key, None, None, None, limit, offset, order_by=order_by, coalesce_groups=coalesce_groups
+        category_slug_key,
+        None,
+        None,
+        None,
+        limit,
+        offset,
+        order_by=normalized_order_by,
+        coalesce_groups=coalesce_groups,
     )
-    cache_enabled = cache is not None and market_svc.should_cache_market_list(limit, offset, None, order_by)
+    cache_enabled = cache is not None and market_svc.should_cache_market_list(limit, offset, None, normalized_order_by)
     if cache_enabled:
         cached_payload = await get_json(cache, cache_key)
         hydrated = await market_svc.hydrate_cached_market_list(cache, cached_payload)
@@ -326,6 +345,14 @@ async def list_markets_by_category(
             if coalesce_mode and models_from_cache:
                 models_from_cache = market_svc.coalesce_grouped_markets(
                     models_from_cache, use_total_volume=total_volume_mode
+                )
+            if volume_mode and models_from_cache:
+                models_from_cache.sort(
+                    key=lambda m: (
+                        market_svc.market_volume_value(m, use_total=total_volume_mode),
+                        getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+                    ),
+                    reverse=True,
                 )
             models_from_cache = models_from_cache[:limit]
             log_event(
@@ -348,7 +375,8 @@ async def list_markets_by_category(
     fetch_limit = limit
     fetch_offset = offset
     if coalesce_mode:
-        fetch_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+        multiplier = 1 if total_volume_mode else 3
+        fetch_limit = min(settings.max_page_size, max(limit * multiplier, settings.default_page_size))
     log_event(
         logger,
         logging.DEBUG,
@@ -359,13 +387,24 @@ async def list_markets_by_category(
         trending=trending_category,
         limit=fetch_limit,
         offset=fetch_offset,
-        order_by=order_by,
+        order_by=normalized_order_by,
     )
     if trending_category:
-        markets = await crud.get_markets(session, limit=fetch_limit, offset=fetch_offset, order_by=order_by)
+        markets = await crud.get_markets(
+            session,
+            limit=fetch_limit,
+            offset=fetch_offset,
+            order_by=normalized_order_by,
+            coalesce_groups=coalesce_mode,
+        )
     else:
         markets = await crud.get_markets(
-            session, category=category_label, limit=fetch_limit, offset=fetch_offset, order_by=order_by
+            session,
+            category=category_label,
+            limit=fetch_limit,
+            offset=fetch_offset,
+            order_by=normalized_order_by,
+            coalesce_groups=coalesce_mode,
         )
     market_models = market_svc.filter_markets_for_visibility(
         await market_svc.enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
@@ -397,7 +436,7 @@ async def list_markets_by_category(
             category_slug=category_slug_key,
             limit=limit,
             offset=offset,
-            order_by=order_by,
+            order_by=normalized_order_by,
         )
     if cache_enabled and market_models:
         schema_tag = await get_schema_tag(cache, settings.schema_version_key)

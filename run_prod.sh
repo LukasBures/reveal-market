@@ -324,7 +324,8 @@ disable_next_telemetry() {
   fi
 }
 
-PARALLEL_BUILDS="$(calc_parallel_builds)"
+PARALLEL_BUILDS_DEFAULT="$(calc_parallel_builds)"
+PARALLEL_BUILDS="${PARALLEL_BUILDS:-${PARALLEL_BUILDS_DEFAULT}}"
 WAIT_FLAG=()
 if supports_wait_flag; then
   WAIT_FLAG+=("--wait")
@@ -420,8 +421,28 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
   log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[*]} build --parallel --pull --build-arg APK_REPO_URL=${APK_REPO_URL} --build-arg APK_FALLBACK_URL=${APK_FALLBACK_URL}"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build --parallel --pull --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}"
+  run_compose_build() {
+    local parallel_flag="${1:-true}"
+    local parallel_limit="${2:-${COMPOSE_PARALLEL_LIMIT}}"
+    local opts=(--pull --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
+    if [[ "${parallel_flag}" == "true" && "${parallel_limit}" -gt 1 ]]; then
+      opts+=(--parallel)
+    fi
+    local cmd=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${opts[@]}")
+    log_info "Running: COMPOSE_PARALLEL_LIMIT=${parallel_limit} ${cmd[*]}"
+    COMPOSE_PARALLEL_LIMIT="${parallel_limit}" "${cmd[@]}"
+  }
+  if ! run_compose_build true "${COMPOSE_PARALLEL_LIMIT}"; then
+    if [[ "${COMPOSE_PARALLEL_LIMIT}" -gt 1 ]]; then
+      log_warn "Parallel compose build failed (BuildKit flake). Retrying sequentially."
+      if ! run_compose_build false 1; then
+        log_warn "Sequential compose build also failed."
+        exit 1
+      fi
+    else
+      exit 1
+    fi
+  fi
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi

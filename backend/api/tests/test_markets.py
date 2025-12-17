@@ -21,6 +21,7 @@ def _make_market(
     group_slug: str | None = None,
     group_position: int | None = None,
     volume_24h_usd: float | None = None,
+    orderbook_volume_usd: float | None = None,
     liquidity_usd: float | None = None,
 ) -> models.Market:
     now = datetime.now(tz=UTC)
@@ -34,6 +35,7 @@ def _make_market(
         group_slug=group_slug,
         group_position=group_position,
         volume_24h_usd=volume_24h_usd,
+        orderbook_volume_usd=orderbook_volume_usd,
         liquidity_usd=liquidity_usd,
         created_at=now,
         updated_at=now,
@@ -72,6 +74,51 @@ def test_list_markets_supports_filters(client, db_session):
 
     filtered_search = client.get("/markets", params={"search": "Alpha"}).json()
     assert {m["event_id"] for m in filtered_search} == {"evt-1", "evt-3"}
+
+
+def test_volume_sorting_prefers_total_volume(client, db_session):
+    m1 = _make_market(
+        "evt-total-high",
+        "Total volume first",
+        category="sports",
+        oracle="0xaaa",
+        status="commit",
+        volume_24h_usd=1,
+    )
+    m2 = _make_market(
+        "evt-total-mid",
+        "24h misleadingly high",
+        category="sports",
+        oracle="0xaaa",
+        status="commit",
+        volume_24h_usd=5_000,
+    )
+    m3 = _make_market(
+        "evt-total-low",
+        "Smallest total volume",
+        category="sports",
+        oracle="0xaaa",
+        status="commit",
+        volume_24h_usd=100_000,
+    )
+    db_session.add_all([m1, m2, m3])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(market_id=m1.id, volume=200),
+            models.MarketGammaMetadata(market_id=m2.id, volume=125),
+            models.MarketGammaMetadata(market_id=m3.id, volume=75),
+        ]
+    )
+    db_session.commit()
+
+    ordered = client.get("/markets", params={"order_by": "volume"}).json()
+    ids = [m["event_id"] for m in ordered][:3]
+    assert ids == ["evt-total-high", "evt-total-mid", "evt-total-low"]
+
+    alias_ordered = client.get("/markets", params={"order_by": "volume_24h_usd"}).json()
+    alias_ids = [m["event_id"] for m in alias_ordered][:3]
+    assert alias_ids == ids
 
 
 def test_create_and_read_market(client):
@@ -418,41 +465,66 @@ def test_category_endpoint_allows_hyphenated_slug(client, db_session):
 
 def test_category_endpoint_orders_by_volume(client, db_session):
     high = _make_market(
-        "evt-cat-high", "High Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=25
+        "evt-cat-high",
+        "High Volume",
+        category="sports",
+        oracle="0xvol",
+        status="commit",
+        orderbook_volume_usd=250,
     )
     low = _make_market(
-        "evt-cat-low", "Low Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=5
+        "evt-cat-low",
+        "Low Volume",
+        category="sports",
+        oracle="0xvol",
+        status="commit",
+        orderbook_volume_usd=5,
     )
     db_session.add_all([low, high])
     db_session.commit()
 
-    resp = client.get("/categories/sports", params={"limit": 5, "order_by": "volume_24h_usd"})
+    resp = client.get("/categories/sports", params={"limit": 5, "order_by": "volume"})
     assert resp.status_code == 200
     payload = resp.json()
     assert [item["event_id"] for item in payload] == ["evt-cat-high", "evt-cat-low"]
-    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume_24h_usd")
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume")
     assert cache_key in api_main.cache_client.store
 
 
 def test_markets_volume_order_respects_offset_and_cache(client, db_session):
     top = _make_market(
-        "evt-vol-top", "Top Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=50
+        "evt-vol-top",
+        "Top Volume",
+        category="sports",
+        oracle="0xvol",
+        status="commit",
+        orderbook_volume_usd=500,
     )
     middle = _make_market(
-        "evt-vol-mid", "Mid Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=20
+        "evt-vol-mid",
+        "Mid Volume",
+        category="sports",
+        oracle="0xvol",
+        status="commit",
+        orderbook_volume_usd=200,
     )
     low = _make_market(
-        "evt-vol-low", "Low Volume", category="sports", oracle="0xvol", status="commit", volume_24h_usd=5
+        "evt-vol-low",
+        "Low Volume",
+        category="sports",
+        oracle="0xvol",
+        status="commit",
+        orderbook_volume_usd=50,
     )
     db_session.add_all([low, middle, top])
     db_session.commit()
 
-    resp = client.get("/markets", params={"limit": 1, "offset": 1, "order_by": "volume_24h_usd"})
+    resp = client.get("/markets", params={"limit": 1, "offset": 1, "order_by": "volume"})
     assert resp.status_code == 200
     payload = resp.json()
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-vol-mid"
-    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume_24h_usd")
+    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume")
     assert cache_key in api_main.cache_client.store
 
 

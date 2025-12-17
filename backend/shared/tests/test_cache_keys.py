@@ -7,8 +7,8 @@ def test_category_cache_key_slugifies_hyphenated_input():
 
 
 def test_category_cache_key_respects_order_by():
-    key = cache_keys.category_cache_key("sports", 10, 0, order_by="volume_24h_usd")
-    assert key == "v1:markets:category:sports|limit=10|offset=0|order_by=volume_24h_usd"
+    key = cache_keys.category_cache_key("sports", 10, 0, order_by="volume")
+    assert key == "v1:markets:category:sports|limit=10|offset=0|order_by=volume"
 
 
 def test_suggest_cache_key_handles_whitespace():

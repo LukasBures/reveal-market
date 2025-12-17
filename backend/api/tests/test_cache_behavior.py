@@ -178,9 +178,9 @@ def test_cache_refresh_worker_triggers_hydration(monkeypatch):
     monkeypatch.setattr("app.runtime.cache_client", cache, raising=False)
     monkeypatch.setattr("app.server.cache_client", cache, raising=False)
 
-    async def fake_hydrate(*, source: str, limit: int | None = None, order_by: str | None = None):
-        calls.append({"source": source, "limit": limit, "order_by": order_by})
-        return {"status": "hydrated", "limit": limit, "order_by": order_by}
+    async def fake_hydrate(**kwargs):
+        calls.append(kwargs)
+        return {"status": "hydrated", **kwargs}
 
     monkeypatch.setattr(api_main.settings, "cache_refresh_enabled", True, raising=False)
     monkeypatch.setattr(api_main.settings, "cache_refresh_interval_seconds", 0.01, raising=False)

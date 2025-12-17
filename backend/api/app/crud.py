@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from shared import repository_async as shared_repository
 from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,24 +21,29 @@ async def get_markets(
     limit: int = 100,
     offset: int = 0,
     order_by: str | None = None,
+    coalesce_groups: bool = False,
 ) -> list[models.Market]:
+    # Always sort by lifetime volume; keep volume_24h_usd as a legacy alias.
+    if order_by == "volume_24h_usd":
+        order_by = "volume"
+    if order_by == "volume" and coalesce_groups:
+        return await _get_markets_by_total_volume(
+            session,
+            status=status,
+            category=category,
+            oracle=oracle,
+            search=search,
+            featured=featured,
+            limit=limit,
+            offset=offset,
+        )
     stmt = select(models.Market).options(
         selectinload(models.Market.outcomes_rel),
         selectinload(models.Market.tags_rel),
         selectinload(models.Market.clob_tokens_rel),
         selectinload(models.Market.gamma_metadata_rel),
     )
-    if status == "active":
-        stmt = stmt.where(models.Market.closed.is_(False))
-    elif status:
-        stmt = stmt.where(models.Market.status == status)
-    if category:
-        normalized_category = category.lower()
-        stmt = stmt.where(func.lower(models.Market.category) == literal(normalized_category))
-    if oracle:
-        stmt = stmt.where(models.Market.oracle == oracle)
-    if featured:
-        stmt = stmt.where(models.Market.featured.is_(True))
+    stmt = _apply_common_filters(stmt, status=status, category=category, oracle=oracle, featured=featured)
     stmt = _apply_text_search(session, stmt, search, apply_default_order=order_by is None)
     if order_by == "volume_24h_usd":
         stmt = stmt.order_by(
@@ -48,7 +55,7 @@ async def get_markets(
         stmt = (
             stmt.outerjoin(models.MarketGammaMetadata)
             .order_by(
-                models.MarketGammaMetadata.volume.desc(),
+                _volume_value_expression().desc(),
                 models.Market.updated_at.desc(),
                 models.Market.created_at.desc(),
             )
@@ -142,6 +149,134 @@ async def patch_market(session: AsyncSession, market: models.Market, update: sch
             setattr(market, field, value)
     session.add(market)
     return market
+
+
+def _apply_common_filters(stmt, *, status: str | None, category: str | None, oracle: str | None, featured: bool | None):
+    if status == "active":
+        stmt = stmt.where(models.Market.closed.is_(False))
+    elif status and status.lower() not in {"any", "all"}:
+        stmt = stmt.where(models.Market.status == status)
+    if category:
+        normalized_category = category.lower()
+        stmt = stmt.where(func.lower(models.Market.category) == literal(normalized_category))
+    if oracle:
+        stmt = stmt.where(models.Market.oracle == oracle)
+    if featured:
+        stmt = stmt.where(models.Market.featured.is_(True))
+    return stmt
+
+
+def _volume_group_expression():
+    return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_id)
+
+
+def _volume_value_expression():
+    return func.coalesce(
+        models.MarketGammaMetadata.volume,
+        models.MarketGammaMetadata.volume_clob,
+        models.Market.orderbook_volume_usd,
+        0,
+    )
+
+
+async def _get_markets_by_total_volume(
+    session: AsyncSession,
+    *,
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    search: str | None,
+    featured: bool | None,
+    limit: int,
+    offset: int,
+) -> list[models.Market]:
+    group_expr = _volume_group_expression()
+    volume_expr = _volume_value_expression()
+    aggregate_stmt = (
+        select(
+            group_expr.label("volume_group"),
+            func.coalesce(func.sum(volume_expr), 0).label("total_volume"),
+            func.max(models.Market.updated_at).label("last_updated_at"),
+            func.max(models.Market.created_at).label("last_created_at"),
+        )
+        .select_from(models.Market)
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+    )
+    aggregate_stmt = _apply_common_filters(
+        aggregate_stmt, status=status, category=category, oracle=oracle, featured=featured
+    )
+    aggregate_stmt = _apply_text_search(session, aggregate_stmt, search, apply_default_order=False)
+    aggregate_stmt = (
+        aggregate_stmt.group_by(group_expr)
+        .order_by(
+            func.coalesce(func.sum(volume_expr), 0).desc(),
+            func.max(models.Market.updated_at).desc(),
+            func.max(models.Market.created_at).desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+    )
+    aggregate_rows = await session.execute(aggregate_stmt)
+    group_order = [row[0] for row in aggregate_rows if row[0] is not None]
+    if not group_order:
+        return []
+
+    markets_stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+        .where(group_expr.in_(group_order))
+    )
+    markets_stmt = _apply_common_filters(
+        markets_stmt, status=status, category=category, oracle=oracle, featured=featured
+    )
+    markets_stmt = _apply_text_search(session, markets_stmt, search, apply_default_order=False)
+    result = await session.execute(markets_stmt)
+    rows: list[models.Market] = list(result.unique().scalars().all())
+
+    def _group_key(market: models.Market) -> str | None:
+        meta = getattr(market, "gamma_metadata_rel", None)
+        return (
+            getattr(market, "group_slug", None)
+            or getattr(meta, "group_slug", None)
+            or getattr(market, "event_id", None)
+        )
+
+    def _volume_value(market: models.Market) -> float:
+        meta = getattr(market, "gamma_metadata_rel", None)
+        raw = getattr(meta, "volume", None)
+        if raw is None:
+            raw = getattr(meta, "volume_clob", None)
+        if raw is None:
+            raw = getattr(market, "orderbook_volume_usd", None)
+        try:
+            return float(raw) if raw is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _updated_timestamp(market: models.Market) -> float:
+        timestamp = getattr(market, "updated_at", None) or getattr(market, "created_at", None)
+        if isinstance(timestamp, datetime):
+            try:
+                return float(timestamp.timestamp())
+            except (OverflowError, OSError, ValueError):
+                return 0.0
+        return 0.0
+
+    order_lookup = {value: index for index, value in enumerate(group_order)}
+    rows.sort(
+        key=lambda market: (
+            order_lookup.get(_group_key(market), len(order_lookup)),
+            -_volume_value(market),
+            -_updated_timestamp(market),
+        )
+    )
+    return rows
 
 
 async def search_markets(session: AsyncSession, query: str, limit: int) -> list[models.Market]:

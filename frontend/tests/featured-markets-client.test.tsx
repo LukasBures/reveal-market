@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactElement } from "react";
 import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
@@ -22,12 +22,7 @@ const sampleMarket = {
 describe("FeaturedMarketsClient", () => {
   beforeEach(() => {
     vi.mocked(fetchFeaturedMarkets).mockReset();
-    class NoopIntersectionObserver {
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    }
-    (globalThis as any).IntersectionObserver = NoopIntersectionObserver;
+    delete (globalThis as any).IntersectionObserver;
   });
 
   afterEach(() => {
@@ -88,20 +83,20 @@ describe("FeaturedMarketsClient", () => {
     });
   });
 
-  it("auto-loads additional pages before showing manual button", async () => {
+  it("auto-loads batches then surfaces the manual button after the cap", async () => {
     let callCount = 0;
     const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;
-    fetchMock.mockImplementation(() => {
+    fetchMock.mockImplementation((limit: number) => {
       callCount += 1;
-      return Promise.resolve([
-        {
-          eventId: `evt-auto-${callCount}`,
-          title: `Auto Market ${callCount}`,
+      return Promise.resolve(
+        Array.from({ length: limit }, (_, idx) => ({
+          eventId: `evt-auto-${callCount}-${idx}`,
+          title: `Auto Market ${callCount}-${idx}`,
           category: "Auto",
           outcomes: [],
           outcomePrices: [],
-        },
-      ]);
+        })),
+      );
     });
 
     class InstantIntersectionObserver {
@@ -117,25 +112,99 @@ describe("FeaturedMarketsClient", () => {
     }
     (globalThis as any).IntersectionObserver = InstantIntersectionObserver;
 
+    const initialBatch = Array.from({ length: 30 }, (_, idx) => ({
+      ...sampleMarket,
+      eventId: `evt-init-${idx}`,
+      title: `Initial Market ${idx}`,
+    }));
+
     renderWithClient(
       <FeaturedMarketsClient
-        initialMarkets={[sampleMarket]}
-        pageSize={1}
-        maxItems={6}
+        initialMarkets={initialBatch}
+        pageSize={30}
+        maxItems={300}
       />,
     );
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(AUTO_LOAD_BATCHES);
     });
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(AUTO_LOAD_BATCHES);
-    expect(screen.queryByRole("button", { name: /load more markets/i })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+    });
   });
 
-  it("preserves the order returned by the API", () => {
+  it("shows a loading indicator during automatic pagination", async () => {
+    let resolveFetch: (() => void) | undefined;
+    const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;
+    fetchMock.mockImplementation((limit: number) => {
+      return new Promise((resolve) => {
+        resolveFetch = () =>
+          resolve(
+            Array.from({ length: limit }, (_, idx) => ({
+              ...sampleMarket,
+              eventId: `evt-lazy-${idx}`,
+              title: `Lazy Market ${idx}`,
+            })),
+          );
+      });
+    });
+
+    let observerCallback: IntersectionObserverCallback | null = null;
+    class ManualIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        observerCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    (globalThis as any).IntersectionObserver = ManualIntersectionObserver;
+
+    const initialBatch = Array.from({ length: 30 }, (_, idx) => ({
+      ...sampleMarket,
+      eventId: `evt-lazy-init-${idx}`,
+      title: `Lazy Initial ${idx}`,
+    }));
+
+    renderWithClient(
+      <FeaturedMarketsClient
+        initialMarkets={initialBatch}
+        pageSize={30}
+        maxItems={120}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(observerCallback).toBeTruthy();
+    });
+
+    const initialCalls = fetchMock.mock.calls.length;
+    act(() => {
+      observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as any);
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(initialCalls);
+      expect(
+        fetchMock.mock.calls.some(([, params]) => (params as any)?.offset === initialBatch.length),
+      ).toBe(true);
+    });
+
+    const loading = await screen.findByTestId("auto-loading-indicator");
+    expect(loading).toBeInTheDocument();
+
+    resolveFetch?.();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status", { name: /loading/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the server-provided ordering that favors total volume", () => {
     const markets = [
-      { eventId: "evt-a", title: "Higher 24h", volume24hUsd: 800, volume: 1_000 },
       { eventId: "evt-b", title: "Highest total", volume24hUsd: 100, volume: 5_000 },
+      { eventId: "evt-a", title: "Lower total", volume24hUsd: 800, volume: 1_000 },
     ];
 
     const { container } = renderWithClient(
@@ -143,6 +212,6 @@ describe("FeaturedMarketsClient", () => {
     );
 
     const titles = Array.from(container.querySelectorAll("h3")).map((node) => node.textContent ?? "");
-    expect(titles[0]).toContain("Higher 24h");
+    expect(titles[0]).toContain("Highest total");
   });
 });

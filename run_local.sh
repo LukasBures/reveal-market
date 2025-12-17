@@ -158,7 +158,8 @@ calc_parallel_builds() {
 }
 
 CPU_COUNT="$(detect_cpu_count)"
-PARALLEL_BUILDS="$(calc_parallel_builds "${CPU_COUNT}")"
+PARALLEL_BUILDS_DEFAULT="$(calc_parallel_builds "${CPU_COUNT}")"
+PARALLEL_BUILDS="${PARALLEL_BUILDS:-${PARALLEL_BUILDS_DEFAULT}}"
 NEXT_BUILD_WORKERS="${NEXT_BUILD_WORKERS:-${CPU_COUNT}}"
 export NEXT_BUILD_WORKERS
 # Default Caddy TLS profile to internal for local runs (overridable).
@@ -431,21 +432,40 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   # If the user requested specific services to run and did not pass --build-services,
   # limit the build to those services to avoid rebuilding the entire stack.
   if [[ ${#BUILD_SERVICES[@]} -eq 0 && ${#UP_ARGS[@]} -gt 0 ]]; then
-    BUILD_SERVICES=("${UP_ARGS[@]}")
-  fi
+  BUILD_SERVICES=("${UP_ARGS[@]}")
+fi
 
-  BUILD_DESC="${BUILD_FLAG:-cached layers}"
-  log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  BUILD_OPTS=(--parallel)
+BUILD_DESC="${BUILD_FLAG:-cached layers}"
+log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
+run_compose_build() {
+  local parallel_flag="${1:-true}"
+  local parallel_limit="${2:-${COMPOSE_PARALLEL_LIMIT}}"
+  local opts=()
+  if [[ "${parallel_flag}" == "true" && "${parallel_limit}" -gt 1 ]]; then
+    opts+=(--parallel)
+  fi
   if [[ -n "${BUILD_FLAG}" ]]; then
-    BUILD_OPTS+=("${BUILD_FLAG}")
+    opts+=("${BUILD_FLAG}")
   fi
-  BUILD_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${BUILD_OPTS[@]}")
+  local cmd=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${opts[@]}")
   if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
-    BUILD_CMD+=("${BUILD_SERVICES[@]}")
+    cmd+=("${BUILD_SERVICES[@]}")
   fi
-  log_info "Running: ${BUILD_CMD[*]}"
-  "${BUILD_CMD[@]}"
+  log_info "Running: COMPOSE_PARALLEL_LIMIT=${parallel_limit} ${cmd[*]}"
+  COMPOSE_PARALLEL_LIMIT="${parallel_limit}" "${cmd[@]}"
+}
+
+if ! run_compose_build true "${COMPOSE_PARALLEL_LIMIT}"; then
+  if [[ "${COMPOSE_PARALLEL_LIMIT}" -gt 1 ]]; then
+    log_warn "Parallel compose build failed (BuildKit flake). Retrying sequentially."
+    if ! run_compose_build false 1; then
+      log_warn "Sequential compose build also failed."
+      exit 1
+    fi
+  else
+    exit 1
+  fi
+fi
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi
