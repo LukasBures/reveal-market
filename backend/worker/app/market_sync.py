@@ -654,7 +654,7 @@ async def _sync_market(
     existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
     if existing is not None:
         state: InstanceState[shared_models.Market] | None = inspect(existing)
-        if state.detached:
+        if state is not None and state.detached:
             existing = await shared_repository.get_market_by_event_id(session, market.event_id)
             state = inspect(existing) if existing is not None else None
         if existing is not None and state is not None and state.expired_attributes:

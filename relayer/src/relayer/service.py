@@ -290,7 +290,7 @@ class RelayerService:
         async def _call(label: str, func, *args):
             try:
                 return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=rpc_timeout)
-            except (Web3Exception, ValueError, asyncio.TimeoutError) as err:
+            except (TimeoutError, Web3Exception, ValueError) as err:
                 if label not in issues:
                     issues.append(label)
                 logger.warning(f"relayer.health.{label}", error=str(err))
@@ -351,7 +351,10 @@ class RelayerService:
                 )
                 if escrow_token_balance is not None and escrow_token_balance < self.min_escrow_token_balance_wei:
                     issues.append("low_escrow_token_balance")
-                if relayer_token_allowance is not None and relayer_token_allowance < self.min_relayer_token_allowance_wei:
+                if (
+                    relayer_token_allowance is not None
+                    and relayer_token_allowance < self.min_relayer_token_allowance_wei
+                ):
                     issues.append("low_relayer_token_allowance")
             except (Web3Exception, ValueError) as err:
                 if "token_fetch_failed" not in issues:
