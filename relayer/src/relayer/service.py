@@ -285,64 +285,81 @@ class RelayerService:
 
     async def health(self) -> dict[str, Any]:
         issues: list[str] = []
-        connected = await asyncio.to_thread(self.web3.is_connected)
+        rpc_timeout = 2.0
+
+        async def _call(label: str, func, *args):
+            try:
+                return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=rpc_timeout)
+            except (Web3Exception, ValueError, asyncio.TimeoutError) as err:
+                if label not in issues:
+                    issues.append(label)
+                logger.warning(f"relayer.health.{label}", error=str(err))
+                return None
+
+        connected_result, block_data, relayer_balance_raw, token_address_raw, escrow_owner = await asyncio.gather(
+            _call("connection_failed", self.web3.is_connected),
+            _call("block_fetch_failed", self.web3.eth.get_block, "latest"),
+            _call("balance_fetch_failed", self.web3.eth.get_balance, self.account.address),
+            _call("token_fetch_failed", self.escrow.functions.COLLATERAL_TOKEN().call),
+            _call("owner_fetch_failed", self.escrow.functions.owner().call),
+        )
+        connected = bool(connected_result)
 
         block_number: int | None = None
         block_age: int | None = None
-        try:
-            latest_block = await asyncio.to_thread(self.web3.eth.get_block, "latest")
-            block_number = latest_block["number"]
-            block_ts = int(latest_block["timestamp"])
-            now = int(datetime.now(UTC).timestamp())
-            block_age = max(0, now - block_ts)
-            if block_age > self.max_block_age_seconds:
-                issues.append("block_stale")
-        except (KeyError, ValueError, Web3Exception) as err:
-            issues.append("block_fetch_failed")
-            logger.warning("relayer.health.block_fetch_failed", error=str(err))
+        if block_data is not None:
+            try:
+                block_number = block_data["number"]
+                block_ts = int(block_data["timestamp"])
+                now = int(datetime.now(UTC).timestamp())
+                block_age = max(0, now - block_ts)
+                if block_age > self.max_block_age_seconds:
+                    issues.append("block_stale")
+            except (KeyError, TypeError, ValueError) as err:
+                if "block_fetch_failed" not in issues:
+                    issues.append("block_fetch_failed")
+                logger.warning("relayer.health.block_fetch_failed", error=str(err))
 
         relayer_balance: int | None = None
-        try:
-            relayer_balance = await asyncio.to_thread(self.web3.eth.get_balance, self.account.address)
+        if relayer_balance_raw is not None:
+            relayer_balance = int(relayer_balance_raw)
             if relayer_balance < self.min_relayer_balance_wei:
                 issues.append("low_balance")
-        except (Web3Exception, ValueError) as err:
-            issues.append("balance_fetch_failed")
-            logger.warning("relayer.health.balance_fetch_failed", error=str(err))
 
         token_address: str | None = None
         escrow_token_balance: int | None = None
         relayer_token_balance: int | None = None
         relayer_token_allowance: int | None = None
-        try:
-            token_address_raw = await asyncio.to_thread(self.escrow.functions.COLLATERAL_TOKEN().call)
-            token_address = str(token_address_raw)
-            token_contract = self.web3.eth.contract(
-                address=self.web3.to_checksum_address(token_address),
-                abi=ERC20_ABI,
-            )
-            escrow_token_balance = await asyncio.to_thread(token_contract.functions.balanceOf(self.escrow.address).call)
-            relayer_token_balance = await asyncio.to_thread(
-                token_contract.functions.balanceOf(self.account.address).call
-            )
-            relayer_token_allowance = await asyncio.to_thread(
-                token_contract.functions.allowance(self.account.address, self.escrow.address).call
-            )
-            if escrow_token_balance is not None and escrow_token_balance < self.min_escrow_token_balance_wei:
-                issues.append("low_escrow_token_balance")
-            if relayer_token_allowance is not None and relayer_token_allowance < self.min_relayer_token_allowance_wei:
-                issues.append("low_relayer_token_allowance")
-        except (Web3Exception, ValueError) as err:
-            issues.append("token_fetch_failed")
-            logger.warning("relayer.health.token_fetch_failed", error=str(err))
+        if token_address_raw:
+            try:
+                token_address = str(token_address_raw)
+                token_contract = self.web3.eth.contract(
+                    address=self.web3.to_checksum_address(token_address),
+                    abi=ERC20_ABI,
+                )
+                (
+                    escrow_token_balance,
+                    relayer_token_balance,
+                    relayer_token_allowance,
+                ) = await asyncio.gather(
+                    _call("token_fetch_failed", token_contract.functions.balanceOf(self.escrow.address).call),
+                    _call("token_fetch_failed", token_contract.functions.balanceOf(self.account.address).call),
+                    _call(
+                        "token_fetch_failed",
+                        token_contract.functions.allowance(self.account.address, self.escrow.address).call,
+                    ),
+                )
+                if escrow_token_balance is not None and escrow_token_balance < self.min_escrow_token_balance_wei:
+                    issues.append("low_escrow_token_balance")
+                if relayer_token_allowance is not None and relayer_token_allowance < self.min_relayer_token_allowance_wei:
+                    issues.append("low_relayer_token_allowance")
+            except (Web3Exception, ValueError) as err:
+                if "token_fetch_failed" not in issues:
+                    issues.append("token_fetch_failed")
+                logger.warning("relayer.health.token_fetch_failed", error=str(err))
 
-        escrow_owner: str | None = None
-        try:
-            escrow_owner = await asyncio.to_thread(self.escrow.functions.owner().call)
-            if escrow_owner is not None and str(escrow_owner).lower() != self.account.address.lower():
-                issues.append("owner_mismatch")
-        except (Web3Exception, ValueError) as err:
-            logger.warning("relayer.health.owner_fetch_failed", error=str(err))
+        if escrow_owner is not None and str(escrow_owner).lower() != self.account.address.lower():
+            issues.append("owner_mismatch")
 
         status = "ok" if connected and not issues else "degraded"
         payload = {
