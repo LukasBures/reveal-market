@@ -158,7 +158,7 @@ export function FeaturedMarketsClient({
           });
           const merged = normalizeMarkets([...markets, ...additions]);
           const newItemsAdded = merged.length - markets.length;
-          const computedHasMore = additions.length === nextLimit && merged.length < maxItems;
+          const computedHasMore = additions.length > 0 && merged.length < maxItems;
           setMarkets(merged);
           setOffset(fetchOffset + additions.length);
           setHasMore(computedHasMore);

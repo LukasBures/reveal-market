@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { useSignMessage } from "wagmi";
 import type { Address, Hex } from "viem";
@@ -13,6 +13,145 @@ import { formatDateTime } from "@/lib/formatters";
 import Link from "next/link";
 import { useClaimTicket } from "@/lib/marketContract";
 import clsx from "clsx";
+
+const POSITION_LIFECYCLE_STAGES = [
+  { key: "committed", label: "Committed", description: "Stake recorded" },
+  { key: "locked", label: "Locked", description: "Market closed" },
+  { key: "pending_resolution", label: "Resolving", description: "Waiting on oracle & proofs" },
+  { key: "settled", label: "Settled", description: "Payout path ready" },
+] as const;
+
+type PositionLifecycleKey = (typeof POSITION_LIFECYCLE_STAGES)[number]["key"] | "cancelled";
+
+const normalizePositionStatus = (status: string | null | undefined): PositionLifecycleKey => {
+  const normalized = (status ?? "").toLowerCase();
+  if (normalized === "locked") return "locked";
+  if (normalized === "pending_resolution" || normalized === "pending") return "pending_resolution";
+  if (normalized === "settled") return "settled";
+  if (normalized === "cancelled") return "cancelled";
+  return "committed";
+};
+
+type PositionStatusFlowProps = {
+  status: string;
+  claimable?: boolean | null;
+  resolutionReason?: string | null;
+};
+
+function PositionStatusFlow({ status, claimable, resolutionReason }: PositionStatusFlowProps) {
+  const normalized = normalizePositionStatus(status);
+  const stages =
+    normalized === "cancelled"
+      ? [
+          ...POSITION_LIFECYCLE_STAGES,
+          { key: "cancelled" as const, label: "Cancelled", description: resolutionReason || "Void market" },
+        ]
+      : POSITION_LIFECYCLE_STAGES;
+  const currentIndex = Math.max(
+    0,
+    stages.findIndex((stage) => stage.key === normalized),
+  );
+  const isCancelled = normalized === "cancelled";
+  const isFinal = normalized === "settled" || isCancelled;
+  const connectorActiveClass = isCancelled
+    ? "from-rose-400/80 via-rose-400/40 to-rose-500/70"
+    : "from-emerald-400/80 via-emerald-300/40 to-emerald-400/70";
+  const bubbleCompleteClass = isCancelled
+    ? "border-rose-400/50 bg-rose-500/10 text-rose-100"
+    : "border-emerald-400/50 bg-emerald-500/10 text-emerald-100";
+  const bubbleCurrentClass = isCancelled
+    ? "border-rose-300/80 bg-rose-500/20 text-rose-50 shadow-[0_0_0_2px_rgba(248,113,113,0.35)]"
+    : "border-emerald-300/80 bg-emerald-500/20 text-emerald-50 shadow-[0_0_0_2px_rgba(123,240,94,0.35)]";
+  const headerAccentClass = isCancelled ? "text-rose-200" : "text-emerald-200";
+  const outlineClass = isCancelled
+    ? "border-rose-400/50 shadow-[0_0_24px_rgba(248,113,113,0.18)]"
+    : isFinal
+      ? "border-emerald-400/60 shadow-[0_0_28px_rgba(123,240,94,0.35)]"
+      : "border-white/10";
+  const nextLabel =
+    stages[Math.min(currentIndex + 1, stages.length - 1)]?.label.toLowerCase() ?? stages[stages.length - 1].label;
+
+  return (
+    <div
+      className={clsx(
+        "mt-3 rounded-xl border bg-gradient-to-r from-slate-900/60 via-black/60 to-slate-900/40 p-3 transition-shadow relative overflow-hidden",
+        outlineClass,
+      )}
+    >
+      <div
+        className={clsx(
+          "pointer-events-none absolute inset-0 bg-[length:240%_160%] opacity-35 blur-[1px] mix-blend-screen",
+          isCancelled
+            ? "bg-[linear-gradient(120deg,rgba(248,113,113,0)_0%,rgba(248,113,113,0.24)_40%,rgba(248,113,113,0)_75%)] animate-[statusFlow_5.5s_linear_infinite]"
+            : "bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.22)_40%,rgba(123,240,94,0)_75%)] animate-[statusFlow_5.5s_linear_infinite]",
+        )}
+      />
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-slate-400">
+        <span>Lifecycle</span>
+        <span className={clsx("text-[10px]", headerAccentClass)}>
+          {isCancelled ? "Cancelled" : isFinal ? "All phases complete" : "Flowing"}
+        </span>
+      </div>
+      <div className="relative mt-3 overflow-hidden rounded-lg border border-white/5 bg-black/40 p-3 shadow-inner shadow-black/30">
+        {!isCancelled ? (
+          <div className="pointer-events-none absolute inset-0 bg-[length:220%_140%] bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.18)_35%,rgba(123,240,94,0)_70%)] opacity-70 mix-blend-screen animate-[statusFlow_4.2s_linear_infinite]" />
+        ) : null}
+        <div className="relative flex items-center gap-2 overflow-x-auto pb-1">
+          {stages.map((stage, idx) => {
+            const stageState = idx < currentIndex ? "complete" : idx === currentIndex ? "current" : "upcoming";
+            return (
+              <Fragment key={stage.key}>
+                <div
+                  className={clsx(
+                    "flex min-w-[140px] flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                    stageState === "complete"
+                      ? bubbleCompleteClass
+                      : stageState === "current"
+                        ? bubbleCurrentClass
+                        : "border-white/10 bg-white/5 text-slate-200",
+                  )}
+                >
+                  <span className="text-[11px] uppercase tracking-[0.2em]">{stage.label}</span>
+                  <span className="text-[11px] text-slate-300">{stage.description}</span>
+                </div>
+                {idx < stages.length - 1 ? (
+                  <div className="flex items-center gap-1">
+                    <div
+                      className={clsx(
+                        "h-[2px] w-12 rounded-full bg-gradient-to-r transition-colors md:w-16",
+                        currentIndex > idx ? connectorActiveClass : "from-white/15 via-white/10 to-white/15",
+                      )}
+                    />
+                    <svg
+                      className={clsx(
+                        "h-4 w-4",
+                        currentIndex > idx ? (isCancelled ? "text-rose-200" : "text-emerald-200") : "text-slate-500",
+                      )}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden
+                    >
+                      <path d="M7 4l6 6-6 6" />
+                    </svg>
+                  </div>
+                ) : null}
+              </Fragment>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400">
+        {isCancelled
+          ? `Market cancelled${resolutionReason ? ` — ${resolutionReason}` : ""}.`
+          : isFinal
+            ? claimable
+              ? "All phases cleared — claim is open."
+              : "All phases cleared."
+            : `Arrows pulse toward ${nextLabel}.`}
+      </p>
+    </div>
+  );
+}
 
 export function DashboardClient() {
   const { address, isConnected } = useAccount();
@@ -723,34 +862,26 @@ export function DashboardClient() {
                         <p className="font-mono text-white">{p.stake_zen.toFixed(3)} ZEN</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Status</p>
-                        <div className="flex flex-col items-end gap-1">
-                          <span
-                            className={clsx(
-                              "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold capitalize",
-                              p.status === "settled"
-                                ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
-                                : "bg-white/10 text-white border border-white/15",
-                            )}
-                          >
-                            {p.status}
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">To win</p>
+                        <p className="font-mono text-white">{toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</p>
+                        {p.claimable ? (
+                          <span className="mt-1 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
+                            Claimable
                           </span>
-                          {p.claimable ? (
-                            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
-                              Claimable
-                            </span>
-                          ) : null}
-                        </div>
+                        ) : null}
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-6">
-                      <span>Ticket: {p.ticket_id ?? "—"}</span>
+                    <PositionStatusFlow
+                      status={p.status}
+                      claimable={p.claimable}
+                      resolutionReason={p.resolution_reason}
+                    />
+                    <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-3">
                       <span>Created: {formatDateTime(p.created_at ?? undefined)}</span>
                       <span>Closes: {formatDateTime(p.closes_at ?? p.resolved_at ?? undefined)}</span>
                       <span>
                         Merkle root: {p.merkle_root ? `${p.merkle_root.slice(0, 8)}…${p.merkle_root.slice(-6)}` : "—"}
                       </span>
-                      <span>To win: {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</span>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                       {p.status === "settled" && p.claimable ? (

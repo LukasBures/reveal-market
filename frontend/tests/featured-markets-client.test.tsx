@@ -83,6 +83,59 @@ describe("FeaturedMarketsClient", () => {
     });
   });
 
+  it("keeps the load more button when a short page arrives mid-pagination", async () => {
+    const fetchMock = fetchFeaturedMarkets as unknown as Mock;
+    fetchMock
+      .mockResolvedValueOnce(
+        Array.from({ length: 10 }, (_, idx) => ({
+          eventId: `evt-gap-${idx}`,
+          title: `Gap Market ${idx}`,
+          category: "Sports",
+          outcomes: [],
+          outcomePrices: [],
+        })),
+      )
+      .mockResolvedValueOnce(
+        Array.from({ length: 5 }, (_, idx) => ({
+          eventId: `evt-gap-next-${idx}`,
+          title: `Gap Market Next ${idx}`,
+          category: "Politics",
+          outcomes: [],
+          outcomePrices: [],
+        })),
+      );
+
+    const initialBatch = Array.from({ length: 30 }, (_, idx) => ({
+      ...sampleMarket,
+      eventId: `evt-init-gap-${idx}`,
+      title: `Initial Gap ${idx}`,
+    }));
+
+    renderWithClient(
+      <FeaturedMarketsClient
+        initialMarkets={initialBatch}
+        pageSize={30}
+        maxItems={200}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /load more markets/i });
+    fireEvent.click(button);
+
+    await screen.findByText("Gap Market 0");
+    expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        expect.any(Number),
+        expect.objectContaining({ offset: initialBatch.length + 10 }),
+      );
+    });
+  });
+
   it("auto-loads batches then surfaces the manual button after the cap", async () => {
     let callCount = 0;
     const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;

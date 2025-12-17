@@ -226,3 +226,12 @@ a {
     transform: translateY(0);
   }
 }
+
+@keyframes statusFlow {
+  0% {
+    background-position: 160% 50%;
+  }
+  100% {
+    background-position: -60% 50%;
+  }
+}

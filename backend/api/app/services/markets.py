@@ -124,10 +124,11 @@ def build_market_caps() -> schemas.MarketCaps:
 
 
 def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
-    """Apply visibility rules (category allowlist, active-only, de-dupe by event_id)."""
+    """Apply visibility rules (category allowlist, skip closed, de-dupe by event_id)."""
 
     category_allow = {item.lower() for item in settings.market_category_allowlist if isinstance(item, str)}
-    allowed_statuses = {"", "active", "open", "live", "commit"}
+    allowed_statuses = {status.value.lower() for status in models.MarketStatusEnum}
+    allowed_statuses.update({"", "active", "open", "live", "resolved"})
     filtered: list[schemas.MarketResponse] = []
     seen_events: set[str] = set()
 
@@ -137,7 +138,7 @@ def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list
             if not isinstance(market.category, str) or market.category.lower() not in category_allow:
                 continue
 
-        # Only surface active markets (skip closed/locked/settled/cancelled).
+        # Skip explicitly closed markets and records with unknown statuses.
         status_normalized = str(getattr(market, "status", "") or "").lower()
         if getattr(market, "closed", False) is True or (
             status_normalized and status_normalized not in allowed_statuses
