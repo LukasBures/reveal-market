@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from app import resolution
 from app.polymarket import MarketPayload
@@ -7,7 +9,7 @@ from app.runtime import settings
 
 
 @pytest.mark.asyncio
-async def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
+async def test_fetch_resolution_snapshot_uses_goldsky(monkeypatch):
     # set minimal market payload
     market = MarketPayload(
         event_id="evt-1",
@@ -24,24 +26,20 @@ async def test_fetch_resolution_snapshot_falls_back_to_conditional(monkeypatch):
 
         def resolution_summary(self, *_args, **_kwargs):
             self.calls += 1
-            return None
-
-    class DummyConditional:
-        def __init__(self):
-            self.calls = 0
-
-        def resolution_summary(self, *_args, **_kwargs):
-            self.calls += 1
-            return {"conditionId": "0xabc", "resolved": True}
+            return {
+                "conditionId": "0xabc",
+                "resolved": True,
+                "outcomes": ["Yes", "No"],
+                "payouts": [0, 1],
+                "winners": [{"index": 1, "label": "No", "payout": 1}],
+                "checkedAt": datetime.now(UTC),
+            }
 
     goldsky = DummyGoldsky()
-    conditional = DummyConditional()
 
     monkeypatch.setattr(resolution, "goldsky_client", goldsky, raising=False)
-    monkeypatch.setattr(resolution, "conditional_tokens_client", conditional, raising=False)
     monkeypatch.setattr(settings, "resolution_fetch_max_attempts", 1, raising=False)
 
     summary = await resolution._fetch_resolution_snapshot("0xabc", market, None)
     assert summary is not None
-    assert summary["conditionId"] == "0xabc"
-    assert conditional.calls == 1
+    assert goldsky.calls == 1

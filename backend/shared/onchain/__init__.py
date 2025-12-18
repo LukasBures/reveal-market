@@ -5,7 +5,6 @@ from .client import (
     load_account,
     to_checksum,
 )
-from .conditional_tokens import ConditionalTokensClient
 
 __all__ = [
     "OnChainConfigurationError",
@@ -14,5 +13,4 @@ __all__ = [
     "to_checksum",
     "MARKET_FACTORY_ABI",
     "MARKET_FACTORY_EVENT_MAP",
-    "ConditionalTokensClient",
 ]

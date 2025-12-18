@@ -149,8 +149,6 @@ class Settings(BaseSettings):
     rake_manager_address: str | None = Field(default=None)
     verifier_address: str | None = Field(default=None)
     rpc_url: AnyUrl | None = Field(default=None)
-    polygon_rpc_url: AnyUrl | None = Field(default=None)
-    conditional_tokens_address: str | None = Field(default=None)
     clob_host: AnyHttpUrl | None = Field(default=None)
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
@@ -377,7 +375,6 @@ def sanitize_settings(settings: Settings) -> dict[str, Any]:
         "wallet_private_key",
         "summary_api_key",
         "rpc_url",
-        "polygon_rpc_url",
         "prover_base_url",
     }
     redacted: dict[str, Any] = {}

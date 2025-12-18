@@ -166,8 +166,6 @@ class Settings(BaseSettings):
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_closed_filter: bool | None = Field(default=False)
-    polygon_rpc_url: AnyUrl | None = Field(default=None)
-    conditional_tokens_address: str | None = Field(default=None)
     clob_host: AnyHttpUrl | None = Field(default=None)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)

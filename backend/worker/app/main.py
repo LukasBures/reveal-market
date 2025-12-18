@@ -32,7 +32,6 @@ from .resolution import ResolutionOutcome, _fetch_resolution_snapshot, apply_res
 from .runtime import (
     PROVER_CLIENT,
     clob_client,
-    conditional_tokens_client,
     goldsky_client,
     logger,
     polymarket_client,
@@ -58,7 +57,6 @@ def __getattr__(name: str) -> Any:
         "polymarket_client",
         "clob_client",
         "goldsky_client",
-        "conditional_tokens_client",
         "PROVER_CLIENT",
     }
     if name in dynamic_attrs:
@@ -98,7 +96,6 @@ __all__ = [
     "SUMMARY_DLQ_COUNTER",
     "PROVER_CLIENT",
     "clob_client",
-    "conditional_tokens_client",
     "goldsky_client",
     "polymarket_client",
     "settings",

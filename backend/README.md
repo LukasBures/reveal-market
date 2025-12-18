@@ -7,7 +7,7 @@ The backend is the heartbeat of Reveal Market’s investable ecosystem. It trans
 | Component | Investor Benefit |
 | --- | --- |
 | **Market API** | Surfaces curated markets, stats, and settlements through a high-availability FastAPI layer backed by Redis caching, structured logging, and Prometheus metrics. Investors see the same latency and transparency they expect from Tier-1 exchanges. |
-| **Ingestion & On-Chain Worker** | Continuously ingests Polymarket and Conditional Tokens data, reconciles it with our PostgreSQL source of truth, and sends heartbeats so ops can verify freshness. |
+| **Ingestion & On-Chain Worker** | Continuously ingests Polymarket data, reconciles it with our PostgreSQL source of truth, and sends heartbeats so ops can verify freshness. |
 | **Price Streamer** | Separate FastAPI service (see `streamer/`) that handles live Polymarket CLOB + FX streaming via SSE/WS. The frontend calls `/stream`/`/stream/ws` with explicit `assets_ids` (clobTokenIds) from the market-detail API for the fastest live books/trades; no auto-discovery is used. |
 
 Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
@@ -23,7 +23,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Schema-first storage** – Alembic-managed tables for markets, outcomes, tags, Gamma metadata, clob tokens, resolutions, quotes, settlements, commitments, Merkle paths, prover receipts, hedger metrics, and ops logs. Indexes cover search, status, event/category slugs, and quote expiry; updated_at triggers run everywhere.
 - **Cache tagging + hydration** – Detail/list/resolution responses are JSON cached in Redis with schema + logical tags. Startup and interval hydrators repopulate `/markets`, categories, and suggest; Redis bypass is clean when unavailable.
 - **Polymarket ingest** – Worker polls Gamma `/events` (active/non-archived defaults), flattens multi-market events, rate limits requests, retries with exponential backoff, and upserts normalized rows; optional CLOB enrichment hooks remain in place.
-- **Resolution pipeline** – Goldsky (preferred) → Conditional Tokens RPC fallback for payout vectors; stored in Postgres/Redis, cached in `/resolution/{condition_id}`, and surfaced in `/markets` detail payloads. Resolved markets drop from cache 12 hours after `resolved_at`.
+- **Resolution pipeline** – Goldsky for payout vectors; stored in Postgres/Redis, cached in `/resolution/{condition_id}`, and surfaced in `/markets` detail payloads. Resolved markets drop from cache 12 hours after `resolved_at`.
 - **Signed pricing** – `/pricing/quote` ignores client FX, pulls streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and writes quote rows; `/pricing/submit` revalidates digest/expiry/FX drift and marks consumed.
 - **Health/metrics** – `/health` fans DB + Redis + worker heartbeat + Polymarket + signer/CORS checks; `/metrics` exposes Prometheus histograms/counters for HTTP, cache, ingest, and proof flows. Docker health probes use Python entrypoints instead of cURL.
 - **Automation hooks** – Worker emits heartbeats/batch stats, primes featured caches (markets/categories/suggest), can request Groth16 proofs, and has stubs for MarketFactory automation and AI summary queues. Retention currently reports metrics only.
@@ -40,7 +40,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 
 ## Horizen Indexing via Goldsky
 
-Horizen events (MarketFactory deployments, Conditional Tokens resolutions, rake changes) can now be sourced from Goldsky-managed subgraphs. Provide `RM_GOLDSKY_SUBGRAPH_URL` + `RM_GOLDSKY_API_KEY` and the worker will prefer GraphQL lookups for payout vectors before falling back to direct RPC calls. This gives ops teams fast, filterable history without running dedicated indexers, and it unlocks the roadmap items around persistent resolution ledgers, Horizen ZEN testnet monitoring, and investor-friendly audit exports.
+Horizen events (MarketFactory deployments, resolutions, rake changes) can now be sourced from Goldsky-managed subgraphs. Provide `RM_GOLDSKY_SUBGRAPH_URL` + `RM_GOLDSKY_API_KEY` to pull payout vectors without running dedicated indexers. This gives ops teams fast, filterable history and unlocks the roadmap items around persistent resolution ledgers, Horizen ZEN testnet monitoring, and investor-friendly audit exports.
 
 When Goldsky isn’t configured the previous RPC path remains intact, so staging environments can toggle the feature independently.
 

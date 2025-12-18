@@ -186,7 +186,7 @@ async def test_sync_market_persists_resolution(monkeypatch):
     class DummyClient:
         def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
             return {
-                "source": "conditional_tokens",
+                "source": "goldsky_subgraph",
                 "conditionId": condition_id_hex,
                 "resolved": True,
                 "outcomes": outcomes,
@@ -201,8 +201,7 @@ async def test_sync_market_persists_resolution(monkeypatch):
             }
 
     try:
-        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
-        monkeypatch.setattr(resolution_module, "conditional_tokens_client", DummyClient(), raising=False)
+        monkeypatch.setattr(resolution_module, "goldsky_client", DummyClient(), raising=False)
 
         payload = MarketPayload(
             event_id="evt-resolution",
@@ -229,61 +228,6 @@ async def test_sync_market_persists_resolution(monkeypatch):
             ).scalar_one()
             assert record.resolved is True
             assert record.transaction_hash == "0x" + "2" * 64
-    finally:
-        await engine.dispose()
-        monkeypatch.setattr(resolution_module, "conditional_tokens_client", None, raising=False)
-        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
-
-
-async def test_sync_market_uses_goldsky_when_available(monkeypatch):
-    engine, session_factory = await create_async_in_memory_db()
-
-    class DummyGoldsky:
-        def resolution_summary(self, condition_id_hex, outcomes, outcome_count_hint):
-            return {
-                "source": "goldsky_subgraph",
-                "conditionId": condition_id_hex,
-                "resolved": True,
-                "outcomes": outcomes,
-                "payouts": [1, 0],
-                "winners": [{"index": 0, "label": outcomes[0] if outcomes else None, "payout": 1}],
-                "checkedAt": datetime.now(UTC),
-                "oracle": "0xoracle",
-                "questionId": "0x" + "4" * 64,
-                "transactionHash": "0x" + "5" * 64,
-                "blockNumber": 777,
-                "blockTimestamp": datetime.now(UTC),
-            }
-
-    try:
-        monkeypatch.setattr(resolution_module, "goldsky_client", DummyGoldsky(), raising=False)
-        monkeypatch.setattr(resolution_module, "conditional_tokens_client", None, raising=False)
-
-        payload = MarketPayload(
-            event_id="evt-goldsky",
-            title="Goldsky Market",
-            slug="goldsky-market",
-            category="crypto",
-            metadata_uri=None,
-            oracle="polymarket",
-            status="commit",
-            outcomes=["Yes", "No"],
-            outcome_prices=[0.6, 0.4],
-            gamma_raw={"id": "evt-goldsky"},
-            condition_id="0x" + "6" * 64,
-        )
-
-        async with session_factory() as session:
-            _, outcome = await sync_market(session, payload)
-            assert outcome.resolution_changed is True
-            await session.commit()
-
-        async with session_factory() as session:
-            record = (
-                await session.execute(select(Resolution).where(Resolution.condition_id == payload.condition_id.lower()))
-            ).scalar_one()
-            assert record.source == "goldsky_subgraph"
-            assert record.block_number == 777
     finally:
         await engine.dispose()
         monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)

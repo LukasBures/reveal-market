@@ -1,5 +1,5 @@
 # ruff: noqa: UP047
-"""Resolution fetching and persistence helpers (Goldsky/Conditional Tokens)."""
+"""Resolution fetching and persistence helpers (Goldsky)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from .polymarket import MarketPayload
 
 logger = runtime.logger
 goldsky_client = runtime.goldsky_client
-conditional_tokens_client = runtime.conditional_tokens_client
 
 T = TypeVar("T")
 
@@ -124,7 +123,7 @@ def _build_resolution_record(
             winning_outcome = None
     return {
         "condition_id": summary.get("condition_id") or summary.get("conditionId"),
-        "source": summary.get("source", "conditional_tokens"),
+        "source": summary.get("source", "goldsky_subgraph"),
         "resolved": bool(summary.get("resolved")),
         "payouts": payouts,
         "winners": winners,
@@ -148,7 +147,7 @@ async def _fetch_resolution_snapshot(
     market: MarketPayload,
     outcome_count_hint: int | None,
 ) -> dict[str, Any] | None:
-    """Return the best-effort resolution summary from Goldsky or fallback RPC."""
+    """Return the best-effort resolution summary from Goldsky."""
     outcomes = market.outcomes or []
     attempts = runtime.settings.resolution_fetch_max_attempts
     backoff = runtime.settings.resolution_fetch_backoff_seconds
@@ -187,32 +186,26 @@ async def _fetch_resolution_snapshot(
             return None
 
     goldsky = goldsky_client or runtime.goldsky_client
-    if goldsky is not None:
-
-        async def _goldsky_action() -> dict[str, Any] | None:
-            result = goldsky.resolution_summary(condition_id, outcomes, outcome_count_hint)  # type: ignore[call-arg]
-            if asyncio.iscoroutine(result):
-                return await result  # type: ignore[return-value]
-            return result  # type: ignore[return-value]
-
-        summary = await _with_retry(_goldsky_action, "goldsky")
-        if summary:
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.resolution.goldsky_success",
-                message="loaded resolution from goldsky",
-                condition_id=condition_id,
-                resolved=summary.get("resolved"),
-            )
-            return summary
-    conditional = conditional_tokens_client or runtime.conditional_tokens_client
-    if conditional is None:
+    if goldsky is None:
         return None
-    return await _with_retry(
-        lambda: asyncio.to_thread(conditional.resolution_summary, condition_id, outcomes, outcome_count_hint),
-        "conditional_tokens",
-    )
+
+    async def _goldsky_action() -> dict[str, Any] | None:
+        result = goldsky.resolution_summary(condition_id, outcomes, outcome_count_hint)  # type: ignore[call-arg]
+        if asyncio.iscoroutine(result):
+            return await result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
+
+    summary = await _with_retry(_goldsky_action, "goldsky")
+    if summary:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.resolution.goldsky_success",
+            message="loaded resolution from goldsky",
+            condition_id=condition_id,
+            resolved=summary.get("resolved"),
+        )
+    return summary
 
 
 async def apply_resolution(
@@ -220,12 +213,7 @@ async def apply_resolution(
 ) -> ResolutionOutcome:
     condition_id = market.condition_id
     active_goldsky = goldsky_client or runtime.goldsky_client
-    active_conditional = conditional_tokens_client or runtime.conditional_tokens_client
-    if (
-        (active_goldsky is None and active_conditional is None)
-        or not isinstance(condition_id, str)
-        or not condition_id.startswith("0x")
-    ):
+    if active_goldsky is None or not isinstance(condition_id, str) or not condition_id.startswith("0x"):
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
                 logger,
@@ -234,7 +222,6 @@ async def apply_resolution(
                 message="skipping resolution sync because prerequisites not met",
                 condition_id=condition_id,
                 goldsky_enabled=active_goldsky is not None,
-                conditional_tokens_enabled=active_conditional is not None,
             )
         return ResolutionOutcome()
 
@@ -328,7 +315,7 @@ async def apply_resolution(
         logger,
         logging.DEBUG,
         event="worker.resolution.persisted",
-        message="persisted conditional tokens resolution snapshot",
+        message="persisted resolution snapshot",
         condition_id=normalized_condition_id,
         resolved=record_payload["resolved"],
         block_number=record_payload["block_number"],

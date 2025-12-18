@@ -9,7 +9,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Domain | Duties |
 | --- | --- |
 | Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. Normalized tables (`market_outcomes`, `market_tags`, `market_clob_tokens`, `market_gamma_metadata/events`, `gamma_raw`) replace legacy JSON columns. |
-| Resolution tracking | Prefer Goldsky subgraph data (fallback to Conditional Tokens RPC) to persist payout vectors in Postgres + Redis and update market status (`settled`). |
+| Resolution tracking | Use Goldsky subgraph data to persist payout vectors in Postgres + Redis and update market status (`settled`). |
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, Prometheus counters (`worker.*`), plus proof queue depth gauge and DLQ counter. |
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
@@ -24,8 +24,8 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ## Current implementation snapshot
 
-- **Startup** – Configures logging, builds clients (Polymarket, optional CLOB, Goldsky, Conditional Tokens, prover), connects to Redis, optionally runs Alembic migrations, and broadcasts schema revision to Redis.
-- **Ingestion loop** – `process_once` fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies resolutions (Goldsky preferred, Conditional Tokens fallback).
+- **Startup** – Configures logging, builds clients (Polymarket, optional CLOB, Goldsky, prover), connects to Redis, optionally runs Alembic migrations, and broadcasts schema revision to Redis.
+- **Ingestion loop** – `process_once` fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies resolutions via Goldsky.
 - **Cache governance** – Invalidates Redis tags for market list/detail/resolution, primes homepage/categories/suggest caches, writes schema tags, and publishes batch stats + heartbeats to Redis.
 - **Resolution + proofs** – Persists payout vectors in Postgres + Redis; optional prover integration requests Groth16 proofs, caches receipts, and stores them in DB; resolved markets expire from cache 12 hours after `resolved_at`.
 - **Retention** – Reports metrics on resolved markets beyond `RM_RESOLVED_RETENTION_SECONDS` (no deletions yet); retention runner executes each loop.
@@ -49,7 +49,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 1. **Startup** (`app.service.run_worker`):
    - Configure logging via `app.logging_config`.
-   - Build runtime clients (Polymarket, optional CLOB, Goldsky, Conditional Tokens, prover) in `app.runtime`.
+   - Build runtime clients (Polymarket, optional CLOB, Goldsky, prover) in `app.runtime`.
    - Connect to Redis (heartbeat + cache invalidation).
    - Optionally run Alembic migrations (`app.schema.ensure_schema`) and broadcast the latest revision key.
 2. **Main loop**:
@@ -73,7 +73,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 backend/worker/
 ├── app/
 │   ├── service.py         # Async worker loop, heartbeats, orchestration
-│   ├── runtime.py         # Settings + client builders (Polymarket, CLOB, Goldsky, prover, Conditional Tokens)
+│   ├── runtime.py         # Settings + client builders (Polymarket, CLOB, Goldsky, prover)
 │   ├── (fetcher removed; ingestion calls AsyncPolymarketClient directly)
 │   ├── market_sync.py     # Market persistence, retention, resolution backfill
 │   ├── resolution.py      # Resolution fetch/refresh and ledger upserts
@@ -143,7 +143,7 @@ All environment variables begin with `RM_`. Notable groups:
 | --- | --- |
 | `RM_RESOLVED_RETENTION_SECONDS` | Age threshold before deleting settled markets. |
 | `RM_RESOLVED_RETENTION_DRY_RUN` | If true, log eligible rows but do not delete. |
-| `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky/Conditional Tokens resolution fetches. |
+| `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky resolution fetches. |
 
 ### On-chain automation (manual only)
 
@@ -177,7 +177,7 @@ All environment variables begin with `RM_`. Notable groups:
 
 | Variable | Description |
 | --- | --- |
-| `RM_GOLDSKY_SUBGRAPH_URL` | Goldsky GraphQL endpoint that indexes Horizen Conditional Tokens events. |
+| `RM_GOLDSKY_SUBGRAPH_URL` | Goldsky GraphQL endpoint that indexes Horizen events. |
 | `RM_GOLDSKY_API_KEY` | API key required for private Goldsky projects (leave blank for public endpoints). |
 | `RM_GOLDSKY_TIMEOUT_SECONDS` | HTTP timeout for Goldsky GraphQL requests. |
 
