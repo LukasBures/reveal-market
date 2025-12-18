@@ -145,38 +145,38 @@
             ],
             "title": "Outcomeid"
           },
-        "salt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Salt"
-        },
-        "txHash": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Txhash"
-        },
-        "ticketHash": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
+          "salt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salt"
+          },
+          "ticketHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
               {
                 "type": "null"
               }
             ],
             "title": "Tickethash"
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Txhash"
           },
           "user_address": {
             "anyOf": [
@@ -876,6 +876,17 @@
             ],
             "title": "Market Maker"
           },
+          "merkle_root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkle Root"
+          },
           "metadata_uri": {
             "anyOf": [
               {
@@ -977,6 +988,39 @@
             ],
             "title": "Price Tick Size"
           },
+          "proof_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Hash"
+          },
+          "proof_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Request Id"
+          },
+          "proof_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Status"
+          },
           "question_id": {
             "anyOf": [
               {
@@ -1042,6 +1086,29 @@
             ],
             "title": "Resolution Status"
           },
+          "settlement_submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Submitted At"
+          },
+          "settlement_tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Tx Hash"
+          },
           "siblings": {
             "anyOf": [
               {
@@ -1094,6 +1161,17 @@
             "default": "commit",
             "title": "Status",
             "type": "string"
+          },
+          "submission_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submission Status"
           },
           "summary": {
             "anyOf": [
@@ -2593,6 +2671,17 @@
             ],
             "title": "Marketid"
           },
+          "merkleRoot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merkleroot"
+          },
           "oracle": {
             "anyOf": [
               {
@@ -2617,6 +2706,39 @@
             },
             "title": "Payouts",
             "type": "array"
+          },
+          "proofHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofhash"
+          },
+          "proofRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofrequestid"
+          },
+          "proofStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proofstatus"
           },
           "questionId": {
             "anyOf": [
@@ -2655,6 +2777,29 @@
             "title": "Resolved",
             "type": "boolean"
           },
+          "settlementSubmittedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlementsubmittedat"
+          },
+          "settlementTxHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlementtxhash"
+          },
           "slug": {
             "anyOf": [
               {
@@ -2669,6 +2814,17 @@
           "source": {
             "title": "Source",
             "type": "string"
+          },
+          "submissionStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submissionstatus"
           },
           "title": {
             "anyOf": [

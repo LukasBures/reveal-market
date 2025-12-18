@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Sequence
+import secrets
+from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -24,6 +26,8 @@ from web3.types import TxParams, Wei
 from . import runtime
 from .cache_ops import invalidate_cache_tags
 from .database import session_scope
+from .merkle import build_merkle_root_and_paths
+from .metrics import RELAYER_QUEUE_COUNTER
 
 logger = runtime.logger
 
@@ -56,6 +60,16 @@ def _build_market_contract(web3: AsyncWeb3, market_address: str) -> AsyncContrac
 
     checksum_address = cast(ChecksumAddress, to_checksum(market_address))
     return web3.eth.contract(address=checksum_address, abi=REVEAL_MARKET_ABI)
+
+
+def _hex_to_bytes(value: str | None) -> bytes:
+    if not value:
+        return b""
+    cleaned = value.removeprefix("0x")
+    try:
+        return bytes.fromhex(cleaned)
+    except ValueError:
+        return b""
 
 
 async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[str, Any]:
@@ -222,38 +236,194 @@ async def _resolve_winning_outcome(session: AsyncSession, market: shared_models.
     return None
 
 
-async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
-    """Submit settlement proofs on-chain for markets with generated proofs and no tx hash."""
+async def _build_merkle_proof_for_commitment(
+    session: AsyncSession, market_db_id: int, commitment: shared_models.Commitment
+) -> list[str]:
+    """Return stored merkle path or recompute from existing leaves."""
 
-    if not runtime.settings.auto_settlement_tx_enabled:
-        return 0
-    signer_secret = runtime.settings.settlement_signer_private_key
-    rpc_url = str(runtime.settings.settlement_rpc_url or runtime.settings.rpc_url or "")
-    if signer_secret is None or not rpc_url:
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.settlement.tx.disabled",
-            message="auto-settlement tx disabled (missing signer or rpc)",
+    path_rows = list(
+        (
+            await session.execute(
+                select(shared_models.CommitmentMerklePath)
+                .where(shared_models.CommitmentMerklePath.commitment_id == commitment.id)
+                .order_by(shared_models.CommitmentMerklePath.level.asc())
+            )
+        ).scalars()
+    )
+    siblings = [row.sibling_hash for row in path_rows] if path_rows else []
+    if siblings:
+        return siblings
+    commitments = await shared_repository.list_commitments_by_market(session, market_db_id)
+    leaves: list[bytes] = []
+    index_lookup: dict[int, int] = {}
+    for idx, row in enumerate(commitments):
+        leaf_bytes = _hex_to_bytes(row.leaf)
+        if not leaf_bytes:
+            return []
+        leaves.append(leaf_bytes)
+        if row.leaf_index is not None:
+            index_lookup[row.leaf_index] = idx
+    if commitment.leaf_index is None or commitment.leaf_index not in index_lookup:
+        return []
+    _, paths = build_merkle_root_and_paths(leaves)
+    try:
+        return [sibling.hex() for sibling in paths[index_lookup[commitment.leaf_index]]]
+    except Exception:
+        return []
+
+
+async def _build_relayer_claim_payloads(
+    session: AsyncSession, market: shared_models.Market, settlement: shared_models.Settlement
+) -> list[dict[str, Any]]:
+    """Construct relayer claim payloads for winning commitments."""
+
+    if not market.market_address or settlement.winning_outcome_id is None:
+        return []
+    winning_outcome = settlement.winning_outcome_id
+    payloads: list[dict[str, Any]] = []
+    commitments = await shared_repository.list_commitments_by_market(session, market.id)
+    for commitment in commitments:
+        if commitment.outcome_id != winning_outcome:
+            continue
+        merkle_proof = await _build_merkle_proof_for_commitment(session, market.id, commitment)
+        payloads.append(
+            {
+                "user": commitment.user_address,
+                "market": market.market_address,
+                "ticket_id": commitment.leaf_index or 0,
+                "outcome_id": winning_outcome,
+                "amount": int(commitment.amount_wei),
+                "salt": commitment.salt or "0x0",
+                "merkle_proof": merkle_proof,
+                "merkle_root": settlement.merkle_root,
+                "commitments_count": settlement.commitments_count,
+                "pool_total_yes": settlement.pool_total_yes,
+                "pool_total_no": settlement.pool_total_no,
+                "total_escrow": settlement.total_escrow,
+                "total_liability": settlement.total_liability,
+                "rake_bps": settlement.rake_bps,
+                "proof_request_id": settlement.proof_request_id,
+                "event_id": market.event_id,
+            }
         )
+    return payloads
+
+
+async def _enqueue_relayer_claims(
+    redis_client: Redis | None, market: shared_models.Market, settlement: shared_models.Settlement
+) -> int:
+    """Queue relayer claim jobs for the given market using the relayer Redis queue."""
+
+    if redis_client is None or not runtime.settings.relayer_queue_enabled or not runtime.settings.relayer_base_url:
         return 0
     try:
-        account = Account.from_key(signer_secret.get_secret_value())
-    except Exception as exc:  # pragma: no cover - config error
+        async with session_scope() as session:
+            payloads = await _build_relayer_claim_payloads(session, market, settlement)
+    except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
-            event="worker.settlement.tx.signer_error",
-            message="failed to load settlement signer",
+            event="worker.relayer.payload_failed",
+            message="failed to build relayer claim payloads",
             error=str(exc),
         )
+        RELAYER_QUEUE_COUNTER.labels(outcome="error").inc()
         return 0
+    if not payloads:
+        return 0
+    endpoint = str(runtime.settings.relayer_base_url).rstrip("/") + "/claim"
+    enqueued = 0
+    now = int(datetime.now(tz=UTC).timestamp())
+    for payload in payloads:
+        job_id = secrets.token_hex(16)
+        body = {
+            "job_id": job_id,
+            "kind": "claim",
+            "endpoint": endpoint,
+            "payload": payload,
+            "attempts": 0,
+            "enqueued_at": now,
+        }
+        try:
+            await cast(Awaitable[Any], redis_client.lpush(runtime.settings.relayer_queue_key, json.dumps(body)))
+            enqueued += 1
+        except Exception as exc:  # pragma: no cover - redis failures are non-fatal
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.relayer.enqueue_failed",
+                message="failed to enqueue relayer claim job",
+                market_id=getattr(market, "event_id", None),
+                error=str(exc),
+            )
+            RELAYER_QUEUE_COUNTER.labels(outcome="error").inc()
+            continue
+    if enqueued:
+        RELAYER_QUEUE_COUNTER.labels(outcome="queued").inc(enqueued)
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.relayer.claims_enqueued",
+            message="queued relayer claim jobs",
+            count=enqueued,
+            market_id=getattr(market, "event_id", None),
+        )
+    return enqueued
 
-    web3 = get_async_web3(rpc_url)
+
+async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
+    """Submit settlement proofs on-chain for markets with generated proofs and no tx hash."""
+
+    relayer_enabled = bool(runtime.settings.relayer_queue_enabled and runtime.settings.relayer_base_url)
+    if not runtime.settings.auto_settlement_tx_enabled and not relayer_enabled:
+        return 0
+    signer_secret = runtime.settings.settlement_signer_private_key
+    rpc_url = str(runtime.settings.settlement_rpc_url or runtime.settings.rpc_url or "")
+    account = None
+    web3: AsyncWeb3 | None = None
+    if runtime.settings.auto_settlement_tx_enabled:
+        if signer_secret is None or not rpc_url:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.settlement.tx.disabled",
+                message="auto-settlement tx disabled (missing signer or rpc)",
+            )
+            if not relayer_enabled:
+                return 0
+        else:
+            try:
+                account = Account.from_key(signer_secret.get_secret_value())
+                web3 = get_async_web3(rpc_url)
+            except Exception as exc:  # pragma: no cover - config error
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.settlement.tx.signer_error",
+                    message="failed to load settlement signer",
+                    error=str(exc),
+                )
+                if not relayer_enabled:
+                    return 0
+
     submitted = 0
+    dirty_events: set[str] = set()
+    dirty_conditions: set[str] = set()
     async with session_scope() as session:
         pending = await shared_repository.list_settlements_pending_tx(session)
         for settlement, market in pending:
+            event_id = getattr(market, "event_id", None)
+            condition_value = getattr(market, "condition_id", None)
+
+            def _mark_dirty(eid: str | None = event_id, cond_val: str | None = condition_value) -> None:
+                if eid:
+                    dirty_events.add(eid)
+                    summary.changed_events.add(eid)
+                if isinstance(cond_val, str) and cond_val:
+                    normalized = cond_val.lower()
+                    dirty_conditions.add(normalized)
+                    summary.changed_conditions.add(normalized)
+
             if not market.market_address:
                 continue
             winning_outcome_id = settlement.winning_outcome_id or await _resolve_winning_outcome(session, market)
@@ -262,6 +432,21 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             if settlement.merkle_root is None:
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
+            if relayer_enabled:
+                enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
+                if enqueued:
+                    settlement.submission_status = shared_models.SettlementSubmissionStatus.QUEUED.value
+                    settlement.submission_error = None
+                    _mark_dirty()
+                    session.add(settlement)
+                    submitted += enqueued
+                    continue
+            if web3 is None or account is None:
+                continue
+            settlement.submission_status = shared_models.SettlementSubmissionStatus.PROCESSING.value
+            settlement.submission_error = None
+            _mark_dirty()
+            session.add(settlement)
             receipt = None
             if settlement.proof_request_id:
                 receipt = await shared_repository.get_settlement_receipt_by_request_id(
@@ -275,6 +460,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                     message="skipping settlement submission due to missing proof receipt",
                     market_id=getattr(market, "event_id", None),
                 )
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                settlement.submission_error = "missing_proof_receipt"
+                _mark_dirty()
                 continue
             proof = receipt.proof
             try:
@@ -301,13 +489,17 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                     market_id=getattr(market, "event_id", None),
                     error=str(exc),
                 )
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                settlement.submission_error = str(exc)
+                _mark_dirty()
                 continue
 
             settlement.settlement_tx_hash = tx_hash
             settlement.settlement_block_number = block_number
             settlement.settlement_submitted_at = datetime.now(tz=UTC)
+            settlement.submission_status = shared_models.SettlementSubmissionStatus.SUBMITTED.value
+            _mark_dirty()
             session.add(settlement)
-            summary.changed_events.add(getattr(market, "event_id", ""))
             submitted += 1
             log_event(
                 logger,
@@ -319,6 +511,6 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                 block_number=block_number,
             )
         await session.flush()
-    if submitted:
+    if dirty_events or dirty_conditions:
         await invalidate_cache_tags(redis_client, summary)
     return submitted

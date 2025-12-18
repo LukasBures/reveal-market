@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 import logging
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, TypeVar, cast
 
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
@@ -15,13 +19,161 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import runtime
+from .cache_ops import invalidate_cache_tags
 from .database import session_scope
 from .market_sync import SyncSummary
+from .metrics import (
+    PROOF_QUEUE_DEPTH_GAUGE,
+    PROOF_QUEUE_DLQ_COUNTER,
+    PROOF_QUEUE_OVERFLOW_COUNTER,
+    SETTLEMENT_QUEUE_DEPTH_GAUGE,
+    SETTLEMENT_QUEUE_DLQ_COUNTER,
+)
 from .polymarket import MarketPayload
 from .proof_builder import SettlementDataMissingError, build_prover_payload_async
 from .prover_client import ProverError
+from .settlement import run_settlement_jobs
 
 logger = runtime.logger
+T = TypeVar("T")
+
+
+async def _resolve_awaitable(value: Awaitable[T] | T) -> T:
+    """Handle Redis' async-or-pipeline return types safely for mypy."""
+
+    if inspect.isawaitable(value):
+        return cast(T, await value)
+    return cast(T, value)
+
+
+def _queue_keys() -> tuple[str, str]:
+    return (
+        runtime.settings.proof_queue_key,
+        runtime.settings.proof_queue_dedupe_key,
+    )
+
+
+def _settlement_queue_keys() -> tuple[str, str]:
+    return (
+        runtime.settings.settlement_queue_key,
+        runtime.settings.settlement_queue_dead_letter_key,
+    )
+
+
+async def _invalidate_market_cache(redis_client: Redis | None, event_id: str | None, condition_id: str | None) -> None:
+    if redis_client is None:
+        return
+    summary = SyncSummary()
+    if event_id:
+        summary.changed_events.add(str(event_id))
+    if condition_id:
+        summary.changed_conditions.add(str(condition_id).lower())
+    await invalidate_cache_tags(redis_client, summary)
+
+
+async def _update_queue_depth(redis_client: Redis | None) -> None:
+    if redis_client is None:
+        return
+    queue_key, _ = _queue_keys()
+    try:
+        depth = await _resolve_awaitable(redis_client.llen(queue_key))
+        PROOF_QUEUE_DEPTH_GAUGE.labels(queue=queue_key).set(float(depth))
+    except Exception:  # pragma: no cover - metrics best-effort
+        return
+
+
+async def _dead_letter(redis_client: Redis, job: dict[str, Any], reason: str) -> None:
+    """Push a failed job to dead letter list for inspection."""
+
+    try:
+        await _resolve_awaitable(
+            redis_client.rpush(runtime.settings.proof_queue_dead_letter_key, json.dumps(job, default=str))
+        )
+        PROOF_QUEUE_DLQ_COUNTER.labels(reason=reason).inc()
+    except Exception:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.proof.queue_dlq_failed",
+            message="failed to dead-letter proof job",
+            reason=reason,
+        )
+
+
+async def _settlement_dead_letter(redis_client: Redis, job: dict[str, Any], reason: str) -> None:
+    try:
+        await _resolve_awaitable(
+            redis_client.rpush(runtime.settings.settlement_queue_dead_letter_key, json.dumps(job, default=str))
+        )
+        SETTLEMENT_QUEUE_DLQ_COUNTER.labels(reason=reason).inc()
+    except Exception:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.queue_dlq_failed",
+            message="failed to dead-letter settlement job",
+            reason=reason,
+        )
+
+
+async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -> int:
+    """Store proof jobs in Redis so background workers can process them without blocking ingestion."""
+
+    if redis_client is None:
+        return 0
+    queue_key, dedupe_key = _queue_keys()
+    depth_raw = await _resolve_awaitable(redis_client.llen(queue_key))
+    depth = int(depth_raw or 0)
+    if depth >= runtime.settings.proof_queue_max_depth:
+        PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.proof.queue_overflow",
+            message="skipping proof enqueue because queue is at capacity",
+            depth=depth,
+            max_depth=runtime.settings.proof_queue_max_depth,
+        )
+        return 0
+    enqueued = 0
+    for snapshot, payload, condition in summary.proof_jobs:
+        job_id = str(
+            snapshot.get("market_address")
+            or snapshot.get("id")
+            or snapshot.get("market_id")
+            or snapshot.get("event_id")
+            or condition
+            or "",
+        )
+        if not job_id:
+            continue
+        try:
+            added = await _resolve_awaitable(redis_client.sadd(dedupe_key, job_id))
+        except Exception:
+            added = False
+        if not added:
+            continue
+        job = {
+            "job_id": job_id,
+            "market_snapshot": snapshot,
+            "market_payload": payload.model_dump(),
+            "condition_id": condition,
+        }
+        try:
+            await _resolve_awaitable(redis_client.rpush(queue_key, json.dumps(job, default=str)))
+            enqueued += 1
+        except Exception as exc:  # pragma: no cover - enqueue best-effort
+            await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.queue_enqueue_failed",
+                message="failed to enqueue proof job",
+                job_id=job_id,
+                error=str(exc),
+            )
+    await _update_queue_depth(redis_client)
+    return enqueued
 
 
 async def _persist_settlement_snapshot(session: AsyncSession, market_id: int, snapshot: dict[str, Any]) -> None:
@@ -165,6 +317,13 @@ async def maybe_generate_settlement_proof(
     market_address = market_snapshot.get("market_address")
     numeric_market_id = _as_int(market_identifier)
 
+    async def _notify_status_change() -> None:
+        await _invalidate_market_cache(
+            redis_client,
+            market_event_id or market_snapshot.get("event_id") or market_payload.event_id,
+            normalized_condition or market_snapshot.get("condition_id") or condition_id,
+        )
+
     if market_identifier is None:
         log_event(
             logger,
@@ -219,6 +378,7 @@ async def maybe_generate_settlement_proof(
                 settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
                 session.add(settlement_row)
             await session.flush()
+            await _notify_status_change()
     except (ValueError, SettlementDataMissingError) as exc:
         fallback = _build_snapshot_payload(market_snapshot, market_payload, market_identifier or "")
         if not fallback:
@@ -244,6 +404,8 @@ async def maybe_generate_settlement_proof(
                 if settlement_row:
                     settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
                     session.add(settlement_row)
+                    await session.flush()
+                    await _notify_status_change()
         except Exception as exc:  # pragma: no cover - defensive snapshot persistence
             log_event(
                 logger,
@@ -303,6 +465,7 @@ async def maybe_generate_settlement_proof(
             error=str(exc),
             event_id=market_snapshot.get("event_id"),
         )
+        await _notify_status_change()
         return False
 
     proof_hash = None
@@ -395,6 +558,7 @@ async def maybe_generate_settlement_proof(
             market_id=market_identifier,
         )
 
+    await _notify_status_change()
     log_event(
         logger,
         logging.DEBUG,
@@ -406,3 +570,191 @@ async def maybe_generate_settlement_proof(
         nonce=getattr(response, "request_id", None),
     )
     return True
+
+
+async def _process_proof_job(redis_client: Redis, job: dict[str, Any]) -> None:
+    job_id = job.get("job_id")
+    _, dedupe_key = _queue_keys()
+    try:
+        payload_dict = job.get("market_payload") or {}
+        try:
+            market_payload = MarketPayload.model_validate(payload_dict)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.queue_job_invalid",
+                message="dropping invalid proof job payload",
+                job_id=job_id,
+                error=str(exc),
+            )
+            await _dead_letter(redis_client, job, "invalid_payload")
+            return
+        snapshot = job.get("market_snapshot") or {}
+        condition = job.get("condition_id")
+        await maybe_generate_settlement_proof(
+            redis_client,
+            market_snapshot=snapshot,
+            market_payload=market_payload,
+            condition_id=condition,
+        )
+        # Enqueue settlement job to run separately with its own DLQ/backoff.
+        await enqueue_settlement_job(redis_client)
+    except Exception as exc:  # pragma: no cover - defensive processing
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.proof.queue_job_failed",
+            message="failed to process proof queue job",
+            job_id=job_id,
+            error=str(exc),
+        )
+        await _dead_letter(redis_client, job, "processing_error")
+    finally:
+        try:
+            if job_id:
+                await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
+        except Exception:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.queue_cleanup_failed",
+                message="failed to clean up proof queue dedupe entry",
+                job_id=job_id,
+            )
+        await _update_queue_depth(redis_client)
+
+
+async def run_proof_queue_worker(redis_client: Redis | None) -> None:
+    """Continuously drain the proof queue without blocking the main Gamma loop."""
+
+    if redis_client is None:
+        return
+    queue_key, _ = _queue_keys()
+    poll = max(runtime.settings.proof_queue_poll_seconds, 0.1)
+    semaphore = asyncio.Semaphore(max(1, runtime.settings.proof_queue_max_concurrency))
+    await _update_queue_depth(redis_client)
+    try:
+        while True:
+            raw_job = None
+            try:
+                raw_job = await _resolve_awaitable(redis_client.lpop(queue_key))
+            except Exception as exc:  # pragma: no cover - redis transient errors
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.proof.queue_read_failed",
+                    message="failed to read proof queue",
+                    error=str(exc),
+                )
+            if raw_job is None:
+                await asyncio.sleep(poll)
+                continue
+            if isinstance(raw_job, (bytes, bytearray)):
+                raw_payload = raw_job.decode()
+            elif isinstance(raw_job, str):
+                raw_payload = raw_job
+            else:
+                await _update_queue_depth(redis_client)
+                continue
+            try:
+                job: dict[str, Any] = json.loads(raw_payload)
+            except Exception:
+                await _update_queue_depth(redis_client)
+                continue
+            async with semaphore:
+                await _process_proof_job(redis_client, job)
+    except asyncio.CancelledError:  # pragma: no cover - shutdown path
+        return
+
+
+async def enqueue_settlement_job(redis_client: Redis | None) -> int:
+    """Enqueue a settlement job if Redis is available."""
+
+    if redis_client is None:
+        return 0
+    queue_key, _ = _settlement_queue_keys()
+    try:
+        await _resolve_awaitable(redis_client.rpush(queue_key, json.dumps({"job": "settle"})))
+        await _update_settlement_depth(redis_client)
+        return 1
+    except Exception as exc:  # pragma: no cover - enqueue best-effort
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.queue_enqueue_failed",
+            message="failed to enqueue settlement job",
+            error=str(exc),
+        )
+        return 0
+
+
+async def _update_settlement_depth(redis_client: Redis | None) -> None:
+    if redis_client is None:
+        return
+    queue_key, _ = _settlement_queue_keys()
+    try:
+        depth = await _resolve_awaitable(redis_client.llen(queue_key))
+        SETTLEMENT_QUEUE_DEPTH_GAUGE.labels(queue=queue_key).set(float(depth))
+    except Exception:  # pragma: no cover - metrics best-effort
+        return
+
+
+async def _process_settlement_job(redis_client: Redis, job: dict[str, Any]) -> None:
+    try:
+        temp_summary = SyncSummary()
+        await run_settlement_jobs(temp_summary, redis_client)
+    except Exception as exc:  # pragma: no cover - defensive
+        await _settlement_dead_letter(redis_client, job, "processing_error")
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.queue_job_failed",
+            message="failed to process settlement queue job",
+            error=str(exc),
+        )
+    finally:
+        await _update_settlement_depth(redis_client)
+
+
+async def run_settlement_queue_worker(redis_client: Redis | None) -> None:
+    """Continuously drain the settlement queue."""
+
+    if redis_client is None:
+        return
+    queue_key, _ = _settlement_queue_keys()
+    poll = max(runtime.settings.settlement_queue_poll_seconds, 0.1)
+    semaphore = asyncio.Semaphore(max(1, runtime.settings.settlement_queue_max_concurrency))
+    await _update_settlement_depth(redis_client)
+    try:
+        while True:
+            raw_job = None
+            try:
+                raw_job = await _resolve_awaitable(redis_client.lpop(queue_key))
+            except Exception as exc:  # pragma: no cover
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.settlement.queue_read_failed",
+                    message="failed to read settlement queue",
+                    error=str(exc),
+                )
+            if raw_job is None:
+                await asyncio.sleep(poll)
+                continue
+            if isinstance(raw_job, (bytes, bytearray)):
+                raw_payload = raw_job.decode()
+            elif isinstance(raw_job, str):
+                raw_payload = raw_job
+            else:
+                await _update_settlement_depth(redis_client)
+                continue
+            try:
+                job: dict[str, Any] = json.loads(raw_payload)
+            except Exception:
+                await _update_settlement_depth(redis_client)
+                continue
+            async with semaphore:
+                await _process_settlement_job(redis_client, job)
+    except asyncio.CancelledError:  # pragma: no cover
+        return

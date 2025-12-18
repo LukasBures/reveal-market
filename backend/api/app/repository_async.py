@@ -101,3 +101,7 @@ async def upsert_settlement_snapshot(
     session: AsyncSession, market_id: int, data: Mapping[str, Any]
 ) -> shared_models.Settlement:
     return await shared_repository_async.upsert_settlement_snapshot(session, market_id, data)
+
+
+async def get_settlement_by_market_id(session: AsyncSession, market_id: int) -> shared_models.Settlement | None:
+    return await shared_repository_async.get_settlement_by_market_id(session, market_id)

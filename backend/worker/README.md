@@ -11,7 +11,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. Normalized tables (`market_outcomes`, `market_tags`, `market_clob_tokens`, `market_gamma_metadata/events`, `gamma_raw`) replace legacy JSON columns. |
 | Resolution tracking | Prefer Goldsky subgraph data (fallback to Conditional Tokens RPC) to persist payout vectors in Postgres + Redis and update market status (`settled`). |
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
-| Operational signals | Publish Redis heartbeats, batch stats, and Prometheus counters (`worker.*`). |
+| Operational signals | Publish Redis heartbeats, batch stats, Prometheus counters (`worker.*`), plus proof queue depth gauge and DLQ counter. |
 | Retention | Delete resolved markets older than `RM_RESOLVED_RETENTION_SECONDS` (dry-run supported). |
 | Commitments & Merkle | Persist commitments/settlements (ticket hash, leaf, root, pools, liability, rake, outcome, circuit hash), rebuild Keccak Merkle roots/paths from stored leaves, and keep prover payloads in sync with the on-chain root/commit count. |
 | Optional on-chain writes | When `RM_AUTO_CREATE_ONCHAIN_MARKETS=true`, call `MarketFactory.createMarket` with retry/backoff. |
@@ -54,7 +54,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
    - Optionally run Alembic migrations (`app.schema.ensure_schema`) and broadcast the latest revision key.
 2. **Main loop**:
    - `process_once()` in `app.service`:
-     - Fetch Polymarket markets (with retry) via `app.fetcher`.
+     - Fetch Polymarket markets (with retry) directly via the async Gamma client (`app.polymarket.AsyncPolymarketClient`).
      - For each market, `app.market_sync.sync_market()` upserts rows and calls `app.resolution.apply_resolution`.
      - Optionally trigger `maybe_create_onchain_market`.
      - Run `cleanup_resolved_markets` to enforce retention.
@@ -74,7 +74,7 @@ backend/worker/
 ├── app/
 │   ├── service.py         # Async worker loop, heartbeats, orchestration
 │   ├── runtime.py         # Settings + client builders (Polymarket, CLOB, Goldsky, prover, Conditional Tokens)
-│   ├── fetcher.py         # Polymarket fetch helpers + CLOB enrichment
+│   ├── (fetcher removed; ingestion calls AsyncPolymarketClient directly)
 │   ├── market_sync.py     # Market persistence, retention, resolution backfill
 │   ├── resolution.py      # Resolution fetch/refresh and ledger upserts
 │   ├── proofs.py          # Settlement proof orchestration + persistence
@@ -108,6 +108,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_DATABASE_POOL_SIZE`, `RM_DATABASE_MAX_OVERFLOW`, `RM_DATABASE_POOL_TIMEOUT` | SQLAlchemy pool sizing/tuning for the worker. |
 | `RM_REDIS_URL` | Redis URI used for cache invalidation, schema tags, heartbeat storage. |
 | `RM_POLL_INTERVAL_SECONDS` | How often to pull Polymarket (default 300s). |
+| `RM_POLL_INTERVAL_JITTER_SECONDS` | Random jitter added to the sleep interval so multiple workers don’t align (default 3s). |
 | `RM_RUN_MIGRATIONS_ON_STARTUP` | If true, apply Alembic migrations before syncing. |
 | `RM_SCHEMA_VERSION_KEY` | Redis key where `_propagate_schema_revision` stores the current Alembic revision. |
 | `RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`, `RM_HEARTBEAT_MAX_RETRIES`, `RM_HEARTBEAT_RETRY_BACKOFF_SECONDS` | Heartbeat publishing behavior. |
@@ -124,6 +125,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER` | Additional Gamma filters recommended by Polymarket; defaults to active-only, non-archived markets. |
 | `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
 | `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` | Exponential backoff applied when the entire fetch loop fails before a sync cycle completes. |
+| `RM_POLYMARKET_SYNC_LEASE_KEY`, `RM_POLYMARKET_SYNC_LEASE_TTL_SECONDS`, `RM_POLYMARKET_SYNC_LEASE_JITTER_SECONDS` | Redis lease used to ensure only one worker paginates Gamma at a time; TTL + jitter reduce stampedes when multiple workers run. |
 | `RM_POLYMARKET_RATE_LIMIT_REQUESTS`, `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` | Sliding-window rate limiter applied before each Gamma request. |
 
 ### Cache priming
@@ -187,6 +189,10 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_PROVER_BASE_URL` | Base URL for the `prover` container (defaults to `http://prover:8085` in docker-compose). |
 | `RM_PROVER_TIMEOUT_SECONDS` | HTTP timeout when calling the prover service. |
 | `RM_PROOF_CACHE_PREFIX` / `RM_PROOF_CACHE_TTL_SECONDS` | Redis key namespace + TTL for cached proof receipts. |
+| `RM_PROOF_QUEUE_KEY` / `RM_PROOF_QUEUE_DEDUPE_KEY` | Redis list/set used for background proof jobs so ingestion doesn’t block. |
+| `RM_PROOF_QUEUE_POLL_SECONDS` | Sleep between queue polls; defaults to 1s. |
+| `RM_PROOF_QUEUE_MAX_CONCURRENCY` | Max concurrent proof jobs the background worker processes. |
+| `RM_PROOF_QUEUE_DEAD_LETTER_KEY` | Redis list where malformed/failed proof jobs are stored for inspection. |
 
 ---
 

@@ -1,14 +1,16 @@
-"""Tests for the Polymarket Gamma client pagination and normalisation behaviour."""
+"""Tests for the Polymarket Gamma async client pagination and normalisation behaviour."""
 
 from __future__ import annotations
 
 import logging
 
 import httpx
-from app.polymarket import MarketPayload, PolymarketClient, fetch_clob_markets, merge_clob_markets
+import pytest
+from app.polymarket import AsyncPolymarketClient, MarketPayload, fetch_clob_markets, merge_clob_markets
 
 
-def test_polymarket_client_handles_pagination():
+@pytest.mark.asyncio
+async def test_polymarket_client_handles_pagination():
     """Ensure multiple offsets are fetched and converted into market payloads."""
     page_payloads = {
         0: [
@@ -45,9 +47,9 @@ def test_polymarket_client_handles_pagination():
         return httpx.Response(status_code=200, json=data[:limit])
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
 
-    markets = client.fetch_markets(page_size=1)
+    markets = await client.fetch_markets(page_size=1)
 
     assert len(markets) == 2
     first, second = markets
@@ -73,7 +75,8 @@ def test_polymarket_client_handles_pagination():
     assert second.gamma_metadata["slug"] == "market-two"
 
 
-def test_polymarket_client_parses_stringified_arrays():
+@pytest.mark.asyncio
+async def test_polymarket_client_parses_stringified_arrays():
     """Markets with JSON-encoded strings for outcomes/prices populate columns."""
 
     payload = [
@@ -92,9 +95,9 @@ def test_polymarket_client_parses_stringified_arrays():
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
 
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
     assert len(markets) == 1
     market = markets[0]
 
@@ -104,7 +107,8 @@ def test_polymarket_client_parses_stringified_arrays():
     assert market.clob_token_ids == ["abc", "def"]
 
 
-def test_polymarket_client_derives_category_from_event_series_when_tags_missing():
+@pytest.mark.asyncio
+async def test_polymarket_client_derives_category_from_event_series_when_tags_missing():
     """Ensure category falls back to event/series metadata when tags are absent."""
 
     payload = [
@@ -125,15 +129,16 @@ def test_polymarket_client_derives_category_from_event_series_when_tags_missing(
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
 
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
 
     assert len(markets) == 1
     assert markets[0].category == "Sports"
 
 
-def test_polymarket_client_respects_closed_filter_and_extra_params():
+@pytest.mark.asyncio
+async def test_polymarket_client_respects_closed_filter_and_extra_params():
     """Ensure closed flag + caller-provided params are forwarded in requests."""
 
     observed_params: list[dict[str, str]] = []
@@ -155,9 +160,9 @@ def test_polymarket_client_respects_closed_filter_and_extra_params():
         )
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
 
-    markets = client.fetch_markets(
+    markets = await client.fetch_markets(
         page_size=5,
         max_pages=1,
         closed=True,
@@ -177,7 +182,8 @@ def test_polymarket_client_respects_closed_filter_and_extra_params():
     assert sent_params["customFlag"] == "alpha"
 
 
-def test_polymarket_client_handles_wrapped_payload():
+@pytest.mark.asyncio
+async def test_polymarket_client_handles_wrapped_payload():
     """Support Gamma responses that wrap markets inside a data/items container."""
 
     payload = {
@@ -196,15 +202,16 @@ def test_polymarket_client_handles_wrapped_payload():
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
 
-    markets = client.fetch_markets(page_size=10, max_pages=1)
+    markets = await client.fetch_markets(page_size=10, max_pages=1)
 
     assert len(markets) == 1
     assert markets[0].event_id == "wrapped-1"
 
 
-def test_polymarket_client_supports_full_markets_endpoint(monkeypatch):
+@pytest.mark.asyncio
+async def test_polymarket_client_supports_full_markets_endpoint(monkeypatch):
     """Allow RM_POLYMARKET_API_BASE to include the markets segment already."""
 
     observed = {"path": None}
@@ -224,20 +231,21 @@ def test_polymarket_client_supports_full_markets_endpoint(monkeypatch):
         )
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient(
+    client = AsyncPolymarketClient(
         "https://gamma.polymarket.example/polygon/markets",
         timeout=1.0,
         transport=transport,
     )
 
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
 
     assert len(markets) == 1
     assert markets[0].event_id == "evt-custom"
     assert observed["path"] == "/polygon/markets"
 
 
-def test_polymarket_client_appends_extra_filters():
+@pytest.mark.asyncio
+async def test_polymarket_client_appends_extra_filters():
     """Ensure polymarket-client forwards caller-provided filters (network/active/etc)."""
 
     observed_params: list[dict[str, str]] = []
@@ -247,14 +255,14 @@ def test_polymarket_client_appends_extra_filters():
         return httpx.Response(status_code=200, json=[])
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient(
+    client = AsyncPolymarketClient(
         "https://gamma.polymarket.example",
         timeout=1.0,
         transport=transport,
         empty_page_tolerance=1,
     )
 
-    client.fetch_markets(
+    await client.fetch_markets(
         page_size=1,
         max_pages=1,
         extra_params={"network": "137", "active": "true", "archived": "false"},
@@ -267,7 +275,8 @@ def test_polymarket_client_appends_extra_filters():
     assert first["archived"] == "false"
 
 
-def test_polymarket_client_handles_empty_pages_with_meta_total():
+@pytest.mark.asyncio
+async def test_polymarket_client_handles_empty_pages_with_meta_total():
     """Continue pagination when Gamma temporarily returns empty pages despite meta.total."""
 
     responses = {
@@ -281,19 +290,20 @@ def test_polymarket_client_handles_empty_pages_with_meta_total():
         return httpx.Response(status_code=200, json=responses.get(offset, {"data": []}))
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient(
+    client = AsyncPolymarketClient(
         "https://gamma.polymarket.example",
         timeout=1.0,
         transport=transport,
         empty_page_tolerance=2,
     )
 
-    markets = client.fetch_markets(page_size=1, max_pages=5)
+    markets = await client.fetch_markets(page_size=1, max_pages=5)
 
     assert [m.event_id for m in markets] == ["evt-1", "evt-2"]
 
 
-def test_polymarket_client_derives_grouping_fields():
+@pytest.mark.asyncio
+async def test_polymarket_client_derives_grouping_fields():
     payload = [
         {
             "id": "grp-1",
@@ -310,8 +320,8 @@ def test_polymarket_client_derives_grouping_fields():
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
 
     assert len(markets) == 1
     market = markets[0]
@@ -322,7 +332,8 @@ def test_polymarket_client_derives_grouping_fields():
     assert market.gamma_metadata.get("group_slug") == "makina-public-sale-total-commitments"
 
 
-def test_polymarket_client_derives_group_slug_from_embedded_range():
+@pytest.mark.asyncio
+async def test_polymarket_client_derives_group_slug_from_embedded_range():
     payload = [
         {
             "id": "grp-2",
@@ -338,8 +349,8 @@ def test_polymarket_client_derives_group_slug_from_embedded_range():
         return httpx.Response(status_code=200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
 
     assert len(markets) == 1
     market = markets[0]
@@ -347,7 +358,8 @@ def test_polymarket_client_derives_group_slug_from_embedded_range():
     assert market.group_item_title == "0.2%"
 
 
-def test_polymarket_client_fetches_events_and_flattens_markets():
+@pytest.mark.asyncio
+async def test_polymarket_client_fetches_events_and_flattens_markets():
     events_payload = [
         {
             "id": "ev-multi",
@@ -388,8 +400,8 @@ def test_polymarket_client_fetches_events_and_flattens_markets():
         return httpx.Response(status_code=200, json=events_payload)
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
-    markets = client.fetch_events_markets(page_size=10, max_pages=2)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = await client.fetch_events_markets(page_size=10, max_pages=2)
 
     assert len(markets) == 3
     multi = [m for m in markets if m.event_id in {"m-1", "m-2"}]
@@ -400,7 +412,8 @@ def test_polymarket_client_fetches_events_and_flattens_markets():
     assert markets[0].gamma_events and markets[0].gamma_events[0].get("slug") == "multi-event"
 
 
-def test_polymarket_client_forwards_event_filters(monkeypatch):
+@pytest.mark.asyncio
+async def test_polymarket_client_forwards_event_filters(monkeypatch):
     observed: dict[str, list[tuple[str, str]]] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -426,8 +439,8 @@ def test_polymarket_client_forwards_event_filters(monkeypatch):
         )
 
     transport = httpx.MockTransport(handler)
-    client = PolymarketClient("https://example.com", timeout=1.0, transport=transport)
-    client.fetch_events_markets(
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    await client.fetch_events_markets(
         page_size=1,
         max_pages=1,
         order="id",

@@ -389,12 +389,24 @@ class SettlementProofStatus(str, Enum):
     FAILED = "failed"
 
 
+class SettlementSubmissionStatus(str, Enum):
+    NONE = "none"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    SUBMITTED = "submitted"
+    FAILED = "failed"
+
+
 class Settlement(Base):
     __tablename__ = "settlements"
     __table_args__ = (
         CheckConstraint(
             "proof_status IN ('none','requested','generated','failed')",
             name="ck_settlements_proof_status",
+        ),
+        CheckConstraint(
+            "submission_status IN ('none','queued','processing','submitted','failed')",
+            name="ck_settlements_submission_status",
         ),
     )
 
@@ -414,6 +426,10 @@ class Settlement(Base):
     proof_status: Mapped[str] = mapped_column(String(32), nullable=False, default=SettlementProofStatus.NONE.value)
     proof_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     proof_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    submission_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SettlementSubmissionStatus.NONE.value
+    )
+    submission_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     settlement_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     settlement_tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
     settlement_block_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

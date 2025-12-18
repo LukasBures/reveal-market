@@ -144,3 +144,55 @@ def test_resolution_endpoint_returns_cached_isoformat(client, db_session):
     second = client.get(f"/resolution/{condition_id}")
     assert second.status_code == 200
     assert second.json() == payload
+
+
+def test_settlement_statuses_surface_in_market_and_resolution(client, db_session):
+    condition_id = "0x" + "b" * 64
+    market = _make_market(
+        "evt-settlement",
+        "Settlement Status",
+        category="finance",
+        oracle="0xstatus",
+        status="settled",
+        condition_id=condition_id.lower(),
+    )
+    db_session.add(market)
+    db_session.flush()
+    db_session.add(
+        models.Resolution(
+            condition_id=condition_id.lower(),
+            source="conditional_tokens",
+            resolved=True,
+            payouts=[0, 1],
+            winners=[{"index": 1, "label": "Yes", "payout": 1}],
+            oracle=market.oracle,
+            question_id=condition_id.lower(),
+            event_id=market.event_id,
+            market_id=market.id,
+            checked_at=datetime(2024, 2, 1, 12, 0, tzinfo=UTC),
+        )
+    )
+    settlement = shared_models.Settlement(
+        id=1,
+        market_id=market.id,
+        proof_status=shared_models.SettlementProofStatus.GENERATED.value,
+        proof_request_id="req-123",
+        proof_hash="0xproof",
+        submission_status=shared_models.SettlementSubmissionStatus.QUEUED.value,
+        settlement_tx_hash="0xtx",
+        settlement_submitted_at=datetime(2024, 2, 1, 12, 0, tzinfo=UTC),
+        merkle_root="0xmerkle",
+    )
+    db_session.add(settlement)
+    db_session.commit()
+
+    market_payload = client.get(f"/markets/{market.event_id}").json()
+    assert market_payload["proof_status"] == shared_models.SettlementProofStatus.GENERATED.value
+    assert market_payload["proof_request_id"] == "req-123"
+    assert market_payload["submission_status"] == shared_models.SettlementSubmissionStatus.QUEUED.value
+    assert market_payload["settlement_tx_hash"] == "0xtx"
+
+    resolution_payload = client.get(f"/resolution/{condition_id}").json()
+    assert resolution_payload["proofStatus"] == shared_models.SettlementProofStatus.GENERATED.value
+    assert resolution_payload["submissionStatus"] == shared_models.SettlementSubmissionStatus.QUEUED.value
+    assert resolution_payload["settlementTxHash"] == "0xtx"

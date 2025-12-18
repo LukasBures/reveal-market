@@ -7,7 +7,6 @@ from typing import Any
 
 from . import runtime
 from .cache_ops import invalidate_cache_tags, persist_resolution_cache_updates
-from .fetcher import build_filters_from_settings, fetch_markets_from_polymarket
 from .market_sync import (
     CleanupOutcome,
     SyncOutcome,
@@ -26,6 +25,7 @@ from .metrics import (
     SUMMARY_DLQ_COUNTER,
     CacheInvalidationReport,
 )
+from .polymarket import build_filters_from_settings
 from .prime import prime_featured_views, prime_markets_cache
 from .proofs import maybe_generate_settlement_proof
 from .resolution import ResolutionOutcome, _fetch_resolution_snapshot, apply_resolution
@@ -72,7 +72,6 @@ __all__ = [
     "cleanup_resolved_markets",
     "collect_market_changes",
     "collect_market_changes_with_summary",
-    "fetch_markets_from_polymarket",
     "invalidate_cache_tags",
     "persist_resolution_cache_updates",
     "run_settlement_jobs",

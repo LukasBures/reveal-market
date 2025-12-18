@@ -131,6 +131,13 @@ class MarketRead(MarketBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    merkle_root: str | None = None
+    proof_status: str | None = None
+    proof_request_id: str | None = None
+    proof_hash: str | None = None
+    submission_status: str | None = None
+    settlement_tx_hash: str | None = None
+    settlement_submitted_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -212,6 +219,13 @@ class ResolutionSummary(BaseModel):
     winning_outcome_id: int | None = Field(default=None, alias="winningOutcomeId")
     rake_bps: int | None = Field(default=None, alias="rakeBps")
     request_id: str | None = Field(default=None, alias="requestId")
+    proof_status: str | None = Field(default=None, alias="proofStatus")
+    proof_request_id: str | None = Field(default=None, alias="proofRequestId")
+    proof_hash: str | None = Field(default=None, alias="proofHash")
+    submission_status: str | None = Field(default=None, alias="submissionStatus")
+    settlement_tx_hash: str | None = Field(default=None, alias="settlementTxHash")
+    settlement_submitted_at: datetime | None = Field(default=None, alias="settlementSubmittedAt")
+    merkle_root: str | None = Field(default=None, alias="merkleRoot")
     created_at: datetime | None = Field(default=None, alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 

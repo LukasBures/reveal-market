@@ -11,7 +11,7 @@ from shared.logging import log_event
 logger = logging.getLogger("reveal_market.worker")
 
 try:
-    from prometheus_client import REGISTRY, CollectorRegistry, Counter
+    from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge
 except ImportError:  # pragma: no cover - optional dependency
 
     class _CounterStub:
@@ -25,10 +25,22 @@ except ImportError:  # pragma: no cover - optional dependency
         def inc(amount: float = 1.0) -> None:
             return None
 
+    class _GaugeStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def labels(self, **kwargs):
+            return self
+
+        @staticmethod
+        def set(value: float) -> None:
+            return None
+
     class _CollectorRegistryStub:
         pass
 
     Counter = _CounterStub  # type: ignore[misc,assignment]
+    Gauge = _GaugeStub  # type: ignore[misc,assignment]
     CollectorRegistry = _CollectorRegistryStub  # type: ignore[misc,assignment]
     REGISTRY = None  # type: ignore[assignment]
 
@@ -44,6 +56,17 @@ def _safe_counter(name: str, documentation: str, labelnames: list[str]) -> Count
         if isinstance(existing, Counter):
             return existing
         return Counter(name, documentation, labelnames, registry=CollectorRegistry())
+
+
+def _safe_gauge(name: str, documentation: str, labelnames: list[str]) -> Gauge:
+    registry = REGISTRY
+    try:
+        return Gauge(name, documentation, labelnames, registry=registry)
+    except ValueError:
+        existing = getattr(registry, "_names_to_collectors", {}).get(name) if registry else None
+        if isinstance(existing, Gauge):
+            return existing
+        return Gauge(name, documentation, labelnames, registry=CollectorRegistry())
 
 
 RETENTION_METRIC = _safe_counter(
@@ -79,6 +102,47 @@ POLYMARKET_RATE_LIMIT_COUNTER = _safe_counter(
 POLYMARKET_EMPTY_PAGE_COUNTER = _safe_counter(
     "worker_polymarket_empty_pages_total",
     "Empty page responses during Polymarket pagination",
+    ["outcome"],
+)
+
+PROOF_QUEUE_DEPTH_GAUGE = _safe_gauge(
+    "worker_proof_queue_depth",
+    "Number of pending settlement proof jobs in the worker queue",
+    ["queue"],
+)
+
+PROOF_QUEUE_DLQ_COUNTER = _safe_counter(
+    "worker_proof_queue_deadletter_total",
+    "Proof queue jobs sent to dead letter list",
+    ["reason"],
+)
+
+PROOF_QUEUE_OVERFLOW_COUNTER = _safe_counter(
+    "worker_proof_queue_overflow_total",
+    "Proof queue backpressure events when max depth exceeded",
+    ["outcome"],
+)
+
+SETTLEMENT_QUEUE_DEPTH_GAUGE = _safe_gauge(
+    "worker_settlement_queue_depth",
+    "Number of pending settlement jobs in the worker queue",
+    ["queue"],
+)
+
+SETTLEMENT_QUEUE_DLQ_COUNTER = _safe_counter(
+    "worker_settlement_queue_deadletter_total",
+    "Settlement queue jobs sent to dead letter list",
+    ["reason"],
+)
+RELAYER_QUEUE_COUNTER = _safe_counter(
+    "worker_relayer_queue_total",
+    "Relayer claim queue enqueue outcomes",
+    ["outcome"],
+)
+
+LEASE_SKIP_COUNTER = _safe_counter(
+    "worker_polymarket_lease_skipped_total",
+    "Polymarket ingest skips due to lease already held",
     ["outcome"],
 )
 

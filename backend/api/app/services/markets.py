@@ -873,6 +873,20 @@ def attach_resolution_to_market(
         return
 
 
+def attach_settlement_to_resolution(
+    summary: schemas.ResolutionSummary | None, settlement: models.Settlement | None = None
+) -> None:
+    if summary is None or settlement is None:
+        return
+    summary.proof_status = settlement.proof_status
+    summary.proof_request_id = settlement.proof_request_id
+    summary.proof_hash = settlement.proof_hash
+    summary.submission_status = settlement.submission_status
+    summary.settlement_tx_hash = settlement.settlement_tx_hash
+    summary.settlement_submitted_at = settlement.settlement_submitted_at
+    summary.merkle_root = settlement.merkle_root
+
+
 def augment_market_models(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
     for market in markets:
         apply_market_caps(market)
@@ -956,6 +970,37 @@ async def load_outcomes_for_market(
     return list(rows)
 
 
+async def load_settlement_records(
+    session: AsyncSession, markets: list[schemas.MarketResponse]
+) -> dict[int, models.Settlement]:
+    """Fetch settlement rows for a set of market ids."""
+
+    market_ids = [getattr(market, "id", None) for market in markets if getattr(market, "id", None)]
+    if not market_ids:
+        return {}
+    stmt = select(models.Settlement).where(models.Settlement.market_id.in_(market_ids))
+    records: dict[int, models.Settlement] = {}
+    for record in await session.scalars(stmt):
+        if record.market_id is not None:
+            records[int(record.market_id)] = record
+    return records
+
+
+def attach_settlement_to_market(
+    market: schemas.MarketResponse,
+    settlement: models.Settlement | None = None,
+) -> None:
+    if market is None or settlement is None:
+        return
+    market.merkle_root = settlement.merkle_root
+    market.proof_status = settlement.proof_status
+    market.proof_request_id = settlement.proof_request_id
+    market.proof_hash = settlement.proof_hash
+    market.submission_status = settlement.submission_status
+    market.settlement_tx_hash = settlement.settlement_tx_hash
+    market.settlement_submitted_at = settlement.settlement_submitted_at
+
+
 async def enrich_market_models(
     session: AsyncSession, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
 ) -> list[schemas.MarketResponse]:
@@ -965,12 +1010,16 @@ async def enrich_market_models(
     await attach_group_fields(session, markets, include_siblings=include_siblings)
     augment_market_models(markets)
     resolution_map = await load_resolution_records(session, markets)
+    settlement_map = await load_settlement_records(session, markets)
     for market in markets:
         condition = getattr(market, "condition_id", None)
         if isinstance(condition, str):
             resolution = resolution_map.get(condition.lower())
             if resolution:
                 attach_resolution_to_market(market, resolution)
+        settlement = settlement_map.get(getattr(market, "id", 0))
+        if settlement:
+            attach_settlement_to_market(market, settlement)
     return markets
 
 

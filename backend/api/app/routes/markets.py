@@ -814,6 +814,11 @@ async def read_resolution(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resolution_not_found")
 
+    if market is not None and getattr(market, "id", None) is not None:
+        settlement = await repository_async.get_settlement_by_market_id(session, market.id)
+        if settlement:
+            market_svc.attach_settlement_to_resolution(summary_model, settlement)
+
     if cache_available:
         cache_payload = summary_model.model_dump(mode="json", by_alias=True)
         if summary_model.checked_at is not None:

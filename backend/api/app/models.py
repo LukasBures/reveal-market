@@ -18,6 +18,7 @@ from shared.models import (
     ResolutionStatusEnum,
     Settlement,
     SettlementProofStatus,
+    SettlementSubmissionStatus,
 )
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "Resolution",
     "Settlement",
     "SettlementProofStatus",
+    "SettlementSubmissionStatus",
     "HedgerTreasurySnapshot",
 ]

@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from functools import partial
 from types import ModuleType
@@ -43,6 +43,23 @@ if _orjson_spec is not None:
 orjson = cast(_JsonLib | None, _orjson_module)
 
 logger = logging.getLogger("reveal_market.worker.polymarket")
+
+__all__ = ["AsyncPolymarketClient", "MarketPayload", "build_filters_from_settings"]
+
+
+def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
+    """Translate worker settings into Gamma API query params."""
+
+    params: dict[str, Any] = {}
+    if settings_obj is None:
+        return params
+    active = getattr(settings_obj, "polymarket_active_filter", None)
+    archived = getattr(settings_obj, "polymarket_archived_filter", None)
+    if active is not None:
+        params["active"] = str(active).lower()
+    if archived is not None:
+        params["archived"] = str(archived).lower()
+    return params
 
 
 class MarketPayload(BaseModel):
@@ -263,366 +280,6 @@ class MarketPayload(BaseModel):
         return market
 
 
-class PolymarketClient:
-    """Lightweight client for the Polymarket Gamma REST API."""
-
-    def __init__(
-        self,
-        base_url: str,
-        *,
-        timeout: float = 10.0,
-        transport: httpx.BaseTransport | None = None,
-        request_max_attempts: int = 1,
-        request_backoff_seconds: float = 0.2,
-        request_backoff_max_seconds: float | None = None,
-        retry_counter: Any | None = None,
-        rate_limit_requests: int | None = None,
-        rate_limit_window_seconds: float | None = None,
-        empty_page_tolerance: int = 0,
-        rate_limit_counter: Any | None = None,
-        empty_page_counter: Any | None = None,
-    ) -> None:
-        raw_base = str(base_url)
-        self.base_url = raw_base.rstrip("/")
-        self._markets_url = build_polymarket_markets_url(raw_base)
-        self._events_url = build_polymarket_events_url(raw_base)
-        self.timeout = timeout
-        self._request_max_attempts = max(1, int(request_max_attempts))
-        self._request_backoff_seconds = request_backoff_seconds if request_backoff_seconds > 0 else 0.1
-        self._request_backoff_max_seconds = (
-            request_backoff_max_seconds if request_backoff_max_seconds and request_backoff_max_seconds > 0 else None
-        )
-        self._transport = transport or httpx.HTTPTransport(retries=0)
-        self._client = httpx.Client(timeout=self.timeout, transport=self._transport)
-        self._retryer = None
-        self._retry_counter = retry_counter
-        self._rate_limit_counter = rate_limit_counter
-        self._empty_page_counter = empty_page_counter
-        self._rate_limiter = _RateLimiter(rate_limit_requests, rate_limit_window_seconds)
-        self._empty_page_tolerance = max(0, empty_page_tolerance)
-
-    def fetch_markets(  # noqa: C901
-        self,
-        *,
-        page_size: int = 100,
-        max_pages: int | None = None,
-        order: str = "id",
-        ascending: bool = False,
-        closed: bool | None = None,
-        extra_params: dict[str, Any] | None = None,
-    ) -> list[MarketPayload]:
-        """Walk the offset-based API, returning a list of validated markets."""
-        markets: list[MarketPayload] = []
-        for page in self.fetch_markets_paginated(
-            page_size=page_size,
-            max_pages=max_pages,
-            order=order,
-            ascending=ascending,
-            closed=closed,
-            extra_params=extra_params,
-        ):
-            markets.extend(page)
-        return markets
-
-    def fetch_events_markets(
-        self,
-        *,
-        page_size: int = 100,
-        max_pages: int | None = None,
-        order: str = "id",
-        ascending: bool = False,
-        closed: bool | None = None,
-        extra_params: dict[str, Any] | None = None,
-    ) -> list[MarketPayload]:
-        """Fetch markets via the /events endpoint, flattening embedded markets."""
-        markets: list[MarketPayload] = []
-        for page in self._fetch_events_paginated(
-            page_size=page_size,
-            max_pages=max_pages,
-            order=order,
-            ascending=ascending,
-            closed=closed,
-            extra_params=extra_params,
-        ):
-            markets.extend(page)
-        return markets
-
-    def fetch_markets_paginated(
-        self,
-        *,
-        page_size: int = 100,
-        max_pages: int | None = None,
-        order: str = "id",
-        ascending: bool = False,
-        closed: bool | None = None,
-        extra_params: dict[str, Any] | None = None,
-    ) -> Iterator[list[MarketPayload]]:
-        """Yield Polymarket markets page-by-page to reduce peak memory."""
-
-        offset = 0
-        page = 0
-        empty_pages = 0
-        total_records: int | None = None
-
-        client = self._client
-        while True:
-            params: dict[str, Any] = {
-                "limit": page_size,
-                "offset": offset,
-                "order": order,
-                "ascending": str(ascending).lower(),
-            }
-            if closed is not None:
-                params["closed"] = str(closed).lower()
-            if extra_params:
-                for key, value in extra_params.items():
-                    if value is None:
-                        continue
-                    if isinstance(value, bool):
-                        params[key] = str(value).lower()
-                    else:
-                        params[key] = value
-
-            url = self._markets_url
-            request_callable = partial(self._request_page, client, url, params.copy())
-            try:
-                response = self._send_with_retry(request_callable)
-                payload = orjson.loads(response.content) if orjson is not None else response.json()
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error("failed to fetch polymarket page offset=%s: %s", offset, exc)
-                raise
-
-            meta_total = _extract_meta_total(payload)
-            if isinstance(meta_total, int) and meta_total >= 0:
-                total_records = meta_total
-            records = _extract_page_records(payload)
-            if not records:
-                empty_pages += 1
-                logger.debug(
-                    "polymarket page contained no records",
-                    extra={"offset": offset, "empty_pages": empty_pages},
-                )
-                self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                break
-            empty_pages = 0
-
-            page_payloads: list[MarketPayload] = []
-            for raw in records:
-                try:
-                    page_payloads.append(MarketPayload.from_gamma(raw))
-                except (ValidationError, ValueError) as exc:
-                    logger.warning("skipping polymarket record: %s", exc)
-
-            yield page_payloads
-
-            offset += len(records)
-            page += 1
-
-            if max_pages is not None and page >= max_pages:
-                break
-            if total_records is not None and offset >= total_records:
-                break
-            if len(records) < page_size:
-                break
-
-    def _fetch_events_paginated(
-        self,
-        *,
-        page_size: int = 100,
-        max_pages: int | None = None,
-        order: str = "id",
-        ascending: bool = False,
-        closed: bool | None = None,
-        extra_params: dict[str, Any] | None = None,
-    ) -> Iterator[list[MarketPayload]]:
-        """Yield markets derived from the /events endpoint page-by-page."""
-        offset = 0
-        page = 0
-        empty_pages = 0
-        total_records: int | None = None
-
-        client = self._client
-        while True:
-            params: dict[str, Any] = {
-                "limit": page_size,
-                "offset": offset,
-                "order": order,
-                "ascending": str(ascending).lower(),
-            }
-            if closed is not None:
-                params["closed"] = str(closed).lower()
-            if extra_params:
-                params.update({k: v for k, v in extra_params.items() if v is not None})
-
-            url = self._events_url
-            request_callable = partial(self._request_page, client, url, params.copy())
-            try:
-                response = self._send_with_retry(request_callable)
-                payload = orjson.loads(response.content) if orjson is not None else response.json()
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error("failed to fetch polymarket events offset=%s: %s", offset, exc)
-                raise
-
-            meta_total = _extract_meta_total(payload)
-            if isinstance(meta_total, int) and meta_total >= 0:
-                total_records = meta_total
-            records = _extract_page_records(payload)
-            if not records:
-                empty_pages += 1
-                logger.debug(
-                    "polymarket events page contained no records",
-                    extra={"offset": offset, "empty_pages": empty_pages},
-                )
-                self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                break
-            empty_pages = 0
-
-            page_payloads: list[MarketPayload] = []
-            for event in records:
-                markets = event.get("markets")
-                if not markets:
-                    continue
-                event_group_slug = (event.get("slug") or event.get("id")) if len(markets) > 1 else None
-                raw_events = event.get("events")
-                event_metadata = raw_events if isinstance(raw_events, list) and raw_events else None
-                if event_metadata is None:
-                    event_metadata = [
-                        {
-                            "slug": event.get("slug"),
-                            "id": event.get("id"),
-                        }
-                    ]
-                for raw in markets:
-                    try:
-                        payload = MarketPayload.from_gamma(raw)
-                        payload.gamma_events = event_metadata
-                        payload.group_slug = event_group_slug
-                        page_payloads.append(payload)
-                    except (ValidationError, ValueError) as exc:  # pragma: no cover - defensive
-                        logger.warning("skipping invalid polymarket event record: %s", exc)
-
-            if not page_payloads:
-                empty_pages += 1
-                self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
-                break
-
-            yield page_payloads
-
-            offset += len(records)
-            page += 1
-            if max_pages is not None and page >= max_pages:
-                break
-            if total_records is not None and offset >= total_records:
-                break
-            if len(records) < page_size:
-                break
-
-    def _request_page(self, client: httpx.Client, url: str, params: dict[str, Any]) -> httpx.Response:
-        self._rate_limiter.acquire()
-        response = client.get(url, params=params)
-        if response.status_code == 429:
-            self._record_rate_limit()
-            logger.warning(
-                "polymarket rate limit encountered",
-                extra={"params": params, "status_code": response.status_code},
-            )
-        response.raise_for_status()
-        return response
-
-    def _send_with_retry(self, action: Callable[[], httpx.Response]) -> httpx.Response:
-        retryer = self._build_retryer()
-        try:
-            if retryer is None:
-                response = action()
-            else:
-                response = retryer(action)
-            self._record_retry_metric("success")
-            return response
-        except Exception:
-            self._record_retry_metric("failed")
-            raise
-
-    def _build_retryer(self):
-        if self._request_max_attempts <= 1:
-            return None
-        if self._retryer is not None:
-            return self._retryer
-        try:
-            from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
-        except ModuleNotFoundError:  # pragma: no cover - defensive
-            return None
-
-        wait_kwargs = {"multiplier": self._request_backoff_seconds, "min": self._request_backoff_seconds}
-        if self._request_backoff_max_seconds:
-            wait_kwargs["max"] = self._request_backoff_max_seconds
-
-        def _log_retry(retry_state):
-            exc = retry_state.outcome.exception() if retry_state.outcome else None
-            self._record_retry_metric("retry")
-            logger.warning(
-                "retrying polymarket request",
-                extra={
-                    "attempt": retry_state.attempt_number,
-                    "max_attempts": self._request_max_attempts,
-                    "error": str(exc) if exc else None,
-                },
-            )
-
-        self._retryer = Retrying(
-            stop=stop_after_attempt(self._request_max_attempts),
-            wait=wait_exponential(**wait_kwargs),
-            retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
-            before_sleep=_log_retry,
-            reraise=True,
-        )
-        return self._retryer
-
-    def _record_retry_metric(self, outcome: str) -> None:
-        counter = self._retry_counter
-        if counter is None:
-            return
-        try:
-            counter.labels(outcome=outcome).inc()
-        except Exception:  # pragma: no cover - metrics failures should not break ingestion
-            logger.debug("failed to record polymarket retry metric", extra={"metric_outcome": outcome})
-
-    def _record_rate_limit(self) -> None:
-        counter = getattr(self, "_rate_limit_counter", None)
-        if counter is None:
-            return
-        try:
-            counter.labels(outcome="rate_limited").inc()
-        except Exception:  # pragma: no cover
-            logger.debug("failed to record polymarket rate limit metric")
-
-    def _record_empty_page(self) -> None:
-        counter = getattr(self, "_empty_page_counter", None)
-        if counter is None:
-            return
-        try:
-            counter.labels(outcome="empty").inc()
-        except Exception:  # pragma: no cover
-            logger.debug("failed to record polymarket empty page metric")
-
-
 class AsyncPolymarketClient:
     """Async client for the Polymarket Gamma REST API."""
 
@@ -704,6 +361,26 @@ class AsyncPolymarketClient:
         ):
             markets.extend(page)
         return markets
+
+    async def fetch_events_paginated(
+        self,
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+        order: str = "id",
+        ascending: bool = False,
+        closed: bool | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> AsyncIterator[list[MarketPayload]]:
+        async for page in self._fetch_events_paginated(
+            page_size=page_size,
+            max_pages=max_pages,
+            order=order,
+            ascending=ascending,
+            closed=closed,
+            extra_params=extra_params,
+        ):
+            yield page
 
     async def fetch_markets_paginated(
         self,
@@ -993,28 +670,6 @@ class AsyncPolymarketClient:
             counter.labels(outcome="empty").inc()
         except Exception:  # pragma: no cover
             logger.debug("failed to record polymarket empty page metric")
-
-
-class _RateLimiter:
-    def __init__(self, max_requests: int | None, window_seconds: float | None) -> None:
-        self.max_requests = max_requests if max_requests and max_requests > 0 else None
-        self.window_seconds = window_seconds if window_seconds and window_seconds > 0 else None
-        self._events: deque[float] = deque()
-
-    def acquire(self) -> None:
-        if not self.max_requests or not self.window_seconds:
-            return
-        now = time.monotonic()
-        window_start = now - self.window_seconds
-        while self._events and self._events[0] <= window_start:
-            self._events.popleft()
-        if len(self._events) >= self.max_requests:
-            sleep_for = self.window_seconds - (now - self._events[0])
-            if sleep_for > 0:
-                time.sleep(min(sleep_for, self.window_seconds))
-            self.acquire()
-            return
-        self._events.append(now)
 
 
 class _AsyncRateLimiter:

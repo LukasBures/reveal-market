@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+# ruff: noqa: S101
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import app.database as db
-import app.fetcher as fetcher
 import app.market_sync as market_sync
 import app.prime as prime
 import app.proofs as proofs
@@ -16,13 +17,14 @@ import app.service as worker_service
 import httpx
 import pytest
 from app.market_sync import SyncSummary
-from app.polymarket import MarketPayload, PolymarketClient
+from app.polymarket import MarketPayload, build_filters_from_settings
 from app.prover_client import SettlementProofResponse
 from app.schema import SchemaSyncResult
 from prometheus_client import REGISTRY
 from shared import cache_async as shared_cache
+from shared import models as shared_models
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
-from shared.models import Base, Market
+from shared.models import Base, Market, Settlement
 from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -50,10 +52,13 @@ class DummyRedis:
         self.last_set: dict[str, Any] | None = None
         self._ttls: dict[str, int | None] = {}
 
-    async def set(self, key: str, value: Any, ex: int | None = None):
+    async def set(self, key: str, value: Any, ex: int | None = None, nx: bool = False):
+        if nx and key in self.store:
+            return False
         self.store[key] = value
         self.last_set = {"key": key, "value": value, "ttl": ex}
         self._ttls[key] = ex
+        return True
 
     async def get(self, key: str):
         return self.store.get(key)
@@ -75,7 +80,20 @@ class DummyRedis:
                 yield member
 
     async def sadd(self, key: str, value: str):
-        self.store.setdefault(key, set()).add(value)
+        bucket = self.store.setdefault(key, set())
+        if not isinstance(bucket, set):
+            bucket = set()
+            self.store[key] = bucket
+        before = len(bucket)
+        bucket.add(value)
+        return 1 if len(bucket) > before else 0
+
+    async def srem(self, key: str, value: str):
+        bucket = self.store.get(key)
+        if isinstance(bucket, set) and value in bucket:
+            bucket.remove(value)
+            return 1
+        return 0
 
     async def smembers(self, key: str):
         members = self.store.get(key)
@@ -102,6 +120,7 @@ class DummyRedis:
             queue = []
             self.store[key] = queue
         queue.append(value)
+        return len(queue)
 
     async def brpop(self, keys, timeout: int | None = None):
         key = keys[0] if keys else None
@@ -112,6 +131,12 @@ class DummyRedis:
             return None
         value = queue.pop()
         return key, value
+
+    async def lpop(self, key: str):
+        queue = self.store.get(key, [])
+        if not isinstance(queue, list) or not queue:
+            return None
+        return queue.pop(0)
 
     async def llen(self, key: str) -> int:
         queue = self.store.get(key, [])
@@ -136,6 +161,27 @@ class DummyCounter:
         return _Recorder(record)
 
 
+class DummyGauge:
+    def __init__(self):
+        self.records: list[dict[str, Any]] = []
+
+    def labels(self, **labels):
+        record = {"labels": labels, "value": None}
+        self.records.append(record)
+
+        class _Setter:
+            def __init__(self, target):
+                self.target = target
+
+            def set(self, value: float):
+                self.target["value"] = value
+
+        return _Setter(record)
+
+    def last_value(self) -> float | None:
+        return self.records[-1]["value"] if self.records else None
+
+
 @pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     captured: dict[str, Any] = {}
@@ -154,10 +200,16 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
     monkeypatch.setattr(runtime_module.settings, "polymarket_active_filter", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_archived_filter", False, raising=False)
 
-    markets, latency = await fetcher.fetch_markets_from_polymarket()
+    markets = await runtime_module.polymarket_client.fetch_events_markets(
+        page_size=runtime_module.settings.polymarket_page_size,
+        max_pages=runtime_module.settings.polymarket_max_pages,
+        order=runtime_module.settings.polymarket_order,
+        ascending=runtime_module.settings.polymarket_sort_ascending,
+        closed=runtime_module.settings.polymarket_closed_filter,
+        extra_params=build_filters_from_settings(runtime_module.settings),
+    )
 
     assert markets == []
-    assert latency >= 0
     assert captured["page_size"] == 25
     assert captured["max_pages"] == 4
     assert captured["order"] == "updatedAt"
@@ -185,7 +237,14 @@ async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeyp
     monkeypatch.setattr(runtime_module, "polymarket_client", DummyClient(), raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
 
-    markets, _ = await fetcher.fetch_markets_from_polymarket()
+    markets = await runtime_module.polymarket_client.fetch_events_markets(
+        page_size=runtime_module.settings.polymarket_page_size,
+        max_pages=runtime_module.settings.polymarket_max_pages,
+        order=runtime_module.settings.polymarket_order,
+        ascending=runtime_module.settings.polymarket_sort_ascending,
+        closed=runtime_module.settings.polymarket_closed_filter,
+        extra_params=build_filters_from_settings(runtime_module.settings),
+    )
 
     assert markets == []
     assert calls["events"] == 1
@@ -233,7 +292,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("DummyClient", (), {"fetch_markets_paginated": _fake_paginated})(),
+        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated})(),
         raising=False,
     )
 
@@ -553,31 +612,114 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         gamma_raw={"id": "evt-success"},
     )
 
-    async def _fake_events_markets(self, **_kwargs):
-        return [payload]
+    async def _fake_events_paginated(self, **_kwargs):
+        yield [payload]
 
-    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    @contextlib.asynccontextmanager
+    async def dummy_session_scope():
+        class DummySession:
+            async def flush(self):
+                return None
+
+            async def commit(self):
+                return None
+
+            def expunge_all(self):
+                return None
+
+        yield DummySession()
+
+    async def fake_collect(session, page, redis_client, summary):
+        for item in page:
+            summary.changed_events.add(item.event_id)
+        summary.markets_created += len(page)
+        summary.proof_jobs = []
+        return summary
+
+    async def async_none(*_args, **_kwargs):
+        return None
+
+    async def async_zero(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
+    monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
+    monkeypatch.setattr(worker_service, "apply_retention_cleanup_async", async_none, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
     monkeypatch.setattr(
-        runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": _fake_events_markets})()
+        runtime_module,
+        "polymarket_client",
+        type("Dummy", (), {"fetch_events_paginated": _fake_events_paginated})(),
+        raising=False,
     )
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
+    dummy_redis = DummyRedis()
     before = _fetch_counter("success")
 
-    markets, _ = await fetcher.fetch_markets_from_polymarket()
+    summary, total, gap_count, latency_ms = await worker_service._sync_polymarket_feed(dummy_redis)
 
-    assert markets[0].event_id == "evt-success"
+    assert total == 1
+    assert summary.markets_created == 1
+    assert len(summary.changed_events) == 1
+    assert gap_count == 0
+    assert latency_ms >= 0
     assert _fetch_counter("success") == before + 1
 
 
 @pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
-    def always_fail(self, **kwargs):
+    async def always_fail(self, **_kwargs):
+        if False:  # pragma: no cover - ensure this is an async generator
+            yield []
         raise RuntimeError("fatal failure")
 
+    @contextlib.asynccontextmanager
+    async def dummy_session_scope():
+        class DummySession:
+            async def flush(self):
+                return None
+
+            async def commit(self):
+                return None
+
+            def expunge_all(self):
+                return None
+
+        yield DummySession()
+
+    async def fake_collect(session, page, redis_client, summary):
+        return summary
+
+    async def async_none(*_args, **_kwargs):
+        return None
+
+    async def async_zero(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
+    monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
+    monkeypatch.setattr(worker_service, "apply_retention_cleanup_async", async_none, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(
+        runtime_module,
+        "polymarket_client",
+        type("Dummy", (), {"fetch_events_paginated": always_fail})(),
+        raising=False,
+    )
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
-    monkeypatch.setattr(runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": always_fail})())
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
+
+    dummy_redis = DummyRedis()
     before = _fetch_counter("error")
     with pytest.raises(RuntimeError):
-        await fetcher.fetch_markets_from_polymarket()
+        await worker_service._sync_polymarket_feed(dummy_redis)
     assert _fetch_counter("error") == before + 1
 
 
@@ -594,22 +736,65 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
 
     attempts = {"count": 0}
 
-    async def flaky_fetch(self, **kwargs):
+    async def flaky_fetch(self, **_kwargs):
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise RuntimeError("temporary failure")
-        return [payload]
+        yield [payload]
 
+    @contextlib.asynccontextmanager
+    async def dummy_session_scope():
+        class DummySession:
+            async def flush(self):
+                return None
+
+            async def commit(self):
+                return None
+
+            def expunge_all(self):
+                return None
+
+        yield DummySession()
+
+    async def fake_collect(session, page, redis_client, summary):
+        for item in page:
+            summary.changed_events.add(item.event_id)
+        summary.markets_created += len(page)
+        summary.proof_jobs = []
+        return summary
+
+    async def async_none(*_args, **_kwargs):
+        return None
+
+    async def async_zero(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
+    monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
+    monkeypatch.setattr(worker_service, "apply_retention_cleanup_async", async_none, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(
+        runtime_module,
+        "polymarket_client",
+        type("Dummy", (), {"fetch_events_paginated": flaky_fetch})(),
+        raising=False,
+    )
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 2, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runtime_module, "polymarket_client", type("Dummy", (), {"fetch_events_markets": flaky_fetch})())
 
-    markets, _ = await fetcher.fetch_markets_from_polymarket()
+    dummy_redis = DummyRedis()
+    before_success = _fetch_counter("success")
+    summary, total, gap_count, _ = await worker_service._sync_polymarket_feed(dummy_redis)
 
     assert attempts["count"] == 2
-    assert markets[0].event_id == "evt-retry"
+    assert total == 1
+    assert summary.markets_created == 1
+    assert len(summary.changed_events) == 1
+    assert gap_count == 0
+    assert _fetch_counter("success") == before_success + 1
 
 
 @pytest.mark.asyncio
@@ -788,53 +973,395 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
     assert redis_client.last_set is not None
 
 
-def test_polymarket_client_retries_failed_requests(monkeypatch):
-    attempts = {"count": 0}
+@pytest.mark.asyncio
+async def test_enqueue_proof_jobs_dedupes(monkeypatch):
+    redis_client = DummyRedis()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", DummyGauge())
+    summary = SyncSummary()
+    market_payload = MarketPayload(
+        event_id="evt-proof",
+        title="Proofable",
+        slug="proofable",
+        category="news",
+        metadata_uri=None,
+        oracle="polymarket",
+        status="commit",
+        outcomes=["Yes", "No"],
+        outcome_prices=[0.5, 0.5],
+        gamma_raw={"id": "evt-proof"},
+    )
+    summary.proof_jobs.append(({"id": 1, "event_id": "evt-proof"}, market_payload, "0xabc"))
+    first = await proofs.enqueue_proof_jobs(redis_client, summary)
+    second = await proofs.enqueue_proof_jobs(redis_client, summary)
+    assert first == 1
+    assert second == 0
+    assert await redis_client.llen(runtime_module.settings.proof_queue_key) == 1
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        attempts["count"] += 1
-        if attempts["count"] < 3:
-            raise httpx.ReadTimeout("timeout", request=request)
-        return httpx.Response(
-            status_code=200,
-            json=[{"id": "evt-123", "question": "Will it work?", "category": "AI"}],
+
+@pytest.mark.asyncio
+async def test_acquire_sync_lease_respects_existing(monkeypatch):
+    redis_client = DummyRedis()
+    # Simulate existing lease so NX fails
+    await redis_client.set(runtime_module.settings.polymarket_sync_lease_key, "holder")
+    acquired = await worker_service._acquire_sync_lease(redis_client)
+    assert acquired is False
+
+
+@pytest.mark.asyncio
+async def test_sync_polymarket_feed_skips_when_lease_held(monkeypatch):
+    redis_client = DummyRedis()
+    await redis_client.set(runtime_module.settings.polymarket_sync_lease_key, "holder")
+
+    # Ensure fetch loop would fail if executed to catch accidental runs
+    class DummyClient:
+        async def fetch_events_paginated(self, **kwargs):
+            raise AssertionError("fetch should be skipped due to lease")
+
+    monkeypatch.setattr(runtime_module, "polymarket_client", DummyClient(), raising=False)
+
+    summary, total, gaps, latency = await worker_service._sync_polymarket_feed(redis_client)
+    assert total == 0
+    assert gaps == 0
+    assert summary.markets_created == 0
+
+
+@pytest.mark.asyncio
+async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, caplog):
+    # Set up runtime settings
+    monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "proof_queue_poll_seconds", 0.01, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "settlement_queue_poll_seconds", 0.01, raising=False)
+
+    # In-memory DB
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    # Seed a resolved market + settlement so proof jobs are enqueued.
+    async with session_factory() as session:
+        market_row = Market(
+            event_id="evt-proof-queue",
+            title="Existing proof market",
+            slug="proof-queue-market",
+            category="news",
+            oracle="polymarket",
+            status="settled",
+            resolution_status="final",
+            resolved_at=datetime.now(UTC),
         )
+        session.add(market_row)
+        await session.flush()
+        session.add(Settlement(id=1, market_id=market_row.id, proof_status="none", submission_status="none"))
+        await session.commit()
 
-    transport = httpx.MockTransport(handler)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-    client = PolymarketClient(
-        "https://gamma.polymarket.example",
-        timeout=0.1,
-        transport=transport,
-        request_max_attempts=3,
-        request_backoff_seconds=0,
-        request_backoff_max_seconds=0,
+    # Fake market payload from Gamma
+    sample_markets = [
+        MarketPayload(
+            event_id="evt-proof-queue",
+            title="Proof Queue Market",
+            slug="proof-queue-market",
+            category="news",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.55, 0.45],
+            gamma_raw={"id": "evt-proof-queue"},
+        )
+    ]
+
+    async def _fake_paginated(self, **_kwargs):
+        yield sample_markets
+
+    monkeypatch.setattr(
+        runtime_module,
+        "polymarket_client",
+        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated})(),
+        raising=False,
     )
 
-    markets = client.fetch_markets(page_size=1, max_pages=1)
+    # Redis + gauges
+    redis_client = DummyRedis()
+    gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", gauge)
 
-    assert attempts["count"] == 3
-    assert markets[0].event_id == "evt-123"
+    called = {"maybe_generate": 0, "settlements": 0}
+
+    async def fake_generate(redis_client=None, market_snapshot=None, market_payload=None, condition_id=None):
+        called["maybe_generate"] += 1
+        return True
+
+    async def fake_settlements(summary, redis_client=None):
+        called["settlements"] += 1
+        return 0
+
+    monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
+    monkeypatch.setattr(proofs, "run_settlement_jobs", fake_settlements)
+
+    # Run a single tick which should enqueue, then let the background workers drain
+    proof_worker_task = asyncio.create_task(worker_service.run_proof_queue_worker(redis_client))
+    settlement_worker_task = asyncio.create_task(worker_service.run_settlement_queue_worker(redis_client))
+    stats = await worker_service.process_once(redis_client)
+    await asyncio.sleep(0.05)
+    async with session_factory() as session:
+        market_row = (await session.execute(select(Market).where(Market.event_id == "evt-proof-queue"))).scalar_one()
+        snapshot = {
+            "id": market_row.id,
+            "event_id": market_row.event_id,
+            "market_address": market_row.market_address,
+            "condition_id": market_row.condition_id,
+        }
+    manual_summary = SyncSummary()
+    manual_summary.proof_jobs.append((snapshot, sample_markets[0], None))
+    await proofs.enqueue_proof_jobs(redis_client, manual_summary)
+    await asyncio.sleep(0.1)
+    proof_worker_task.cancel()
+    settlement_worker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await proof_worker_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await settlement_worker_task
+
+    assert stats["markets_processed"] == 1
+    assert await redis_client.llen(runtime_module.settings.proof_queue_key) == 0
+    assert called["maybe_generate"] >= 1
+    assert called["settlements"] >= 1
+    assert settlement_worker_task.done()
 
 
-def test_polymarket_client_raises_after_request_retry_budget(monkeypatch):
-    attempts = {"count": 0}
+@pytest.mark.asyncio
+async def test_events_ingest_persists_gamma_events_and_enqueues_proof(monkeypatch):
+    # Use in-memory DB
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        attempts["count"] += 1
-        raise httpx.ReadTimeout("timeout", request=request)
+    events_payload = [
+        {
+            "id": "ev-group",
+            "slug": "grouped-event",
+            "events": [{"slug": "grouped-event", "description": "meta"}],
+            "markets": [
+                {
+                    "id": "m-ev-1",
+                    "question": "Grouped?",
+                    "outcomes": ["Yes", "No"],
+                    "outcomePrices": [0.4, 0.6],
+                },
+                {
+                    "id": "m-ev-2",
+                    "question": "Grouped second",
+                    "outcomes": ["Up", "Down"],
+                    "outcomePrices": [0.5, 0.5],
+                },
+            ],
+        }
+    ]
 
-    transport = httpx.MockTransport(handler)
-    monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
-    client = PolymarketClient(
-        "https://gamma.polymarket.example",
-        timeout=0.1,
-        transport=transport,
-        request_max_attempts=2,
-        request_backoff_seconds=0,
-        request_backoff_max_seconds=0,
+    async def _fake_events(self, **_kwargs):
+        payloads = []
+        for raw in events_payload[0]["markets"]:
+            payload = MarketPayload.from_gamma({**raw, "events": events_payload[0]["events"]})
+            payload.group_slug = events_payload[0]["slug"]
+            payload.gamma_events = events_payload[0]["events"]
+            payloads.append(payload)
+        yield payloads
+
+    monkeypatch.setattr(
+        runtime_module,
+        "polymarket_client",
+        type("DummyClient", (), {"fetch_events_paginated": _fake_events})(),
+        raising=False,
     )
 
-    with pytest.raises(httpx.ReadTimeout):
-        client.fetch_markets(page_size=1, max_pages=1)
-    assert attempts["count"] == 2
+    redis_client = DummyRedis()
+    proof_gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", proof_gauge)
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_OVERFLOW_COUNTER", DummyCounter())
+
+    # Stub proof/settlement to prevent external calls
+    async def fake_generate(redis_client=None, market_snapshot=None, market_payload=None, condition_id=None):
+        return True
+
+    async def fake_settlement(summary, redis_client=None):
+        return 0
+
+    monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
+    monkeypatch.setattr(proofs, "run_settlement_jobs", fake_settlement)
+
+    proof_worker_task = asyncio.create_task(worker_service.run_proof_queue_worker(redis_client))
+    settlement_worker_task = asyncio.create_task(worker_service.run_settlement_queue_worker(redis_client))
+    await worker_service.process_once(redis_client)
+    await asyncio.sleep(0.1)
+    proof_worker_task.cancel()
+    settlement_worker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await proof_worker_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await settlement_worker_task
+
+    # Validate DB persisted gamma_events and group_slug
+    async with engine.begin() as conn:
+        gamma_rows = (await conn.execute(select(Base.metadata.tables["market_gamma_events"]))).fetchall()
+        group_slug_row = (await conn.execute(select(Base.metadata.tables["markets"].c.group_slug))).fetchall()
+    assert gamma_rows, "gamma events should be persisted"
+    assert group_slug_row[0][0] == "grouped-event"
+    assert await redis_client.llen(runtime_module.settings.proof_queue_key) == 0
+
+
+@pytest.mark.asyncio
+async def test_settlement_queue_enqueues_relayer_claims(monkeypatch):
+    redis_client = DummyRedis()
+    monkeypatch.setattr(runtime_module.settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "relayer_base_url", "http://relayer:8088", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
+
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    async with session_factory() as session:
+        market = Market(
+            event_id="evt-relayer",
+            title="Relayer Market",
+            category="sports",
+            oracle="polymarket",
+            status="settled",
+            resolution_status="final",
+            market_address="0x0000000000000000000000000000000000000001",
+            resolved_at=datetime.now(UTC),
+        )
+        session.add(market)
+        await session.flush()
+        settlement = Settlement(
+            id=1,
+            market_id=market.id,
+            proof_status="generated",
+            submission_status="none",
+            merkle_root="0x1234",
+            winning_outcome_id=1,
+            commitments_count=2,
+        )
+        session.add(settlement)
+        commit_row = shared_models.Commitment(
+            market_id=market.id,
+            user_address="0xabc",
+            outcome_id=1,
+            amount_wei=10,
+            salt="0x01",
+            ticket_hash="0xticket",
+            leaf="0x10",
+            leaf_index=0,
+        )
+        session.add(commit_row)
+        await session.flush()
+        session.add(
+            shared_models.CommitmentMerklePath(
+                commitment_id=commit_row.id,
+                level=0,
+                sibling_hash="0x20",
+            )
+        )
+        await session.commit()
+
+    temp_summary = SyncSummary()
+    await worker_service.run_settlement_jobs(temp_summary, redis_client)
+
+    queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)
+    assert queue_items, "relayer queue should have jobs"
+    job_body = json.loads(queue_items[0])
+    assert job_body["kind"] == "claim"
+    assert job_body["payload"]["market"] == "0x0000000000000000000000000000000000000001"
+    assert job_body["payload"]["outcome_id"] == 1
+
+    async with session_factory() as session:
+        db_settlement = (
+            await session.execute(
+                select(shared_models.Settlement).where(shared_models.Settlement.market_id == market.id)
+            )
+        ).scalar_one()
+        assert db_settlement.submission_status == shared_models.SettlementSubmissionStatus.QUEUED.value
+
+
+@pytest.mark.asyncio
+async def test_proof_queue_worker_processes_jobs(monkeypatch):
+    redis_client = DummyRedis()
+    gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", gauge)
+    settlement_gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "SETTLEMENT_QUEUE_DEPTH_GAUGE", settlement_gauge)
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_OVERFLOW_COUNTER", DummyCounter())
+
+    # Fake maybe_generate_settlement_proof to just mark a call
+    called = {"count": 0}
+
+    async def fake_generate(redis_client=None, market_snapshot=None, market_payload=None, condition_id=None):
+        called["count"] += 1
+        return True
+
+    monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
+
+    # Avoid on-chain settlement calls in this path
+    async def fake_settlements(summary, redis_client=None):
+        return 0
+
+    monkeypatch.setattr(proofs, "run_settlement_jobs", fake_settlements)
+
+    queue_key = runtime_module.settings.proof_queue_key
+    job = {
+        "job_id": "job-1",
+        "market_snapshot": {"id": 1, "event_id": "evt-proof"},
+        "market_payload": MarketPayload(
+            event_id="evt-proof",
+            title="Proofable",
+            slug="proofable",
+            category="news",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.5, 0.5],
+            gamma_raw={"id": "evt-proof"},
+        ).model_dump(),
+        "condition_id": "0xabc",
+    }
+    await redis_client.rpush(queue_key, json.dumps(job))
+    worker_task = asyncio.create_task(proofs.run_proof_queue_worker(redis_client))
+    # Give the worker a moment to process
+    await asyncio.sleep(0.1)
+    worker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await worker_task
+
+    assert called["count"] == 1
+    assert await redis_client.llen(queue_key) == 0
+    assert gauge.last_value() == 0
+
+
+@pytest.mark.asyncio
+async def test_proof_queue_worker_drops_invalid_payload(monkeypatch):
+    redis_client = DummyRedis()
+    gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", gauge)
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DLQ_COUNTER", DummyCounter())
+
+    # Invalid payload (missing required fields)
+    queue_key = runtime_module.settings.proof_queue_key
+    job = {"job_id": "job-bad", "market_payload": {"event_id": None}}
+    await redis_client.rpush(queue_key, json.dumps(job))
+    worker_task = asyncio.create_task(proofs.run_proof_queue_worker(redis_client))
+    await asyncio.sleep(0.05)
+    worker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await worker_task
+
+    assert await redis_client.llen(queue_key) == 0
+    assert gauge.last_value() == 0
+    assert redis_client.store.get(runtime_module.settings.proof_queue_dead_letter_key)  # DLQ entry exists

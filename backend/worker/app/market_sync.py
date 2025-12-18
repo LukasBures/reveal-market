@@ -16,6 +16,7 @@ from shared.logging import log_event
 from sqlalchemy import delete, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.orm.state import InstanceState
 
 from . import runtime
@@ -805,6 +806,21 @@ async def _sync_market(
     else:
         gamma_counts = {"metadata": 0, "events": 0}
     await _record_factory_state(session, db_market, market)
+    if db_market is not None:
+        # Clear stale relationship collections to avoid reusing deleted instances without triggering lazy loads.
+        for rel_key in ("outcomes_rel", "tags_rel", "clob_tokens_rel"):
+            try:
+                set_committed_value(db_market, rel_key, [])
+            except Exception:
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.market.relationship_clear_failed",
+                        message="failed to clear relationship cache",
+                        market_id=getattr(db_market, "event_id", None),
+                        relationship=rel_key,
+                    )
     resolution_outcome = await apply_resolution(session, db_market, market)
     await session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))

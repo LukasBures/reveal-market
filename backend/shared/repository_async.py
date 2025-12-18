@@ -47,6 +47,13 @@ async def upsert_market(
         "outcome_prices",
         "tags",
         "clob_token_ids",
+        "merkle_root",
+        "proof_status",
+        "proof_request_id",
+        "proof_hash",
+        "submission_status",
+        "settlement_tx_hash",
+        "settlement_submitted_at",
         "extra_data",
         "group_item_title",
         "group_item_threshold",
@@ -537,6 +544,14 @@ async def list_settlements_pending_tx(session: AsyncSession) -> list[tuple[model
         .join(models.Market, models.Market.id == models.Settlement.market_id)
         .where(
             models.Settlement.proof_status == models.SettlementProofStatus.GENERATED.value,
+            models.Settlement.submission_status.in_(
+                [
+                    models.SettlementSubmissionStatus.NONE.value,
+                    models.SettlementSubmissionStatus.QUEUED.value,
+                    models.SettlementSubmissionStatus.PROCESSING.value,
+                    models.SettlementSubmissionStatus.FAILED.value,
+                ]
+            ),
             models.Settlement.settlement_tx_hash.is_(None),
         )
     )
