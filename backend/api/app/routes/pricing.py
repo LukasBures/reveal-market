@@ -729,8 +729,11 @@ async def pricing_submit(
         market_id=quote.market_id,
         wallet_address=quote.wallet_address,
         exclude_quote=db_quote,
-        include_stake=False,
-        statuses={models.QuoteStatusEnum.CONSUMED.value},
+        include_stake=True,
+        statuses={
+            models.QuoteStatusEnum.ISSUED.value,
+            models.QuoteStatusEnum.CONSUMED.value,
+        },
     )
 
     db_quote.payload = quote.model_dump(mode="json")

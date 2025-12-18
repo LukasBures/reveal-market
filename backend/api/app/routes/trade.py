@@ -470,6 +470,44 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
         return onchain_count if onchain_count == db_count else db_count
 
 
+async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
+    """Reserve a ticket id using Redis to avoid duplicate leaf indices under concurrency."""
+
+    cache = await get_cache_client()
+    if cache is None:
+        return tentative_next
+    key = f"ticket_counter:{market_address.lower()}"
+    try:
+        exists = await cache.exists(key)
+        if not exists:
+            # Initialize so the first INCR returns the tentative value.
+            await cache.set(key, str(max(0, tentative_next - 1)))
+        reserved_raw = await cache.incr(key)
+        reserved = int(reserved_raw)
+        if reserved < tentative_next:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="ticket_counter.reservation_lower_than_chain",
+                message="Redis counter lagged on-chain nextTicketId",
+                reserved=reserved,
+                tentative=tentative_next,
+                market_address=market_address,
+            )
+            return tentative_next
+        return reserved
+    except Exception as exc:  # pragma: no cover - best-effort guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="ticket_counter.reserve_failed",
+            message="failed to reserve ticket id; falling back to tentative value",
+            market_address=market_address,
+            error=str(exc),
+        )
+        return tentative_next
+
+
 async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tuple[str, int]:
     """Create a market via the factory when no address is stored."""
 
@@ -1077,6 +1115,18 @@ async def trade_commit(
 
     # Derive next ticket id by counting on-chain Committed events (fallback to DB count).
     ticket_id = await _next_ticket_id_onchain(market_address, market_db_id, session)
+    reserved_ticket_id = await _reserve_ticket_id(market_address, ticket_id)
+    if reserved_ticket_id != ticket_id:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="ticket_counter.reserved_adjusted",
+            message="ticket id adjusted via redis reservation",
+            market_address=market_address,
+            tentative=ticket_id,
+            reserved=reserved_ticket_id,
+        )
+    ticket_id = reserved_ticket_id
     salt_bytes = secrets.token_bytes(32)
     salt_hex = "0x" + salt_bytes.hex()
     if not quote.wallet_address:

@@ -432,16 +432,22 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             if settlement.merkle_root is None:
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
-            if relayer_enabled:
-                enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
-                if enqueued:
-                    settlement.submission_status = shared_models.SettlementSubmissionStatus.QUEUED.value
-                    settlement.submission_error = None
-                    _mark_dirty()
-                    session.add(settlement)
-                    submitted += enqueued
-                    continue
+            if not runtime.settings.auto_settlement_tx_enabled:
+                if relayer_enabled:
+                    enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
+                    if enqueued:
+                        settlement.submission_status = shared_models.SettlementSubmissionStatus.QUEUED.value
+                        settlement.submission_error = None
+                        _mark_dirty()
+                        session.add(settlement)
+                        submitted += enqueued
+                continue
+
             if web3 is None or account is None:
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                settlement.submission_error = "settlement_tx_unavailable"
+                _mark_dirty()
+                session.add(settlement)
                 continue
             settlement.submission_status = shared_models.SettlementSubmissionStatus.PROCESSING.value
             settlement.submission_error = None
@@ -510,6 +516,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                 tx_hash=tx_hash,
                 block_number=block_number,
             )
+            if relayer_enabled:
+                enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
+                submitted += enqueued
         await session.flush()
     if dirty_events or dirty_conditions:
         await invalidate_cache_tags(redis_client, summary)

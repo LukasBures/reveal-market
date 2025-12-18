@@ -32,7 +32,7 @@ from .metrics import (
 from .polymarket import MarketPayload
 from .proof_builder import SettlementDataMissingError, build_prover_payload_async
 from .prover_client import ProverError
-from .settlement import run_settlement_jobs
+from .settlement import _upsert_settlement_from_chain, run_settlement_jobs
 
 logger = runtime.logger
 T = TypeVar("T")
@@ -381,17 +381,40 @@ async def maybe_generate_settlement_proof(
             await _notify_status_change()
     except (ValueError, SettlementDataMissingError) as exc:
         fallback = _build_snapshot_payload(market_snapshot, market_payload, market_identifier or "")
-        if not fallback:
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.proof.incomplete",
-                message="skipping proof generation due to missing settlement fields",
-                error=str(exc),
-                event_id=market_snapshot.get("event_id"),
-            )
-            return False
-        payload = fallback
+        # If a chain snapshot is available, try to hydrate settlement data before giving up.
+        if payload is None and numeric_market_id is not None and runtime.settings.rpc_url:
+            try:
+                async with session_scope() as session:
+                    market_record = await session.get(shared_models.Market, numeric_market_id)
+                    if market_record and getattr(market_record, "market_address", None):
+                        refreshed = await _upsert_settlement_from_chain(session, market_record)
+                        if refreshed is not None:
+                            try:
+                                payload = await build_prover_payload_async(session, numeric_market_id)
+                                persisted_snapshot = True
+                            except SettlementDataMissingError:
+                                payload = None
+            except Exception as refresh_exc:  # pragma: no cover - best-effort hydrate
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.chain_hydrate_failed",
+                    message="failed to backfill settlement from chain for proof payload",
+                    market_id=market_identifier,
+                    error=str(refresh_exc),
+                )
+        if payload is None:
+            if not fallback:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.incomplete",
+                    message="skipping proof generation due to missing settlement fields",
+                    error=str(exc),
+                    event_id=market_snapshot.get("event_id"),
+                )
+                return False
+            payload = fallback
     if payload is not None and numeric_market_id is not None and not persisted_snapshot:
         try:
             async with session_scope() as session:
