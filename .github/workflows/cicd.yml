@@ -383,16 +383,28 @@ jobs:
             set -euo pipefail
             echo ">>> Pull latest code"
             cd ~/apps/reveal-market
+            export MAIN_REPO_SSH_KEY_PATH="${{ vars.MAIN_REPO_SSH_KEY_PATH }}"
             export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}"
             # Expand leading ~ in key path if provided (quoted pattern prevents tilde expansion).
+            if [ -n "${MAIN_REPO_SSH_KEY_PATH:-}" ]; then
+              case "${MAIN_REPO_SSH_KEY_PATH}" in
+                "~/"*) MAIN_REPO_SSH_KEY_PATH="${HOME}/${MAIN_REPO_SSH_KEY_PATH#"~/"}" ;;
+              esac
+            fi
             if [ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" ]; then
               case "${PROVER_ARTIFACTS_SSH_KEY_PATH}" in
                 "~/"*) PROVER_ARTIFACTS_SSH_KEY_PATH="${HOME}/${PROVER_ARTIFACTS_SSH_KEY_PATH#"~/"}" ;;
               esac
             fi
-            # Apply SSH key for private submodules if present
+            MAIN_GIT_SSH_COMMAND=""
+            if [ -n "${MAIN_REPO_SSH_KEY_PATH:-}" ] && [ -f "${MAIN_REPO_SSH_KEY_PATH}" ]; then
+              MAIN_GIT_SSH_COMMAND="ssh -i ${MAIN_REPO_SSH_KEY_PATH} -o IdentitiesOnly=yes"
+            elif [ -f "${HOME}/.ssh/reveal-market-gh-deploy" ]; then
+              MAIN_GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/reveal-market-gh-deploy -o IdentitiesOnly=yes"
+            fi
+            SUBMODULE_GIT_SSH_COMMAND=""
             if [ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]; then
-              export GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes"
+              SUBMODULE_GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes"
             else
               echo "Artifacts SSH key missing at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; submodule fetch may fail." >&2
             fi
@@ -401,11 +413,19 @@ jobs:
               echo "Working tree dirty. Stash or commit changes before deploying." >&2
               exit 1
             fi
-            git pull --rebase
+            if [ -n "${MAIN_GIT_SSH_COMMAND:-}" ]; then
+              GIT_SSH_COMMAND="${MAIN_GIT_SSH_COMMAND}" git pull --rebase
+            else
+              git pull --rebase
+            fi
 
             mkdir -p ~/.ssh
             ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
-            git submodule update --init --recursive
+            if [ -n "${SUBMODULE_GIT_SSH_COMMAND:-}" ]; then
+              GIT_SSH_COMMAND="${SUBMODULE_GIT_SSH_COMMAND}" git submodule update --init --recursive
+            else
+              git submodule update --init --recursive
+            fi
 
             echo ">>> Run production deployment script"
             chmod +x run_prod.sh
