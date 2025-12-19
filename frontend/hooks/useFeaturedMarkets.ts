@@ -8,7 +8,10 @@ import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 type UseFeaturedMarketsArgs = {
   limit: number;
   initialData?: MarketSummary[];
-} & Pick<FetchFeaturedMarketsOptions, "searchQuery" | "category" | "status" | "trending" | "orderBy">;
+} & Pick<
+  FetchFeaturedMarketsOptions,
+  "searchQuery" | "category" | "status" | "trending" | "orderBy" | "closesWithinHours"
+>;
 
 export function useFeaturedMarkets({
   limit,
@@ -16,6 +19,7 @@ export function useFeaturedMarkets({
   category,
   status,
   trending,
+  closesWithinHours,
   orderBy,
   initialData,
 }: UseFeaturedMarketsArgs) {
@@ -32,6 +36,7 @@ export function useFeaturedMarkets({
         trending: trending ?? null,
         coalesceGroups: true,
         orderBy: normalizedOrderBy,
+        closesWithinHours: closesWithinHours ?? null,
       },
     ],
     queryFn: () =>
@@ -42,6 +47,7 @@ export function useFeaturedMarkets({
         trending,
         coalesceGroups: true,
         orderBy: normalizedOrderBy,
+        closesWithinHours,
       }),
     initialData,
     staleTime: 30_000,

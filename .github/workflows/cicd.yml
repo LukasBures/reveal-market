@@ -384,12 +384,14 @@ jobs:
             echo ">>> Pull latest code"
             cd ~/apps/reveal-market
             export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}"
-            # Expand leading ~ in key path if provided
-            if [[ "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" == "~/"* ]]; then
-              PROVER_ARTIFACTS_SSH_KEY_PATH="${HOME}/${PROVER_ARTIFACTS_SSH_KEY_PATH#~/}"
+            # Expand leading ~ in key path if provided (quoted pattern prevents tilde expansion).
+            if [ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" ]; then
+              case "${PROVER_ARTIFACTS_SSH_KEY_PATH}" in
+                "~/"*) PROVER_ARTIFACTS_SSH_KEY_PATH="${HOME}/${PROVER_ARTIFACTS_SSH_KEY_PATH#"~/"}" ;;
+              esac
             fi
             # Apply SSH key for private submodules if present
-            if [[ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+            if [ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]; then
               export GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes"
             else
               echo "Artifacts SSH key missing at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; submodule fetch may fail." >&2

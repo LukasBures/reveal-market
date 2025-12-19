@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -55,6 +55,10 @@ async def list_markets(
     coalesce_groups: Annotated[
         bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
     ] = None,
+    closes_within_hours: Annotated[
+        int | None,
+        Query(ge=1, le=168, description="Only return markets closing within this many hours"),
+    ] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     """List markets with optional filters and heavy reliance on Redis caches."""
@@ -83,6 +87,7 @@ async def list_markets(
         trending=trending,
         featured=featured,
         coalesce_groups=coalesce_groups,
+        closes_within_hours=closes_within_hours,
     )
     cache = await get_cache_client()
     log_event(
@@ -101,7 +106,14 @@ async def list_markets(
         trending=bool(trending),
         featured=featured,
         coalesce_groups=coalesce_mode,
+        closes_within_hours=closes_within_hours,
     )
+    closes_after = None
+    closes_before = None
+    if closes_within_hours is not None:
+        now = datetime.now(UTC)
+        closes_after = now
+        closes_before = now + timedelta(hours=closes_within_hours)
     start = time.perf_counter()
     cache_enabled = cache is not None and market_svc.should_cache_market_list(
         limit, offset, normalized_search, normalized_order_by
@@ -145,6 +157,7 @@ async def list_markets(
                 result_count=len(cached_models),
                 featured=featured,
                 coalesce_groups=coalesce_mode,
+                closes_within_hours=closes_within_hours,
             )
             return cached_models
         MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*", category=category or "*").inc()
@@ -178,6 +191,8 @@ async def list_markets(
         offset=query_offset,
         order_by=normalized_order_by,
         coalesce_groups=coalesce_mode,
+        closes_after=closes_after,
+        closes_before=closes_before,
     )
     market_models = await market_svc.enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets]
@@ -257,6 +272,7 @@ async def list_markets(
             result_count=len(market_models),
             order_by=normalized_order_by,
             trending=bool(trending),
+            closes_within_hours=closes_within_hours,
         )
     else:
         duration = (time.perf_counter() - start) * 1000
@@ -277,6 +293,7 @@ async def list_markets(
             result_count=len(market_models),
             order_by=normalized_order_by,
             trending=bool(trending),
+            closes_within_hours=closes_within_hours,
         )
     return market_models
 
@@ -292,6 +309,10 @@ async def list_markets_by_category(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     coalesce_groups: Annotated[
         bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
+    ] = None,
+    closes_within_hours: Annotated[
+        int | None,
+        Query(ge=1, le=168, description="Only return markets closing within this many hours"),
     ] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
@@ -314,7 +335,14 @@ async def list_markets_by_category(
         offset=offset,
         order_by=normalized_order_by,
         coalesce_groups=bool(coalesce_groups),
+        closes_within_hours=closes_within_hours,
     )
+    closes_after = None
+    closes_before = None
+    if closes_within_hours is not None:
+        now = datetime.now(UTC)
+        closes_after = now
+        closes_before = now + timedelta(hours=closes_within_hours)
     category_value = market_svc.decode_slug(category_slug)
     lookup = market_svc.canonical_category_lookup(category_value)
     if lookup is None:
@@ -337,6 +365,7 @@ async def list_markets_by_category(
         offset,
         order_by=normalized_order_by,
         coalesce_groups=coalesce_groups,
+        closes_within_hours=closes_within_hours,
     )
     cache_enabled = cache is not None and market_svc.should_cache_market_list(limit, offset, None, normalized_order_by)
     if cache_enabled:
@@ -369,6 +398,7 @@ async def list_markets_by_category(
                 result_count=len(models_from_cache),
                 duration_ms=round((time.perf_counter() - start) * 1000, 2),
                 coalesce_groups=coalesce_mode,
+                closes_within_hours=closes_within_hours,
             )
             return models_from_cache
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
@@ -392,6 +422,7 @@ async def list_markets_by_category(
         limit=fetch_limit,
         offset=fetch_offset,
         order_by=normalized_order_by,
+        closes_within_hours=closes_within_hours,
     )
     if trending_category:
         markets = await crud.get_markets(
@@ -400,6 +431,8 @@ async def list_markets_by_category(
             offset=fetch_offset,
             order_by=normalized_order_by,
             coalesce_groups=coalesce_mode,
+            closes_after=closes_after,
+            closes_before=closes_before,
         )
     else:
         markets = await crud.get_markets(
@@ -409,6 +442,8 @@ async def list_markets_by_category(
             offset=fetch_offset,
             order_by=normalized_order_by,
             coalesce_groups=coalesce_mode,
+            closes_after=closes_after,
+            closes_before=closes_before,
         )
     market_models = market_svc.filter_markets_for_visibility(
         await market_svc.enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets]),
@@ -443,6 +478,7 @@ async def list_markets_by_category(
             limit=limit,
             offset=offset,
             order_by=normalized_order_by,
+            closes_within_hours=closes_within_hours,
         )
     if cache_enabled and market_models:
         schema_tag = await get_schema_tag(cache, settings.schema_version_key)
@@ -461,6 +497,7 @@ async def list_markets_by_category(
             offset=offset,
             result_count=len(market_models),
             duration_ms=duration_ms,
+            closes_within_hours=closes_within_hours,
         )
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:category")
     else:
@@ -475,6 +512,7 @@ async def list_markets_by_category(
             offset=offset,
             result_count=len(market_models),
             duration_ms=duration_ms,
+            closes_within_hours=closes_within_hours,
         )
         update_cache_context(request, cache_key=None, hit=False, source="markets:category")
     return market_models

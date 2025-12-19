@@ -208,4 +208,5 @@ export type FetchFeaturedMarketsOptions = {
   onlyFeatured?: boolean;
   coalesceGroups?: boolean;
   orderBy?: "volume";
+  closesWithinHours?: number | null;
 };

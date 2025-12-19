@@ -28,6 +28,7 @@ type ClientProps = {
   onlyActive?: boolean;
   trending?: boolean;
   sortBy?: MarketSortOption;
+  closesWithinHours?: number | null;
 };
 
 /**
@@ -44,6 +45,7 @@ export function FeaturedMarketsClient({
   onlyActive = true,
   trending,
   sortBy = "totalVolume",
+  closesWithinHours,
 }: ClientProps) {
   const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
@@ -64,7 +66,7 @@ export function FeaturedMarketsClient({
   const batchSize = Math.max(pageSize, 30);
   const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
   const orderBy = "volume";
-  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}`;
+  const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}|${closesWithinHours ?? "default"}`;
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
@@ -105,6 +107,7 @@ export function FeaturedMarketsClient({
     category: normalizedCategory,
     status,
     trending,
+    closesWithinHours,
     orderBy,
     initialData: initialMarkets,
   });
@@ -155,6 +158,7 @@ export function FeaturedMarketsClient({
             trending,
             coalesceGroups: false,
             orderBy,
+            closesWithinHours,
           });
           const merged = normalizeMarkets([...markets, ...additions]);
           const newItemsAdded = merged.length - markets.length;

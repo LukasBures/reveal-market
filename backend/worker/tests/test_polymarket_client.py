@@ -413,6 +413,38 @@ async def test_polymarket_client_fetches_events_and_flattens_markets():
 
 
 @pytest.mark.asyncio
+async def test_polymarket_events_inherit_tags_for_category():
+    events_payload = [
+        {
+            "id": "ev-1",
+            "slug": "finance-event",
+            "tags": [{"id": "120", "label": "Finance", "slug": "finance"}],
+            "markets": [
+                {
+                    "id": "m-1",
+                    "question": "Q?",
+                    "outcomes": ["Yes", "No"],
+                    "outcomePrices": [0.5, 0.5],
+                }
+            ],
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        if offset > 0:
+            return httpx.Response(status_code=200, json=[])
+        return httpx.Response(status_code=200, json=events_payload)
+
+    transport = httpx.MockTransport(handler)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = await client.fetch_events_markets(page_size=10, max_pages=1)
+
+    assert markets[0].category == "Finance"
+    assert markets[0].tags == ["finance"]
+
+
+@pytest.mark.asyncio
 async def test_polymarket_client_forwards_event_filters(monkeypatch):
     observed: dict[str, list[tuple[str, str]]] = {}
 

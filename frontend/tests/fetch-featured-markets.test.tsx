@@ -19,7 +19,7 @@ describe("fetchFeaturedMarkets", () => {
   it("calls /markets by default", async () => {
     await fetchFeaturedMarkets(6);
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/markets?limit=6&status=active&order_by=volume&coalesce_groups=1"),
+      expect.stringContaining("/markets?limit=6&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1"),
       expect.objectContaining({
         next: expect.objectContaining({ tags: ["markets:list"] }),
       }),
@@ -29,7 +29,9 @@ describe("fetchFeaturedMarkets", () => {
   it("targets the categories endpoint when category filter provided", async () => {
     await fetchFeaturedMarkets(10, { category: "Sports" });
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/categories/sports?limit=10&status=active&order_by=volume&coalesce_groups=1"),
+      expect.stringContaining(
+        "/categories/sports?limit=10&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1",
+      ),
       expect.objectContaining({
         next: expect.objectContaining({ tags: ["category:sports"] }),
       }),

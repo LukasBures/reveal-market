@@ -22,6 +22,7 @@ def markets_list_cache_key(
     trending: bool | None = None,
     featured: bool | None = None,
     coalesce_groups: bool | None = None,
+    closes_within_hours: int | None = None,
 ) -> str:
     """Build the cache key used for /markets list responses."""
 
@@ -42,6 +43,8 @@ def markets_list_cache_key(
         parts.append(f"featured={int(bool(featured))}")
     if coalesce_groups is not None:
         parts.append(f"coalesce_groups={int(bool(coalesce_groups))}")
+    if closes_within_hours is not None:
+        parts.append(f"closes_within_hours={int(closes_within_hours)}")
     return f"{MARKETS_LIST_PREFIX}:" + "|".join(parts)
 
 

@@ -145,24 +145,7 @@ class MarketPayload(BaseModel):
         manual_activation = _coerce_bool(raw.get("manualActivation"))
         clear_book_on_start = _coerce_bool(raw.get("clearBookOnStart"))
         deploying_timestamp = _extract_timestamp_candidate(raw.get("deployingTimestamp"))
-        if any(
-            flag is True
-            for flag in (
-                restricted_flag,
-                archived_flag,
-                pending_deployment,
-                deploying,
-            )
-        ) or any(
-            flag is False
-            for flag in (
-                accepting_orders,
-                active_flag,
-                ready_flag,
-                funded_flag,
-                approved_flag,
-            )
-        ):
+        if accepting_orders is False:
             closed = True
         uma_status = _extract_uma_status(raw)
 
@@ -591,6 +574,9 @@ class AsyncPolymarketClient:
                 if not markets:
                     continue
                 event_group_slug = (event.get("slug") or event.get("id")) if len(markets) > 1 else None
+                event_tags = event.get("tags")
+                event_category = event.get("category")
+                event_series = event.get("series")
                 raw_events = event.get("events")
                 event_metadata = raw_events if isinstance(raw_events, list) and raw_events else None
                 if event_metadata is None:
@@ -602,7 +588,16 @@ class AsyncPolymarketClient:
                     ]
                 for raw in markets:
                     try:
-                        payload = MarketPayload.from_gamma(raw)
+                        if not isinstance(raw, dict):
+                            continue
+                        enriched = dict(raw)
+                        if event_tags and not enriched.get("tags"):
+                            enriched["tags"] = event_tags
+                        if event_category and not enriched.get("category"):
+                            enriched["category"] = event_category
+                        if isinstance(event_series, list) and not enriched.get("series"):
+                            enriched["series"] = event_series
+                        payload = MarketPayload.from_gamma(enriched)
                         payload.gamma_events = event_metadata
                         payload.group_slug = event_group_slug
                         page_payloads.append(payload)

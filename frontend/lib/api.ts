@@ -22,6 +22,7 @@ export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
+const DEFAULT_CLOSES_WITHIN_HOURS = 24;
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
   const message = error instanceof Error ? error.message : String(error ?? "unknown");
   const payload = meta ? { ...meta, error: message } : { error: message };
@@ -340,6 +341,13 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     }
     const orderBy = options?.orderBy ?? "volume";
     params.set("order_by", orderBy);
+    const closesWithinHours = options?.closesWithinHours;
+    if (closesWithinHours !== null) {
+      const effectiveWindow = closesWithinHours ?? DEFAULT_CLOSES_WITHIN_HOURS;
+      if (Number.isFinite(effectiveWindow) && effectiveWindow > 0) {
+        params.set("closes_within_hours", String(effectiveWindow));
+      }
+    }
     if (onlyFeatured) {
       params.set("only_featured", "1");
     }

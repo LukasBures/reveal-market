@@ -22,6 +22,8 @@ async def get_markets(
     offset: int = 0,
     order_by: str | None = None,
     coalesce_groups: bool = False,
+    closes_after: datetime | None = None,
+    closes_before: datetime | None = None,
 ) -> list[models.Market]:
     # Always sort by lifetime volume; keep volume_24h_usd as a legacy alias.
     if order_by == "volume_24h_usd":
@@ -45,6 +47,12 @@ async def get_markets(
     )
     stmt = _apply_common_filters(stmt, status=status, category=category, oracle=oracle, featured=featured)
     stmt = _apply_text_search(session, stmt, search, apply_default_order=order_by is None)
+    if closes_after or closes_before:
+        stmt = stmt.where(models.Market.closes_at.isnot(None))
+        if closes_after:
+            stmt = stmt.where(models.Market.closes_at >= closes_after)
+        if closes_before:
+            stmt = stmt.where(models.Market.closes_at <= closes_before)
     if order_by == "volume_24h_usd":
         stmt = stmt.order_by(
             models.Market.volume_24h_usd.desc(),
@@ -78,10 +86,7 @@ async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBr
     )
     finalized = int((await session.execute(finalized_stmt)).scalar_one() or 0)
 
-    total_stmt = select(func.count(models.Market.id))
-    total = int((await session.execute(total_stmt)).scalar_one() or 0)
-    if total == 0:
-        total = live + finalized
+    total = live + finalized
 
     return [
         schemas.MarketStatusBreakdown(status="live", count=live),

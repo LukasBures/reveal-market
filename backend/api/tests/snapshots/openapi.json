@@ -3595,6 +3595,26 @@
               "description": "Return a single representative per group_slug",
               "title": "Coalesce Groups"
             }
+          },
+          {
+            "description": "Only return markets closing within this many hours",
+            "in": "query",
+            "name": "closes_within_hours",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 168,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only return markets closing within this many hours",
+              "title": "Closes Within Hours"
+            }
           }
         ],
         "responses": {
@@ -3976,6 +3996,26 @@
               ],
               "description": "Return a single representative per group_slug",
               "title": "Coalesce Groups"
+            }
+          },
+          {
+            "description": "Only return markets closing within this many hours",
+            "in": "query",
+            "name": "closes_within_hours",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 168,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only return markets closing within this many hours",
+              "title": "Closes Within Hours"
             }
           }
         ],
