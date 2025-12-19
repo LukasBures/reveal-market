@@ -15,7 +15,7 @@ from redis.asyncio import Redis
 from shared import models as shared_models
 from shared import repository_async as shared_repository
 from shared.logging import log_event
-from sqlalchemy import delete, inspect, or_, select
+from sqlalchemy import delete, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -472,10 +472,21 @@ async def collect_market_changes_with_summary(
     if not markets:
         return summary
     existing_records = await _load_existing_markets(session, markets)
+    existing_ids = [record.id for record in existing_records.values() if record.id is not None]
+    commitment_counts: dict[int, int] = {}
+    if existing_ids:
+        commit_stmt = (
+            select(shared_models.Commitment.market_id, func.count(shared_models.Commitment.id))
+            .where(shared_models.Commitment.market_id.in_(existing_ids))
+            .group_by(shared_models.Commitment.market_id)
+        )
+        for market_id, count in (await session.execute(commit_stmt)).all():
+            commitment_counts[int(market_id)] = int(count or 0)
     prefetched_state = await _prefetch_normalized_state(
         session, [record.id for record in existing_records.values() if record.id is not None]
     )
     total_markets = len(markets)
+    allow_resolution_fetch: dict[str, bool] = {}
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None
     goldsky = runtime.goldsky_client
     if goldsky is not None:
@@ -484,14 +495,26 @@ async def collect_market_changes_with_summary(
         for market in markets:
             condition_id = getattr(market, "condition_id", None)
             if not isinstance(condition_id, str) or not condition_id.startswith("0x"):
+                allow_resolution_fetch[market.event_id] = False
                 continue
             existing = existing_records.get(market.event_id)
+            market_id = getattr(existing, "id", None)
+            closed_flag = bool(getattr(market, "closed", None) or getattr(existing, "closed", None))
+            status_value = (
+                getattr(market, "resolution_status", None)
+                or getattr(existing, "resolution_status", None)
+                or shared_models.ResolutionStatusEnum.PENDING.value
+            )
+            has_commits = bool(market_id and commitment_counts.get(market_id, 0) > 0)
+            allow_fetch = closed_flag and status_value == shared_models.ResolutionStatusEnum.FINAL.value and has_commits
+            allow_resolution_fetch[market.event_id] = allow_fetch
+            if not allow_fetch:
+                continue
             closes_at = getattr(market, "closes_at", None) or getattr(existing, "closes_at", None)
             if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
                 closes_at = closes_at.replace(tzinfo=UTC)
             if isinstance(closes_at, datetime) and now < closes_at:
                 continue
-            status_value = getattr(market, "resolution_status", None) or getattr(existing, "resolution_status", None)
             resolved_at = getattr(existing, "resolved_at", None)
             if status_value == shared_models.ResolutionStatusEnum.FINAL.value and resolved_at is not None:
                 continue
@@ -538,6 +561,7 @@ async def collect_market_changes_with_summary(
                 existing_market=prefetched,
                 prefetched_state=prefetched_state,
                 resolution_summaries=resolution_summaries,
+                allow_resolution_fetch=allow_resolution_fetch.get(market.event_id, True),
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -789,6 +813,7 @@ async def sync_market(
     existing_market: shared_models.Market | None = None,
     prefetched_state: PrefetchedMarketState | None = None,
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
+    allow_resolution_fetch: bool = True,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
     return await _sync_market(
@@ -797,6 +822,7 @@ async def sync_market(
         existing_market=existing_market,
         prefetched_state=prefetched_state,
         resolution_summaries=resolution_summaries,
+        allow_resolution_fetch=allow_resolution_fetch,
     )
 
 
@@ -933,6 +959,7 @@ async def _sync_market(
     existing_market: shared_models.Market | None = None,
     prefetched_state: PrefetchedMarketState | None = None,
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
+    allow_resolution_fetch: bool = True,
 ):
     """Async implementation that upserts market state + resolutions."""
     now = datetime.now(UTC)
@@ -1161,7 +1188,13 @@ async def _sync_market(
                         relationship=rel_key,
                     )
     resolution_start = time.perf_counter()
-    resolution_outcome = await apply_resolution(session, db_market, market, summary_overrides=resolution_summaries)
+    resolution_outcome = await apply_resolution(
+        session,
+        db_market,
+        market,
+        summary_overrides=resolution_summaries,
+        allow_resolution_fetch=allow_resolution_fetch,
+    )
     timing_resolution_ms = (time.perf_counter() - resolution_start) * 1000
     await session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))

@@ -70,16 +70,23 @@ async def get_markets(
 
 
 async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBreakdown]:
-    stmt = select(models.Market.closed, func.count(models.Market.id)).group_by(models.Market.closed)
-    rows = (await session.execute(stmt)).all()
-    live = 0
-    finalized = 0
-    for closed_flag, count in rows:
-        if closed_flag:
-            finalized += count
-        else:
-            live += count
-    total = live + finalized
+    live_stmt = select(func.count(models.Market.id)).where(models.Market.closed.is_(False))
+    live = int((await session.execute(live_stmt)).scalar_one() or 0)
+
+    finalized_stmt = select(func.count(models.Market.id)).where(
+        or_(
+            models.Market.status == models.MarketStatusEnum.SETTLED.value,
+            models.Market.resolution_status == models.ResolutionStatusEnum.FINAL.value,
+            models.Market.resolved_at.isnot(None),
+        )
+    )
+    finalized = int((await session.execute(finalized_stmt)).scalar_one() or 0)
+
+    total_stmt = select(func.count(models.Market.id))
+    total = int((await session.execute(total_stmt)).scalar_one() or 0)
+    if total == 0:
+        total = live + finalized
+
     return [
         schemas.MarketStatusBreakdown(status="live", count=live),
         schemas.MarketStatusBreakdown(status="finalized", count=finalized),

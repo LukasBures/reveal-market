@@ -225,6 +225,7 @@ async def apply_resolution(
     market: MarketPayload,
     *,
     summary_overrides: dict[str, dict[str, Any] | None] | None = None,
+    allow_resolution_fetch: bool = True,
 ) -> ResolutionOutcome:
     condition_id = market.condition_id
     active_goldsky = goldsky_client or runtime.goldsky_client
@@ -258,7 +259,11 @@ async def apply_resolution(
     existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     existing_resolved = bool(existing and existing.resolved)
     now = datetime.now(UTC)
-    incoming_resolution_status = getattr(market, "resolution_status", None) or ResolutionStatusEnum.FINAL.value
+    incoming_resolution_status = (
+        getattr(market, "resolution_status", None)
+        or getattr(db_market, "resolution_status", None)
+        or ResolutionStatusEnum.PENDING.value
+    )
     incoming_resolution_reason = getattr(market, "resolution_reason", None)
     if incoming_resolution_reason:
         db_market.resolution_reason = incoming_resolution_reason
@@ -333,6 +338,9 @@ async def apply_resolution(
     summary_override = None
     if summary_overrides is not None:
         summary_override = summary_overrides.get(normalized_condition_id)
+
+    if not allow_resolution_fetch:
+        return ResolutionOutcome()
 
     summary = await _fetch_resolution_snapshot(
         normalized_condition_id,
