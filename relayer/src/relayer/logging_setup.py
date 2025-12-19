@@ -12,7 +12,8 @@ def configure_logging(level: str = "INFO") -> None:
     )
     structlog.configure(
         processors=[
-            structlog.processors.TimeStamper(fmt="iso"),
+            # Emit UTC timestamps so all services log in the same timezone.
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.stdlib.add_log_level,
             structlog.processors.JSONRenderer(),
         ],

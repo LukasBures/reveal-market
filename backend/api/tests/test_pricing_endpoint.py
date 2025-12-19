@@ -252,6 +252,7 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
         title="Cutoff market",
         oracle="0xoracle",
         status=models.MarketStatusEnum.COMMIT.value,
+        resolution_status=models.ResolutionStatusEnum.FINAL.value,
         closes_at=datetime.now(tz=UTC) + timedelta(seconds=120),
         market_address="0x2222222222222222222222222222222222222222",
     )

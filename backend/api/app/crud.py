@@ -153,7 +153,16 @@ async def patch_market(session: AsyncSession, market: models.Market, update: sch
 
 def _apply_common_filters(stmt, *, status: str | None, category: str | None, oracle: str | None, featured: bool | None):
     if status == "active":
-        stmt = stmt.where(models.Market.closed.is_(False))
+        stmt = stmt.where(
+            models.Market.closed.is_(False),
+            models.Market.status.notin_(
+                [
+                    models.MarketStatusEnum.SETTLED.value,
+                    models.MarketStatusEnum.CANCELLED.value,
+                ]
+            ),
+            models.Market.resolved_at.is_(None),
+        )
     elif status and status.lower() not in {"any", "all"}:
         stmt = stmt.where(models.Market.status == status)
     if category:

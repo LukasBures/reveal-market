@@ -78,7 +78,10 @@ class Market(Base):
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     resolution_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=ResolutionStatusEnum.FINAL.value, server_default=text("'final'")
+        String(32),
+        nullable=False,
+        default=ResolutionStatusEnum.PENDING.value,
+        server_default=text("'pending_resolution'"),
     )
     resolution_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     commits_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

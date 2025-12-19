@@ -31,6 +31,8 @@ def _coerce_preset_list(value: object) -> list[str]:
 
     if isinstance(value, (list, tuple, set)):
         return [str(item) for item in value]
+    if isinstance(value, str):
+        return [entry.strip() for entry in value.split(",") if entry.strip()]
     return []
 
 

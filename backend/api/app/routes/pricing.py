@@ -58,7 +58,8 @@ def _assert_commits_allowed(
 ) -> None:
     """Raise if the market should not accept new quotes/commits."""
 
-    cutoff_seconds = getattr(settings, "commit_cutoff_seconds", 0) or 0
+    # Enforce a minimum 5-minute buffer before close; use configured cutoff if larger.
+    cutoff_seconds = max(300, getattr(settings, "commit_cutoff_seconds", 0) or 0)
     resolution_status = getattr(market, "resolution_status", shared_models.ResolutionStatusEnum.FINAL.value)
     resolution_reason = getattr(market, "resolution_reason", None)
     blocked_at = getattr(market, "commits_blocked_at", None)
@@ -91,10 +92,12 @@ def _assert_commits_allowed(
     if cutoff_seconds > 0 and closes_at is not None:
         cutoff_time = closes_at - timedelta(seconds=int(cutoff_seconds))
         if now >= cutoff_time:
-            if blocked_at is None:
-                market.commits_blocked_at = now
-                blocked_at = market.commits_blocked_at
+            block_time = cutoff_time
             blocked_at_ts = _normalize_ts(blocked_at)
+            if blocked_at_ts is None or blocked_at_ts > block_time:
+                market.commits_blocked_at = block_time
+                blocked_at = market.commits_blocked_at
+                blocked_at_ts = block_time
             if session is not None:
                 session.add(market)
             raise HTTPException(

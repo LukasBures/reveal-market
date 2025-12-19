@@ -244,7 +244,9 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                 ):
                     page_start = time.perf_counter()
                     page_no += 1
+                    page_from = total_fetched + 1
                     total_fetched += len(page)
+                    page_to = total_fetched
                     log_event(
                         logger,
                         logging.DEBUG,
@@ -253,11 +255,37 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         page=page_no,
                         count=len(page),
                         total=total_fetched,
+                        from_index=page_from,
+                        to_index=page_to,
+                    )
+                    process_start = time.perf_counter()
+                    timing_before = (
+                        summary.timing_match_ms,
+                        summary.timing_upsert_ms,
+                        summary.timing_normalized_ms,
+                        summary.timing_resolution_ms,
                     )
                     summary = await collect_market_changes_with_summary(session, page, redis_client, summary=summary)
+                    process_ms = (time.perf_counter() - process_start) * 1000
+                    timing_after = (
+                        summary.timing_match_ms,
+                        summary.timing_upsert_ms,
+                        summary.timing_normalized_ms,
+                        summary.timing_resolution_ms,
+                    )
+                    delta_match = timing_after[0] - timing_before[0]
+                    delta_upsert = timing_after[1] - timing_before[1]
+                    delta_normalized = timing_after[2] - timing_before[2]
+                    delta_resolution = timing_after[3] - timing_before[3]
+                    flush_start = time.perf_counter()
                     await session.flush()
+                    flush_ms = (time.perf_counter() - flush_start) * 1000
+                    commit_start = time.perf_counter()
                     await session.commit()
+                    commit_ms = (time.perf_counter() - commit_start) * 1000
+                    expunge_start = time.perf_counter()
                     session.expunge_all()  # keep identity map small between pages
+                    expunge_ms = (time.perf_counter() - expunge_start) * 1000
                     page_duration_ms = (time.perf_counter() - page_start) * 1000
                     log_event(
                         logger,
@@ -268,6 +296,14 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         count=len(page),
                         total=total_fetched,
                         duration_ms=round(page_duration_ms, 2),
+                        process_ms=round(process_ms, 2),
+                        flush_ms=round(flush_ms, 2),
+                        commit_ms=round(commit_ms, 2),
+                        expunge_ms=round(expunge_ms, 2),
+                        match_ms=round(delta_match, 2),
+                        upsert_ms=round(delta_upsert, 2),
+                        normalized_ms=round(delta_normalized, 2),
+                        resolution_ms=round(delta_resolution, 2),
                     )
                 await apply_retention_cleanup_async(session, summary)
                 log_event(

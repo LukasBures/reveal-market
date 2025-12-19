@@ -97,7 +97,7 @@ class MarketPayload(BaseModel):
     starts_at: datetime | None = None
     orders_opened_at: datetime | None = None
     resolution_source: str | None = None
-    resolution_status: str = Field(default="final")
+    resolution_status: str = Field(default=ResolutionStatusEnum.PENDING.value)
     resolution_reason: str | None = None
     commits_blocked_at: datetime | None = None
     market_maker: str | None = None
@@ -222,7 +222,8 @@ class MarketPayload(BaseModel):
             _clean_string(raw.get("resolutionState")) or _clean_string(raw.get("resolutionStatus")) or uma_status
         )
         resolution_status, resolution_reason = _map_resolution_status(raw_resolution_state)
-        if resolution_status != ResolutionStatusEnum.FINAL.value:
+        has_explicit_resolution = raw_resolution_state is not None and str(raw_resolution_state).strip() != ""
+        if has_explicit_resolution and resolution_status != ResolutionStatusEnum.FINAL.value:
             closed = True
 
         market = cls(
@@ -238,7 +239,7 @@ class MarketPayload(BaseModel):
             tags=tags,
             outcomes=outcomes,
             outcome_prices=outcome_prices,
-            gamma_raw=raw,
+            gamma_raw=None,
             gamma_metadata=gamma_metadata,
             gamma_events=gamma_events or None,
             rake_bps=None,
@@ -945,10 +946,10 @@ def _map_resolution_status(raw_status: str | None) -> tuple[str, str | None]:
     """Convert upstream resolution strings into internal resolution status flags."""
 
     if raw_status is None:
-        return ResolutionStatusEnum.FINAL.value, None
+        return ResolutionStatusEnum.PENDING.value, None
     normalized = raw_status.strip().lower()
     if not normalized:
-        return ResolutionStatusEnum.FINAL.value, raw_status
+        return ResolutionStatusEnum.PENDING.value, raw_status
     if normalized in {"pending", "pending_resolution", "preliminary", "awaiting", "waiting"}:
         return ResolutionStatusEnum.PENDING.value, raw_status
     if normalized in {"disputed", "challenge", "challenged", "contested"}:

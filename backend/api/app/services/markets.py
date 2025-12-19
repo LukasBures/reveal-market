@@ -123,14 +123,29 @@ def build_market_caps() -> schemas.MarketCaps:
     )
 
 
-def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list[schemas.MarketResponse]:
-    """Apply visibility rules (category allowlist, skip closed, de-dupe by event_id)."""
+def filter_markets_for_visibility(
+    markets: list[schemas.MarketResponse], *, hide_settled: bool = False
+) -> list[schemas.MarketResponse]:
+    """Apply visibility rules (category allowlist, skip closed, de-dupe by event_id).
+
+    hide_settled controls whether settled/cancelled markets are stripped (used for active feeds),
+    while detail pages and broad listings can keep them.
+    """
 
     category_allow = {item.lower() for item in settings.market_category_allowlist if isinstance(item, str)}
+    disallowed_statuses = {
+        models.MarketStatusEnum.SETTLED.value.lower(),
+        models.MarketStatusEnum.CANCELLED.value.lower(),
+    }
     allowed_statuses = {status.value.lower() for status in models.MarketStatusEnum}
+    if hide_settled:
+        allowed_statuses.difference_update(disallowed_statuses)
+    else:
+        allowed_statuses.update(disallowed_statuses)
     allowed_statuses.update({"", "active", "open", "live", "resolved"})
     filtered: list[schemas.MarketResponse] = []
     seen_events: set[str] = set()
+    settled_filtered = 0
 
     for market in markets:
         # Filter by category allowlist when configured.
@@ -140,6 +155,12 @@ def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list
 
         # Skip explicitly closed markets and records with unknown statuses.
         status_normalized = str(getattr(market, "status", "") or "").lower()
+        resolution_status = str(getattr(market, "resolution_status", "") or "").lower()
+        resolved_at = getattr(market, "resolved_at", None)
+        is_resolved = resolution_status in {"final", "resolved"} or resolved_at is not None
+        if hide_settled and (status_normalized in disallowed_statuses or is_resolved):
+            settled_filtered += 1
+            continue
         if getattr(market, "closed", False) is True or (
             status_normalized and status_normalized not in allowed_statuses
         ):
@@ -163,6 +184,7 @@ def filter_markets_for_visibility(markets: list[schemas.MarketResponse]) -> list
             removed=removed,
             remaining=len(filtered),
             category_allowlist=list(category_allow) if category_allow else None,
+            settled_filtered=settled_filtered or None,
         )
     return filtered
 

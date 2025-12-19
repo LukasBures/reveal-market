@@ -114,7 +114,9 @@ async def list_markets(
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
             duration = (time.perf_counter() - start) * 1000
-            cached_models = market_svc.filter_markets_for_visibility(hydrated)
+            cached_models = market_svc.filter_markets_for_visibility(
+                hydrated, hide_settled=(status or "").lower() == "active"
+            )
             if coalesce_mode and cached_models:
                 cached_models = market_svc.coalesce_grouped_markets(cached_models, use_total_volume=total_volume_mode)
             if volume_mode and cached_models:
@@ -180,7 +182,9 @@ async def list_markets(
     market_models = await market_svc.enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets]
     )
-    market_models = market_svc.filter_markets_for_visibility(market_models)
+    market_models = market_svc.filter_markets_for_visibility(
+        market_models, hide_settled=(status or "").lower() == "active"
+    )
     if coalesce_mode and market_models:
         market_models = market_svc.coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if popularity_mode:
@@ -341,7 +345,7 @@ async def list_markets_by_category(
         if hydrated is not None:
             hydrated = await market_svc.enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
-            models_from_cache = market_svc.filter_markets_for_visibility(hydrated)
+            models_from_cache = market_svc.filter_markets_for_visibility(hydrated, hide_settled=False)
             if coalesce_mode and models_from_cache:
                 models_from_cache = market_svc.coalesce_grouped_markets(
                     models_from_cache, use_total_volume=total_volume_mode
@@ -407,13 +411,15 @@ async def list_markets_by_category(
             coalesce_groups=coalesce_mode,
         )
     market_models = market_svc.filter_markets_for_visibility(
-        await market_svc.enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets])
+        await market_svc.enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in markets]),
+        hide_settled=False,
     )
     if not market_models and not trending_category and offset == 0:
         fallback_matches = await market_svc.fallback_markets_by_category_slug(session, category_slug_key, limit)
         if fallback_matches:
             market_models = market_svc.filter_markets_for_visibility(
-                await market_svc.enrich_market_models(session, fallback_matches)
+                await market_svc.enrich_market_models(session, fallback_matches),
+                hide_settled=False,
             )
     if coalesce_mode and market_models:
         market_models = market_svc.coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)

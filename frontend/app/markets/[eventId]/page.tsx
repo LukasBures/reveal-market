@@ -15,6 +15,15 @@ import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
 import { formatDateTime } from "@/lib/formatters";
 import { JsonLd } from "@/components/seo/JsonLd";
 
+const humanizeGroupSlug = (slug?: string | null): string | undefined => {
+  if (!slug) return undefined;
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 const MarketDetailMetadataPanel = dynamic(
   () =>
     import("@/components/markets/MarketDetailMetadata").then((mod) => ({
@@ -276,8 +285,8 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
                 siblings={selectorSiblings}
                 activeEventId={canonicalEventId}
                 labelOverride="Grouped market"
-                titleOverride={market.title}
-                subtitleOverride="Select a threshold to jump between sub-markets."
+                titleOverride={humanizeGroupSlug(market.groupSlug) ?? market.title}
+                subtitleOverride="Choose a sub-market within this event bundle."
                 forceShow
               />
               <MarketDetailChart

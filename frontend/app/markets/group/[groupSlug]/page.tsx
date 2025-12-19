@@ -35,6 +35,15 @@ type GroupPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
+const humanizeGroupSlug = (slug?: string | null): string | undefined => {
+  if (!slug) return undefined;
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 const selectMarketCopy = (market: MarketDetail): string => {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
@@ -155,8 +164,8 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                 activeEventId={market.eventId}
                 linkToGroupPage
                 labelOverride="Grouped market"
-                titleOverride={market.title}
-                subtitleOverride="Select a threshold to jump between sub-markets."
+                titleOverride={humanizeGroupSlug(grouped.groupSlug) ?? market.title}
+                subtitleOverride="Choose a sub-market within this event bundle."
                 forceShow
               />
               <MarketDetailChart

@@ -33,7 +33,13 @@ class _AsyncClientStub:
 
 
 def _seed_market(db_session, event_id: str = "mkt-test", address: str = "0x1111111111111111111111111111111111111111"):
-    market = models.Market(event_id=event_id, title="Test Market", oracle="0x1234", market_address=address)
+    market = models.Market(
+        event_id=event_id,
+        title="Test Market",
+        oracle="0x1234",
+        market_address=address,
+        resolution_status=models.ResolutionStatusEnum.FINAL.value,
+    )
     db_session.add(market)
     db_session.commit()
     return market

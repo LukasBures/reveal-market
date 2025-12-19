@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from redis.asyncio import Redis
@@ -23,6 +25,7 @@ from . import runtime
 from .metrics import record_retention_metrics
 from .polymarket import MarketPayload, _extract_timestamp_candidate, _parse_group_threshold
 from .resolution import apply_resolution
+from .settlement import _upsert_settlement_from_chain
 from .summary_jobs import maybe_enqueue_summary_job
 
 logger = runtime.logger
@@ -42,6 +45,21 @@ class SyncOutcome:
     group_slugs: set[str] = field(default_factory=set)
     gamma_metadata_updates: int = 0
     gamma_events_written: int = 0
+    timing_match_ms: float = 0.0
+    timing_upsert_ms: float = 0.0
+    timing_normalized_ms: float = 0.0
+    timing_resolution_ms: float = 0.0
+
+
+@dataclass
+class PrefetchedMarketState:
+    """Preloaded normalized rows so per-market sync avoids redundant queries."""
+
+    outcomes: dict[int, list[shared_models.MarketOutcome]] = field(default_factory=dict)
+    tags: dict[int, set[str]] = field(default_factory=dict)
+    clob_tokens: dict[int, list[shared_models.MarketClobToken]] = field(default_factory=dict)
+    gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = field(default_factory=dict)
+    gamma_events: dict[int, list[shared_models.MarketGammaEvent]] = field(default_factory=dict)
 
 
 @dataclass
@@ -79,6 +97,10 @@ class SyncSummary:
     failed_markets: int = 0
     cache_invalidations: int = 0
     settlement_txs: int = 0
+    timing_match_ms: float = 0.0
+    timing_upsert_ms: float = 0.0
+    timing_normalized_ms: float = 0.0
+    timing_resolution_ms: float = 0.0
 
     def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
         return {
@@ -129,69 +151,181 @@ async def _persist_normalized_market_data(
     clob_token_ids: list[str] | None,
     gamma_metadata: dict | None,
     gamma_events: list[dict[str, Any]] | None,
+    prefetched_state: PrefetchedMarketState | None = None,
 ) -> dict[str, int]:
-    """Replace normalized tables for a market with the latest payload."""
+    """Upsert normalized tables for a market, avoiding unnecessary rewrites."""
 
     metadata_written = 0
     events_written = 0
-    await session.execute(delete(shared_models.MarketOutcome).where(shared_models.MarketOutcome.market_id == market_id))
-    if outcomes:
+    # Outcomes: update only when a payload was provided.
+    if outcomes is not None:
+        if prefetched_state and market_id in prefetched_state.outcomes:
+            existing_outcome_rows = prefetched_state.outcomes.get(market_id, [])
+        else:
+            existing_outcome_rows = list(
+                (
+                    await session.execute(
+                        select(shared_models.MarketOutcome).where(shared_models.MarketOutcome.market_id == market_id)
+                    )
+                ).scalars()
+            )
+        existing_outcomes = {row.outcome_id: row for row in existing_outcome_rows}
+        desired: dict[int, tuple[str, Decimal | None]] = {}
         for idx, label in enumerate(outcomes):
-            price = None
+            price: Decimal | None = None
             if isinstance(outcome_prices, list) and idx < len(outcome_prices):
                 try:
-                    price = float(outcome_prices[idx])
-                except (TypeError, ValueError):
+                    price = Decimal(str(outcome_prices[idx]))
+                except (TypeError, ValueError, InvalidOperation):
                     price = None
-            session.add(
-                shared_models.MarketOutcome(
-                    market_id=market_id,
-                    outcome_id=idx,
-                    label=str(label),
-                    price=price,
+            desired[idx] = (str(label), price)
+
+        # Delete removed outcomes.
+        for outcome_id, outcome_row in existing_outcomes.items():
+            if outcome_id not in desired:
+                await session.delete(outcome_row)
+        # Insert/update changed ones.
+        for outcome_id, (label_str, price_val) in desired.items():
+            existing_outcome = existing_outcomes.get(outcome_id)
+            if existing_outcome is None:
+                session.add(
+                    shared_models.MarketOutcome(
+                        market_id=market_id,
+                        outcome_id=outcome_id,
+                        label=label_str,
+                        price=price_val,
+                    )
+                )
+            else:
+                existing_price = existing_outcome.price
+                if existing_outcome.label != label_str or existing_price != price_val:
+                    existing_outcome.label = label_str
+                    existing_outcome.price = price_val
+                    session.add(existing_outcome)
+
+    # Tags: diff sets when provided.
+    if tags is not None:
+        if prefetched_state and market_id in prefetched_state.tags:
+            existing_tags = prefetched_state.tags.get(market_id, set())
+        else:
+            existing_tags = {
+                row.tag
+                for row in (
+                    await session.execute(
+                        select(shared_models.MarketTag).where(shared_models.MarketTag.market_id == market_id)
+                    )
+                ).scalars()
+            }
+        desired_tags = {str(tag).strip() for tag in tags if str(tag).strip()}
+        to_delete = existing_tags - desired_tags
+        to_insert = desired_tags - existing_tags
+        if to_delete:
+            await session.execute(
+                delete(shared_models.MarketTag).where(
+                    shared_models.MarketTag.market_id == market_id,
+                    shared_models.MarketTag.tag.in_(to_delete),
                 )
             )
+        for tag in to_insert:
+            session.add(shared_models.MarketTag(market_id=market_id, tag=tag))
 
-    await session.execute(delete(shared_models.MarketTag).where(shared_models.MarketTag.market_id == market_id))
-    if tags:
-        seen = set()
-        for tag in tags:
-            tag_str = str(tag).strip()
-            if not tag_str or tag_str in seen:
-                continue
-            seen.add(tag_str)
-            session.add(shared_models.MarketTag(market_id=market_id, tag=tag_str))
-
-    await session.execute(
-        delete(shared_models.MarketClobToken).where(shared_models.MarketClobToken.market_id == market_id)
-    )
-    if clob_token_ids:
+    # CLOB tokens: reconcile by token_id.
+    if clob_token_ids is not None:
+        if prefetched_state and market_id in prefetched_state.clob_tokens:
+            existing_clob_rows = prefetched_state.clob_tokens.get(market_id, [])
+        else:
+            existing_clob_rows = list(
+                (
+                    await session.execute(
+                        select(shared_models.MarketClobToken).where(
+                            shared_models.MarketClobToken.market_id == market_id
+                        )
+                    )
+                ).scalars()
+            )
+        existing_tokens = {row.token_id: row for row in existing_clob_rows}
+        desired_tokens: dict[str, str | None] = {}
         for idx, token in enumerate(clob_token_ids):
-            side = None
-            if idx == 0:
-                side = "yes"
-            elif idx == 1:
-                side = "no"
-            session.add(shared_models.MarketClobToken(market_id=market_id, token_id=str(token), side=side))
+            side = "yes" if idx == 0 else "no" if idx == 1 else None
+            desired_tokens[str(token)] = side
+        # Remove missing
+        for token_id, token_row in existing_tokens.items():
+            if token_id not in desired_tokens:
+                await session.delete(token_row)
+        # Insert/update
+        for token_id, side in desired_tokens.items():
+            existing_token = existing_tokens.get(token_id)
+            if existing_token is None:
+                session.add(shared_models.MarketClobToken(market_id=market_id, token_id=token_id, side=side))
+            else:
+                if existing_token.side != side:
+                    existing_token.side = side
+                    session.add(existing_token)
 
-    await session.execute(
-        delete(shared_models.MarketGammaMetadata).where(shared_models.MarketGammaMetadata.market_id == market_id)
-    )
-    if gamma_metadata:
-        session.add(shared_models.MarketGammaMetadata(market_id=market_id, **gamma_metadata))
-        metadata_written = 1
+    # Gamma metadata: upsert only when different.
+    if gamma_metadata is not None:
+        if prefetched_state and market_id in prefetched_state.gamma_metadata:
+            existing_meta = prefetched_state.gamma_metadata.get(market_id)
+        else:
+            existing_meta = (
+                await session.execute(
+                    select(shared_models.MarketGammaMetadata).where(
+                        shared_models.MarketGammaMetadata.market_id == market_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if existing_meta is None:
+            session.add(shared_models.MarketGammaMetadata(market_id=market_id, **gamma_metadata))
+            metadata_written = 1
+        else:
+            changed = False
+            for key, value in gamma_metadata.items():
+                if getattr(existing_meta, key, None) != value:
+                    setattr(existing_meta, key, value)
+                    changed = True
+            if changed:
+                session.add(existing_meta)
+                metadata_written = 1
+    # If metadata was not provided, leave existing rows intact to avoid churn.
 
-    await session.execute(
-        delete(shared_models.MarketGammaEvent).where(shared_models.MarketGammaEvent.market_id == market_id)
-    )
-    if gamma_events:
+    # Gamma events: only rewrite when payload differs.
+    if gamma_events is not None:
+        normalized_events: list[dict[str, Any]] = []
         for raw in gamma_events:
             if not isinstance(raw, dict):
                 continue
             normalized = _normalize_gamma_event(raw)
             if normalized:
-                session.add(shared_models.MarketGammaEvent(market_id=market_id, **normalized))
-                events_written += 1
+                normalized_events.append(normalized)
+        if prefetched_state and market_id in prefetched_state.gamma_events:
+            existing_events = prefetched_state.gamma_events.get(market_id, [])
+        else:
+            existing_events = list(
+                (
+                    await session.execute(
+                        select(shared_models.MarketGammaEvent).where(
+                            shared_models.MarketGammaEvent.market_id == market_id
+                        )
+                    )
+                ).scalars()
+            )
+        existing_serialized = []
+        keys = list(normalized_events[0].keys()) if normalized_events else []
+        for event_row in existing_events:
+            data = {k: getattr(event_row, k, None) for k in keys} if keys else {}
+            existing_serialized.append(data)
+        if normalized_events:
+            if normalized_events != existing_serialized:
+                await session.execute(
+                    delete(shared_models.MarketGammaEvent).where(shared_models.MarketGammaEvent.market_id == market_id)
+                )
+                for payload in normalized_events:
+                    session.add(shared_models.MarketGammaEvent(market_id=market_id, **payload))
+                    events_written += 1
+        else:
+            # No events provided => leave existing as-is.
+            events_written = 0
+
     return {"metadata": metadata_written, "events": events_written}
 
 
@@ -276,6 +410,53 @@ async def _load_existing_markets(
     return existing
 
 
+async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int]) -> PrefetchedMarketState:
+    """Batch-load normalized rows for the provided market ids."""
+
+    if not market_ids:
+        return PrefetchedMarketState()
+
+    outcomes: dict[int, list[shared_models.MarketOutcome]] = {}
+    tags: dict[int, set[str]] = {}
+    clob_tokens: dict[int, list[shared_models.MarketClobToken]] = {}
+    gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = {}
+    gamma_events: dict[int, list[shared_models.MarketGammaEvent]] = {}
+
+    def _chunk(seq: list[int], size: int = 500):
+        for start in range(0, len(seq), size):
+            yield seq[start : start + size]
+
+    for chunk in _chunk(market_ids):
+        outcome_stmt = select(shared_models.MarketOutcome).where(shared_models.MarketOutcome.market_id.in_(chunk))
+        tag_stmt = select(shared_models.MarketTag).where(shared_models.MarketTag.market_id.in_(chunk))
+        clob_stmt = select(shared_models.MarketClobToken).where(shared_models.MarketClobToken.market_id.in_(chunk))
+        gamma_meta_stmt = select(shared_models.MarketGammaMetadata).where(
+            shared_models.MarketGammaMetadata.market_id.in_(chunk)
+        )
+        gamma_events_stmt = select(shared_models.MarketGammaEvent).where(
+            shared_models.MarketGammaEvent.market_id.in_(chunk)
+        )
+
+        for outcome_row in (await session.execute(outcome_stmt)).scalars():
+            outcomes.setdefault(outcome_row.market_id, []).append(outcome_row)
+        for tag_row in (await session.execute(tag_stmt)).scalars():
+            tags.setdefault(tag_row.market_id, set()).add(tag_row.tag)
+        for clob_row in (await session.execute(clob_stmt)).scalars():
+            clob_tokens.setdefault(clob_row.market_id, []).append(clob_row)
+        for gamma_meta_row in (await session.execute(gamma_meta_stmt)).scalars():
+            gamma_metadata[gamma_meta_row.market_id] = gamma_meta_row
+        for gamma_event_row in (await session.execute(gamma_events_stmt)).scalars():
+            gamma_events.setdefault(gamma_event_row.market_id, []).append(gamma_event_row)
+
+    return PrefetchedMarketState(
+        outcomes=outcomes,
+        tags=tags,
+        clob_tokens=clob_tokens,
+        gamma_metadata=gamma_metadata,
+        gamma_events=gamma_events,
+    )
+
+
 async def collect_market_changes(
     session: AsyncSession, markets: list[MarketPayload], redis_client: Redis | None
 ) -> SyncSummary:
@@ -291,6 +472,9 @@ async def collect_market_changes_with_summary(
     if not markets:
         return summary
     existing_records = await _load_existing_markets(session, markets)
+    prefetched_state = await _prefetch_normalized_state(
+        session, [record.id for record in existing_records.values() if record.id is not None]
+    )
     total_markets = len(markets)
     log_event(
         logger,
@@ -312,7 +496,9 @@ async def collect_market_changes_with_summary(
             )
         try:
             prefetched = existing_records.get(market.event_id)
-            db_market, outcome = await sync_market(session, market, existing_market=prefetched)
+            db_market, outcome = await sync_market(
+                session, market, existing_market=prefetched, prefetched_state=prefetched_state
+            )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
@@ -339,12 +525,17 @@ async def collect_market_changes_with_summary(
             summary.failed_markets += 1
             # Drop prefetched rows so later iterations do not reuse expired instances after a rollback.
             existing_records = {}
+            prefetched_state = PrefetchedMarketState()
             continue
         if db_market and isinstance(db_market.event_id, str):
             existing_records[db_market.event_id] = db_market
         if outcome.market_changed and db_market and db_market.event_id:
             summary.changed_events.add(db_market.event_id)
             summary.stats_dirty = True
+        summary.timing_match_ms += outcome.timing_match_ms
+        summary.timing_upsert_ms += outcome.timing_upsert_ms
+        summary.timing_normalized_ms += outcome.timing_normalized_ms
+        summary.timing_resolution_ms += outcome.timing_resolution_ms
         if outcome.market_created:
             summary.markets_created += 1
         if outcome.market_updated:
@@ -384,21 +575,67 @@ async def collect_market_changes_with_summary(
                         resolution_status=getattr(db_market, "resolution_status", None),
                     )
                 continue
+            # Only proceed if the market had Reveal activity (commitments exist).
+            commitments_count = (
+                await session.execute(
+                    select(shared_models.Commitment.id).where(shared_models.Commitment.market_id == db_market.id)
+                )
+            ).first()
+            if commitments_count is None:
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.proof.skipped_no_activity",
+                        message="skipping proof job because no Reveal commitments recorded",
+                        event_id=db_market.event_id,
+                        market_id=db_market.id,
+                    )
+                continue
             settlement_result = await session.execute(
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == db_market.id)
             )
             settlement = settlement_result.scalar_one_or_none()
             if settlement is None:
-                if logger.isEnabledFor(logging.DEBUG):
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        event="worker.proof.skipped_missing_settlement",
-                        message="skipping proof job because settlement snapshot is missing",
-                        event_id=db_market.event_id,
-                        market_id=db_market.id,
-                    )
-            elif settlement.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
+                # Best-effort hydrate settlement from chain once when we have a final resolution and commitments.
+                hydrated = None
+                try:
+                    if getattr(db_market, "market_address", None):
+                        hydrated = await _upsert_settlement_from_chain(session, db_market)
+                        if hydrated is not None:
+                            settlement = hydrated
+                        else:
+                            # Refresh local view if a new row was inserted.
+                            settlement = (
+                                await session.execute(
+                                    select(shared_models.Settlement).where(
+                                        shared_models.Settlement.market_id == db_market.id
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                except Exception as exc:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            event="worker.proof.hydrate_failed",
+                            message="failed to hydrate settlement from chain",
+                            event_id=db_market.event_id,
+                            market_id=db_market.id,
+                            error=str(exc),
+                        )
+                if settlement is None:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            event="worker.proof.skipped_missing_settlement",
+                            message="skipping proof job because settlement snapshot is missing",
+                            event_id=db_market.event_id,
+                            market_id=db_market.id,
+                        )
+                    continue
+            if settlement.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
                 if logger.isEnabledFor(logging.DEBUG):
                     log_event(
                         logger,
@@ -510,9 +747,10 @@ async def sync_market(
     session: AsyncSession,
     market: MarketPayload,
     existing_market: shared_models.Market | None = None,
+    prefetched_state: PrefetchedMarketState | None = None,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
-    return await _sync_market(session, market, existing_market=existing_market)
+    return await _sync_market(session, market, existing_market=existing_market, prefetched_state=prefetched_state)
 
 
 async def _record_factory_state(
@@ -649,6 +887,7 @@ async def _sync_market(
     session: AsyncSession,
     market: MarketPayload,
     existing_market: shared_models.Market | None = None,
+    prefetched_state: PrefetchedMarketState | None = None,
 ):
     """Async implementation that upserts market state + resolutions."""
     now = datetime.now(UTC)
@@ -674,14 +913,31 @@ async def _sync_market(
             payload["closes_at"] = close_deadline
     should_close = _should_close_market(close_deadline, market.closed, now)
     payload["closed"] = should_close
-    resolution_status = payload.get("resolution_status") or shared_models.ResolutionStatusEnum.FINAL.value
+    existing_resolution_status = getattr(existing, "resolution_status", None)
+    resolution_provided = "resolution_status" in market.model_fields_set
+    incoming_resolution_status = payload.get("resolution_status") if resolution_provided else None
+    resolution_status = (
+        incoming_resolution_status or existing_resolution_status or shared_models.ResolutionStatusEnum.PENDING.value
+    )
     payload["resolution_status"] = resolution_status
     resolution_reason = payload.get("resolution_reason") or getattr(existing, "resolution_reason", None)
     if resolution_reason:
         payload["resolution_reason"] = resolution_reason
     existing_blocked_at = getattr(existing, "commits_blocked_at", None)
     blocked_at = payload.get("commits_blocked_at") or existing_blocked_at
-    if resolution_status in {
+    resolution_status_changed = (
+        incoming_resolution_status is not None and incoming_resolution_status != existing_resolution_status
+    )
+    commit_block_lead = max(300, int(getattr(runtime.settings, "commit_cutoff_seconds", 0) or 0))
+    if blocked_at is None and should_close:
+        deadline = close_deadline
+        if deadline and not deadline.tzinfo:
+            deadline = deadline.replace(tzinfo=UTC)
+        if deadline is not None:
+            blocked_at = deadline - timedelta(seconds=commit_block_lead)
+        else:
+            blocked_at = now
+    if resolution_status_changed and incoming_resolution_status in {
         shared_models.ResolutionStatusEnum.PENDING.value,
         shared_models.ResolutionStatusEnum.DISPUTED.value,
     }:
@@ -716,18 +972,24 @@ async def _sync_market(
     market_updated = False
     incoming_updated_at = getattr(market, "source_updated_at", None)
     incoming_hash = getattr(market, "content_hash", None)
+    timing_match_ms = 0.0
+    timing_upsert_ms = 0.0
+    timing_normalized_ms = 0.0
+    timing_resolution_ms = 0.0
 
     outcomes = payload.pop("outcomes", None)
     outcome_prices = payload.pop("outcome_prices", None)
     tags = payload.pop("tags", None)
     clob_token_ids = payload.pop("clob_token_ids", None)
-    gamma_raw = payload.pop("gamma_raw", None)
+    payload.pop("gamma_raw", None)  # no longer persisted; drop to avoid unused variable
     gamma_metadata = payload.pop("gamma_metadata", None)
     gamma_events = payload.pop("gamma_events", None)
     gamma_counts = {"metadata": 0, "events": 0}
 
     if existing is None:
+        upsert_start = time.perf_counter()
         db_market = await shared_repository.upsert_market(session, payload, existing)
+        timing_upsert_ms = (time.perf_counter() - upsert_start) * 1000
         market_changed = True
         market_created = True
         if logger.isEnabledFor(logging.DEBUG):
@@ -741,6 +1003,7 @@ async def _sync_market(
                 category=payload.get("category"),
             )
     else:
+        match_start = time.perf_counter()
         match, match_reason = _markets_match(
             existing,
             incoming_updated_at,
@@ -749,6 +1012,7 @@ async def _sync_market(
             resolution_reason=resolution_reason,
             commits_blocked_at=blocked_at,
         )
+        timing_match_ms = (time.perf_counter() - match_start) * 1000
         if match:
             if logger.isEnabledFor(logging.DEBUG):
                 log_event(
@@ -759,8 +1023,33 @@ async def _sync_market(
                     event_id=market.event_id,
                     reason=match_reason,
                 )
+            category_slug = _slugify_token(getattr(existing, "category", None))
+            condition_value = getattr(existing, "condition_id", None)
+            condition_normalized = condition_value.lower() if isinstance(condition_value, str) else condition_value
+            group_slugs = set()
+            for slug in (previous_group_slug, getattr(existing, "group_slug", None)):
+                if isinstance(slug, str) and slug:
+                    group_slugs.add(slug)
+            return existing, SyncOutcome(
+                market_changed=False,
+                resolution_changed=False,
+                category_slug=category_slug,
+                condition_id=condition_normalized,
+                resolution_cache_payload=None,
+                market_created=False,
+                market_updated=False,
+                group_slugs=group_slugs,
+                gamma_metadata_updates=0,
+                gamma_events_written=0,
+                timing_match_ms=timing_match_ms,
+                timing_upsert_ms=timing_upsert_ms,
+                timing_normalized_ms=timing_normalized_ms,
+                timing_resolution_ms=timing_resolution_ms,
+            )
         else:
+            upsert_start = time.perf_counter()
             db_market = await shared_repository.upsert_market(session, payload, existing)
+            timing_upsert_ms = (time.perf_counter() - upsert_start) * 1000
             market_changed = True
             market_updated = True
             if logger.isEnabledFor(logging.DEBUG):
@@ -777,12 +1066,11 @@ async def _sync_market(
 
     if market.rake_bps is not None and db_market is not None:
         db_market.rake_bps = market.rake_bps
-    if db_market is not None:
-        db_market.gamma_raw = gamma_raw
 
     if db_market is not None:
         if db_market.id is None:
             await session.flush()
+        norm_start = time.perf_counter()
         gamma_counts = await _persist_normalized_market_data(
             session,
             market_id=db_market.id,
@@ -792,7 +1080,9 @@ async def _sync_market(
             clob_token_ids=clob_token_ids,
             gamma_metadata=gamma_metadata,
             gamma_events=gamma_events,
+            prefetched_state=prefetched_state,
         )
+        timing_normalized_ms = (time.perf_counter() - norm_start) * 1000
         if gamma_counts.get("metadata") or gamma_counts.get("events"):
             log_event(
                 logger,
@@ -821,11 +1111,13 @@ async def _sync_market(
                         market_id=getattr(db_market, "event_id", None),
                         relationship=rel_key,
                     )
+    resolution_start = time.perf_counter()
     resolution_outcome = await apply_resolution(session, db_market, market)
+    timing_resolution_ms = (time.perf_counter() - resolution_start) * 1000
     await session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))
     current_group_slug = getattr(db_market, "group_slug", None)
-    group_slugs: set[str] = set()
+    group_slugs = set()
     for slug in (previous_group_slug, current_group_slug):
         if isinstance(slug, str) and slug:
             group_slugs.add(slug)
@@ -840,6 +1132,10 @@ async def _sync_market(
         group_slugs=group_slugs,
         gamma_metadata_updates=gamma_counts.get("metadata", 0),
         gamma_events_written=gamma_counts.get("events", 0),
+        timing_match_ms=timing_match_ms,
+        timing_upsert_ms=timing_upsert_ms,
+        timing_normalized_ms=timing_normalized_ms,
+        timing_resolution_ms=timing_resolution_ms,
     )
 
 

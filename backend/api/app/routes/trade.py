@@ -51,6 +51,23 @@ def _strip_hex(value: str) -> str:
     return value[2:] if value.startswith("0x") else value
 
 
+def _normalize_bytes32(value: Any) -> str | None:
+    """Return a 0x-prefixed hex string for bytes/HexBytes values."""
+
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + value.hex()
+    hex_value = getattr(value, "hex", None)
+    if callable(hex_value):
+        try:
+            result = hex_value()
+            return result if isinstance(result, str) else str(result)
+        except Exception:
+            return None
+    return str(value)
+
+
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
     raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
@@ -988,8 +1005,10 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
         rake_bps = await contract.functions.rakeBps().call()
         circuit_hash = await contract.functions.circuitHash().call()
         winning_value = int(winning_outcome_id) if settled else None
+        commitments_root_hex = _normalize_bytes32(commitments_root)
+        circuit_hash_hex = _normalize_bytes32(circuit_hash)
         settlement_data = {
-            "merkle_root": commitments_root,
+            "merkle_root": commitments_root_hex or commitments_root,
             "commitments_count": int(next_ticket_id),
             "pool_total_yes": int(pool_total_yes),
             "pool_total_no": int(pool_total_no),
@@ -997,7 +1016,7 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
             "total_liability": int(total_liability),
             "rake_bps": int(rake_bps),
             "winning_outcome_id": winning_value,
-            "circuit_hash": circuit_hash,
+            "circuit_hash": circuit_hash_hex or circuit_hash,
         }
         await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
         if settled and settlement_data["winning_outcome_id"] is not None and not market.resolved_at:

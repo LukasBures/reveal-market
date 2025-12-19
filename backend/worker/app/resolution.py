@@ -84,13 +84,19 @@ async def _run_with_retries(
 
 
 def _should_refresh_resolution(existing, now: datetime) -> bool:
+    """Decide whether to refresh a resolution snapshot.
+
+    - Always fetch if we have no record or the record is not resolved.
+    - Once resolved (final), we fetch at most once; no periodic refresh is needed.
+    """
     if existing is None:
         return True
     if not existing.resolved:
         return True
     if existing.checked_at is None:
         return True
-    return (now - existing.checked_at).total_seconds() >= runtime.settings.resolution_refresh_interval_seconds
+    # Already resolved and checked once: do not refresh again.
+    return False
 
 
 def _parse_checked_at(value: Any, fallback: datetime) -> datetime:
@@ -258,6 +264,31 @@ async def apply_resolution(
         if db_market.status == MarketStatusEnum.COMMIT.value:
             db_market.status = MarketStatusEnum.LOCKED.value
         session.add(db_market)
+
+    # Skip resolution fetches for open/commit markets to avoid unnecessary polling.
+    # Only attempt when the market appears closed/locked or Gamma reports a non-final status.
+    market_closed_like = bool(getattr(db_market, "closed", False)) or getattr(db_market, "status", None) in {
+        MarketStatusEnum.LOCKED.value,
+        MarketStatusEnum.SETTLED.value,
+        MarketStatusEnum.CANCELLED.value,
+    }
+    if (
+        not market_closed_like
+        and incoming_resolution_status == ResolutionStatusEnum.FINAL.value
+        and existing is not None
+        and getattr(existing, "resolved", False)
+    ):
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.skip_open_market",
+                message="skipping resolution fetch for open market with existing final snapshot",
+                condition_id=normalized_condition_id,
+                status=getattr(db_market, "status", None),
+                closed=getattr(db_market, "closed", None),
+            )
+        return ResolutionOutcome()
 
     if not _should_refresh_resolution(existing, now):
         if logger.isEnabledFor(logging.DEBUG):

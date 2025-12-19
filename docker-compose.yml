@@ -4,6 +4,7 @@ name: reveal-market
 # connection strings. Override values via .env / CLI if needed.
 
 x-backend-env: &backend-env
+  TZ: UTC
   RM_ENVIRONMENT: ${RM_ENVIRONMENT}
   RM_DATABASE_URL: ${RM_DATABASE_URL}
   RM_REDIS_URL: ${RM_REDIS_URL}
@@ -14,15 +15,68 @@ services:
     image: postgres:15-alpine
     container_name: reveal-market-postgres
     restart: unless-stopped
-    # mem_swappiness: 0
-    # command: ["postgres", "-c", "shared_buffers=128MB", "-c", "work_mem=4MB"]
-    # Primary datastore for both API + worker. The binded volume keeps data
-    # across container restarts so migrations/tests do not blow away fixtures.
-    # Default credentials are baked into the sample data only. Override in prod.
+    command:
+      - "postgres"
+      # ---- Memory ----
+      # ~25% of container memory (4G)
+      - "-c"
+      - "shared_buffers=1GB"
+      # Per-sort / per-hash; keep conservative to avoid OOM
+      - "-c"
+      - "work_mem=16MB"
+      # Used for vacuum, index builds, retention cleanup
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      # ---- WAL & Checkpoints ----
+      - "-c"
+      - "max_wal_size=6GB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "checkpoint_timeout=15min"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_compression=on"
+      - "-c"
+      - "wal_buffers=64MB"
+      # ---- Parallelism / CPU ----
+      # Match Docker CPU limits
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "max_parallel_workers=4"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_worker_processes=4"
+      # ---- Planner / IO ----
+      # Assume SSD / cloud disk
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_cache_size=1.5GB"
+      # ---- Autovacuum (important for retention deletes) ----
+      - "-c"
+      - "autovacuum_max_workers=3"
+      - "-c"
+      - "autovacuum_naptime=30s"
+      - "-c"
+      - "autovacuum_vacuum_scale_factor=0.05"
+      - "-c"
+      - "autovacuum_analyze_scale_factor=0.02"
+      # ---- Safety / Observability ----
+      - "-c"
+      - "log_min_duration_statement=500ms"
+      - "-c"
+      - "log_checkpoints=on"
+      - "-c"
+      - "log_autovacuum_min_duration=1s"
     environment:
       POSTGRES_USER: market_admin
       POSTGRES_PASSWORD: <REDACTED>
       POSTGRES_DB: reveal_market
+      TZ: UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -35,8 +89,8 @@ services:
       replicas: 1
       resources:
         limits:
-          cpus: "1.0"
-          memory: 1G
+          cpus: "2.0"
+          memory: 4G
         reservations:
           cpus: "0.5"
           memory: 512M
@@ -48,6 +102,7 @@ services:
     # mem_swappiness: 0
     # Acts as cache + heartbeat store. Port binding lives in docker-compose.override.yml for local-only access.
     environment:
+      TZ: UTC
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in your env file}
     volumes:
       - redis_data:/data
@@ -192,6 +247,7 @@ services:
     environment:
       HEDGER_ENVIRONMENT: ${RM_ENVIRONMENT:-dev}
       HEDGER_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: UTC
       RM_DATABASE_URL: ${RM_DATABASE_URL:-postgresql+psycopg2://market_admin:<REDACTED>@postgres:5432/reveal_market}
       HEDGER_REDIS_URL: ${HEDGER_REDIS_URL}
       HEDGER_POLYMARKET_API_BASE: ${HEDGER_POLYMARKET_API_BASE}
@@ -250,6 +306,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
+      TZ: UTC
       RPC_URL: ${RPC_URL}
       CHAIN_ID: ${CHAIN_ID}
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY}
@@ -297,6 +354,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
+      TZ: UTC
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       NODE_OPTIONS: --max-old-space-size=256
@@ -344,6 +402,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     environment:
+      TZ: UTC
       CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
     healthcheck:
@@ -376,6 +435,7 @@ services:
     volumes:
       - ./prover/circuits:/app/circuits:ro
     environment:
+      TZ: UTC
       PROVER_LISTEN_ADDR: 0.0.0.0:8085
       PROVER_HEARTBEAT_SECONDS: 60
       PROVER_VERSION: ${PROVER_VERSION}
@@ -410,6 +470,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
+      TZ: UTC
       STREAMER_REDIS_URL: ${STREAMER_REDIS_URL}
       STREAMER_CLOB_WS_URL: ${STREAMER_CLOB_WS_URL}
       STREAMER_FX_PRIMARY_REST_URL: ${STREAMER_FX_PRIMARY_REST_URL}

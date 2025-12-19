@@ -40,6 +40,7 @@ def upgrade() -> None:
         sa.Column("onchain_market_id", sa.Integer(), nullable=True, unique=True),
         sa.Column("market_address", sa.String(length=64), nullable=True, unique=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="commit"),
+        # TODO: gamma_raw is no longer written by the worker; safe to drop in a future migration.
         sa.Column("gamma_raw", sa.JSON(), nullable=True),
         sa.Column("group_slug", sa.String(length=256), nullable=True),
         sa.Column("group_position", sa.Integer(), nullable=True),
@@ -72,7 +73,7 @@ def upgrade() -> None:
         sa.Column("featured", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("closes_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("resolution_status", sa.String(length=32), nullable=False, server_default="final"),
+        sa.Column("resolution_status", sa.String(length=32), nullable=False, server_default="pending_resolution"),
         sa.Column("resolution_reason", sa.String(length=128), nullable=True),
         sa.Column("commits_blocked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -426,6 +427,8 @@ def upgrade() -> None:
         sa.Column("winning_outcome_id", sa.Integer(), nullable=True),
         sa.Column("circuit_hash", sa.String(length=66), nullable=True),
         sa.Column("proof_status", sa.String(length=32), nullable=False, server_default="none"),
+        sa.Column("submission_status", sa.String(length=32), nullable=False, server_default="none"),
+        sa.Column("submission_error", sa.Text(), nullable=True),
         sa.Column("proof_request_id", sa.String(length=128), nullable=True),
         sa.Column("proof_hash", sa.String(length=66), nullable=True),
         sa.Column("settlement_submitted_at", sa.DateTime(timezone=True), nullable=True),
@@ -436,6 +439,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "proof_status IN ('none','requested','generated','failed')",
             name="ck_settlements_proof_status",
+        ),
+        sa.CheckConstraint(
+            "submission_status IN ('none','queued','processing','submitted','failed')",
+            name="ck_settlements_submission_status",
         ),
     )
     op.create_index("ix_settlements_market_id", "settlements", ["market_id"])
