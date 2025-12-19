@@ -227,5 +227,114 @@ class AsyncGoldskyClient:
         summary["winners"] = _derive_winners(payout_seq, outcomes_seq)
         return summary
 
+    async def resolution_summary_batch(
+        self,
+        condition_requests: Sequence[tuple[str, int | None, Sequence[str] | None]],
+    ) -> dict[str, dict[str, Any] | None]:
+        """Batch variant of resolution_summary using a single GraphQL request with aliases."""
+
+        if not condition_requests:
+            return {}
+
+        # Chunk to keep query size reasonable.
+        chunk_size = 100
+        results: dict[str, dict[str, Any] | None] = {}
+
+        for i in range(0, len(condition_requests), chunk_size):
+            chunk = condition_requests[i : i + chunk_size]
+            query_parts: list[str] = []
+            aliases: list[tuple[str, str]] = []
+            for idx, (condition_id, _hint, _outcomes) in enumerate(chunk):
+                alias_res = f"c{i + idx}"
+                alias_cond = f"c{i + idx}Cond"
+                aliases.append((condition_id.lower(), alias_res))
+                query_parts.append(
+                    f"""{alias_res}: conditionResolutions(
+  where: {{ conditionId: "{condition_id.lower()}" }}
+  orderBy: blockNumber
+  orderDirection: desc
+  first: 1
+) {{
+  conditionId
+  oracle
+  questionId
+  payoutNumerators
+  transactionHash
+  blockNumber
+  blockTimestamp
+}}"""
+                )
+                query_parts.append(
+                    f"""{alias_cond}: condition(id: "{condition_id.lower()}") {{
+  id
+  payoutNumerators
+  payoutDenominator
+}}"""
+                )
+            query = "{\n" + "\n".join(query_parts) + "\n}"
+
+            payload = {"query": query}
+            try:
+
+                async def _do_post(body: dict[str, Any] = payload) -> dict[str, Any]:
+                    return await self._post(body)
+
+                data = await self._run_with_retry(_do_post)
+            except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
+                # Mark all in this chunk as None on failure to avoid partial poisoning.
+                for condition_id, _alias in aliases:
+                    results.setdefault(condition_id, None)
+                continue
+
+            for condition_id, alias_res in aliases:
+                alias_cond = f"{alias_res}Cond"
+                resolutions = data.get(alias_res) or []
+                condition = data.get(alias_cond) or {}
+                record: dict[str, Any] = {}
+                payouts: list[int] = []
+                resolved = False
+                block_number = None
+                block_timestamp = None
+
+                if resolutions:
+                    record = resolutions[0]
+                    payouts = _as_int_list(record.get("payoutNumerators"))
+                    resolved = bool(resolutions)
+                    block_number = int(record["blockNumber"]) if record.get("blockNumber") is not None else None
+                    block_timestamp = _as_datetime(record.get("blockTimestamp"))
+                elif condition:
+                    record = condition
+                    payouts = _as_int_list(condition.get("payoutNumerators"))
+                    den = condition.get("payoutDenominator")
+                    resolved = bool(payouts) or bool(den)
+
+                # Fill hint-based padding for payouts when needed.
+                hint = next((h for cid, h, _out in chunk if cid.lower() == condition_id), None)
+                if not payouts and isinstance(hint, int) and hint > 0:
+                    payouts = [0] * hint
+
+                summary = None
+                if record:
+                    checked_at = datetime.now(tz=UTC)
+                    summary = {
+                        "source": "goldsky_subgraph",
+                        "conditionId": condition_id.lower(),
+                        "resolved": resolved,
+                        "outcomes": [],
+                        "payouts": payouts,
+                        "winners": [],
+                        "checkedAt": checked_at,
+                        "oracle": record.get("oracle"),
+                        "questionId": _normalize_hex(record.get("questionId")),
+                        "transactionHash": _normalize_hex(record.get("transactionHash")),
+                        "blockNumber": block_number,
+                        "blockTimestamp": block_timestamp,
+                    }
+                    summary["winners"] = _derive_winners(payouts, [])
+
+                results[condition_id] = summary
+
+        return results
+
     async def aclose(self) -> None:
         await self._client.aclose()

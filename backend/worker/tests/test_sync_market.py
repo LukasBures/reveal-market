@@ -279,3 +279,50 @@ async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         assert call_count == 1
     finally:
         await engine.dispose()
+
+
+async def test_sync_market_skips_when_source_timestamp_matches_without_hash(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
+    try:
+        updated_at = datetime.now(UTC)
+        payload = MarketPayload(
+            event_id="evt-skip-no-hash",
+            title="Skip Market No Hash",
+            slug="skip-market-no-hash",
+            category="science",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.45, 0.55],
+            gamma_raw={"id": "evt-skip-no-hash"},
+            source_updated_at=updated_at,
+        )
+
+        call_count = 0
+        original_upsert = market_sync.shared_repository.upsert_market
+
+        def tracked_upsert(session, data, existing=None):
+            nonlocal call_count
+            call_count += 1
+            return original_upsert(session, data, existing)
+
+        monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
+
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, payload)
+            assert outcome.market_changed is True
+            assert outcome.resolution_changed is False
+            await session.commit()
+
+        identical = MarketPayload(**payload.model_dump())
+
+        async with session_factory() as session:
+            _, outcome = await sync_market(session, identical)
+            assert outcome.market_changed is False
+            assert outcome.resolution_changed is False
+            await session.commit()
+
+        assert call_count == 1
+    finally:
+        await engine.dispose()

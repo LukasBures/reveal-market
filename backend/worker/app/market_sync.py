@@ -476,6 +476,42 @@ async def collect_market_changes_with_summary(
         session, [record.id for record in existing_records.values() if record.id is not None]
     )
     total_markets = len(markets)
+    resolution_summaries: dict[str, dict[str, Any] | None] | None = None
+    goldsky = runtime.goldsky_client
+    if goldsky is not None:
+        now = datetime.now(UTC)
+        resolution_requests: list[tuple[str, int | None, list[str] | None]] = []
+        for market in markets:
+            condition_id = getattr(market, "condition_id", None)
+            if not isinstance(condition_id, str) or not condition_id.startswith("0x"):
+                continue
+            existing = existing_records.get(market.event_id)
+            closes_at = getattr(market, "closes_at", None) or getattr(existing, "closes_at", None)
+            if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
+                closes_at = closes_at.replace(tzinfo=UTC)
+            if isinstance(closes_at, datetime) and now < closes_at:
+                continue
+            status_value = getattr(market, "resolution_status", None) or getattr(existing, "resolution_status", None)
+            resolved_at = getattr(existing, "resolved_at", None)
+            if status_value == shared_models.ResolutionStatusEnum.FINAL.value and resolved_at is not None:
+                continue
+            hint = len(market.outcome_prices) if market.outcome_prices else None
+            outcomes = market.outcomes if isinstance(market.outcomes, list) else None
+            resolution_requests.append((condition_id.lower(), hint, outcomes))
+        if resolution_requests:
+            try:
+                batch_result = await goldsky.resolution_summary_batch(resolution_requests)
+                # Normalize keys to lowercase condition ids.
+                resolution_summaries = {key.lower(): value for key, value in batch_result.items()}
+            except Exception as exc:  # pragma: no cover - best effort; fall back to per-market fetch
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.resolution.batch_failed",
+                    message="failed to fetch batched goldsky resolutions; falling back to per-market fetch",
+                    error=str(exc),
+                )
+                resolution_summaries = None
     log_event(
         logger,
         logging.DEBUG,
@@ -497,7 +533,11 @@ async def collect_market_changes_with_summary(
         try:
             prefetched = existing_records.get(market.event_id)
             db_market, outcome = await sync_market(
-                session, market, existing_market=prefetched, prefetched_state=prefetched_state
+                session,
+                market,
+                existing_market=prefetched,
+                prefetched_state=prefetched_state,
+                resolution_summaries=resolution_summaries,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -748,9 +788,16 @@ async def sync_market(
     market: MarketPayload,
     existing_market: shared_models.Market | None = None,
     prefetched_state: PrefetchedMarketState | None = None,
+    resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
-    return await _sync_market(session, market, existing_market=existing_market, prefetched_state=prefetched_state)
+    return await _sync_market(
+        session,
+        market,
+        existing_market=existing_market,
+        prefetched_state=prefetched_state,
+        resolution_summaries=resolution_summaries,
+    )
 
 
 async def _record_factory_state(
@@ -794,7 +841,9 @@ def _markets_match(
         return False, "resolution_reason_changed"
     if commits_blocked_at is not None and getattr(existing, "commits_blocked_at", None) != commits_blocked_at:
         return False, "commits_blocked_at_changed"
-    if source_updated_at and getattr(existing, "source_updated_at", None) == source_updated_at:
+    existing_source_ts = _as_utc(getattr(existing, "source_updated_at", None))
+    incoming_source_ts = _as_utc(source_updated_at)
+    if incoming_source_ts and existing_source_ts and existing_source_ts == incoming_source_ts:
         return True, "source_timestamp"
     existing_hash = getattr(existing, "content_hash", None)
     if content_hash and existing_hash and existing_hash == content_hash:
@@ -803,12 +852,7 @@ def _markets_match(
 
 
 def _should_close_market(close_deadline: datetime | None, explicit_closed: bool | None, now: datetime) -> bool:
-    if isinstance(explicit_closed, bool) and explicit_closed:
-        return True
-    if isinstance(close_deadline, datetime):
-        deadline = close_deadline if close_deadline.tzinfo else close_deadline.replace(tzinfo=UTC)
-        return deadline <= now
-    return False
+    return bool(explicit_closed)
 
 
 def _build_cleanup_outcome(records, cutoff: datetime, dry_run: bool) -> CleanupOutcome:
@@ -888,6 +932,7 @@ async def _sync_market(
     market: MarketPayload,
     existing_market: shared_models.Market | None = None,
     prefetched_state: PrefetchedMarketState | None = None,
+    resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
 ):
     """Async implementation that upserts market state + resolutions."""
     now = datetime.now(UTC)
@@ -911,7 +956,11 @@ async def _sync_market(
         close_deadline = getattr(existing, "closes_at", None)
         if close_deadline is not None:
             payload["closes_at"] = close_deadline
-    should_close = _should_close_market(close_deadline, market.closed, now)
+    deadline = close_deadline
+    if isinstance(deadline, datetime) and deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=UTC)
+    deadline_passed = bool(deadline and deadline <= now)
+    should_close = _should_close_market(deadline, market.closed, now)
     payload["closed"] = should_close
     existing_resolution_status = getattr(existing, "resolution_status", None)
     resolution_provided = "resolution_status" in market.model_fields_set
@@ -929,12 +978,12 @@ async def _sync_market(
         incoming_resolution_status is not None and incoming_resolution_status != existing_resolution_status
     )
     commit_block_lead = max(300, int(getattr(runtime.settings, "commit_cutoff_seconds", 0) or 0))
-    if blocked_at is None and should_close:
-        deadline = close_deadline
-        if deadline and not deadline.tzinfo:
-            deadline = deadline.replace(tzinfo=UTC)
-        if deadline is not None:
-            blocked_at = deadline - timedelta(seconds=commit_block_lead)
+    if blocked_at is None and (should_close or deadline_passed):
+        cutoff_deadline = deadline
+        if cutoff_deadline and not cutoff_deadline.tzinfo:
+            cutoff_deadline = cutoff_deadline.replace(tzinfo=UTC)
+        if cutoff_deadline is not None:
+            blocked_at = cutoff_deadline - timedelta(seconds=commit_block_lead)
         else:
             blocked_at = now
     if resolution_status_changed and incoming_resolution_status in {
@@ -947,7 +996,7 @@ async def _sync_market(
             blocked_at = now
     payload["commits_blocked_at"] = blocked_at
     status_value = payload.get("status") or shared_models.MarketStatusEnum.COMMIT.value
-    if should_close and status_value not in {
+    if (should_close or deadline_passed) and status_value not in {
         shared_models.MarketStatusEnum.SETTLED.value,
         shared_models.MarketStatusEnum.CANCELLED.value,
     }:
@@ -1112,7 +1161,7 @@ async def _sync_market(
                         relationship=rel_key,
                     )
     resolution_start = time.perf_counter()
-    resolution_outcome = await apply_resolution(session, db_market, market)
+    resolution_outcome = await apply_resolution(session, db_market, market, summary_overrides=resolution_summaries)
     timing_resolution_ms = (time.perf_counter() - resolution_start) * 1000
     await session.flush()
     category_slug = _slugify_token(getattr(db_market, "category", None))

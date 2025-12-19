@@ -152,6 +152,8 @@ async def _fetch_resolution_snapshot(
     condition_id: str,
     market: MarketPayload,
     outcome_count_hint: int | None,
+    *,
+    batch_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return the best-effort resolution summary from Goldsky."""
     outcomes = market.outcomes or []
@@ -195,6 +197,9 @@ async def _fetch_resolution_snapshot(
     if goldsky is None:
         return None
 
+    if batch_summary is not None:
+        return batch_summary
+
     async def _goldsky_action() -> dict[str, Any] | None:
         result = goldsky.resolution_summary(condition_id, outcomes, outcome_count_hint)  # type: ignore[call-arg]
         if asyncio.iscoroutine(result):
@@ -215,7 +220,11 @@ async def _fetch_resolution_snapshot(
 
 
 async def apply_resolution(
-    session: AsyncSession, db_market: shared_models.Market | None, market: MarketPayload
+    session: AsyncSession,
+    db_market: shared_models.Market | None,
+    market: MarketPayload,
+    *,
+    summary_overrides: dict[str, dict[str, Any] | None] | None = None,
 ) -> ResolutionOutcome:
     condition_id = market.condition_id
     active_goldsky = goldsky_client or runtime.goldsky_client
@@ -265,6 +274,23 @@ async def apply_resolution(
             db_market.status = MarketStatusEnum.LOCKED.value
         session.add(db_market)
 
+    # Skip Goldsky fetch until the market's scheduled close has passed.
+    closes_at = getattr(db_market, "closes_at", None) or getattr(market, "closes_at", None)
+    if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
+        closes_at = closes_at.replace(tzinfo=UTC)
+    if isinstance(closes_at, datetime) and now < closes_at:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.resolution.skip_before_close",
+                message="skipping resolution fetch because market has not closed yet",
+                condition_id=normalized_condition_id,
+                closes_at=closes_at.isoformat(),
+                now=now.isoformat(),
+            )
+        return ResolutionOutcome()
+
     # Skip resolution fetches for open/commit markets to avoid unnecessary polling.
     # Only attempt when the market appears closed/locked or Gamma reports a non-final status.
     market_closed_like = bool(getattr(db_market, "closed", False)) or getattr(db_market, "status", None) in {
@@ -304,7 +330,16 @@ async def apply_resolution(
             )
         return ResolutionOutcome()
 
-    summary = await _fetch_resolution_snapshot(normalized_condition_id, market, outcome_count_hint)
+    summary_override = None
+    if summary_overrides is not None:
+        summary_override = summary_overrides.get(normalized_condition_id)
+
+    summary = await _fetch_resolution_snapshot(
+        normalized_condition_id,
+        market,
+        outcome_count_hint,
+        batch_summary=summary_override,
+    )
     if summary is None:
         if logger.isEnabledFor(logging.DEBUG):
             log_event(
