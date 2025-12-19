@@ -413,18 +413,20 @@ jobs:
               echo "Working tree dirty. Stash or commit changes before deploying." >&2
               exit 1
             fi
-            if [ -n "${MAIN_GIT_SSH_COMMAND:-}" ]; then
-              GIT_SSH_COMMAND="${MAIN_GIT_SSH_COMMAND}" git pull --rebase
-            else
-              git pull --rebase
-            fi
-
             mkdir -p ~/.ssh
             ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
-            if [ -n "${SUBMODULE_GIT_SSH_COMMAND:-}" ]; then
-              GIT_SSH_COMMAND="${SUBMODULE_GIT_SSH_COMMAND}" git submodule update --init --recursive
+            if [ -n "${MAIN_GIT_SSH_COMMAND:-}" ]; then
+              GIT_SSH_COMMAND="${MAIN_GIT_SSH_COMMAND}" git pull --rebase --recurse-submodules=no
             else
-              git submodule update --init --recursive
+              git pull --rebase --recurse-submodules=no
+            fi
+
+            git submodule sync --recursive
+            git -c submodule.prover/artifacts.update=none submodule update --init --recursive
+            if [ -n "${SUBMODULE_GIT_SSH_COMMAND:-}" ]; then
+              GIT_SSH_COMMAND="${SUBMODULE_GIT_SSH_COMMAND}" git submodule update --init --recursive prover/artifacts
+            else
+              git submodule update --init --recursive prover/artifacts
             fi
 
             echo ">>> Run production deployment script"
