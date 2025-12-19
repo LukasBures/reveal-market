@@ -259,10 +259,8 @@ async def apply_resolution(
     existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     existing_resolved = bool(existing and existing.resolved)
     now = datetime.now(UTC)
-    incoming_resolution_status = (
-        getattr(market, "resolution_status", None)
-        or getattr(db_market, "resolution_status", None)
-        or ResolutionStatusEnum.PENDING.value
+    incoming_resolution_status = getattr(market, "resolution_status", None) or getattr(
+        db_market, "resolution_status", None
     )
     incoming_resolution_reason = getattr(market, "resolution_reason", None)
     if incoming_resolution_reason:

@@ -73,7 +73,7 @@ def upgrade() -> None:
         sa.Column("featured", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("closes_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("resolution_status", sa.String(length=32), nullable=False, server_default="pending_resolution"),
+        sa.Column("resolution_status", sa.String(length=32), nullable=True),
         sa.Column("resolution_reason", sa.String(length=128), nullable=True),
         sa.Column("commits_blocked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),

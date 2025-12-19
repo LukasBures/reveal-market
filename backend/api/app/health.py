@@ -143,8 +143,8 @@ async def _check_polymarket_api(settings: Settings) -> tuple[str, schemas.Health
                 "order": settings.polymarket_order,
                 "ascending": str(settings.polymarket_sort_ascending).lower(),
             }
-            if settings.polymarket_closed_filter is not None:
-                params["closed"] = str(settings.polymarket_closed_filter).lower()
+            if settings.polymarket_only_open_markets is True:
+                params["closed"] = "false"
             response = await client.get(
                 markets_url,
                 params=params,

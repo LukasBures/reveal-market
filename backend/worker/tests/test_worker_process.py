@@ -196,7 +196,7 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
     monkeypatch.setattr(runtime_module.settings, "polymarket_max_pages", 4, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_order", "updatedAt", raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_sort_ascending", False, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "polymarket_closed_filter", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_only_open_markets", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_active_filter", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_archived_filter", False, raising=False)
 
@@ -205,7 +205,7 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
         max_pages=runtime_module.settings.polymarket_max_pages,
         order=runtime_module.settings.polymarket_order,
         ascending=runtime_module.settings.polymarket_sort_ascending,
-        closed=runtime_module.settings.polymarket_closed_filter,
+        closed=False if runtime_module.settings.polymarket_only_open_markets is True else None,
         extra_params=build_filters_from_settings(runtime_module.settings),
     )
 
@@ -242,7 +242,7 @@ async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeyp
         max_pages=runtime_module.settings.polymarket_max_pages,
         order=runtime_module.settings.polymarket_order,
         ascending=runtime_module.settings.polymarket_sort_ascending,
-        closed=runtime_module.settings.polymarket_closed_filter,
+        closed=False if runtime_module.settings.polymarket_only_open_markets is True else None,
         extra_params=build_filters_from_settings(runtime_module.settings),
     )
 

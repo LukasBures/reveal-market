@@ -33,7 +33,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;
   const callouts = [
     { label: "Live markets", value: formatNumber(liveMarkets) },
-    { label: "Markets settled", value: formatNumber(finalizedMarkets) },
+    { label: "Finalized markets", value: formatNumber(finalizedMarkets) },
     { label: "Total markets tracked", value: formatNumber(totalMarkets) },
     { label: "Access", value: "Invite only" },
   ];

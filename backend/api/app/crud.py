@@ -70,15 +70,11 @@ async def get_markets(
 
 
 async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBreakdown]:
-    live_stmt = select(func.count(models.Market.id)).where(models.Market.closed.is_(False))
+    live_stmt = select(func.count(models.Market.id)).where(models.Market.status == models.MarketStatusEnum.COMMIT.value)
     live = int((await session.execute(live_stmt)).scalar_one() or 0)
 
     finalized_stmt = select(func.count(models.Market.id)).where(
-        or_(
-            models.Market.status == models.MarketStatusEnum.SETTLED.value,
-            models.Market.resolution_status == models.ResolutionStatusEnum.FINAL.value,
-            models.Market.resolved_at.isnot(None),
-        )
+        models.Market.resolution_status == models.ResolutionStatusEnum.FINAL.value
     )
     finalized = int((await session.execute(finalized_stmt)).scalar_one() or 0)
 
@@ -161,7 +157,7 @@ async def patch_market(session: AsyncSession, market: models.Market, update: sch
 def _apply_common_filters(stmt, *, status: str | None, category: str | None, oracle: str | None, featured: bool | None):
     if status == "active":
         stmt = stmt.where(
-            models.Market.closed.is_(False),
+            models.Market.status == models.MarketStatusEnum.COMMIT.value,
         )
     elif status and status.lower() not in {"any", "all"}:
         stmt = stmt.where(models.Market.status == status)

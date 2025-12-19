@@ -30,7 +30,7 @@ export async function FeaturedMarketsSection({
     category: categoryFilter,
     status: "active",
     trending: false,
-    coalesceGroups: true,
+    coalesceGroups: false,
     orderBy,
   });
 

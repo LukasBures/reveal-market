@@ -261,6 +261,7 @@ def test_patch_market_and_stats(client, db_session):
         "title": "Patched Title",
         "status": "settled",
         "closed": True,
+        "resolution_status": "final",
         "tags": ["patched"],
     }
 

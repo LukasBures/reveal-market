@@ -9,7 +9,7 @@ fi
 echo "Stopping running containers..."
 running_containers=$(docker ps -q)
 if [[ -n "${running_containers}" ]]; then
-  docker stop ${running_containers}
+  docker stop "${running_containers}"
 else
   echo "No running containers."
 fi
@@ -17,7 +17,7 @@ fi
 echo "Removing all containers..."
 all_containers=$(docker ps -aq)
 if [[ -n "${all_containers}" ]]; then
-  docker rm -f ${all_containers}
+  docker rm -f "${all_containers}"
 else
   echo "No containers to remove."
 fi

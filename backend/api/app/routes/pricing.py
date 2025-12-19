@@ -272,11 +272,17 @@ async def pricing_quote(
             )
         if market_record:
             _assert_commits_allowed(market_record, now, session)
-    # Best-effort resolve a market address without creating one; quotes can be issued pre-deploy.
+    # Auto-deploy on first quote if a market address is missing.
     ensured_market_address: str | None = (payload.market_address or "") or None
     if payload.market_id and not ensured_market_address:
         market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
         ensured_market_address = getattr(market_record, "market_address", None)
+    if payload.market_id and not ensured_market_address:
+        from app.routes.trade import _ensure_market_or_create
+
+        _, ensured_market_address, _ = await _ensure_market_or_create(
+            session, payload.market_id, payload.market_address
+        )
     try:
         fx_quote = await fetch_fx_quote(settings)
         if fx_quote.stale:

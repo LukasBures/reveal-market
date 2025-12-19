@@ -234,18 +234,24 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         gap_count = 0
         try:
             async with session_scope() as session:
+                only_open = runtime.settings.polymarket_only_open_markets is True
+                closed_param = False if only_open else None
                 async for page in runtime.polymarket_client.fetch_events_paginated(
                     page_size=runtime.settings.polymarket_page_size,
                     max_pages=runtime.settings.polymarket_max_pages,
                     order=runtime.settings.polymarket_order,
                     ascending=runtime.settings.polymarket_sort_ascending,
-                    closed=runtime.settings.polymarket_closed_filter,
+                    closed=closed_param,
                     extra_params=build_filters_from_settings(runtime.settings),
                 ):
                     page_start = time.perf_counter()
                     page_no += 1
-                    page_from = total_fetched + 1
-                    total_fetched += len(page)
+                    raw_count = len(page)
+                    if only_open:
+                        page = [market for market in page if getattr(market, "closed", None) is not True]
+                    filtered_count = len(page)
+                    page_from = total_fetched + 1 if filtered_count else total_fetched
+                    total_fetched += filtered_count
                     page_to = total_fetched
                     log_event(
                         logger,
@@ -253,11 +259,15 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         event="worker.fetch.page",
                         message="fetched polymarket page",
                         page=page_no,
-                        count=len(page),
+                        count=filtered_count,
+                        raw_count=raw_count,
+                        filtered=raw_count - filtered_count if raw_count != filtered_count else None,
                         total=total_fetched,
                         from_index=page_from,
                         to_index=page_to,
                     )
+                    if filtered_count == 0:
+                        continue
                     process_start = time.perf_counter()
                     timing_before = (
                         summary.timing_match_ms,

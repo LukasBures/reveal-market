@@ -97,7 +97,7 @@ class MarketPayload(BaseModel):
     starts_at: datetime | None = None
     orders_opened_at: datetime | None = None
     resolution_source: str | None = None
-    resolution_status: str = Field(default=ResolutionStatusEnum.PENDING.value)
+    resolution_status: str | None = Field(default=None)
     resolution_reason: str | None = None
     commits_blocked_at: datetime | None = None
     market_maker: str | None = None
@@ -133,6 +133,37 @@ class MarketPayload(BaseModel):
         question_id = raw.get("questionID") or raw.get("questionId")
         image_url = raw.get("image") or raw.get("imageUrl") or raw.get("imageURL")
         closed = raw.get("closed")
+        accepting_orders = _coerce_bool(raw.get("acceptingOrders"))
+        active_flag = _coerce_bool(raw.get("active"))
+        ready_flag = _coerce_bool(raw.get("ready"))
+        funded_flag = _coerce_bool(raw.get("funded"))
+        approved_flag = _coerce_bool(raw.get("approved"))
+        restricted_flag = _coerce_bool(raw.get("restricted"))
+        archived_flag = _coerce_bool(raw.get("archived"))
+        pending_deployment = _coerce_bool(raw.get("pendingDeployment"))
+        deploying = _coerce_bool(raw.get("deploying"))
+        manual_activation = _coerce_bool(raw.get("manualActivation"))
+        clear_book_on_start = _coerce_bool(raw.get("clearBookOnStart"))
+        deploying_timestamp = _extract_timestamp_candidate(raw.get("deployingTimestamp"))
+        if any(
+            flag is True
+            for flag in (
+                restricted_flag,
+                archived_flag,
+                pending_deployment,
+                deploying,
+            )
+        ) or any(
+            flag is False
+            for flag in (
+                accepting_orders,
+                active_flag,
+                ready_flag,
+                funded_flag,
+                approved_flag,
+            )
+        ):
+            closed = True
         uma_status = _extract_uma_status(raw)
 
         outcomes = _extract_outcomes(raw.get("outcomes"))
@@ -171,6 +202,7 @@ class MarketPayload(BaseModel):
         raw_group_slug = _clean_string(raw.get("group_slug"))
         group_slug = raw_group_slug or _derive_group_slug(slug, raw.get("question"), group_item_title)
 
+        closed_flag = closed if isinstance(closed, bool) else None
         gamma_metadata = {
             "gamma_id": str(event_id),
             "question": raw.get("question"),
@@ -181,11 +213,25 @@ class MarketPayload(BaseModel):
             "image": image_url,
             "icon": raw.get("icon"),
             "description": raw.get("description"),
+            "active": active_flag,
+            "closed": closed_flag,
+            "archived": archived_flag,
+            "restricted": restricted_flag,
+            "ready": ready_flag,
+            "funded": funded_flag,
+            "approved": approved_flag,
             "enable_order_book": enable_order_book,
             "order_price_min_tick_size": price_tick_size,
             "order_min_size": order_min_size,
             "clob_token_id_yes": clob_token_ids[0] if clob_token_ids and clob_token_ids[0] is not None else None,
             "clob_token_id_no": clob_token_ids[1] if clob_token_ids and len(clob_token_ids) > 1 else None,
+            "accepting_orders": accepting_orders,
+            "accepting_orders_timestamp": orders_opened_at,
+            "pending_deployment": pending_deployment,
+            "deploying": deploying,
+            "deploying_timestamp": deploying_timestamp,
+            "manual_activation": manual_activation,
+            "clear_book_on_start": clear_book_on_start,
             "group_item_title": group_item_title,
             "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
             "group_slug": group_slug,
@@ -222,8 +268,13 @@ class MarketPayload(BaseModel):
             _clean_string(raw.get("resolutionState")) or _clean_string(raw.get("resolutionStatus")) or uma_status
         )
         resolution_status, resolution_reason = _map_resolution_status(raw_resolution_state)
-        has_explicit_resolution = raw_resolution_state is not None and str(raw_resolution_state).strip() != ""
-        if has_explicit_resolution and resolution_status != ResolutionStatusEnum.FINAL.value:
+        if resolution_status is None:
+            resolution_reason = None
+        if resolution_status in {
+            ResolutionStatusEnum.PENDING.value,
+            ResolutionStatusEnum.DISPUTED.value,
+            ResolutionStatusEnum.FINAL.value,
+        }:
             closed = True
 
         market = cls(
@@ -833,6 +884,12 @@ def _clean_string(value: Any) -> str | None:
     return None
 
 
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
 def _category_from_tags(raw: dict[str, Any]) -> str | None:
     tags = raw.get("tags")
     if not isinstance(tags, list):
@@ -942,21 +999,21 @@ def _derive_status(closed: Any, resolution_status: Any) -> str:
     return "commit"
 
 
-def _map_resolution_status(raw_status: str | None) -> tuple[str, str | None]:
+def _map_resolution_status(raw_status: str | None) -> tuple[str | None, str | None]:
     """Convert upstream resolution strings into internal resolution status flags."""
 
     if raw_status is None:
-        return ResolutionStatusEnum.PENDING.value, None
+        return None, None
     normalized = raw_status.strip().lower()
     if not normalized:
-        return ResolutionStatusEnum.PENDING.value, raw_status
+        return None, None
     if normalized in {"pending", "pending_resolution", "preliminary", "awaiting", "waiting"}:
         return ResolutionStatusEnum.PENDING.value, raw_status
     if normalized in {"disputed", "challenge", "challenged", "contested"}:
         return ResolutionStatusEnum.DISPUTED.value, raw_status
     if normalized in {"resolved", "settled", "final", "confirmed", "resolved_final"}:
         return ResolutionStatusEnum.FINAL.value, raw_status
-    return ResolutionStatusEnum.FINAL.value, raw_status
+    return None, None
 
 
 def _extract_updated_at(raw: dict[str, Any]) -> datetime | None:

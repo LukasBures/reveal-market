@@ -153,7 +153,7 @@ export function FeaturedMarketsClient({
             offset: fetchOffset,
             status,
             trending,
-            coalesceGroups: true,
+            coalesceGroups: false,
             orderBy,
           });
           const merged = normalizeMarkets([...markets, ...additions]);

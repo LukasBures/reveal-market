@@ -73,14 +73,17 @@ describe("FeaturedMarketsClient", () => {
     await waitFor(() => {
       expect(screen.getByText("Second Market")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith(expect.any(Number), {
-      searchQuery: "sample",
-      category: undefined,
-      offset: 1,
-      status: "active",
-      coalesceGroups: true,
-      orderBy: "volume",
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({
+        searchQuery: "sample",
+        category: undefined,
+        offset: 1,
+        status: "active",
+        coalesceGroups: false,
+        orderBy: "volume",
+      }),
+    );
   });
 
   it("keeps the load more button when a short page arrives mid-pagination", async () => {

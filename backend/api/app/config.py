@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     polymarket_timeout_seconds: float = Field(default=5.0)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
-    polymarket_closed_filter: bool | None = Field(default=False)
+    polymarket_only_open_markets: bool | None = Field(default=False)
     clob_host: AnyHttpUrl | None = Field(default=None)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
     goldsky_api_key: SecretStr | None = Field(default=None)
@@ -213,7 +213,7 @@ class Settings(BaseSettings):
         default=100_000_000_000_000_000, ge=1, description="Fixed ticket size (wei) used for commitWithAuthorization"
     )
     commit_cutoff_seconds: int = Field(
-        default=900, ge=0, description="Seconds before closes_at to halt new commits/quotes"
+        default=300, ge=0, description="Seconds before closes_at to halt new commits/quotes"
     )
     relayer_escrow_address: str | None = Field(
         default=None, description="RelayerEscrow contract address for balance lookups"

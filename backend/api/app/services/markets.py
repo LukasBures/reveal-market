@@ -153,14 +153,14 @@ def filter_markets_for_visibility(
             if not isinstance(market.category, str) or market.category.lower() not in category_allow:
                 continue
 
-        # Skip explicitly closed markets and records with unknown statuses.
         status_normalized = str(getattr(market, "status", "") or "").lower()
-        resolution_status = str(getattr(market, "resolution_status", "") or "").lower()
-        resolved_at = getattr(market, "resolved_at", None)
-        is_resolved = resolution_status in {"final", "resolved"} or resolved_at is not None
-        if hide_settled and (status_normalized in disallowed_statuses or is_resolved):
-            settled_filtered += 1
-            continue
+        # When hide_settled is requested (homepage/active feeds), only expose commit-state markets.
+        if hide_settled:
+            if status_normalized != models.MarketStatusEnum.COMMIT.value:
+                settled_filtered += 1
+                continue
+
+        # Skip explicitly closed markets and records with unknown statuses for other feeds.
         if getattr(market, "closed", False) is True or (
             status_normalized and status_normalized not in allowed_statuses
         ):

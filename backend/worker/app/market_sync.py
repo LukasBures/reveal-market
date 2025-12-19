@@ -23,7 +23,13 @@ from sqlalchemy.orm.state import InstanceState
 
 from . import runtime
 from .metrics import record_retention_metrics
-from .polymarket import MarketPayload, _extract_timestamp_candidate, _parse_group_threshold
+from .polymarket import (
+    MarketPayload,
+    _build_market_hash_payload,
+    _compute_market_hash,
+    _extract_timestamp_candidate,
+    _parse_group_threshold,
+)
 from .resolution import apply_resolution
 from .settlement import _upsert_settlement_from_chain
 from .summary_jobs import maybe_enqueue_summary_job
@@ -500,11 +506,7 @@ async def collect_market_changes_with_summary(
             existing = existing_records.get(market.event_id)
             market_id = getattr(existing, "id", None)
             closed_flag = bool(getattr(market, "closed", None) or getattr(existing, "closed", None))
-            status_value = (
-                getattr(market, "resolution_status", None)
-                or getattr(existing, "resolution_status", None)
-                or shared_models.ResolutionStatusEnum.PENDING.value
-            )
+            status_value = getattr(market, "resolution_status", None) or getattr(existing, "resolution_status", None)
             has_commits = bool(market_id and commitment_counts.get(market_id, 0) > 0)
             allow_fetch = closed_flag and status_value == shared_models.ResolutionStatusEnum.FINAL.value and has_commits
             allow_resolution_fetch[market.event_id] = allow_fetch
@@ -791,7 +793,7 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         starts_at=record.starts_at,
         orders_opened_at=record.orders_opened_at,
         resolution_source=record.resolution_source,
-        resolution_status=getattr(record, "resolution_status", None) or shared_models.ResolutionStatusEnum.FINAL.value,
+        resolution_status=getattr(record, "resolution_status", None),
         resolution_reason=getattr(record, "resolution_reason", None),
         commits_blocked_at=getattr(record, "commits_blocked_at", None),
         market_maker=record.market_maker,
@@ -859,21 +861,27 @@ def _markets_match(
     resolution_status: str | None = None,
     resolution_reason: str | None = None,
     commits_blocked_at: datetime | None = None,
+    *,
+    resolution_status_provided: bool = False,
+    resolution_reason_provided: bool = False,
+    commits_blocked_at_provided: bool = False,
 ) -> tuple[bool, str]:
     """Check whether incoming payload matches the existing record to skip writes."""
-    if resolution_status is not None and getattr(existing, "resolution_status", None) != resolution_status:
+    if resolution_status_provided and getattr(existing, "resolution_status", None) != resolution_status:
         return False, "resolution_status_changed"
-    if resolution_reason is not None and getattr(existing, "resolution_reason", None) != resolution_reason:
+    if resolution_reason_provided and getattr(existing, "resolution_reason", None) != resolution_reason:
         return False, "resolution_reason_changed"
-    if commits_blocked_at is not None and getattr(existing, "commits_blocked_at", None) != commits_blocked_at:
+    if commits_blocked_at_provided and getattr(existing, "commits_blocked_at", None) != commits_blocked_at:
         return False, "commits_blocked_at_changed"
     existing_source_ts = _as_utc(getattr(existing, "source_updated_at", None))
     incoming_source_ts = _as_utc(source_updated_at)
-    if incoming_source_ts and existing_source_ts and existing_source_ts == incoming_source_ts:
-        return True, "source_timestamp"
     existing_hash = getattr(existing, "content_hash", None)
+    if content_hash is not None and existing_hash != content_hash:
+        return False, "content_hash_changed"
     if content_hash and existing_hash and existing_hash == content_hash:
         return True, "content_hash"
+    if incoming_source_ts and existing_source_ts and existing_source_ts == incoming_source_ts:
+        return True, "source_timestamp"
     return False, "diff_detected"
 
 
@@ -990,29 +998,30 @@ async def _sync_market(
     should_close = _should_close_market(deadline, market.closed, now)
     payload["closed"] = should_close
     existing_resolution_status = getattr(existing, "resolution_status", None)
-    resolution_provided = "resolution_status" in market.model_fields_set
-    incoming_resolution_status = payload.get("resolution_status") if resolution_provided else None
-    resolution_status = (
-        incoming_resolution_status or existing_resolution_status or shared_models.ResolutionStatusEnum.PENDING.value
-    )
-    payload["resolution_status"] = resolution_status
-    resolution_reason = payload.get("resolution_reason") or getattr(existing, "resolution_reason", None)
-    if resolution_reason:
-        payload["resolution_reason"] = resolution_reason
+    incoming_resolution_status = payload.get("resolution_status")
+    incoming_resolution_reason = payload.get("resolution_reason")
+    resolution_provided = incoming_resolution_status is not None or incoming_resolution_reason is not None
+    resolution_status = incoming_resolution_status if resolution_provided else existing_resolution_status
+    resolution_reason = incoming_resolution_reason or getattr(existing, "resolution_reason", None)
     existing_blocked_at = getattr(existing, "commits_blocked_at", None)
     blocked_at = payload.get("commits_blocked_at") or existing_blocked_at
     resolution_status_changed = (
         incoming_resolution_status is not None and incoming_resolution_status != existing_resolution_status
     )
+    payload["resolution_status"] = resolution_status
+    if resolution_reason:
+        payload["resolution_reason"] = resolution_reason
+    else:
+        payload.pop("resolution_reason", None)
     commit_block_lead = max(300, int(getattr(runtime.settings, "commit_cutoff_seconds", 0) or 0))
-    if blocked_at is None and (should_close or deadline_passed):
-        cutoff_deadline = deadline
-        if cutoff_deadline and not cutoff_deadline.tzinfo:
-            cutoff_deadline = cutoff_deadline.replace(tzinfo=UTC)
-        if cutoff_deadline is not None:
-            blocked_at = cutoff_deadline - timedelta(seconds=commit_block_lead)
-        else:
-            blocked_at = now
+    cutoff_deadline = deadline
+    if cutoff_deadline and not cutoff_deadline.tzinfo:
+        cutoff_deadline = cutoff_deadline.replace(tzinfo=UTC)
+    cutoff_time = cutoff_deadline - timedelta(seconds=commit_block_lead) if cutoff_deadline else None
+    if cutoff_time and now >= cutoff_time:
+        blocked_at = cutoff_time
+    elif blocked_at is None and (should_close or deadline_passed):
+        blocked_at = cutoff_time or now
     if resolution_status_changed and incoming_resolution_status in {
         shared_models.ResolutionStatusEnum.PENDING.value,
         shared_models.ResolutionStatusEnum.DISPUTED.value,
@@ -1023,12 +1032,20 @@ async def _sync_market(
             blocked_at = now
     payload["commits_blocked_at"] = blocked_at
     status_value = payload.get("status") or shared_models.MarketStatusEnum.COMMIT.value
-    if (should_close or deadline_passed) and status_value not in {
+    if (should_close or deadline_passed or (cutoff_time and now >= cutoff_time)) and status_value not in {
         shared_models.MarketStatusEnum.SETTLED.value,
         shared_models.MarketStatusEnum.CANCELLED.value,
     }:
         status_value = shared_models.MarketStatusEnum.LOCKED.value
     payload["status"] = status_value
+
+    market.closed = payload["closed"]
+    market.status = status_value
+    market.commits_blocked_at = blocked_at
+    market.resolution_status = resolution_status
+    market.resolution_reason = payload.get("resolution_reason")
+    market.content_hash = _compute_market_hash(_build_market_hash_payload(market))
+    payload["content_hash"] = market.content_hash
 
     if logger.isEnabledFor(logging.DEBUG):
         log_event(
@@ -1047,7 +1064,7 @@ async def _sync_market(
     market_created = False
     market_updated = False
     incoming_updated_at = getattr(market, "source_updated_at", None)
-    incoming_hash = getattr(market, "content_hash", None)
+    incoming_hash = payload.get("content_hash")
     timing_match_ms = 0.0
     timing_upsert_ms = 0.0
     timing_normalized_ms = 0.0
@@ -1087,6 +1104,9 @@ async def _sync_market(
             resolution_status=resolution_status,
             resolution_reason=resolution_reason,
             commits_blocked_at=blocked_at,
+            resolution_status_provided=resolution_provided,
+            resolution_reason_provided=resolution_provided and resolution_reason is not None,
+            commits_blocked_at_provided=blocked_at is not None,
         )
         timing_match_ms = (time.perf_counter() - match_start) * 1000
         if match:
