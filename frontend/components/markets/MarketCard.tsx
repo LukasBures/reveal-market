@@ -81,8 +81,8 @@ export function MarketCard({ market }: Props) {
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex items-start gap-4">
           <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} />
-          <div>
-            <h3 className="mt-1 text-base font-semibold text-white line-clamp-2 sm:text-lg">{market.title}</h3>
+          <div className="min-w-0">
+            <h3 className="mt-1 text-base font-semibold text-white line-clamp-2 break-words sm:text-lg">{market.title}</h3>
           </div>
         </div>
         {isBinary ? (
@@ -108,10 +108,10 @@ export function MarketCard({ market }: Props) {
                         window.location.href = href;
                       }
                     }}
-                    className={`flex w-full items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 text-left ${hoverColor}`}
+                    className={`flex w-full min-w-0 items-center justify-between rounded-lg bg-slate-900/60 px-3 py-1.5 text-left ${hoverColor}`}
                   >
-                    <span className="truncate">{outcome}</span>
-                    <span className="font-semibold text-white">{probability}</span>
+                    <span className="min-w-0 flex-1 truncate">{outcome}</span>
+                    <span className="flex-shrink-0 font-semibold text-white">{probability}</span>
                   </button>
                 );
               })}
@@ -141,10 +141,10 @@ export function MarketCard({ market }: Props) {
                 return (
                   <div
                     key={outcome}
-                    className={`flex items-center justify-between rounded-lg bg-slate-900 px-3 py-1.5 ${hoverColor}`}
+                    className={`flex min-w-0 items-center justify-between rounded-lg bg-slate-900 px-3 py-1.5 ${hoverColor}`}
                   >
-                    <span className="truncate">{outcome}</span>
-                    <span className="font-semibold text-white">{probability}</span>
+                    <span className="min-w-0 flex-1 truncate">{outcome}</span>
+                    <span className="flex-shrink-0 font-semibold text-white">{probability}</span>
                   </div>
                 );
               })}

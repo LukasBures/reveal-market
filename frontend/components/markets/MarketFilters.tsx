@@ -218,7 +218,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
   }, [suggestions, loadingSuggestions, search]);
 
   return (
-    <section className="glass-panel relative overflow-visible px-4 py-8 shadow-2xl shadow-black/40 sm:px-6 md:px-10">
+    <section className="glass-panel relative overflow-x-hidden overflow-y-visible px-4 py-8 shadow-2xl shadow-black/40 sm:px-6 md:px-10">
       <div className="pointer-events-none absolute -top-24 right-0 h-64 w-64 rounded-full bg-brand-400/20 blur-3xl" />
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-4 text-center lg:max-w-2xl lg:text-left">
@@ -285,19 +285,19 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
                       router.push(`/markets/${suggestion.eventId}`);
                       setSuggestionsVisible(false);
                     }}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${
+                    className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${
                       index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"
                     }`}
                   >
-                  <MarketArtwork
-                    src={suggestion.imageUrl ?? null}
-                    alt={`${suggestion.title} artwork`}
-                    sizeClass="w-10"
-                    roundedClass="rounded-lg"
-                    borderClass="border border-white/10"
-                  />
-                    <div className="flex flex-col">
-                      <span className="font-semibold leading-snug text-white">{suggestion.title}</span>
+                    <MarketArtwork
+                      src={suggestion.imageUrl ?? null}
+                      alt={`${suggestion.title} artwork`}
+                      sizeClass="w-10"
+                      roundedClass="rounded-lg"
+                      borderClass="border border-white/10"
+                    />
+                    <div className="min-w-0 flex flex-col">
+                      <span className="line-clamp-2 font-semibold leading-snug text-white">{suggestion.title}</span>
                       <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-500">
                         {suggestion.category ?? "General"}
                       </span>

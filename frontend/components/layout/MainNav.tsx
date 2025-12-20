@@ -67,7 +67,7 @@ export function MainNav() {
               height={56}
               priority
               className="select-none"
-              style={{ width: "200px", height: "auto" }}
+              style={{ width: "200px", height: "auto", maxWidth: "100%" }}
               draggable={false}
             />
           </a>
@@ -84,7 +84,7 @@ export function MainNav() {
               height={56}
               priority
               className="select-none"
-              style={{ width: "200px", height: "auto" }}
+              style={{ width: "200px", height: "auto", maxWidth: "100%" }}
               draggable={false}
             />
           </Link>

@@ -190,7 +190,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
                   router.push(`/markets/${suggestion.eventId}`);
                   setSuggestionsVisible(false);
                 }}
-                className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${
+                className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${
                   index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"
                 }`}
               >
@@ -201,8 +201,8 @@ export function HeroSearch({ initialSearch = "" }: Props) {
                   roundedClass="rounded-lg"
                   borderClass="border border-white/10"
                 />
-                <div className="flex flex-col">
-                  <span className="font-semibold leading-snug text-white">{suggestion.title}</span>
+                <div className="min-w-0 flex flex-col">
+                  <span className="line-clamp-2 font-semibold leading-snug text-white">{suggestion.title}</span>
                   <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-500">
                     {suggestion.category ?? "General"}
                   </span>

@@ -96,14 +96,14 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
         {!isCancelled ? (
           <div className="pointer-events-none absolute inset-0 bg-[length:220%_140%] bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.18)_35%,rgba(123,240,94,0)_70%)] opacity-70 mix-blend-screen animate-[statusFlow_4.2s_linear_infinite]" />
         ) : null}
-        <div className="relative flex items-center gap-2 overflow-x-auto pb-1 md:justify-between md:gap-3">
+        <div className="relative flex flex-col gap-2 overflow-x-hidden overflow-y-visible md:flex-row md:items-center md:justify-between md:gap-3 md:overflow-x-auto md:pb-1">
           {stages.map((stage, idx) => {
             const stageState = idx < currentIndex ? "complete" : idx === currentIndex ? "current" : "upcoming";
             return (
               <Fragment key={stage.key}>
                 <div
                   className={clsx(
-                    "flex min-w-[140px] flex-1 flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                    "flex min-w-0 flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors md:min-w-[140px] md:flex-1",
                     stageState === "complete"
                       ? bubbleCompleteClass
                       : stageState === "current"
@@ -115,7 +115,7 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
                   <span className="text-[11px] text-slate-300">{stage.description}</span>
                 </div>
                 {idx < stages.length - 1 ? (
-                  <div className="flex items-center gap-1 md:flex-1 md:justify-center">
+                  <div className="hidden items-center gap-1 md:flex md:flex-1 md:justify-center">
                     <div
                       className={clsx(
                         "h-[2px] w-12 rounded-full bg-gradient-to-r transition-colors md:w-full",
@@ -665,7 +665,7 @@ export function DashboardClient() {
         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Escrow</p>
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-white">
           <span>Balance: {escrowDisplay} ZEN {ZEN_TOKEN_ADDRESS ? "" : "(ZEN token missing)"}</span>
-          <span className="text-slate-400">
+          <span className="break-all text-slate-400">
             Escrow: {RELAYER_ESCROW_ADDRESS ?? "n/a"} | Chain: {chainMismatch ? "Wrong network" : defaultChain.name}
           </span>
         </div>
@@ -680,7 +680,7 @@ export function DashboardClient() {
                   : "—"}
               </span>
             </div>
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               <input
                 type="number"
                 value={depositInput}
@@ -693,7 +693,7 @@ export function DashboardClient() {
               <button
                 type="button"
                 onClick={handleDeposit}
-                className="whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-emerald-900/50 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-800/60"
+                className="w-full whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-emerald-900/50 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-800/60 sm:w-auto"
                 disabled={Boolean(fundingBlockedReason)}
                 title={depositCtaTitle}
               >
@@ -718,7 +718,7 @@ export function DashboardClient() {
                   : "—"}
               </span>
             </div>
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               <input
                 type="number"
                 value={withdrawInput}
@@ -731,7 +731,7 @@ export function DashboardClient() {
               <button
                 type="button"
                 onClick={handleWithdraw}
-                className="whitespace-nowrap rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10"
+                className="w-full whitespace-nowrap rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10 sm:w-auto"
                 disabled={
                   chainMismatch ||
                   !RELAYER_ESCROW_ADDRESS ||
@@ -855,7 +855,7 @@ export function DashboardClient() {
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">
                       <div>
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Market</p>
-                        <p className="font-semibold">{marketTitle}</p>
+                        <p className="break-words font-semibold">{marketTitle}</p>
                         <p className="text-xs text-slate-400">Outcome: {outcomeLabel}</p>
                       </div>
                       <div className="text-right">

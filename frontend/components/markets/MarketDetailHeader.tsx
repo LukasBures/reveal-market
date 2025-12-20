@@ -56,30 +56,30 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
       style={backgroundStyle}
     >
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-        <div className="flex flex-1 gap-4">
+        <div className="flex min-w-0 flex-1 gap-4">
           <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} sizeClass="w-20 h-20 sm:w-24 sm:h-24" />
-          <div className="space-y-3">
-            <h1 className="text-2xl font-semibold text-white sm:text-3xl">{market.title}</h1>
+          <div className="min-w-0 space-y-3">
+            <h1 className="break-words text-2xl font-semibold text-white sm:text-3xl">{market.title}</h1>
             {market.status && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
                 {market.category && (
-              <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
-            )}
-            <span className="rounded-full px-2.5 py-1 bg-brand-500/20 text-brand-100">
-              {market.status}
-            </span>
-            {resolutionStatus === "pending_resolution" && (
-              <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Waiting for resolution</span>
-            )}
-            {resolutionStatus === "disputed" && (
-              <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">
-                Disputed{resolutionReason ? `: ${resolutionReason}` : ""}
-              </span>
+                  <span className="rounded-full bg-white/5 px-3 py-1 text-white/80">{market.category}</span>
+                )}
+                <span className="rounded-full bg-brand-500/20 px-2.5 py-1 text-brand-100">
+                  {market.status}
+                </span>
+                {resolutionStatus === "pending_resolution" && (
+                  <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Waiting for resolution</span>
+                )}
+                {resolutionStatus === "disputed" && (
+                  <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">
+                    Disputed{resolutionReason ? `: ${resolutionReason}` : ""}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
-    </div>
+        </div>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Liquidity" value={formatUsd(liquidity)} />

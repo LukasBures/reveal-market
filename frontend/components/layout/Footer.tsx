@@ -22,7 +22,7 @@ export function Footer() {
               height={64}
               priority
               className="select-none"
-              style={{ width: "240px", height: "auto" }}
+              style={{ width: "240px", height: "auto", maxWidth: "100%" }}
             />
           </Link>
           <p className="text-base text-slate-200">
