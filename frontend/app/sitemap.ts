@@ -14,6 +14,7 @@ const DOC_PATHS = [
   "/docs/getting-started",
   "/docs/architecture",
   "/docs/core-infrastructure",
+  "/docs/roadmap",
   "/docs/privacy-security",
   "/docs/integrations",
   "/docs/marketplace",
@@ -21,6 +22,7 @@ const DOC_PATHS = [
   "/docs/tiers-fees",
   "/docs/referrals",
   "/docs/faq",
+  "/docs/api",
 ];
 
 const STATIC_PATHS = ["/", "/about", "/contact", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer", "/proofs"];

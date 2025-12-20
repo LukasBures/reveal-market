@@ -19,6 +19,7 @@ export const metadata: Metadata = buildMetadata({
   description: "Track your escrow balance, open positions, potential payouts, and claims.",
   path: "/dashboard",
   keywords: ["positions", "escrow", "claims", "reveal market"],
+  robots: { index: false, follow: false },
 });
 
 export default function DashboardPage() {

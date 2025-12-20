@@ -32,6 +32,66 @@ const normalizeKeywords = (keywords: string[]): string[] => {
 const cleanTitle = (title: string): string =>
   title.trim().replace(new RegExp(`\\s*\\|\\s*${SITE_NAME}$`, "i"), "");
 
+type RobotsMeta = Exclude<Metadata["robots"], string>;
+type RobotsInfo = Exclude<RobotsMeta["googleBot"], string | undefined>;
+
+const DEFAULT_ROBOTS: RobotsMeta = {
+  index: true,
+  follow: true,
+  "max-image-preview": "large",
+  "max-snippet": -1,
+  "max-video-preview": -1,
+  googleBot: {
+    index: true,
+    follow: true,
+    "max-image-preview": "large",
+    "max-snippet": -1,
+    "max-video-preview": -1,
+  },
+};
+
+const mergeRobots = (robots?: Metadata["robots"]): Metadata["robots"] => {
+  if (!robots) return DEFAULT_ROBOTS;
+  if (typeof robots === "string") return robots;
+  const merged: RobotsMeta = { ...DEFAULT_ROBOTS, ...robots };
+  if (typeof robots.googleBot === "string") {
+    merged.googleBot = robots.googleBot;
+    return merged;
+  }
+  if (robots.googleBot) {
+    merged.googleBot = {
+      ...(typeof DEFAULT_ROBOTS.googleBot === "object" ? DEFAULT_ROBOTS.googleBot : {}),
+      ...robots.googleBot,
+    };
+    return merged;
+  }
+  const derivedGoogleBot: RobotsInfo = {
+    ...(typeof DEFAULT_ROBOTS.googleBot === "object" ? DEFAULT_ROBOTS.googleBot : {}),
+  };
+  const mirrorKeys = [
+    "index",
+    "follow",
+    "noarchive",
+    "nosnippet",
+    "noimageindex",
+    "nocache",
+    "notranslate",
+    "indexifembedded",
+    "nositelinkssearchbox",
+    "unavailable_after",
+    "max-video-preview",
+    "max-image-preview",
+    "max-snippet",
+  ] as const;
+  mirrorKeys.forEach((key) => {
+    if (typeof robots[key] !== "undefined") {
+      (derivedGoogleBot as RobotsInfo)[key] = robots[key];
+    }
+  });
+  merged.googleBot = derivedGoogleBot;
+  return merged;
+};
+
 export function buildBreadcrumbJsonLd(
   items: { name: string; path: string }[],
 ): Record<string, any> | null {
@@ -153,14 +213,12 @@ export function buildMetadata({
   keywords = [],
   image = DEFAULT_IMAGE,
   type = "website",
-  robots = {
-    index: true,
-    follow: true,
-  },
+  robots,
 }: MetadataOptions): Metadata {
   const canonical = absoluteUrl(path);
   const imageUrl = absoluteUrl(image);
   const normalizedTitle = cleanTitle(title);
+  const resolvedRobots = mergeRobots(robots);
 
   return {
     title: normalizedTitle,
@@ -185,7 +243,7 @@ export function buildMetadata({
       description,
       images: [imageUrl],
     },
-    robots,
+    robots: resolvedRobots,
   };
 }
 

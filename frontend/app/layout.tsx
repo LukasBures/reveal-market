@@ -34,6 +34,7 @@ const displayFont = localFont({
 });
 
 const SITE_URL = absoluteUrl("/");
+const SEARCH_URL = absoluteUrl("/markets/search");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
@@ -75,7 +76,7 @@ const websiteJsonLd = {
   url: SITE_URL,
   potentialAction: {
     "@type": "SearchAction",
-    target: `${SITE_URL}?q={search_term_string}`,
+    target: `${SEARCH_URL}?q={search_term_string}`,
     "query-input": "required name=search_term_string",
   },
 };
@@ -92,6 +93,16 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+    "max-image-preview": "large",
+    "max-snippet": -1,
+    "max-video-preview": -1,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
   },
   openGraph: {
     title: "Reveal Market",

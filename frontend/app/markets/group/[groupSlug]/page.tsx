@@ -96,10 +96,12 @@ export async function generateMetadata({ params, searchParams }: GroupPageProps)
   const market = grouped?.markets?.length ? selectActiveMarket(grouped.markets, targetEventId) : undefined;
   const title = market ? `${market.title} | Reveal Market` : `Markets group ${groupSlug} | Reveal Market`;
   const description = market ? selectMarketCopy(market).slice(0, 140) : "Aggregated markets bundle.";
+  const image = market ? resolveMarketImage(market) : undefined;
   return buildMetadata({
     title,
     description,
     path: `/markets/group/${encodeURIComponent(groupSlug)}`,
+    image,
   });
 }
 
