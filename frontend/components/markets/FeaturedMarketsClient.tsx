@@ -55,9 +55,7 @@ export function FeaturedMarketsClient({
   const [autoLoadTriggered, setAutoLoadTriggered] = useState(false);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [intersectionSupported, setIntersectionSupported] = useState(
-    typeof window !== "undefined" && "IntersectionObserver" in window,
-  );
+  const [intersectionSupported, setIntersectionSupported] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const setSentinel = useCallback((node: HTMLDivElement | null) => {
     sentinelRef.current = node;

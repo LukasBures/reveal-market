@@ -12,7 +12,7 @@ type Props = {
 };
 
 function useVisibleNow() {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     if (typeof document === "undefined") return;
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -46,7 +46,8 @@ function useVisibleNow() {
 
 function FxStatusPill({ fxStream }: { fxStream: ReturnType<typeof useFxStream> }) {
   const now = useVisibleNow();
-  const fxAgeSeconds = fxStream.lastUpdate > 0 ? Math.max(0, Math.round((now - fxStream.lastUpdate) / 1000)) : null;
+  const fxAgeSeconds =
+    now !== null && fxStream.lastUpdate > 0 ? Math.max(0, Math.round((now - fxStream.lastUpdate) / 1000)) : null;
   const fxRate = fxStream.fx?.zen_usd ? fxStream.fx.zen_usd.toFixed(4) : null;
   const className =
     fxStream.status === "error"
@@ -66,7 +67,7 @@ function LastTickPill({ lastUpdated }: { lastUpdated?: string | null }) {
   const now = useVisibleNow();
   const lastTickDate = lastUpdated ? new Date(lastUpdated) : null;
   const lastTick = lastTickDate ? formatTime(lastTickDate) : "—";
-  const lastTickAgeSeconds = lastTickDate
+  const lastTickAgeSeconds = now !== null && lastTickDate
     ? Math.max(0, Math.round((now - lastTickDate.getTime()) / 1000))
     : null;
   return (

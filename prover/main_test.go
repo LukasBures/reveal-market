@@ -8,9 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/reveal-market/prover/internal/shared"
 )
 
 func TestValidateRequest(t *testing.T) {
@@ -143,7 +140,8 @@ func TestProofHandlerSuccess(t *testing.T) {
 			Warnings:      []string{"warn"},
 		},
 	}
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
@@ -190,7 +188,8 @@ func TestProofHandlerStream(t *testing.T) {
 			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
 		},
 	}
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
@@ -226,7 +225,8 @@ func TestProofHandlerStream(t *testing.T) {
 }
 
 func TestProofHandlerInvalidJSON(t *testing.T) {
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, &stubProver{ready: true})
+	cfg := newTestConfig(t)
+	app := newApp(cfg, &stubProver{ready: true})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewBufferString("{"))
 	app.proofHandler(rec, req)
@@ -237,7 +237,8 @@ func TestProofHandlerInvalidJSON(t *testing.T) {
 
 func TestProofHandlerProverError(t *testing.T) {
 	stub := &stubProver{err: newValidationError("bad payload"), ready: true}
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
@@ -259,7 +260,8 @@ func TestProofHandlerProverError(t *testing.T) {
 
 func TestProofHandlerCircuitHashMismatch(t *testing.T) {
 	stub := &stubProver{ready: true, circuitHash: "0x2"}
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",
@@ -284,7 +286,8 @@ func TestProofHandlerCircuitHashMismatch(t *testing.T) {
 
 func TestProofHandlerUnready(t *testing.T) {
 	stub := &stubProver{ready: false, circuitHash: "0x1"}
-	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
 	payload := settlementProofRequest{
 		MarketID:       "0xabc",
 		MerkleRoot:     "0x1",

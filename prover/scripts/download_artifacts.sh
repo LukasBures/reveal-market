@@ -19,6 +19,7 @@ REQUIRED=(
   "settlement_final.zkey"
   "settlement_vk.json"
   "settlement_hashes.json"
+  "settlement_deploy.json"
 )
 
 cleanup() {

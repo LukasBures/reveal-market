@@ -6,12 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
-
-	"github.com/reveal-market/prover/internal/shared"
 )
 
 type httpStubProver struct{}
@@ -28,30 +23,7 @@ func (s httpStubProver) Generate(_ context.Context, _ settlementProofRequest) (*
 }
 
 func TestHTTPHandlersHealthAndProof(t *testing.T) {
-	temp := t.TempDir()
-	for _, name := range []string{"generate_witness.js", "settlement.wasm", "settlement_final.zkey"} {
-		if err := os.WriteFile(filepath.Join(temp, name), []byte("stub"), 0o644); err != nil {
-			t.Fatalf("failed to seed artifact %s: %v", name, err)
-		}
-	}
-
-	cfg := shared.Config{
-		ListenAddr:        "127.0.0.1:0",
-		Version:           "test",
-		HeartbeatSeconds:  1,
-		BackendMode:       shared.BackendGroth16,
-		NodeBinary:        "node",
-		RapidSnarkBinary:  "rapidsnark",
-		CircuitDir:        temp,
-		WitnessScriptPath: filepath.Join(temp, "generate_witness.js"),
-		WasmPath:          filepath.Join(temp, "settlement.wasm"),
-		ZKeyPath:          filepath.Join(temp, "settlement_final.zkey"),
-		TempDir:           temp,
-		ProofTimeout:      5 * time.Second,
-		MaxConcurrency:    1,
-		RequestTimeout:    5 * time.Second,
-	}
-
+	cfg := newTestConfig(t)
 	app := newApp(cfg, httpStubProver{})
 	srv := httptest.NewServer(app.routes())
 	defer srv.Close()

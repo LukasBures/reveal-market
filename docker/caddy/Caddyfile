@@ -1,5 +1,5 @@
 {
-  admin localhost:2019
+  admin 127.0.0.1:2019
   grace_period 5s
   email infra@revealmarket.xyz
   acme_ca https://acme-v02.api.letsencrypt.org/directory

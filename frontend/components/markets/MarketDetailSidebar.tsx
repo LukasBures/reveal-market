@@ -1,7 +1,7 @@
 "use client";
 
 import type { MarketDetail } from "@/lib/api-types";
-import { formatDate, formatDateTime, formatUsd } from "@/lib/formatters";
+import { formatDate, formatDateTime, formatNumber, formatUsd } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
@@ -143,7 +143,7 @@ export function MarketDetailSidebar({ market }: Props) {
     { label: "Best bid", value: bestBid, formatted: formatProbability(bestBid) },
     { label: "Best ask", value: bestAsk, formatted: formatProbability(bestAsk) },
     market.tradesQuantity !== undefined && market.tradesQuantity !== null
-      ? { label: "Trades", value: market.tradesQuantity, formatted: market.tradesQuantity.toLocaleString() }
+      ? { label: "Trades", value: market.tradesQuantity, formatted: formatNumber(market.tradesQuantity) }
       : null,
   ].filter(Boolean) as Array<{ label: string; value: number | null | undefined; formatted: string }>;
 

@@ -14,13 +14,17 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/reveal-market/prover/internal/shared"
 )
 
-const defaultLogLevel = "INFO"
+const (
+	defaultLogLevel       = "INFO"
+	artifactCheckInterval = 60 * time.Second
+)
 
 var (
 	logLevelName  string
@@ -71,14 +75,23 @@ type proofStreamResult struct {
 
 // app bundles configuration, prover backend, and simple state for /healthz.
 type app struct {
-	cfg            shared.Config
-	prover         proverEngine
-	startedAt      time.Time
-	lastHeartbeat  atomic.Value
-	lastProofAt    atomic.Value
-	circuitHash    string
-	requestCounter atomic.Uint64
-	artifactPaths  []string
+	cfg             shared.Config
+	prover          proverEngine
+	startedAt       time.Time
+	lastHeartbeat   atomic.Value
+	lastProofAt     atomic.Value
+	circuitHash     string
+	requestCounter  atomic.Uint64
+	artifactCheck   artifactCheck
+	artifactCheckMu sync.Mutex
+}
+
+type artifactCheck struct {
+	ok         bool
+	missing    []string
+	mismatches []string
+	err        string
+	checkedAt  time.Time
 }
 
 func newApp(cfg shared.Config, prover proverEngine) *app {
@@ -86,13 +99,6 @@ func newApp(cfg shared.Config, prover proverEngine) *app {
 		cfg:       cfg,
 		prover:    prover,
 		startedAt: time.Now().UTC(),
-		artifactPaths: filterPaths([]string{
-			cfg.WitnessScriptPath,
-			cfg.WasmPath,
-			cfg.ZKeyPath,
-			cfg.VerificationKeyPath,
-			cfg.HashesPath,
-		}),
 	}
 	a.lastHeartbeat.Store(time.Now().UTC())
 	a.lastProofAt.Store(time.Time{})
@@ -212,12 +218,13 @@ func (a *app) heartbeatLoop() {
 func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 	lastHeartbeat, _ := a.lastHeartbeat.Load().(time.Time)
 	lastProof, _ := a.lastProofAt.Load().(time.Time)
-	artifactsOk, missing := checkArtifacts(a.artifactPaths)
+	artifactsOk, missing, mismatches, errMsg := a.verifyArtifacts()
 	if artifactsOk {
 		artifactsStatus.Set(1)
 	} else {
 		artifactsStatus.Set(0)
 	}
+	ready := a.prover.Ready() && artifactsOk
 	payload := map[string]any{
 		"status":            "ok",
 		"backend":           a.prover.Backend(),
@@ -227,11 +234,15 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"last_heartbeat":    formatMillis(lastHeartbeat),
 		"last_proof_at":     formatMillis(lastProof),
 		"max_concurrency":   a.cfg.MaxConcurrency,
-		"ready":             a.prover.Ready(),
+		"ready":             ready,
 		"artifacts_ok":      artifactsOk,
 		"missing_artifacts": missing,
+		"hash_mismatches":   mismatches,
 	}
-	if !artifactsOk {
+	if errMsg != "" {
+		payload["artifact_error"] = errMsg
+	}
+	if !ready {
 		payload["status"] = "degraded"
 	}
 	writeJSON(w, http.StatusOK, payload)
@@ -252,17 +263,6 @@ func formatMillis(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-func filterPaths(paths []string) []string {
-	filtered := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		filtered = append(filtered, path)
-	}
-	return filtered
-}
-
 func equalHex(left, right string) (bool, error) {
 	leftValue, err := parseHexField(left, "circuit_hash")
 	if err != nil {
@@ -273,10 +273,6 @@ func equalHex(left, right string) (bool, error) {
 		return false, err
 	}
 	return leftValue.Cmp(rightValue) == 0, nil
-}
-
-func checkArtifacts(paths []string) (bool, []string) {
-	return shared.CheckArtifacts(paths)
 }
 
 func requireArtifactsOrExit(cfg shared.Config) string {
@@ -320,17 +316,54 @@ func requireArtifactsOrExit(cfg shared.Config) string {
 	return report.Hashes.CircuitHash
 }
 
-func (a *app) readyForProof() (bool, []string) {
-	artifactsOk, missing := checkArtifacts(a.artifactPaths)
+func (a *app) verifyArtifacts() (bool, []string, []string, string) {
+	now := time.Now().UTC()
+	a.artifactCheckMu.Lock()
+	defer a.artifactCheckMu.Unlock()
+
+	if !a.artifactCheck.checkedAt.IsZero() && now.Sub(a.artifactCheck.checkedAt) < artifactCheckInterval {
+		return a.artifactCheck.ok,
+			append([]string(nil), a.artifactCheck.missing...),
+			append([]string(nil), a.artifactCheck.mismatches...),
+			a.artifactCheck.err
+	}
+
+	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
+		WitnessScriptPath:   a.cfg.WitnessScriptPath,
+		WasmPath:            a.cfg.WasmPath,
+		ZKeyPath:            a.cfg.ZKeyPath,
+		VerificationKeyPath: a.cfg.VerificationKeyPath,
+		HashesPath:          a.cfg.HashesPath,
+	})
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	ok := err == nil && len(report.Missing) == 0 && len(report.HashMismatches) == 0
+	missing := append([]string(nil), report.Missing...)
+	mismatches := append([]string(nil), report.HashMismatches...)
+	a.artifactCheck = artifactCheck{
+		ok:         ok,
+		missing:    missing,
+		mismatches: mismatches,
+		err:        errMsg,
+		checkedAt:  now,
+	}
+
+	return ok, append([]string(nil), missing...), append([]string(nil), mismatches...), errMsg
+}
+
+func (a *app) readyForProof() (bool, []string, []string, string) {
+	artifactsOk, missing, mismatches, errMsg := a.verifyArtifacts()
 	if artifactsOk {
 		artifactsStatus.Set(1)
 	} else {
 		artifactsStatus.Set(0)
 	}
 	if !artifactsOk || !a.prover.Ready() {
-		return false, missing
+		return false, missing, mismatches, errMsg
 	}
-	return true, nil
+	return true, nil, nil, ""
 }
 
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
@@ -342,16 +375,18 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
-	ready, missing := a.readyForProof()
+	ready, missing, mismatches, artifactErr := a.readyForProof()
 	if !ready {
 		logLine("warn", "prover.request.unready", map[string]any{
-			"path":     r.URL.Path,
-			"ready":    a.prover.Ready(),
-			"missing":  missing,
-			"backend":  a.prover.Backend(),
-			"circuit":  a.circuitHash,
-			"request":  r.ContentLength,
-			"streamed": wantsStream(r),
+			"path":       r.URL.Path,
+			"ready":      a.prover.Ready(),
+			"missing":    missing,
+			"mismatches": mismatches,
+			"error":      artifactErr,
+			"backend":    a.prover.Backend(),
+			"circuit":    a.circuitHash,
+			"request":    r.ContentLength,
+			"streamed":   wantsStream(r),
 		})
 		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
 		return

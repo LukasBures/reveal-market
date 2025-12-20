@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/reveal-market/prover/internal/shared"
 )
@@ -31,6 +32,12 @@ func main() {
 		for _, mismatch := range report.HashMismatches {
 			fmt.Printf("hash mismatch: %s\n", mismatch)
 		}
+		os.Exit(1)
+	}
+	deployPath := filepath.Join(cfg.CircuitDir, "settlement_deploy.json")
+	info, err := os.Stat(deployPath)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		fmt.Printf("missing or unreadable: %s\n", deployPath)
 		os.Exit(1)
 	}
 	if report.Hashes.CircuitHash != "" {
