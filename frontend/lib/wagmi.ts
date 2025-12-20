@@ -1,6 +1,6 @@
 import { createConfig, http } from "wagmi";
 import type { Config, CreateConnectorFn } from "wagmi";
-import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
+import { coinbaseWallet, injected, walletConnect } from "wagmi/connectors";
 import { defineChain } from "viem";
 import { ensureLocalStorage } from "@/lib/localStoragePolyfill";
 import { logger } from "@/lib/logging";
@@ -76,7 +76,7 @@ if (!walletConnectEnabled && typeof console !== "undefined") {
 
 const createWalletConnectors = (): CreateConnectorFn[] => {
   const shared: CreateConnectorFn[] = [
-    metaMask(),
+    injected({ target: "metaMask", shimDisconnect: true }),
     injected({ shimDisconnect: true }),
     coinbaseWallet({ appName: "Reveal Market" }),
   ];
