@@ -164,6 +164,22 @@ Usage: ./run_prod.sh [options] [compose up args...]
 EOF
 }
 
+read_env_file_value() {
+  local key="$1"
+  local file="$2"
+  if [[ -z "${file}" || ! -f "${file}" ]]; then
+    return 0
+  fi
+  local line
+  line="$(grep -E "^${key}=" "${file}" | tail -n 1)" || return 0
+  local value="${line#${key}=}"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf "%s" "${value}"
+}
+
 check_env_file() {
   if [[ ! -f "${ENV_FILE}" ]]; then
     cat <<EOF
@@ -338,8 +354,6 @@ COMPOSE_ENV_ARGS=()
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
-# Production runs default to real certificates unless explicitly overridden.
-export CADDY_TLS_PROFILE="${CADDY_TLS_PROFILE:-tls_prod}"
 export APK_REPO_URL
 export APK_FALLBACK_URL
 
@@ -388,6 +402,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "${CADDY_TLS_PROFILE:-}" ]]; then
+  CADDY_TLS_PROFILE="$(read_env_file_value "CADDY_TLS_PROFILE" "${ENV_FILE}")"
+fi
+if [[ -z "${CADDY_TLS_PROFILE:-}" ]]; then
+  CADDY_TLS_PROFILE="tls_prod"
+fi
+export CADDY_TLS_PROFILE
 
 if ! command -v docker >/dev/null 2>&1; then
   log_warn "docker is required to deploy the stack"
