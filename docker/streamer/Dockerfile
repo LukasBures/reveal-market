@@ -20,10 +20,11 @@ RUN apt-get update -qq \
  && rm -rf /var/lib/apt/lists/*
 
 COPY streamer/pyproject.toml streamer/uv.lock /app/
-COPY streamer/README.md /app/README.md
-COPY streamer/app /app/app
 
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --frozen --no-install-project
+
+COPY streamer/README.md /app/README.md
+COPY streamer/app /app/app
 
 FROM ${PYTHON_RUNTIME_IMAGE} AS streamer
 ARG APP_USER

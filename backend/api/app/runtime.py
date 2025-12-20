@@ -31,11 +31,27 @@ TRENDING_MIN_ORDERBOOK = 0
 TRENDING_MIN_TRADES = 0
 TRENDING_MIN_SCORE = 0.0
 
-sanitized_config = {
-    key: value
-    for key, value in settings.model_dump().items()
-    if not any(secret in key for secret in ["key", "private", "secret", "password"])
-}
+
+def _sanitize_settings() -> dict[str, object]:
+    sensitive_keys = {
+        "database_url",
+        "database_async_url",
+        "redis_url",
+        "rpc_url",
+        "relayer_bearer_token",
+    }
+    redacted: dict[str, object] = {}
+    for key, value in settings.model_dump().items():
+        lower = key.lower()
+        if lower in sensitive_keys or any(
+            token in lower for token in ["key", "secret", "password", "token", "private"]
+        ):
+            continue
+        redacted[key] = value
+    return redacted
+
+
+sanitized_config = _sanitize_settings()
 
 instrumentator = Instrumentator()
 # RequestMetrics tracks rolling latency/throughput to publish API heartbeats.

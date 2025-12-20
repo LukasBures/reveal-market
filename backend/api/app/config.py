@@ -146,6 +146,7 @@ class Settings(BaseSettings):
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
+    rate_limit_trusted_proxies: list[str] = Field(default_factory=list)
     fx_feed_url: AnyHttpUrl = Field(default=AnyHttpUrl("http://streamer:8100/fx/zen-usd"))
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=0.0, ge=0)
@@ -271,6 +272,7 @@ class Settings(BaseSettings):
         "cors_allow_headers",
         "market_category_allowlist",
         "rate_limit_whitelist",
+        "rate_limit_trusted_proxies",
         mode="before",
     )
     @classmethod

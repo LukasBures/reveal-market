@@ -42,6 +42,22 @@ ESCROW_ABI = [
         "outputs": [{"name": "", "type": "uint256"}],
     }
 ]
+_RESERVE_TICKET_LUA = """
+local key = KEYS[1]
+local base = tonumber(ARGV[1])
+local current = redis.call('GET', key)
+if not current then
+  current = base
+else
+  current = tonumber(current)
+  if current < base then
+    current = base
+  end
+end
+local next_val = current + 1
+redis.call('SET', key, next_val)
+return next_val
+"""
 settings: Any = cast(Any, runtime_settings)
 
 router = APIRouter()
@@ -423,7 +439,7 @@ def _require_auth_signer():
 async def _next_ticket_id_onchain(market_address: str, market_db_id: int, session: AsyncSession) -> int:
     """Derive next ticket id by reconciling on-chain Committed events with DB state.
 
-    To avoid silent desync, we fail when counts diverge instead of guessing.
+    To avoid silent desync, we fail when counts diverge unless the relayer queue is enabled.
     """
 
     db_count = await repository_async.count_commitments(session, market_db_id)
@@ -434,26 +450,41 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
     # Prefer on-chain view when available, but tolerate lag when the relayer queue is enabled.
     try:
         contract = web3.eth.contract(address=to_checksum(market_address), abi=REVEAL_MARKET_ABI)
-        onchain_next = await contract.functions.nextTicketId().call()
+        onchain_next = int(await contract.functions.nextTicketId().call())
         if onchain_next != db_count and not settings.relayer_queue_enabled:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"ticket_counter_desync:onchain={onchain_next},db={db_count}",
             )
         if onchain_next != db_count and settings.relayer_queue_enabled:
+            direction = "onchain_ahead" if onchain_next > db_count else "db_ahead"
+            resolved = max(onchain_next, db_count)
             log_event(
                 logger,
                 logging.WARNING,
                 event="ticket_counter.desync_tolerated",
-                message="On-chain ticket counter lags DB; continuing because relayer queue is enabled",
+                message="On-chain ticket counter mismatch; continuing because relayer queue is enabled",
                 onchain=onchain_next,
+                db=db_count,
+                direction=direction,
+                resolved_next=resolved,
+                market_address=market_address,
+            )
+        return onchain_next if onchain_next == db_count else max(onchain_next, db_count)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if settings.relayer_queue_enabled:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="ticket_counter.rpc_failed",
+                message="RPC unavailable; using DB ticket count because relayer queue is enabled",
+                error=str(exc),
                 db=db_count,
                 market_address=market_address,
             )
-        return int(onchain_next if onchain_next == db_count else db_count)
-    except HTTPException:
-        raise
-    except Exception:
+            return db_count
         # Fall back to log scanning.
         try:
             logs = await web3.eth.get_logs(
@@ -465,26 +496,30 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
                 }
             )
             onchain_count = len(logs)
-        except Exception as exc:  # pragma: no cover - defensive network/log fetch
+        except Exception as log_exc:  # pragma: no cover - defensive network/log fetch
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"log_scan_failed:{exc}"
-            ) from exc
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"log_scan_failed:{log_exc}"
+            ) from log_exc
         if onchain_count != db_count and not settings.relayer_queue_enabled:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"ticket_counter_desync:onchain={onchain_count},db={db_count}",
             ) from None
         if onchain_count != db_count and settings.relayer_queue_enabled:
+            direction = "onchain_ahead" if onchain_count > db_count else "db_ahead"
+            resolved = max(onchain_count, db_count)
             log_event(
                 logger,
                 logging.WARNING,
                 event="ticket_counter.desync_tolerated_logs",
-                message="Log scan ticket counter lags DB; continuing because relayer queue is enabled",
+                message="Log scan ticket counter mismatch; continuing because relayer queue is enabled",
                 onchain=onchain_count,
                 db=db_count,
+                direction=direction,
+                resolved_next=resolved,
                 market_address=market_address,
             )
-        return onchain_count if onchain_count == db_count else db_count
+        return onchain_count if onchain_count == db_count else max(onchain_count, db_count)
 
 
 async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
@@ -495,11 +530,8 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
         return tentative_next
     key = f"ticket_counter:{market_address.lower()}"
     try:
-        exists = await cache.exists(key)
-        if not exists:
-            # Initialize so the first INCR returns the tentative value.
-            await cache.set(key, str(max(0, tentative_next - 1)))
-        reserved_raw = await cache.incr(key)
+        base = int(tentative_next) - 1
+        reserved_raw = await cast(Awaitable[Any], cache.eval(_RESERVE_TICKET_LUA, 1, key, base))  # type: ignore[arg-type]
         reserved = int(reserved_raw)
         if reserved < tentative_next:
             log_event(
@@ -511,6 +543,7 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
                 tentative=tentative_next,
                 market_address=market_address,
             )
+            await cache.set(key, str(tentative_next))
             return tentative_next
         return reserved
     except Exception as exc:  # pragma: no cover - best-effort guard

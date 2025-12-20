@@ -266,7 +266,18 @@ class DataStreamer:
                 self._publish_cache = {}
                 for key, payload in to_publish.items():
                     market_id, outcome = key.split(":", 1)
-                    await self.state.cache_tick(market_id, outcome, payload)
+                    try:
+                        await self.state.cache_tick(market_id, outcome, payload)
+                    except Exception as exc:  # pragma: no cover - redis/runtime guard
+                        logger.warning(
+                            "tick publish failed",
+                            extra={
+                                "event": "stream.publish.failed",
+                                "market_id": market_id,
+                                "outcome": outcome,
+                                "error": str(exc),
+                            },
+                        )
         except asyncio.CancelledError:
             return
 
@@ -662,14 +673,34 @@ class DataStreamer:
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     def _build_rtds_subscriptions(self) -> list[Subscription]:
-        assets = sorted(self.state.subscriptions.assets or self.state.rtds_symbols)
-        if not assets:
+        assets = sorted(self.state.subscriptions.assets)
+        symbols = sorted(self.state.rtds_symbols)
+        if not assets and not symbols:
+            return []
+        filters: list[str] = []
+        seen: set[str] = set()
+        for asset in assets:
+            if asset in seen:
+                continue
+            if len(filters) >= self.settings.max_subscriptions:
+                break
+            filters.append(asset)
+            seen.add(asset)
+        if len(filters) < self.settings.max_subscriptions:
+            for symbol in symbols:
+                if symbol in seen:
+                    continue
+                if len(filters) >= self.settings.max_subscriptions:
+                    break
+                filters.append(symbol)
+                seen.add(symbol)
+        if not filters:
             return []
         return [
             Subscription(
                 topic=self.settings.rtds_topic_clob,
                 type="agg_orderbook",
-                filters=assets,
+                filters=filters,
             )
         ]
 

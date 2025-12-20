@@ -3,6 +3,7 @@
 import type { MarketDetail } from "@/lib/api-types";
 import { useMemo } from "react";
 import { formatNumber, formatTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
+import { resolvePriceStreamMarketId } from "@/lib/markets";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
 type Props = {
@@ -22,12 +23,27 @@ const formatCount = (value?: number | null) => {
 };
 
 export function MarketAnalyticsPanel({ market }: Props) {
-  const stream = usePriceStreamStore(market.eventId, market.clobTokenIds ?? []);
+  const streamMarketId = resolvePriceStreamMarketId(market, market.eventId);
+  const stream = usePriceStreamStore(streamMarketId, market.clobTokenIds ?? []);
   const live = stream?.outcomes?.[0] ?? {};
+  const tradesCount =
+    typeof market.tradesQuantity === "number" && Number.isFinite(market.tradesQuantity) ? market.tradesQuantity : null;
+  const avgTradeVolume =
+    typeof market.volume === "number" && Number.isFinite(market.volume)
+      ? market.volume
+      : typeof market.orderbookVolumeUsd === "number" && Number.isFinite(market.orderbookVolumeUsd)
+        ? market.orderbookVolumeUsd
+        : typeof market.volume24hUsd === "number" && Number.isFinite(market.volume24hUsd)
+          ? market.volume24hUsd
+          : null;
+  const avgTradeLabel =
+    typeof market.volume === "number" && Number.isFinite(market.volume) ? "Avg trade size" : "Avg trade size (est.)";
   const lastTrade = useMemo(() => {
     const trades = stream?.trades ?? [];
     return trades.length ? trades[trades.length - 1] : null;
   }, [stream?.trades]);
+  const lastTradePrice = lastTrade ? Number(lastTrade.price) : null;
+  const lastTradeValue = Number.isFinite(lastTradePrice) ? lastTradePrice : null;
   const bestBid = typeof live.bestBid === "number" && Number.isFinite(live.bestBid) ? live.bestBid : null;
   const bestAsk = typeof live.bestAsk === "number" && Number.isFinite(live.bestAsk) ? live.bestAsk : null;
   const spread =
@@ -42,16 +58,20 @@ export function MarketAnalyticsPanel({ market }: Props) {
     { label: "Best ask (Yes)", value: bestAsk, formatter: (v) => `${(Number(v) * 100).toFixed(2)}%` },
     { label: "Spread", value: spread, formatter: (v) => `${Number(v).toFixed(2)}%` },
     lastUpdated ? { label: "Last update", value: lastUpdated, formatter: (v) => String(v) } : null,
-    lastTrade
+    lastTradeValue !== null
       ? {
           label: "Last trade",
-          value: lastTrade.price,
-          formatter: (v) => `${Number(v).toFixed(3)} (${lastTrade.side ?? "—"})`,
+          value: lastTradeValue,
+          formatter: (v) => `${Number(v).toFixed(3)} (${lastTrade?.side ?? "—"})`,
         }
       : null,
     { label: "Trades (lifetime)", value: market.tradesQuantity, formatter: (v) => formatCount(v as number) },
-    market.tradesQuantity !== undefined && market.tradesQuantity !== null
-      ? { label: "Avg trade size", value: (market.volume24hUsd ?? 0) / Math.max(market.tradesQuantity, 1), formatter: (v) => formatUsd(v as number) }
+    tradesCount && avgTradeVolume !== null
+      ? {
+          label: avgTradeLabel,
+          value: avgTradeVolume / tradesCount,
+          formatter: (v) => formatUsd(v as number),
+        }
       : null,
   ];
 

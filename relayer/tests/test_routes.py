@@ -289,6 +289,17 @@ def test_status_returns_tx_hash(tmp_path):
     assert body["txHash"] == "0xabc"
 
 
+def test_status_rejects_invalid_job_id(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    resp = client.post("/status", json={"jobId": "nope"})
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid_job_id"
+
+
 def test_commit_invalid_address(client):
     payload = CommitRequest(
         user="invalid",
@@ -316,3 +327,16 @@ def test_claim_invalid_address(client):
     ).model_dump()
     resp = client.post("/claim", json=payload)
     assert resp.status_code == 400
+
+
+def test_metrics_use_route_template_for_params(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", bearer_token="secret", tx_queue=queue)  # noqa: S106 - test token
+    client = TestClient(app)
+
+    resp = client.post("/admin/queue/deadletter/1/replay", headers={"Authorization": "Bearer secret"})
+    assert resp.status_code in (400, 404)
+
+    metrics = client.get("/metrics")
+    assert b'endpoint="/admin/queue/deadletter/{job_id}/replay"' in metrics.content

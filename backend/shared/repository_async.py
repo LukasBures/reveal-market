@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models
@@ -276,6 +276,13 @@ async def record_commitments(
 ) -> int:
     """Persist commitments (and merkle siblings) for a market, skipping duplicates."""
 
+    bind = session.get_bind()
+    if hasattr(bind, "dialect"):
+        dialect_name = bind.dialect.name
+    elif hasattr(bind, "sync_engine"):
+        dialect_name = bind.sync_engine.dialect.name
+    else:
+        dialect_name = ""
     existing_hashes = {
         row[0]
         for row in (
@@ -287,24 +294,56 @@ async def record_commitments(
         ticket_hash = str(ticket.get("ticketHash") or ticket.get("ticket_hash") or "").lower()
         if not ticket_hash or ticket_hash in existing_hashes:
             continue
-        commitment = models.Commitment(
-            market_id=market_id,
-            user_address=str(ticket.get("user") or ticket.get("user_address") or "").lower(),
-            outcome_id=int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
-            amount_wei=int(ticket.get("amount") or ticket.get("amount_wei") or 0),
-            salt=str(ticket.get("salt") or "0x0"),
-            ticket_hash=ticket_hash,
-            leaf=str(ticket.get("leaf") or ""),
-            leaf_index=int(ticket.get("merkleIndex") or ticket.get("leaf_index") or 0),
-            tx_hash=str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
-        )
-        session.add(commitment)
-        await session.flush()
+        raw_index = ticket.get("merkleIndex")
+        if raw_index is None:
+            raw_index = ticket.get("leaf_index")
+        leaf_index = None
+        if raw_index is not None:
+            try:
+                leaf_index = int(raw_index)
+            except (TypeError, ValueError):
+                leaf_index = None
+        commitment_values = {
+            "market_id": market_id,
+            "user_address": str(ticket.get("user") or ticket.get("user_address") or "").lower(),
+            "outcome_id": int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
+            "amount_wei": int(ticket.get("amount") or ticket.get("amount_wei") or 0),
+            "salt": str(ticket.get("salt") or "0x0"),
+            "ticket_hash": ticket_hash,
+            "leaf": str(ticket.get("leaf") or ""),
+            "leaf_index": leaf_index,
+            "tx_hash": str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
+        }
+        if dialect_name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = (
+                pg_insert(models.Commitment)
+                .values(**commitment_values)
+                .on_conflict_do_nothing(index_elements=["market_id", "ticket_hash"])
+                .returning(models.Commitment.id)
+            )
+        elif dialect_name == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            stmt = (
+                sqlite_insert(models.Commitment)
+                .values(**commitment_values)
+                .prefix_with("OR IGNORE")
+                .returning(models.Commitment.id)
+            )
+        else:
+            stmt = insert(models.Commitment).values(**commitment_values).returning(models.Commitment.id)
+        result = await session.execute(stmt)
+        commitment_id = result.scalar_one_or_none()
+        if not commitment_id:
+            continue
+        existing_hashes.add(ticket_hash)
         siblings = ticket.get("merklePath") or ticket.get("merkle_path") or []
         for level, sibling in enumerate(siblings):
             session.add(
                 models.CommitmentMerklePath(
-                    commitment_id=commitment.id,
+                    commitment_id=commitment_id,
                     level=level,
                     sibling_hash=str(sibling),
                 )

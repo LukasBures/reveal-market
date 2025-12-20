@@ -57,7 +57,9 @@ def create_app(
         duration = time.perf_counter() - start
         status_code = response.status_code
         path = request.url.path
-        REQUEST_LATENCY.labels(endpoint=path, status=str(status_code)).observe(duration)
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", path)
+        REQUEST_LATENCY.labels(endpoint=endpoint, status=str(status_code)).observe(duration)
         logger.info(
             "http_request",
             method=request.method,
@@ -76,10 +78,14 @@ def create_app(
         job_id = body.get("jobId") or body.get("job_id")
         if job_id is None:
             raise HTTPException(status_code=400, detail="job_id_required")
+        try:
+            job_id_int = int(job_id)
+        except (TypeError, ValueError) as err:
+            raise HTTPException(status_code=400, detail="invalid_job_id") from err
         if tx_queue is None:
             raise HTTPException(status_code=503, detail="queue_disabled")
         try:
-            job = await tx_queue.get_job(int(job_id))
+            job = await tx_queue.get_job(job_id_int)
         except RuntimeError as err:
             if str(err) == "job_not_found":
                 raise HTTPException(status_code=404, detail="job_not_found") from err

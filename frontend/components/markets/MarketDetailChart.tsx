@@ -22,26 +22,56 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
   const [fallbackHistory, setFallbackHistory] = useState<
     Array<{ x: number; y: number; fx_stale?: boolean; timestamp: string }>
   >([]);
-  const hasStaleFx = (history.length ? history : fallbackHistory).some((p) => p.fx_stale);
   const normalizedPrices = useMemo(() => (Array.isArray(outcomePrices) ? outcomePrices : []), [outcomePrices]);
   const fallbackPrice =
     typeof normalizedPrices[selectedOutcome] === "number" && Number.isFinite(normalizedPrices[selectedOutcome])
       ? normalizedPrices[selectedOutcome]
       : null;
+
+  const outcomeState = streamState.outcomes[selectedOutcome] ?? {};
+  const liveStreamPrice =
+    typeof outcomeState.displayPrice === "number" && Number.isFinite(outcomeState.displayPrice)
+      ? outcomeState.displayPrice
+      : typeof outcomeState.price === "number" && Number.isFinite(outcomeState.price)
+        ? outcomeState.price
+        : null;
+  const liveStreamMid =
+    typeof outcomeState.bestBid === "number" &&
+    typeof outcomeState.bestAsk === "number" &&
+    Number.isFinite(outcomeState.bestBid) &&
+    Number.isFinite(outcomeState.bestAsk)
+      ? (outcomeState.bestBid + outcomeState.bestAsk) / 2
+      : null;
+  const fallbackSeed = liveStreamPrice ?? liveStreamMid ?? fallbackPrice;
   useEffect(() => {
-    if (history.length > 0 || fallbackPrice === null) {
+    if (history.length >= 2 || fallbackSeed === null) {
       setFallbackHistory((prev) => (prev.length ? [] : prev));
       return;
     }
     const now = Date.now();
-    const points = [
-      { x: now - 5 * 60 * 1000, y: fallbackPrice, fx_stale: false, timestamp: new Date(now - 5 * 60 * 1000).toISOString() },
-      { x: now, y: fallbackPrice, fx_stale: false, timestamp: new Date(now).toISOString() },
-    ];
-    setFallbackHistory(points);
-  }, [history.length, fallbackPrice]);
+    setFallbackHistory((prev) => {
+      const last = prev[prev.length - 1];
+      const minIntervalMs = 15_000;
+      if (!prev.length) {
+        const startTs = now - 5 * 60 * 1000;
+        return [
+          { x: startTs, y: fallbackSeed, fx_stale: streamState.fxStale, timestamp: new Date(startTs).toISOString() },
+          { x: now, y: fallbackSeed, fx_stale: streamState.fxStale, timestamp: new Date(now).toISOString() },
+        ];
+      }
+      if (last && Math.abs(last.y - fallbackSeed) < 1e-6 && now - last.x < minIntervalMs) {
+        return prev;
+      }
+      const next = [
+        ...prev.slice(-199),
+        { x: now, y: fallbackSeed, fx_stale: streamState.fxStale, timestamp: new Date(now).toISOString() },
+      ];
+      return next;
+    });
+  }, [history.length, fallbackSeed, streamState.fxStale, streamState.lastUpdated]);
 
-  const displayHistory = history.length ? history : fallbackHistory;
+  const displayHistory = history.length >= 2 ? history : fallbackHistory;
+  const hasStaleFx = displayHistory.some((p) => p.fx_stale);
   const latestTs = displayHistory.length ? displayHistory[displayHistory.length - 1].timestamp : null;
 
   const filteredHistory = useMemo(() => {
@@ -62,40 +92,53 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
       ? ((latestPrice - firstPrice) / firstPrice) * 100
       : null;
 
-  const { pathData, areaData, minY, maxY } = useMemo(() => {
-    if (filteredHistory.length < 2) return { pathData: "", areaData: "", minY: null, maxY: null };
+  const { pathData, areaData, minY, maxY, normalizedPoints } = useMemo(() => {
+    if (filteredHistory.length < 2) {
+      return {
+        pathData: "",
+        areaData: "",
+        minY: null,
+        maxY: null,
+        normalizedPoints: [] as Array<{ xPct: number; yPct: number }>,
+      };
+    }
     const xs = filteredHistory.map((p) => p.x);
     const ys = filteredHistory.map((p) => p.y);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
+    let minY = Math.min(...ys);
+    let maxY = Math.max(...ys);
+    if (minY === maxY) {
+      const padding = Math.max(Math.abs(minY) * 0.02, 0.01);
+      minY -= padding;
+      maxY += padding;
+    }
     const width = maxX - minX || 1;
     const height = maxY - minY || 1;
-    const normalize = (x: number, y: number) => [
-      ((x - minX) / width) * 100,
-      100 - ((y - minY) / height) * 100,
-    ];
-    const [firstX, firstY] = normalize(xs[0], ys[0]);
-    let d = `M ${firstX},${firstY}`;
-    for (let i = 1; i < filteredHistory.length; i++) {
-      const [nx, ny] = normalize(xs[i], ys[i]);
-      d += ` L ${nx},${ny}`;
+    const normalizedPoints = filteredHistory.map((point) => ({
+      xPct: ((point.x - minX) / width) * 100,
+      yPct: 100 - ((point.y - minY) / height) * 100,
+    }));
+    const [first] = normalizedPoints;
+    let d = `M ${first.xPct},${first.yPct}`;
+    for (let i = 1; i < normalizedPoints.length; i++) {
+      const point = normalizedPoints[i];
+      d += ` L ${point.xPct},${point.yPct}`;
     }
     return {
       pathData: d,
       areaData: `${d} L 100,100 L 0,100 Z`,
       minY,
       maxY,
+      normalizedPoints,
     };
   }, [filteredHistory]);
 
-  const activePoint =
-    hoverIndex !== null && filteredHistory[hoverIndex]
-      ? filteredHistory[hoverIndex]
-      : filteredHistory[filteredHistory.length - 1];
+  const activeIndex =
+    hoverIndex !== null && filteredHistory[hoverIndex] ? hoverIndex : Math.max(filteredHistory.length - 1, 0);
+  const activePoint = filteredHistory[activeIndex];
+  const activeNormalized = normalizedPoints[activeIndex];
 
-  const outcomeState = streamState.outcomes[selectedOutcome] ?? {};
   const parseNum = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
   const bestBid = parseNum(outcomeState.bestBid);
   const bestAsk = parseNum(outcomeState.bestAsk);
@@ -183,18 +226,13 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
             className="h-full w-full"
             onMouseLeave={() => setHoverIndex(null)}
             onMouseMove={(e) => {
+              if (!normalizedPoints.length) return;
               const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
               const xPct = ((e.clientX - rect.left) / rect.width) * 100;
-              // find closest point by normalized x
               let closest = 0;
               let closestDiff = Infinity;
-              filteredHistory.forEach((pt, idx) => {
-                const xs = filteredHistory.map((p) => p.x);
-                const minX = Math.min(...xs);
-                const maxX = Math.max(...xs);
-                const width = maxX - minX || 1;
-                const normX = ((pt.x - minX) / width) * 100;
-                const diff = Math.abs(normX - xPct);
+              normalizedPoints.forEach((point, idx) => {
+                const diff = Math.abs(point.xPct - xPct);
                 if (diff < closestDiff) {
                   closestDiff = diff;
                   closest = idx;
@@ -233,27 +271,11 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
               strokeLinejoin="round"
               filter="url(#glow)"
             />
-            {activePoint && (
+            {activePoint && activeNormalized && (
               <>
                 <circle
-                  cx={
-                    (() => {
-                      const xs = filteredHistory.map((p) => p.x);
-                      const minX = Math.min(...xs);
-                      const maxX = Math.max(...xs);
-                      const width = maxX - minX || 1;
-                      return ((activePoint.x - minX) / width) * 100;
-                    })()
-                  }
-                  cy={
-                    (() => {
-                      const ys = filteredHistory.map((p) => p.y);
-                      const minY = Math.min(...ys);
-                      const maxY = Math.max(...ys);
-                      const height = maxY - minY || 1;
-                      return 100 - ((activePoint.y - minY) / height) * 100;
-                    })()
-                  }
+                  cx={activeNormalized.xPct}
+                  cy={activeNormalized.yPct}
                   r="2.2"
                   fill="#34d399"
                   stroke="#fff"

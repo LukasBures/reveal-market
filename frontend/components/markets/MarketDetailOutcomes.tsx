@@ -15,6 +15,7 @@ import { useFxStream } from "@/hooks/useFxStream";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime } from "@/lib/formatters";
+import { resolvePriceStreamMarketId } from "@/lib/markets";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { defaultChain } from "@/lib/wagmi";
 
@@ -41,6 +42,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     () => (Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : []),
     [market.clobTokenIds],
   );
+  const streamMarketId = resolvePriceStreamMarketId(market, market.eventId);
   const marketStatus = (market.status ?? "").toLowerCase();
   const resolutionStatus = (market.resolutionStatus ?? "").toLowerCase();
   const resolutionReason = market.resolutionReason ?? null;
@@ -52,11 +54,11 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const isResolved = ["resolved", "settled", "cancelled", "canceled", "voided", "closed"].includes(marketStatus);
   const isLocked = ["locked", "disputed"].includes(marketStatus) || isResolutionWaiting || commitsBlocked;
   const { prices: livePrices, streamError, fxStale: priceFxStale } = useLiveOutcomePrices(
-    market.eventId,
+    streamMarketId,
     prices,
     tokenIds,
   );
-  const liveStore = usePriceStreamStore(market.eventId, tokenIds);
+  const liveStore = usePriceStreamStore(streamMarketId, tokenIds);
   const [selectedOutcome, setSelectedOutcome] = useState(
     initialOutcomeId >= 0 ? Math.min(initialOutcomeId, Math.max(outcomes.length - 1, 0)) : 0,
   );
@@ -94,10 +96,6 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const [resolvedMarketAddress, setResolvedMarketAddress] = useState<string | null>(market.marketAddress ?? null);
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const txPending = false;
-  const wagmiError = null;
-  const approvalError = null;
-  const allowanceLoading = false;
-  const approvalHash = null;
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
@@ -325,24 +323,22 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     if (hasLive || hasInitial || outcomes.length === 0) return;
     const load = async () => {
       try {
-        const historyPrices: Array<number | undefined> = [];
-        for (let i = 0; i < outcomes.length; i += 1) {
-          try {
-            const history = await fetchPriceHistory(market.eventId, i, 1);
-            if (Array.isArray(history) && history.length > 0) {
-              const latest = history[0];
+        const historyPrices = await Promise.all(
+          Array.from({ length: outcomes.length }, async (_, index) => {
+            try {
+              const history = await fetchPriceHistory(streamMarketId, index, 1);
+              if (!Array.isArray(history) || history.length === 0) return undefined;
+              const latest = history[history.length - 1];
               const display = Number(latest.display_price ?? latest.price);
-              historyPrices.push(Number.isFinite(display) ? display : undefined);
-            } else {
-              historyPrices.push(undefined);
+              return Number.isFinite(display) ? display : undefined;
+            } catch {
+              return undefined;
             }
-          } catch {
-            historyPrices.push(undefined);
-          }
-        }
+          }),
+        );
         if (cancelled) return;
         if (historyPrices.some((p) => typeof p === "number")) {
-          seedInitialOutcomes(market.eventId, historyPrices as number[], tokenIds);
+          seedInitialOutcomes(streamMarketId, historyPrices as number[], tokenIds);
         }
       } catch {
         // ignore; history is best-effort
@@ -352,7 +348,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [livePrices, prices, outcomes.length, market.eventId, tokenIds]);
+  }, [livePrices, prices, outcomes.length, streamMarketId, tokenIds]);
 
   async function handleCommit() {
     setTxError(null);

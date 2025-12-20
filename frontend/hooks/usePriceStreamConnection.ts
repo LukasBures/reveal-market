@@ -405,6 +405,7 @@ export function usePriceStreamStore(marketId: string, tokenIds: string[] = []): 
 }
 
 export function seedHistory(marketId: string, outcome: number, points: PricePoint[], tokenIds: string[] = []) {
+  if (priceStreamsDisabled) return;
   const conn = startConnection(marketId, tokenIds);
   if (!points.length) return;
   const histories = { ...conn.state.histories };
@@ -413,6 +414,7 @@ export function seedHistory(marketId: string, outcome: number, points: PricePoin
 }
 
 export function seedInitialOutcomes(marketId: string, prices: number[], tokenIds: string[] = []) {
+  if (priceStreamsDisabled) return;
   if (!prices.length) return;
   const conn = startConnection(marketId, tokenIds);
   const hasData = conn.state.outcomes.some((p) => p.price !== undefined);

@@ -149,3 +149,23 @@ def test_add_rtds_symbols_increments_version():
     # Adding duplicates should not increment.
     state.add_rtds_symbols(["zenusdt"])
     assert state.rtds_symbols_version == 1
+
+
+def test_remove_rtds_symbols_increments_version():
+    state = StreamState(Settings())
+    state.add_rtds_symbols(["zenusdt", "ethusdt"])
+    start_version = state.rtds_symbols_version
+    removed = state.remove_rtds_symbols(["zenusdt"])
+    assert removed == ["zenusdt"]
+    assert state.rtds_symbols_version == start_version + 1
+    # Removing missing symbols should not increment.
+    removed = state.remove_rtds_symbols(["missing"])
+    assert removed == []
+    assert state.rtds_symbols_version == start_version + 1
+
+
+def test_add_rtds_symbols_respects_cap():
+    state = StreamState(Settings(max_subscriptions=1))
+    added = state.add_rtds_symbols(["sym-a", "sym-b"])
+    assert added == ["sym-a"]
+    assert state.rtds_symbols == {"sym-a"}

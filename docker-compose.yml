@@ -241,6 +241,7 @@ services:
     profiles: ["hedger"]
     container_name: reveal-market-hedger
     restart: unless-stopped
+    init: true
     mem_swappiness: 0
     env_file:
       - ${ENV_FILE:-.env.local}
@@ -303,6 +304,7 @@ services:
         BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-relayer
     restart: unless-stopped
+    init: true
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
@@ -389,7 +391,6 @@ services:
     container_name: reveal-market-caddy
     restart: unless-stopped
     mem_swappiness: 0
-    user: root
     env_file:
       - ${ENV_FILE:-.env.local}
     depends_on:
@@ -466,6 +467,7 @@ services:
         BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-streamer
     restart: unless-stopped
+    init: true
     mem_swappiness: 0
     env_file:
       - ${ENV_FILE:-.env.local}

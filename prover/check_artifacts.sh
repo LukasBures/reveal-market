@@ -6,6 +6,8 @@ cd "$SCRIPT_DIR"
 
 REQUIRED_FILES=(
   "circuits/build/settlement_final.zkey"
+  "circuits/build/settlement_vk.json"
+  "circuits/build/settlement_hashes.json"
   "circuits/build/settlement_js/settlement.wasm"
   "circuits/build/settlement_js/generate_witness.js"
 )

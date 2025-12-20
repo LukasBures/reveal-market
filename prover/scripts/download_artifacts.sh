@@ -17,6 +17,8 @@ REQUIRED=(
   "settlement_js/generate_witness.js"
   "settlement_js/settlement.wasm"
   "settlement_final.zkey"
+  "settlement_vk.json"
+  "settlement_hashes.json"
 )
 
 cleanup() {

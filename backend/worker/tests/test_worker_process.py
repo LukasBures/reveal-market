@@ -1291,6 +1291,61 @@ async def test_settlement_queue_enqueues_relayer_claims(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_settlement_queue_skips_missing_merkle_metadata(monkeypatch):
+    redis_client = DummyRedis()
+    monkeypatch.setattr(runtime_module.settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "relayer_base_url", "http://relayer:8088", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
+
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    async with session_factory() as session:
+        market = Market(
+            event_id="evt-relayer-missing",
+            title="Relayer Missing",
+            category="sports",
+            oracle="polymarket",
+            status="settled",
+            resolution_status="final",
+            market_address="0x0000000000000000000000000000000000000002",
+            resolved_at=datetime.now(UTC),
+        )
+        session.add(market)
+        await session.flush()
+        settlement = Settlement(
+            id=2,
+            market_id=market.id,
+            proof_status="generated",
+            submission_status="none",
+            merkle_root="0x1234",
+            winning_outcome_id=1,
+            commitments_count=2,
+        )
+        session.add(settlement)
+        commit_row = shared_models.Commitment(
+            market_id=market.id,
+            user_address="0xdef",
+            outcome_id=1,
+            amount_wei=10,
+            salt="0x01",
+            ticket_hash="0xticket-missing",
+            leaf="0x10",
+            leaf_index=None,
+        )
+        session.add(commit_row)
+        await session.commit()
+
+    temp_summary = SyncSummary()
+    await worker_service.run_settlement_jobs(temp_summary, redis_client)
+
+    queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)
+    assert not queue_items, "relayer queue should be empty when commitments are incomplete"
+
+
+@pytest.mark.asyncio
 async def test_proof_queue_worker_processes_jobs(monkeypatch):
     redis_client = DummyRedis()
     gauge = DummyGauge()

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 
 const mockDefaultChain = vi.hoisted(() => ({
@@ -68,6 +68,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("Trade status polling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("polls trade status when tx hash is present", async () => {
     hooks.useAccount.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
@@ -87,5 +91,46 @@ describe("Trade status polling", () => {
     );
 
     await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(undefined, "0xtx"));
+  });
+
+  it("omits market address when requesting preview without a market address", async () => {
+    hooks.useAccount.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useChainId.mockReturnValue(mockDefaultChain.id);
+    hooks.useReadContract.mockReturnValue({ data: 0n });
+    hooks.useWriteContract.mockReturnValue({ writeContractAsync: vi.fn() });
+    hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
+    pricingMocks.fetchPricingPreview.mockResolvedValue({
+      stake_zen: 0.1,
+      stake_wei: "100000000000000000",
+      zen_usd: 1,
+      zen_usd_scaled: "100000000",
+      displayed_odds_multiplier: 1,
+      rake_zen: 0,
+      refund_zen: 0,
+      hedge_usdc: 0,
+      haircut_percent: 0,
+      worsen_percent: 0,
+      rake_percent: 0,
+      total_monetisation: 0,
+      chain_id: mockDefaultChain.id,
+      quote_id: "q-preview",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      expiry_ts: Math.floor(Date.now() / 1000) + 60,
+      signature: "0x",
+      signer: "0x",
+      market_id: "m1",
+      user_id: "u1",
+      wallet_address: "0xabc",
+      outcome_id: 0,
+      market_address: null,
+    });
+
+    render(
+      <StakeQuoteCard marketId="m1" outcomes={["Yes", "No"]} outcomePrices={[0.5, 0.5]} />,
+    );
+
+    await waitFor(() => expect(pricingMocks.fetchPricingPreview).toHaveBeenCalled());
+    const [, options] = pricingMocks.fetchPricingPreview.mock.calls[0];
+    expect(options.marketAddress).toBeUndefined();
   });
 });

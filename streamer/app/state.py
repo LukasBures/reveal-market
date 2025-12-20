@@ -115,7 +115,7 @@ class StreamState:
                 return None
             return self.register_fx(Decimal(str(price)), source=label, allow_jump=True)
 
-    async def refresh_fx(self, *, label: str = "rest") -> FxQuote:
+    async def refresh_fx(self, *, label: str = "binance_rest") -> FxQuote:
         async with self._fx_lock:
             try:
                 # Avoid recursive self-calls if misconfigured to hit our own /fx endpoint.
@@ -263,15 +263,39 @@ class StreamState:
                 self._asset_refcounts[tok] = self._asset_refcounts.get(tok, 0) + count
                 self.subscriptions.add_assets([tok])
 
-    def add_rtds_symbols(self, symbols: Iterable[str]) -> None:
-        changed = False
+    def add_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
+        added: list[str] = []
         for sym in symbols:
             trimmed = str(sym).strip()
-            if trimmed and trimmed not in self.rtds_symbols:
-                self.rtds_symbols.add(trimmed)
-                changed = True
-        if changed:
+            if not trimmed or trimmed in self.rtds_symbols:
+                continue
+            if len(self.rtds_symbols) >= self.settings.max_subscriptions:
+                logger.warning(
+                    "RTDS symbol cap reached; ignoring symbol",
+                    extra={
+                        "event": "stream.symbols.cap",
+                        "symbol": trimmed,
+                        "count": len(self.rtds_symbols),
+                        "max": self.settings.max_subscriptions,
+                    },
+                )
+                continue
+            self.rtds_symbols.add(trimmed)
+            added.append(trimmed)
+        if added:
             self.rtds_symbols_version += 1
+        return added
+
+    def remove_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
+        removed: list[str] = []
+        for sym in symbols:
+            trimmed = str(sym).strip()
+            if trimmed and trimmed in self.rtds_symbols:
+                self.rtds_symbols.remove(trimmed)
+                removed.append(trimmed)
+        if removed:
+            self.rtds_symbols_version += 1
+        return removed
 
     def get_clob_tokens(self, market_id: str) -> list[str]:
         return self.market_tokens.get(market_id, [])
@@ -363,12 +387,22 @@ class StreamState:
     def release_assets(self, assets: Iterable[str]) -> None:
         for asset in assets:
             key = str(asset)
-            if key not in self._asset_refcounts:
+            if key in self._asset_refcounts:
+                self._asset_refcounts[key] -= 1
+                if self._asset_refcounts[key] <= 0:
+                    self._asset_refcounts.pop(key, None)
+                    self.subscriptions.remove_asset(key)
                 continue
-            self._asset_refcounts[key] -= 1
-            if self._asset_refcounts[key] <= 0:
-                self._asset_refcounts.pop(key, None)
-                self.subscriptions.remove_asset(key)
+            tokens = self.market_tokens.get(key) or []
+            if not tokens:
+                continue
+            for token in tokens:
+                if token not in self._asset_refcounts:
+                    continue
+                self._asset_refcounts[token] -= 1
+                if self._asset_refcounts[token] <= 0:
+                    self._asset_refcounts.pop(token, None)
+                    self.subscriptions.remove_asset(token)
 
     def _sign_payload(self, payload: dict) -> str:
         secret = self.settings.signing_secret

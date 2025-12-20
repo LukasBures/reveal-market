@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,19 @@ def _import_async_http_provider():
     return AsyncHTTPProvider
 
 
+def _rpc_timeout_seconds() -> float | None:
+    raw = os.getenv("RM_RPC_HTTP_TIMEOUT_SECONDS")
+    if raw is None or raw == "":
+        return 10.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 10.0
+    if value <= 0:
+        return None
+    return value
+
+
 @lru_cache(maxsize=1)
 def get_async_web3(rpc_url: str | None):
     """Return a cached AsyncWeb3 instance or raise if misconfigured."""
@@ -47,7 +61,11 @@ def get_async_web3(rpc_url: str | None):
     except (ModuleNotFoundError, ImportError, AttributeError):  # pragma: no cover - optional
         extra_data_to_poa_middleware = None  # ruff: disable=N806
 
-    provider = async_http_provider(rpc_url)
+    timeout_seconds = _rpc_timeout_seconds()
+    if timeout_seconds is None:
+        provider = async_http_provider(rpc_url)
+    else:
+        provider = async_http_provider(rpc_url, request_kwargs={"timeout": timeout_seconds})
     web3: _AsyncWeb3 = _AsyncWeb3(provider)
 
     if async_geth_poa_middleware:

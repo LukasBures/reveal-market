@@ -22,6 +22,18 @@ def test_asset_refcounts_add_and_release():
     assert "b" in state.subscriptions.assets
 
 
+def test_release_assets_handles_token_swap():
+    state = StreamState(Settings())
+    state.acquire_assets(["m1"])
+    assert "m1" in state.subscriptions.assets
+    state.register_clob_tokens("m1", ["t1", "t2"])
+    assert "m1" not in state.subscriptions.assets
+    assert {"t1", "t2"}.issubset(state.subscriptions.assets)
+    state.release_assets(["m1"])
+    assert "t1" not in state.subscriptions.assets
+    assert "t2" not in state.subscriptions.assets
+
+
 def test_fx_priority_skips_lower_sources():
     state = StreamState(Settings())
     quote = state.register_fx(Decimal("10"), source="binance_rest", allow_jump=True)

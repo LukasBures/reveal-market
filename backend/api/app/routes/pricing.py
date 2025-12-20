@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from shared import models as shared_models
 from shared.logging import log_event
 from shared.onchain.client import load_account
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
@@ -608,7 +609,8 @@ async def pricing_submit(
         PRICING_COUNTER.labels(event="submit", result="missing").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
     quote_id = quote.quote_id
-    db_quote = await repository_async.get_quote(session, quote_id)
+    stmt = select(models.Quote).where(models.Quote.quote_id == quote_id).with_for_update()
+    db_quote = (await session.execute(stmt)).scalar_one_or_none()
     if db_quote is None:
         PRICING_COUNTER.labels(event="submit", result="missing").inc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
@@ -630,6 +632,9 @@ async def pricing_submit(
         if db_quote.wallet_address.lower() != quote.wallet_address.lower():
             PRICING_COUNTER.labels(event="submit", result="wallet_mismatch").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote wallet mismatch")
+    if db_quote.market_id and quote.market_id and db_quote.market_id != quote.market_id:
+        PRICING_COUNTER.labels(event="submit", result="market_id_mismatch").inc()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market id mismatch")
     if db_quote.market_address and quote.market_address:
         if db_quote.market_address.lower() != quote.market_address.lower():
             PRICING_COUNTER.labels(event="submit", result="market_mismatch").inc()
@@ -732,10 +737,14 @@ async def pricing_submit(
             ) from exc
     else:
         current_fx = quote.zen_usd
+    market_id_for_caps = db_quote.market_id
+    if db_quote.market_id is not None:
+        quote.market_id = db_quote.market_id
+
     await _enforce_caps(
         session,
         stake_zen=quote.stake_zen,
-        market_id=quote.market_id,
+        market_id=market_id_for_caps,
         wallet_address=quote.wallet_address,
         exclude_quote=db_quote,
         include_stake=True,

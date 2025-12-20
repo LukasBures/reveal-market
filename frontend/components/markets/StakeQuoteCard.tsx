@@ -99,7 +99,6 @@ export function StakeQuoteCard({
   const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
-  const fxLive = status === "live" && !fx?.stale;
   const { address } = useAccount();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
@@ -170,7 +169,9 @@ export function StakeQuoteCard({
   const lockedStates = ["locked", "disputed"];
   const isSettled = isResolved === true || settledStates.includes(statusNormalized);
   const isLocked = lockedStates.includes(statusNormalized);
-  const missingMarketAddress = !marketAddress;
+  const normalizedMarketAddress =
+    typeof marketAddress === "string" && marketAddress.trim().length > 0 ? marketAddress.trim() : undefined;
+  const missingMarketAddress = !normalizedMarketAddress;
   const allowAutoCreate = missingMarketAddress && Boolean(marketId);
   const tradingBlocked = Boolean(tradingHalted || isSettled || isLocked);
   const missingAddressBlocking = missingMarketAddress && !allowAutoCreate;
@@ -207,7 +208,7 @@ export function StakeQuoteCard({
 
   useEffect(() => {
     // Reset quotes immediately when changing markets or stake to avoid stale previews carrying over.
-    const marketKey = `${marketId ?? "market"}|${marketAddress ?? "address"}`;
+    const marketKey = `${marketId ?? "market"}|${normalizedMarketAddress ?? "address"}`;
     if (lastMarketRef.current !== marketKey) {
       lastMarketRef.current = marketKey;
       setQuote(null);
@@ -220,7 +221,7 @@ export function StakeQuoteCard({
       setSelectedOutcome(initialOutcomeId);
       setError(null);
     }
-  }, [marketId, marketAddress, defaultStakeZen, initialOutcomeId]);
+  }, [marketId, normalizedMarketAddress, defaultStakeZen, initialOutcomeId]);
 
   useEffect(() => {
     // Force an immediate preview refresh when the user changes key inputs.
@@ -321,7 +322,7 @@ export function StakeQuoteCard({
         const payload = await fetchPricingPreview(cappedStake, {
           marketId,
           walletAddress: address,
-          marketAddress: marketAddress ?? "",
+          marketAddress: normalizedMarketAddress,
           outcomeId: selectedOutcome,
         });
         if (!cancelled) {
@@ -356,7 +357,7 @@ export function StakeQuoteCard({
     effectiveMaxStake,
     fxIsStale,
     fxUnavailable,
-    marketAddress,
+    normalizedMarketAddress,
     marketId,
     quote,
     quoteExpired,
@@ -528,7 +529,7 @@ export function StakeQuoteCard({
         ? await fetchPricingQuoteWithMeta(stakeZen, {
             marketId,
             walletAddress: address,
-            marketAddress: marketAddress ?? "",
+            marketAddress: normalizedMarketAddress,
             outcomeId: selectedOutcome,
           })
         : previewQuote;

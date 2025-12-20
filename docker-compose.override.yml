@@ -2,12 +2,6 @@ services:
   postgres:
     ports:
       - "127.0.0.1:5432:5432"
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
 
   redis:
     # Bind Redis to localhost for local development/inspection only.

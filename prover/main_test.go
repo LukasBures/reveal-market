@@ -134,7 +134,7 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 func TestProofHandlerSuccess(t *testing.T) {
 	stub := &stubProver{
 		backend:     "stub-backend",
-		circuitHash: "0xtest",
+		circuitHash: "0x1",
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
@@ -182,7 +182,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 func TestProofHandlerStream(t *testing.T) {
 	stub := &stubProver{
 		backend:     "stub-backend",
-		circuitHash: "0xtest",
+		circuitHash: "0x1",
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
@@ -257,6 +257,56 @@ func TestProofHandlerProverError(t *testing.T) {
 	}
 }
 
+func TestProofHandlerCircuitHashMismatch(t *testing.T) {
+	stub := &stubProver{ready: true, circuitHash: "0x2"}
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	payload := settlementProofRequest{
+		MarketID:       "0xabc",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped on hash mismatch")
+	}
+}
+
+func TestProofHandlerUnready(t *testing.T) {
+	stub := &stubProver{ready: false, circuitHash: "0x1"}
+	app := newApp(shared.Config{Version: "test", RequestTimeout: time.Second}, stub)
+	payload := settlementProofRequest{
+		MarketID:       "0xabc",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped when unready")
+	}
+}
+
 type stubProver struct {
 	backend     string
 	circuitHash string
@@ -276,7 +326,7 @@ func (s *stubProver) Backend() string {
 
 func (s *stubProver) CircuitHash() string {
 	if s.circuitHash == "" {
-		return "0xstub"
+		return "0x1"
 	}
 	return s.circuitHash
 }

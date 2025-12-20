@@ -387,6 +387,7 @@ def upgrade() -> None:
         sa.Column("leaf_index", sa.Integer(), nullable=True),
         sa.Column("tx_hash", sa.String(length=66), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.UniqueConstraint("market_id", "ticket_hash", name="ux_commitments_market_ticket_hash"),
     )
     op.create_index("ix_commitments_market_id", "commitments", ["market_id"])
     op.create_index("ix_commitments_market_user", "commitments", ["market_id", "user_address"])

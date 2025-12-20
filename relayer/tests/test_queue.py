@@ -1,4 +1,6 @@
+import asyncio
 import json
+import time
 
 import pytest
 from relayer.queue import TxQueue
@@ -31,6 +33,24 @@ class FlakyService:
 
     async def claim(self, payload, **kwargs):
         return {"txHash": "0xclaim", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
+
+
+class PermanentFailService:
+    async def commit(self, payload, **kwargs):
+        raise TxSendError("tx_reverted", nonce=1, permanent=True, kind="reverted")
+
+    async def claim(self, payload, **kwargs):
+        raise TxSendError("tx_reverted", nonce=1, permanent=True, kind="reverted")
+
+
+class ExplodingService:
+    def __init__(self):
+        self.called = asyncio.Event()
+        self.tx_timeout_seconds = 1
+
+    async def commit(self, payload, **kwargs):
+        self.called.set()
+        raise TypeError("boom")
 
 
 @pytest.mark.asyncio
@@ -73,3 +93,57 @@ async def test_queue_persists_payload(tmp_path):
         row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (job_id,)).fetchone()
     assert row is not None
     assert json.loads(row["payload"]) == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_queue_deadletters_permanent_error(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = PermanentFailService()
+    queue = TxQueue(str(db_path), svc, max_attempts=3, start_worker=False)
+
+    job_id = await queue.enqueue("commit", {"payload": "x"})
+    result = await queue.process_job(job_id)
+    assert result["status"] == "deadletter"
+
+
+@pytest.mark.asyncio
+async def test_queue_commit_expired_deadletters(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = await queue.enqueue("commit", {"expiry": int(time.time()) - 10})
+    result = await queue.process_job(job_id)
+    assert result["status"] == "deadletter"
+    assert result["error"] == "commit_expired"
+    assert svc.commit_calls == 0
+
+
+def test_queue_skips_running_jobs_in_sqlite(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ?",
+            (int(time.time()), job_id),
+        )
+
+    row = queue._reserve_job_sync()  # noqa: SLF001
+    assert row is None
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_unexpected_error(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = ExplodingService()
+    queue = TxQueue(str(db_path), svc, poll_seconds=0.01)
+
+    await queue.start()
+    await queue.enqueue("commit", {"payload": "x"})
+    await asyncio.wait_for(svc.called.wait(), timeout=1)
+    assert queue._worker is not None  # noqa: SLF001
+    assert not queue._worker.done()  # noqa: SLF001
+    await queue.stop()

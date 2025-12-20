@@ -41,7 +41,7 @@ def test_build_prover_payload(session):
     # Insert commitments
     leaves = ["0x" + ("a" * 64), "0x" + ("b" * 64)]
     for i, leaf in enumerate(leaves):
-        ticket_hash = "0x" + ("1" * 64)
+        ticket_hash = f"0x{i + 1:064x}"
         c = Commitment(
             id=i + 1,
             market_id=1,

@@ -396,6 +396,7 @@ check_env_file
 check_prover_artifacts
 check_caddyfile
 check_apk_mirror
+disable_next_telemetry
 
 if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts

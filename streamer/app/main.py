@@ -172,11 +172,19 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid access token")
 
     rl_buckets: dict[str, list[float]] = {}
+    rl_last_cleanup = 0.0
 
     def _rate_limit(identifier: str):
         if settings.rate_limit_per_minute <= 0:
             return
+        nonlocal rl_last_cleanup
         now = time()
+        if now - rl_last_cleanup > 60:
+            stale_before = now - 60
+            for key, bucket in list(rl_buckets.items()):
+                if not bucket or bucket[-1] < stale_before:
+                    rl_buckets.pop(key, None)
+            rl_last_cleanup = now
         bucket = rl_buckets.setdefault(identifier, [])
         # drop entries older than 60s
         rl_buckets[identifier] = [ts for ts in bucket if now - ts < 60]
@@ -670,10 +678,29 @@ def create_app() -> FastAPI:
                 )
                 with suppress(Exception):
                     metrics.assets_fallback.labels(transport="sse", target=fallback_target).inc()
-        acquired = state.acquire_assets(assets) if assets else []
-        if symbols:
-            state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
-        _acquire_connection()
+        symbols_list = [sym.strip() for sym in symbols.split(",") if sym.strip()] if symbols else []
+        assets_for_release = list(assets)
+        connection_acquired = False
+        assets_acquired = False
+        pubsub = None
+        try:
+            _acquire_connection()
+            connection_acquired = True
+            if assets:
+                state.acquire_assets(assets)
+                assets_acquired = True
+            pubsub = await state.subscribe(market_id)
+        except Exception:
+            if assets_acquired:
+                state.release_assets(assets_for_release)
+            if pubsub:
+                with suppress(Exception):
+                    await pubsub.close()
+            if connection_acquired:
+                _release_connection()
+            raise
+        if symbols_list:
+            state.add_rtds_symbols(symbols_list)
         logger.info(
             "stream connection accepted",
             extra={
@@ -686,14 +713,13 @@ def create_app() -> FastAPI:
                 "symbols": symbols,
             },
         )
-        pubsub = await state.subscribe(market_id)
         return StreamingResponse(
             _sse_events(
                 pubsub,
                 heartbeat_seconds=heartbeat,
                 max_events=max_events,
                 metrics=metrics,
-                on_close=lambda: (state.release_assets(acquired), _release_connection()),
+                on_close=lambda: (state.release_assets(assets_for_release), _release_connection()),
             ),
             media_type="text/event-stream",
         )
@@ -734,12 +760,30 @@ def create_app() -> FastAPI:
                 )
                 with suppress(Exception):
                     metrics.assets_fallback.labels(transport="ws", target=fallback_target).inc()
-        acquired = state.acquire_assets(assets) if assets else []
-        if symbols:
-            state.add_rtds_symbols(sym.strip() for sym in symbols.split(","))
-        pubsub = await state.subscribe(market_id)
-        await websocket.accept()
-        _acquire_connection()
+        symbols_list = [sym.strip() for sym in symbols.split(",") if sym.strip()] if symbols else []
+        assets_for_release = list(assets)
+        connection_acquired = False
+        assets_acquired = False
+        pubsub = None
+        try:
+            _acquire_connection()
+            connection_acquired = True
+            if assets:
+                state.acquire_assets(assets)
+                assets_acquired = True
+            pubsub = await state.subscribe(market_id)
+            await websocket.accept()
+        except Exception:
+            if assets_acquired:
+                state.release_assets(assets_for_release)
+            if pubsub:
+                with suppress(Exception):
+                    await pubsub.close()
+            if connection_acquired:
+                _release_connection()
+            raise
+        if symbols_list:
+            state.add_rtds_symbols(symbols_list)
         logger.info(
             "ws stream connection accepted",
             extra={
@@ -779,7 +823,7 @@ def create_app() -> FastAPI:
             with suppress(Exception):
                 await websocket.close()
             with suppress(Exception):
-                state.release_assets(acquired)
+                state.release_assets(assets_for_release)
             _release_connection()
 
     @app_instance.websocket("/data/stream/ws")
@@ -880,14 +924,13 @@ def create_app() -> FastAPI:
         # rate limit by control caller if available
         _rate_limit("control")
         added_assets = state.acquire_assets(assets_ids or [])
-        if symbols:
-            state.add_rtds_symbols(symbols)
+        added_symbols = state.add_rtds_symbols(symbols or [])
         logger.info(
             "control add subscriptions",
             extra={
                 "event": "control.subscriptions.add",
                 "assets_added": added_assets,
-                "symbols_added": symbols or [],
+                "symbols_added": added_symbols,
                 "count": len(state.subscriptions.assets),
             },
         )
@@ -908,15 +951,13 @@ def create_app() -> FastAPI:
         _rate_limit("control")
         if assets_ids:
             state.force_remove_assets(assets_ids)
-        if symbols:
-            for sym in symbols:
-                state.rtds_symbols.discard(sym)
+        removed_symbols = state.remove_rtds_symbols(symbols or [])
         logger.info(
             "control remove subscriptions",
             extra={
                 "event": "control.subscriptions.remove",
                 "assets_removed": assets_ids or [],
-                "symbols_removed": symbols or [],
+                "symbols_removed": removed_symbols,
                 "count": len(state.subscriptions.assets),
             },
         )

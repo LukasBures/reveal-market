@@ -285,12 +285,32 @@ async def _build_relayer_claim_payloads(
     for commitment in commitments:
         if commitment.outcome_id != winning_outcome:
             continue
+        if commitment.leaf_index is None:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.relayer.skip_missing_leaf_index",
+                message="skipping relayer claim; commitment missing leaf index",
+                market_id=market.event_id,
+                commitment_id=getattr(commitment, "id", None),
+            )
+            continue
         merkle_proof = await _build_merkle_proof_for_commitment(session, market.id, commitment)
+        if not merkle_proof and (settlement.commitments_count or 0) > 1:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.relayer.skip_missing_merkle_proof",
+                message="skipping relayer claim; merkle proof unavailable",
+                market_id=market.event_id,
+                commitment_id=getattr(commitment, "id", None),
+            )
+            continue
         payloads.append(
             {
                 "user": commitment.user_address,
                 "market": market.market_address,
-                "ticket_id": commitment.leaf_index or 0,
+                "ticket_id": commitment.leaf_index,
                 "outcome_id": winning_outcome,
                 "amount": int(commitment.amount_wei),
                 "salt": commitment.salt or "0x0",

@@ -343,6 +343,46 @@ def test_control_subscription_endpoints(monkeypatch):
         assert data["symbols"] == []
 
 
+def test_control_symbols_respect_cap_and_bump_version(monkeypatch):
+    settings = Settings(control_token="secret", max_subscriptions=1)  # noqa: S106
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        start_version = state.rtds_symbols_version
+        resp = client.post(
+            "/control/subscriptions",
+            headers={"x-control-token": "secret"},
+            params=[("symbols", "sym1"), ("symbols", "sym2")],
+        )
+        assert resp.status_code == 200
+        assert state.rtds_symbols == {"sym1"}
+        assert state.rtds_symbols_version == start_version + 1
+        resp = client.delete(
+            "/control/subscriptions",
+            headers={"x-control-token": "secret"},
+            params=[("symbols", "sym1")],
+        )
+        assert resp.status_code == 200
+        assert state.rtds_symbols == set()
+        assert state.rtds_symbols_version == start_version + 2
+
+
 def test_access_token_and_connection_cap(monkeypatch):
     settings = Settings(access_token="tok", max_active_connections=1)  # noqa: S106
     state = StreamState(settings)
@@ -425,6 +465,37 @@ def test_ws_requires_access_token(monkeypatch):
         with client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1", headers={"x-access-token": "tok"}) as ws:
             msg = ws.receive_json()
             assert "ping" in msg.get("event", "")
+
+
+def test_stream_releases_assets_on_subscribe_error(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    async def boom(_market_id: str):
+        raise RuntimeError("boom")
+
+    state.subscribe = boom  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.get("/stream", params={"market_id": "m1", "assets_ids": "a1", "max_events": 1})
+        assert resp.status_code == 500
+    assert "a1" not in state.subscriptions.assets
+    assert state._asset_refcounts == {}
 
 
 def test_rate_limit_overflow(monkeypatch):

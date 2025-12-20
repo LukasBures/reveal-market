@@ -194,16 +194,12 @@ class TxQueue:
                 (stale_cutoff,),
             )
             if job_id is None:
-                row = conn.execute(
-                    "SELECT * FROM jobs WHERE status IN ('pending', 'running') ORDER BY id ASC LIMIT 1"
-                ).fetchone()
+                row = conn.execute("SELECT * FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 1").fetchone()
             else:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                row = conn.execute("SELECT * FROM jobs WHERE id = ? AND status = 'pending'", (job_id,)).fetchone()
             if row is None:
                 return None
             attempts = int(row["attempts"]) + 1
-            if row["status"] not in ("pending", "running"):
-                return None
             conn.execute(
                 "UPDATE jobs SET status = 'running', attempts = ?, updated_at = ? WHERE id = ?",
                 (attempts, now, row["id"]),
@@ -251,7 +247,6 @@ class TxQueue:
                     logger.warning(
                         "queue.commit.expired",
                         job_id=row["id"],
-                        expiry=int(expiry),
                         now=int(time.time()),
                         **summary,
                     )
@@ -296,7 +291,8 @@ class TxQueue:
             nonce_to_store = nonce
             if isinstance(err, TxSendError) and err.nonce is not None:
                 nonce_to_store = err.nonce
-            next_status = "pending" if attempts < self.max_attempts else "deadletter"
+            permanent = isinstance(err, TxSendError) and getattr(err, "permanent", False)
+            next_status = "deadletter" if permanent else "pending" if attempts < self.max_attempts else "deadletter"
             logger.warning(
                 "queue.job.error",
                 job_id=row["id"],
@@ -379,16 +375,22 @@ class TxQueue:
         self._update_depth()
 
     async def _run_async(self) -> None:
-        try:
-            while not self._stop.is_set():
+        while not self._stop.is_set():
+            try:
                 result = await self.process_job()
                 if result.get("status") == "empty":
                     try:
                         await asyncio.wait_for(self._stop.wait(), timeout=self.poll_seconds)
                     except TimeoutError:
                         continue
-        except asyncio.CancelledError:
-            return
+            except asyncio.CancelledError:
+                return
+            except Exception as err:
+                logger.exception("queue.worker.error", error=str(err))
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self.poll_seconds)
+                except TimeoutError:
+                    continue
 
     def _update_depth(self) -> None:
         with self._connect() as conn:

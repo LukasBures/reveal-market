@@ -16,6 +16,8 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
 
 - Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh`, which produces:
   - `circuits/build/settlement_final.zkey`
+  - `circuits/build/settlement_vk.json`
+  - `circuits/build/settlement_hashes.json`
   - `circuits/build/settlement_js/settlement.wasm`
   - `circuits/build/settlement_js/generate_witness.js`
 - `snarkjs` is still required locally when running `generate_keys.sh` because the setup script shells out to it for Groth16 key generation, but runtime proof generation relies on the rapidsnark binary.
@@ -26,7 +28,7 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
 > **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
 
 ## Current implementation snapshot
-- Artifact checks (`check_artifacts.sh`, `cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey` or WASM/witness assets are missing or hash mismatched.
+- Artifact checks (`check_artifacts.sh`, `cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, or WASM/witness assets are missing or hash mismatched.
 - Concurrency guarded by semaphore (`PROVER_MAX_CONCURRENCY`); per-proof timeout wraps witness + rapidsnark; temporary directories cleaned after each job.
 - Integration tests include stubbed rapidsnark/Node plus real artifact flow in CI; repo-root `./run_tests.sh` calls into the same checks.
 - Metrics: `prover_request_latency_seconds` histogram, success/failure counters, `prover_active_proofs`, `prover_artifacts_ok`, and last proof latency gauges; `/healthz` carries circuit hash/readiness.
@@ -63,14 +65,17 @@ Concurrency is guarded by a semaphore so at most `PROVER_MAX_CONCURRENCY` rapids
 | `PROVER_WITNESS_SCRIPT` | `${PROVER_CIRCUIT_DIR}/settlement_js/generate_witness.js` | Path to the Circom witness script. |
 | `PROVER_WASM_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_js/settlement.wasm` | Path to the WASM file used by the witness script. |
 | `PROVER_ZKEY_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_final.zkey` | Groth16 proving key. |
+| `PROVER_VK_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_vk.json` | Verification key used for artifact hash validation. |
+| `PROVER_HASHES_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_hashes.json` | Circuit hash manifest used to validate artifacts. |
 | `PROVER_NODE_BINARY` | `node` | Node.js executable used to run the witness script. |
 | `PROVER_RAPIDSNARK_BINARY` | `rapidsnark` | CLI used for Groth16 proving. |
 | `PROVER_TEMP_DIR` | system temp | Directory for ephemeral witness/proof files. |
 | `PROVER_MAX_CONCURRENCY` | `runtime.NumCPU()` | Max concurrent Groth16 jobs (semaphore backed). |
 | `PROVER_PROOF_TIMEOUT_SECONDS` | `120` | Per-proof timeout for witness + proving stages. |
-| `PROVER_REQUEST_TIMEOUT_SECONDS` | `90` | HTTP handler timeout (wrapping Groth16 generation). |
+| `PROVER_REQUEST_TIMEOUT_SECONDS` | `120` | HTTP handler timeout (wrapping Groth16 generation). |
 | `PROVER_HEARTBEAT_SECONDS` | `60` | Emit structured heartbeat logs every N seconds. |
-| `PROVER_CIRCUIT_HASH` | computed from `.zkey` | Optional manual override for the circuit hash returned in responses. |
+| `PROVER_CIRCUIT_HASH` | `settlement_hashes.json` | Optional manual override for the circuit hash returned in responses (must match the hashes file). |
+| `PROVER_MAX_REQUEST_BYTES` | `1048576` | Max request body size in bytes before returning HTTP 413. |
 
 Keep the compiled artifacts mounted read-only so the prover never touches mocked data.
 
@@ -155,7 +160,7 @@ If the artifacts are missing or the Groth16 toolchain fails, the service exits w
 cd prover
 ./run_tests.sh            # wraps `go test -v ./...`
 # Fails fast if circuits/build artifacts are missing (check_artifacts.sh)
-go run ./cmd/verify-artifacts  # CLI to verify settlement_final.zkey + settlement_js/* exist
+go run ./cmd/verify-artifacts  # CLI to verify required artifacts + hashes
 ```
 
 The script is also invoked by repo-root `./run_tests.sh`, keeping local workflows aligned with CI’s Go job. `go test` includes an integration test that stubs Node/rapidsnark to exercise the full flow; real binaries are exercised in CI and in Docker.
@@ -171,7 +176,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 
 ## Operational Tips
 
-- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). CI can pull a tar/zip of the `build/` directory via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .`. Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity. Hash-verify artifacts on boot for production readiness.
+- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). CI can pull a tar/zip of the `build/` directory via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .`. Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity. Hash-verify artifacts on boot for production readiness.
 - **Concurrency tuning** – Start with the default `PROVER_MAX_CONCURRENCY=runtime.NumCPU()` and raise it incrementally only after measuring CPU saturation and memory usage (rapidsnark typically peaks around 250–350 MB per job for this circuit). Set `PROVER_TEMP_DIR` to tmpfs for lower I/O latency if available.
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.

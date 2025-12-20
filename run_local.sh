@@ -397,6 +397,7 @@ fi
 sync_prover_from_artifacts_source || true
 ensure_prover_artifacts
 check_apk_mirror
+disable_next_telemetry
 
 # Configure env file usage
 SUPPORTS_ENV_FILE=false
@@ -440,7 +441,7 @@ log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
 run_compose_build() {
   local parallel_flag="${1:-true}"
   local parallel_limit="${2:-${COMPOSE_PARALLEL_LIMIT}}"
-  local opts=()
+  local opts=(--build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
   if [[ "${parallel_flag}" == "true" && "${parallel_limit}" -gt 1 ]]; then
     opts+=(--parallel)
   fi

@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from ipaddress import ip_address, ip_network
 from typing import Any, cast
 
 from fastapi import Request
@@ -214,20 +215,45 @@ class RateLimitMiddleware:
         RATE_LIMIT_COUNTER.labels(outcome="allowed").inc()
         await self._call_with_headers(scope, receive, send, headers)
 
-    @staticmethod
-    def _extract_identifier(request: Request) -> str | None:
+    def _extract_identifier(self, request: Request) -> str | None:
         forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
         candidate = None
-        if forwarded:
+        client_host = request.client.host if request.client else None
+        if forwarded and client_host and self._is_trusted_proxy(client_host):
             candidate = forwarded.split(",")[0].strip()
-        elif request.client and request.client.host:
-            candidate = request.client.host
+        elif client_host:
+            candidate = client_host
         if not candidate:
             return None
         normalized = candidate.lower()
         if normalized in {"localhost", "testclient"}:
             return "127.0.0.1"
         return normalized
+
+    def _is_trusted_proxy(self, client_host: str) -> bool:
+        proxies = [entry for entry in self.settings.rate_limit_trusted_proxies if entry]
+        if not proxies:
+            return False
+        normalized_host = client_host.lower()
+        if normalized_host == "localhost":
+            normalized_host = "127.0.0.1"
+        for proxy in proxies:
+            entry = proxy.strip().lower()
+            if not entry:
+                continue
+            if entry == "*":
+                return True
+            if entry == "localhost":
+                entry = "127.0.0.1"
+            if "/" in entry:
+                try:
+                    if ip_address(normalized_host) in ip_network(entry, strict=False):
+                        return True
+                except ValueError:
+                    continue
+            elif normalized_host == entry:
+                return True
+        return False
 
     def _is_whitelisted(self, identifier: str) -> bool:
         whitelist = {item.strip().lower() for item in self.settings.rate_limit_whitelist if item}

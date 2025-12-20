@@ -18,42 +18,54 @@ const (
 
 // Config captures every runtime setting for the prover service.
 type Config struct {
-	ListenAddr        string
-	Version           string
-	ManualCircuitHash string
-	HeartbeatSeconds  int
-	BackendMode       proverBackendMode
-	NodeBinary        string
-	RapidSnarkBinary  string
-	CircuitDir        string
-	WitnessScriptPath string
-	WasmPath          string
-	ZKeyPath          string
-	TempDir           string
-	ProofTimeout      time.Duration
-	MaxConcurrency    int
-	RequestTimeout    time.Duration
+	ListenAddr          string
+	Version             string
+	ManualCircuitHash   string
+	HeartbeatSeconds    int
+	BackendMode         proverBackendMode
+	NodeBinary          string
+	RapidSnarkBinary    string
+	CircuitDir          string
+	WitnessScriptPath   string
+	WasmPath            string
+	ZKeyPath            string
+	VerificationKeyPath string
+	HashesPath          string
+	TempDir             string
+	ProofTimeout        time.Duration
+	MaxConcurrency      int
+	RequestTimeout      time.Duration
+	MaxRequestBytes     int64
 }
 
 // LoadConfig builds the config struct from environment variables (with sane defaults).
 func LoadConfig() Config {
 	baseDir := getenv("PROVER_CIRCUIT_DIR", filepath.Join("circuits", "build"))
+	proofTimeout := durationEnv("PROVER_PROOF_TIMEOUT_SECONDS", 120)
+	requestTimeout := durationEnv("PROVER_REQUEST_TIMEOUT_SECONDS", int(proofTimeout.Seconds()))
+	maxRequestBytes := intEnv("PROVER_MAX_REQUEST_BYTES", 1_048_576)
+	if maxRequestBytes <= 0 {
+		maxRequestBytes = 1_048_576
+	}
 	conf := Config{
-		ListenAddr:        getenv("PROVER_LISTEN_ADDR", "0.0.0.0:8085"),
-		Version:           getenv("PROVER_VERSION", "dev"),
-		ManualCircuitHash: getenv("PROVER_CIRCUIT_HASH", ""),
-		HeartbeatSeconds:  intEnv("PROVER_HEARTBEAT_SECONDS", 60),
-		BackendMode:       parseBackendMode(getenv("PROVER_BACKEND", "groth16")),
-		NodeBinary:        getenv("PROVER_NODE_BINARY", "node"),
-		RapidSnarkBinary:  getenv("PROVER_RAPIDSNARK_BINARY", "rapidsnark"),
-		CircuitDir:        baseDir,
-		WitnessScriptPath: getenv("PROVER_WITNESS_SCRIPT", filepath.Join(baseDir, "settlement_js", "generate_witness.js")),
-		WasmPath:          getenv("PROVER_WASM_PATH", filepath.Join(baseDir, "settlement_js", "settlement.wasm")),
-		ZKeyPath:          getenv("PROVER_ZKEY_PATH", filepath.Join(baseDir, "settlement_final.zkey")),
-		TempDir:           getenv("PROVER_TEMP_DIR", os.TempDir()),
-		ProofTimeout:      durationEnv("PROVER_PROOF_TIMEOUT_SECONDS", 120),
-		MaxConcurrency:    max(1, intEnv("PROVER_MAX_CONCURRENCY", runtime.NumCPU())),
-		RequestTimeout:    durationEnv("PROVER_REQUEST_TIMEOUT_SECONDS", 90),
+		ListenAddr:          getenv("PROVER_LISTEN_ADDR", "0.0.0.0:8085"),
+		Version:             getenv("PROVER_VERSION", "dev"),
+		ManualCircuitHash:   getenv("PROVER_CIRCUIT_HASH", ""),
+		HeartbeatSeconds:    intEnv("PROVER_HEARTBEAT_SECONDS", 60),
+		BackendMode:         parseBackendMode(getenv("PROVER_BACKEND", "groth16")),
+		NodeBinary:          getenv("PROVER_NODE_BINARY", "node"),
+		RapidSnarkBinary:    getenv("PROVER_RAPIDSNARK_BINARY", "rapidsnark"),
+		CircuitDir:          baseDir,
+		WitnessScriptPath:   getenv("PROVER_WITNESS_SCRIPT", filepath.Join(baseDir, "settlement_js", "generate_witness.js")),
+		WasmPath:            getenv("PROVER_WASM_PATH", filepath.Join(baseDir, "settlement_js", "settlement.wasm")),
+		ZKeyPath:            getenv("PROVER_ZKEY_PATH", filepath.Join(baseDir, "settlement_final.zkey")),
+		VerificationKeyPath: getenv("PROVER_VK_PATH", filepath.Join(baseDir, "settlement_vk.json")),
+		HashesPath:          getenv("PROVER_HASHES_PATH", filepath.Join(baseDir, "settlement_hashes.json")),
+		TempDir:             getenv("PROVER_TEMP_DIR", os.TempDir()),
+		ProofTimeout:        proofTimeout,
+		MaxConcurrency:      max(1, intEnv("PROVER_MAX_CONCURRENCY", runtime.NumCPU())),
+		RequestTimeout:      requestTimeout,
+		MaxRequestBytes:     int64(maxRequestBytes),
 	}
 	return conf
 }

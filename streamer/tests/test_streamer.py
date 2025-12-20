@@ -92,6 +92,28 @@ async def test_refresh_rtds_subscription_sends_on_version_change():
     assert len(streamer.rtds_client.sent) == 2
 
 
+def test_rtds_subscriptions_include_assets_and_symbols():
+    state = StubState()
+    streamer = DataStreamer(state, state.settings)
+    state.subscriptions.add_assets(["asset-a"])
+    state.add_rtds_symbols(["sym-b"])
+    subs = streamer._build_rtds_subscriptions()
+    assert subs
+    assert set(subs[0].filters) == {"asset-a", "sym-b"}
+
+
+def test_rtds_subscriptions_cap_prioritizes_assets():
+    settings = Settings(max_subscriptions=2, rest_poll_seconds=5, ws_reconnect_seconds=5)
+    state = StreamState(settings)
+    streamer = DataStreamer(state, settings)
+    state.subscriptions.add_assets(["asset-b", "asset-a"])
+    state.add_rtds_symbols(["sym-a", "sym-b"])
+    subs = streamer._build_rtds_subscriptions()
+    assert subs
+    assert len(subs[0].filters) == 2
+    assert set(subs[0].filters) == {"asset-a", "asset-b"}
+
+
 @pytest.mark.asyncio
 async def test_throttled_publish_deduplicates():
     state = StubState()
@@ -99,6 +121,26 @@ async def test_throttled_publish_deduplicates():
     await streamer._throttled_publish("m1", "0", {"price": "0.5"})
     await streamer._throttled_publish("m1", "0", {"price": "0.5"})
     assert len(streamer._publish_cache) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_loop_handles_cache_errors(caplog):
+    settings = Settings(publish_throttle_ms=50, rest_poll_seconds=5, ws_reconnect_seconds=5)
+    state = StreamState(settings)
+    streamer = DataStreamer(state, settings)
+
+    async def fail_cache(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    state.cache_tick = fail_cache  # type: ignore[assignment]
+    streamer._publish_cache = {"m1:0": {"price": "0.5"}}
+    caplog.set_level("WARNING")
+    task = asyncio.create_task(streamer._flush_loop())
+    await asyncio.sleep(0.1)
+    streamer._stop.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert streamer._publish_cache == {}
+    assert any(record.__dict__.get("event") == "stream.publish.failed" for record in caplog.records)
 
 
 @pytest.mark.asyncio

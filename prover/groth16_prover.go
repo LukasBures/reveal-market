@@ -216,7 +216,9 @@ func runCommand(ctx context.Context, binary string, args []string, workdir strin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
-	return stdout.Bytes(), stderr.Bytes(), err
+	outCopy := append([]byte(nil), stdout.Bytes()...)
+	errCopy := append([]byte(nil), stderr.Bytes()...)
+	return outCopy, errCopy, err
 }
 
 func requireCommand(name string) error {

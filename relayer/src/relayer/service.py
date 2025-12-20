@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -41,9 +41,18 @@ ERC20_ABI = [
 
 
 class TxSendError(RuntimeError):
-    def __init__(self, message: str, *, nonce: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        nonce: int | None = None,
+        kind: str = "error",
+        permanent: bool = False,
+    ):
         super().__init__(message)
         self.nonce = nonce
+        self.kind = kind
+        self.permanent = permanent
 
 
 @dataclass
@@ -64,6 +73,12 @@ class RelayerService:
     api_base_url: str | None = None
     api_bearer_token: str | None = None
     api_timeout_seconds: int = 10
+    _nonce_lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
+
+    def _get_nonce_lock(self) -> asyncio.Lock:
+        if self._nonce_lock is None:
+            self._nonce_lock = asyncio.Lock()
+        return self._nonce_lock
 
     async def _build_base_tx(
         self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
@@ -124,7 +139,7 @@ class RelayerService:
                         timeout=send_timeout,
                     )
                 except TimeoutError as err:
-                    raise TxSendError(f"{action}_send_timeout", nonce=nonce_used) from err
+                    raise TxSendError(f"{action}_send_timeout", nonce=nonce_used, kind="timeout") from err
                 logger.info(
                     f"relayer.{action}.broadcast",
                     attempt=attempt,
@@ -137,7 +152,35 @@ class RelayerService:
                 if not tx_hex.startswith("0x"):
                     tx_hex = f"0x{tx_hex}"
                 return {"txHash": tx_hex, "status": status, "nonce": nonce_used}
-            except (TxSendError, TimeExhausted) as err:
+            except TxSendError as err:
+                last_err = err
+                outcome = err.kind
+                if err.kind == "timeout":
+                    logger.warning(
+                        f"relayer.{action}.timeout",
+                        attempt=attempt,
+                        timeout=self.tx_timeout_seconds,
+                        error=f"{type(err).__name__}:{err}",
+                        nonce=nonce_used,
+                    )
+                elif err.kind == "reverted":
+                    logger.warning(
+                        f"relayer.{action}.reverted",
+                        attempt=attempt,
+                        error=f"{type(err).__name__}:{err}",
+                        nonce=nonce_used,
+                    )
+                else:
+                    logger.warning(
+                        f"relayer.{action}.error",
+                        attempt=attempt,
+                        error=f"{type(err).__name__}:{err}",
+                        nonce=nonce_used,
+                    )
+                TX_OUTCOMES.labels(action=action, outcome=outcome).inc()
+                if err.permanent:
+                    break
+            except TimeExhausted as err:
                 last_err = err
                 logger.warning(
                     f"relayer.{action}.timeout",
@@ -161,6 +204,8 @@ class RelayerService:
 
         logger.error(f"relayer.{action}.failed", error=str(last_err))
         TX_OUTCOMES.labels(action=action, outcome="failed").inc()
+        if isinstance(last_err, TxSendError):
+            raise last_err
         raise TxSendError(str(last_err) if last_err else f"{action} failed without error", nonce=nonce_used)
 
     @staticmethod
@@ -183,14 +228,20 @@ class RelayerService:
         while True:
             now = time.perf_counter()
             if now >= deadline:
-                TX_OUTCOMES.labels(action=action, outcome="timeout").inc()
-                raise TxSendError(f"{action}_receipt_timeout", nonce=nonce_used)
+                raise TxSendError(f"{action}_receipt_timeout", nonce=nonce_used, kind="timeout")
             try:
                 receipt: TxReceipt = await asyncio.wait_for(
                     asyncio.to_thread(self.web3.eth.get_transaction_receipt, tx_hash),
                     timeout=single_call_timeout,
                 )
                 status = int(receipt["status"])
+                if status == 0:
+                    logger.warning(
+                        f"relayer.{action}.revert",
+                        tx_hash=tx_hash.hex(),
+                        attempt=attempt,
+                    )
+                    raise TxSendError("tx_reverted", nonce=nonce_used, kind="reverted", permanent=True)
                 logger.info(
                     f"relayer.{action}.sent",
                     tx_hash=tx_hash.hex(),
@@ -248,14 +299,15 @@ class RelayerService:
             bump_factor=bump_factor,
             nonce_override=nonce_override,
         )
-        base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
-        tx = self.escrow.functions.commitOnBehalf(
-            user_addr,
-            market_addr,
-            auth,
-            signature_bytes,
-        ).build_transaction(base_tx)
-        return await self._send_and_wait(tx, "commit")
+        async with self._get_nonce_lock():
+            base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
+            tx = self.escrow.functions.commitOnBehalf(
+                user_addr,
+                market_addr,
+                auth,
+                signature_bytes,
+            ).build_transaction(base_tx)
+            return await self._send_and_wait(tx, "commit")
 
     async def claim(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
@@ -272,16 +324,17 @@ class RelayerService:
             bump_factor=bump_factor,
             nonce_override=nonce_override,
         )
-        base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
-        tx = market.functions.claim(
-            payload["user"],
-            int(payload["ticket_id"]),
-            int(payload["outcome_id"]),
-            int(payload["amount"]),
-            payload["salt"],
-            payload["merkle_proof"],
-        ).build_transaction(base_tx)
-        return await self._send_and_wait(tx, "claim")
+        async with self._get_nonce_lock():
+            base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
+            tx = market.functions.claim(
+                payload["user"],
+                int(payload["ticket_id"]),
+                int(payload["outcome_id"]),
+                int(payload["amount"]),
+                payload["salt"],
+                payload["merkle_proof"],
+            ).build_transaction(base_tx)
+            return await self._send_and_wait(tx, "claim")
 
     async def health(self) -> dict[str, Any]:
         issues: list[str] = []

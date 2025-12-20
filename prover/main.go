@@ -86,11 +86,13 @@ func newApp(cfg shared.Config, prover proverEngine) *app {
 		cfg:       cfg,
 		prover:    prover,
 		startedAt: time.Now().UTC(),
-		artifactPaths: []string{
+		artifactPaths: filterPaths([]string{
 			cfg.WitnessScriptPath,
 			cfg.WasmPath,
 			cfg.ZKeyPath,
-		},
+			cfg.VerificationKeyPath,
+			cfg.HashesPath,
+		}),
 	}
 	a.lastHeartbeat.Store(time.Now().UTC())
 	a.lastProofAt.Store(time.Time{})
@@ -131,7 +133,22 @@ func main() {
 		"listen_addr":    cfg.ListenAddr,
 		"heartbeat_secs": cfg.HeartbeatSeconds,
 	})
-	requireArtifactsOrExit(cfg)
+	verifiedCircuitHash := requireArtifactsOrExit(cfg)
+	if cfg.ManualCircuitHash != "" {
+		matches, err := equalHex(cfg.ManualCircuitHash, verifiedCircuitHash)
+		if err != nil || !matches {
+			fields := map[string]any{
+				"expected": verifiedCircuitHash,
+				"provided": cfg.ManualCircuitHash,
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+			}
+			logLine("error", "prover.circuit_hash.mismatch", fields)
+			os.Exit(1)
+		}
+	}
+	cfg.ManualCircuitHash = verifiedCircuitHash
 	prover := initProver(cfg)
 	server := newApp(cfg, prover)
 
@@ -235,20 +252,85 @@ func formatMillis(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
+func filterPaths(paths []string) []string {
+	filtered := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		filtered = append(filtered, path)
+	}
+	return filtered
+}
+
+func equalHex(left, right string) (bool, error) {
+	leftValue, err := parseHexField(left, "circuit_hash")
+	if err != nil {
+		return false, err
+	}
+	rightValue, err := parseHexField(right, "circuit_hash")
+	if err != nil {
+		return false, err
+	}
+	return leftValue.Cmp(rightValue) == 0, nil
+}
+
 func checkArtifacts(paths []string) (bool, []string) {
 	return shared.CheckArtifacts(paths)
 }
 
-func requireArtifactsOrExit(cfg shared.Config) {
-	ok, missing := shared.CheckArtifacts([]string{cfg.WitnessScriptPath, cfg.WasmPath, cfg.ZKeyPath})
-	if ok {
-		artifactsStatus.Set(1)
-		return
-	}
-	logLine("error", "prover.artifacts.missing", map[string]any{
-		"missing": missing,
+func requireArtifactsOrExit(cfg shared.Config) string {
+	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
+		WitnessScriptPath:   cfg.WitnessScriptPath,
+		WasmPath:            cfg.WasmPath,
+		ZKeyPath:            cfg.ZKeyPath,
+		VerificationKeyPath: cfg.VerificationKeyPath,
+		HashesPath:          cfg.HashesPath,
 	})
-	os.Exit(1)
+	if err != nil {
+		logLine("error", "prover.artifacts.invalid", map[string]any{"error": err.Error()})
+		artifactsStatus.Set(0)
+		os.Exit(1)
+	}
+	if len(report.Missing) > 0 {
+		logLine("error", "prover.artifacts.missing", map[string]any{
+			"missing": report.Missing,
+		})
+		artifactsStatus.Set(0)
+		os.Exit(1)
+	}
+	if len(report.HashMismatches) > 0 {
+		logLine("error", "prover.artifacts.hash_mismatch", map[string]any{
+			"mismatches": report.HashMismatches,
+		})
+		artifactsStatus.Set(0)
+		os.Exit(1)
+	}
+	if strings.TrimSpace(report.Hashes.CircuitHash) == "" {
+		logLine("error", "prover.artifacts.invalid", map[string]any{
+			"error": "circuit hash missing from settlement_hashes.json",
+		})
+		artifactsStatus.Set(0)
+		os.Exit(1)
+	}
+	artifactsStatus.Set(1)
+	logLine("info", "prover.artifacts.verified", map[string]any{
+		"circuit_hash": report.Hashes.CircuitHash,
+	})
+	return report.Hashes.CircuitHash
+}
+
+func (a *app) readyForProof() (bool, []string) {
+	artifactsOk, missing := checkArtifacts(a.artifactPaths)
+	if artifactsOk {
+		artifactsStatus.Set(1)
+	} else {
+		artifactsStatus.Set(0)
+	}
+	if !artifactsOk || !a.prover.Ready() {
+		return false, missing
+	}
+	return true, nil
 }
 
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
@@ -260,10 +342,38 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
+	ready, missing := a.readyForProof()
+	if !ready {
+		logLine("warn", "prover.request.unready", map[string]any{
+			"path":     r.URL.Path,
+			"ready":    a.prover.Ready(),
+			"missing":  missing,
+			"backend":  a.prover.Backend(),
+			"circuit":  a.circuitHash,
+			"request":  r.ContentLength,
+			"streamed": wantsStream(r),
+		})
+		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
+		return
+	}
 	defer r.Body.Close()
+
+	if a.cfg.MaxRequestBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, a.cfg.MaxRequestBytes)
+	}
 
 	var req settlementProofRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			logLine("warn", "prover.request.too_large", map[string]any{
+				"path":   r.URL.Path,
+				"limit":  a.cfg.MaxRequestBytes,
+				"length": r.ContentLength,
+			})
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body too large", err)
+			return
+		}
 		logLine("warn", "prover.request.decode_failed", map[string]any{
 			"path":   r.URL.Path,
 			"error":  err.Error(),
@@ -279,6 +389,27 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 			"market": req.MarketID,
 		})
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), err)
+		return
+	}
+	matches, err := equalHex(req.CircuitHash, a.circuitHash)
+	if err != nil {
+		logLine("warn", "prover.request.circuit_hash_invalid", map[string]any{
+			"path":   r.URL.Path,
+			"error":  err.Error(),
+			"hash":   req.CircuitHash,
+			"market": req.MarketID,
+		})
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), err)
+		return
+	}
+	if !matches {
+		logLine("warn", "prover.request.circuit_hash_mismatch", map[string]any{
+			"path":     r.URL.Path,
+			"provided": req.CircuitHash,
+			"expected": a.circuitHash,
+			"market":   req.MarketID,
+		})
+		writeError(w, http.StatusBadRequest, "invalid_request", "circuitHash does not match prover", nil)
 		return
 	}
 

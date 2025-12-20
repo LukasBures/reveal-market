@@ -357,6 +357,7 @@ Index("ix_resolutions_block_number", Resolution.block_number)
 
 class Commitment(Base):
     __tablename__ = "commitments"
+    __table_args__ = (UniqueConstraint("market_id", "ticket_hash", name="ux_commitments_market_ticket_hash"),)
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, index=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(

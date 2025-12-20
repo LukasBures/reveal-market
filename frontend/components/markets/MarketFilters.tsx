@@ -101,9 +101,6 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
     const cache = windowSuggestionCache;
     const controller = new AbortController();
     fetchAbortRef.current = controller;
-    if (!loadingSuggestions) {
-      setLoadingSuggestions(true);
-    }
     const cachedEntry = cache.get(cacheKey);
     if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
       setSuggestions(cachedEntry.data);
@@ -115,6 +112,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
     if (cachedEntry) {
       cache.delete(cacheKey);
     }
+    setLoadingSuggestions(true);
     const debounce = setTimeout(async () => {
       try {
         const params = new URLSearchParams();
@@ -160,7 +158,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
         fetchAbortRef.current = null;
       }
     };
-  }, [deferredSearch, loadingSuggestions]);
+  }, [deferredSearch]);
 
   const hideSuggestionsWithDelay = () => {
     hideTimeout.current = setTimeout(() => {
