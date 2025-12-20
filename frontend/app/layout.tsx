@@ -133,6 +133,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
         <link rel="shortcut icon" href="/icons/favicon.ico" />
         <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+        <link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#2735d2" />
         <meta name="apple-mobile-web-app-title" content="Reveal Market" />
         <link rel="manifest" href="/site.webmanifest" />
         <script
