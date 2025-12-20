@@ -31,8 +31,8 @@ done
 rm -rf "$DEST/prover/circuits/build/settlement_js"
 cp -R "$SCRIPT_DIR/build/settlement_js" "$DEST/prover/circuits/build/settlement_js"
 
-cp "$ROOT_DIR/contracts/cache/settlement-vk.json" "$DEST/contracts/cache/settlement-vk.json"
-cp "$ROOT_DIR/contracts/zen/cache/settlement-vk.json" "$DEST/contracts/zen/cache/settlement-vk.json"
+cp "$SCRIPT_DIR/build/settlement_deploy.json" "$DEST/contracts/cache/settlement-vk.json"
+cp "$SCRIPT_DIR/build/settlement_deploy.json" "$DEST/contracts/zen/cache/settlement-vk.json"
 
 circuit_hash="$(jq -r '.circuitHash' "$SCRIPT_DIR/build/settlement_hashes.json")"
 echo "Exported artifacts with circuitHash: $circuit_hash"

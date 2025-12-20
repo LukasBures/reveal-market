@@ -572,9 +572,13 @@ export function DashboardClient() {
       return null;
     }
   }, []);
-  const derivedPositions = useMemo(
-    () =>
-      positions.map((p, idx) => {
+  const derivedPositions = useMemo(() => {
+    const parseDate = (value?: string | null) => {
+      if (!value) return 0;
+      const ts = Date.parse(value);
+      return Number.isNaN(ts) ? 0 : ts;
+    };
+    return positions.map((p, idx) => {
         const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
         const bundle = bundleLookup.get(bundleKey);
         const market = marketDetails.get(p.market_id);
@@ -600,10 +604,11 @@ export function DashboardClient() {
         const toWinZen =
           toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
         const quoteId = p.quote_id ?? (p as any).quoteId ?? (bundle as any)?.quoteId ?? null;
-        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle };
-      }),
-    [bundleLookup, marketDetails, normalizeWei, positions],
-  );
+        const createdAtTs = parseDate(p.created_at);
+        const closesAtTs = parseDate(p.closes_at);
+        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle, createdAtTs, closesAtTs };
+      });
+  }, [bundleLookup, marketDetails, normalizeWei, positions]);
   const filteredPositions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return derivedPositions
@@ -624,13 +629,9 @@ export function DashboardClient() {
           return (b.position.stake_zen || 0) - (a.position.stake_zen || 0);
         }
         if (sortBy === "closes") {
-          const aClose = a.position.closes_at ? Date.parse(a.position.closes_at) : 0;
-          const bClose = b.position.closes_at ? Date.parse(b.position.closes_at) : 0;
-          return bClose - aClose;
+          return b.closesAtTs - a.closesAtTs;
         }
-        const aCreated = a.position.created_at ? Date.parse(a.position.created_at) : 0;
-        const bCreated = b.position.created_at ? Date.parse(b.position.created_at) : 0;
-        return bCreated - aCreated;
+        return b.createdAtTs - a.createdAtTs;
       });
   }, [derivedPositions, searchQuery, sortBy, statusFilter, marketDetails]);
   const totalStakeZen = filteredPositions.reduce(

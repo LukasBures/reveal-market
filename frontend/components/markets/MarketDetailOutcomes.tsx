@@ -95,6 +95,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const { switchChain } = useSwitchChain();
   const [resolvedMarketAddress, setResolvedMarketAddress] = useState<string | null>(market.marketAddress ?? null);
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quoteDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const txPending = false;
 
   const effectiveMaxStake = useMemo(() => {
@@ -191,8 +192,15 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   );
 
   useEffect(() => {
-    requestQuote("init");
+    if (quoteDebounceTimer.current) {
+      clearTimeout(quoteDebounceTimer.current);
+    }
+    quoteDebounceTimer.current = setTimeout(() => requestQuote("init"), 250);
     return () => {
+      if (quoteDebounceTimer.current) {
+        clearTimeout(quoteDebounceTimer.current);
+        quoteDebounceTimer.current = null;
+      }
       if (quoteRefreshTimer.current) clearTimeout(quoteRefreshTimer.current);
     };
   }, [requestQuote]);
@@ -286,12 +294,13 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     profitZen !== null && profitZen !== undefined && Number.isFinite(profitZen) ? profitZen.toFixed(3) : "—"
   } ZEN`;
   const lastUpdateTs =
-    liveStore.lastUpdated ||
-    liveStore.outcomes
-      .map((o) => o.updatedAt)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0];
+    liveStore.lastUpdated ??
+    liveStore.outcomes.reduce<string | null>((latest, outcome) => {
+      const next = outcome.updatedAt;
+      if (!next) return latest;
+      if (!latest) return next;
+      return next > latest ? next : latest;
+    }, null);
   const fxBadge = fxStaleCombined
     ? "FX stale"
     : fxValue

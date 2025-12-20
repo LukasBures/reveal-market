@@ -256,7 +256,10 @@ download_prover_artifacts() {
 }
 
 sync_prover_caches() {
-  local vk_src="${PROVER_BUILD_DIR}/settlement_vk.json"
+  local vk_src="${PROVER_BUILD_DIR}/settlement_deploy.json"
+  if [[ ! -s "${vk_src}" ]]; then
+    vk_src="${PROVER_BUILD_DIR}/settlement_vk.json"
+  fi
   if [[ ! -s "${vk_src}" ]]; then
     return
   fi

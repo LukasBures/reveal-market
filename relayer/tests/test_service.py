@@ -5,9 +5,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from web3 import Web3
-
 from relayer.service import RelayerService, TxSendError
+from web3 import Web3
 
 
 class DummyEth:
@@ -37,8 +36,13 @@ class DummyEscrow:
     def __init__(self):
         self.functions = self
 
-    def commitOnBehalf(self, *_args, **_kwargs):
+    def commit_on_behalf(self, *_args, **_kwargs):
         return DummyEscrowCall()
+
+    def __getattr__(self, name: str):
+        if name == "commitOnBehalf":
+            return self.commit_on_behalf
+        raise AttributeError(name)
 
 
 class LockingService(RelayerService):
@@ -47,9 +51,7 @@ class LockingService(RelayerService):
         self.active = 0
         self.max_active = 0
 
-    async def _build_base_tx(
-        self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
-    ):
+    async def _build_base_tx(self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0):
         return {
             "from": "0x0000000000000000000000000000000000000001",
             "nonce": 1 if nonce_override is None else nonce_override,

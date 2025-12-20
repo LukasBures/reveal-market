@@ -30,6 +30,7 @@ type StreamState = {
   error: string | null;
   outcomes: OutcomePrice[];
   histories: Record<number, PricePoint[]>;
+  historyCount: number;
   trades: Array<{ price?: number; size?: number; side?: string; timestamp: string }>;
   tickSize?: number;
   status?: string | null;
@@ -64,6 +65,7 @@ const initialState: StreamState = {
   error: null,
   outcomes: [],
   histories: {},
+  historyCount: 0,
   trades: [],
   tickSize: undefined,
   status: null,
@@ -94,8 +96,10 @@ function updateOutcome(conn: StreamConnection, outcome: number, updater: (prev: 
 function appendHistory(conn: StreamConnection, outcome: number, point: PricePoint) {
   const histories = { ...conn.state.histories };
   const prev = histories[outcome] ?? [];
-  histories[outcome] = [...prev.slice(-199), point];
-  setState(conn, { histories });
+  const next = [...prev.slice(-199), point];
+  histories[outcome] = next;
+  const nextCount = Math.max(0, conn.state.historyCount - prev.length + next.length);
+  setState(conn, { histories, historyCount: nextCount });
 }
 
 function appendTrade(conn: StreamConnection, trade: { price?: number; size?: number; side?: string; timestamp: string }) {
@@ -409,8 +413,11 @@ export function seedHistory(marketId: string, outcome: number, points: PricePoin
   const conn = startConnection(marketId, tokenIds);
   if (!points.length) return;
   const histories = { ...conn.state.histories };
-  histories[outcome] = points.slice(-200);
-  setState(conn, { histories });
+  const prevLen = histories[outcome]?.length ?? 0;
+  const next = points.slice(-200);
+  histories[outcome] = next;
+  const nextCount = Math.max(0, conn.state.historyCount - prevLen + next.length);
+  setState(conn, { histories, historyCount: nextCount });
 }
 
 export function seedInitialOutcomes(marketId: string, prices: number[], tokenIds: string[] = []) {

@@ -10,14 +10,15 @@ The service now boots a rapidsnark-backed pipeline by default:
 4. Convert the proof + public signals into Solidity calldata directly inside Go—no `snarkjs` roundtrips.
 5. Return a cache- and log-safe response with proof JSON, public signals, calldata, backend metadata, and Groth16 circuit hash.
 
-If the compiled artifacts are missing (for example, on a brand-new clone), the service refuses to start so you never return mocked data by accident. Generate the Circom assets (below) before launching the Docker stack.
+If the compiled artifacts are missing (for example, on a brand-new clone), the service refuses to start so you never return mocked data by accident. Generate the Circom assets (below) or sync vetted artifacts from `prover/artifacts` before launching the Docker stack.
 
 ## Prerequisites
 
-- Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh`, which produces:
+- Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh` (or imported from `prover/artifacts`), which produces:
   - `circuits/build/settlement_final.zkey`
   - `circuits/build/settlement_vk.json`
   - `circuits/build/settlement_hashes.json`
+  - `circuits/build/settlement_deploy.json`
   - `circuits/build/settlement_js/settlement.wasm`
   - `circuits/build/settlement_js/generate_witness.js`
 - `snarkjs` is still required locally when running `generate_keys.sh` because the setup script shells out to it for Groth16 key generation, but runtime proof generation relies on the rapidsnark binary.
@@ -26,6 +27,8 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
 
 > **Tip:** `docker/prover/Dockerfile` installs Node 20 and pulls `rapidsnark v0.0.7` from official releases, mounting `./prover/circuits` into `/app/circuits`. Run `bash prover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2`; stick to the bundled binary unless you need a different build.
 > **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
+
+The vetted, source-of-truth artifacts live in the `prover/artifacts` submodule. Use `prover/circuits/export_artifacts.sh` to write `prover/circuits/build/*` plus `contracts/*/cache/settlement-vk.json` (from `settlement_deploy.json`) into that repo, and `prover/circuits/import_from_artifacts.sh` to sync them back into the main checkout.
 
 ## Current implementation snapshot
 - Artifact checks (`check_artifacts.sh`, `cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, or WASM/witness assets are missing or hash mismatched.
@@ -128,14 +131,16 @@ Errors are returned as JSON with `error` and `message` fields (`invalid_request`
 
 ## Local Testing
 
-1. Generate the circuit artifacts (one-time, but required on fresh clones).
+1. Ensure the circuit artifacts exist (generate or import).
 
    ```bash
    cd prover/circuits
    bash generate_keys.sh
+   # Or, if you use the artifacts submodule:
+   # bash import_from_artifacts.sh
    ```
 
-2. Ensure Node + rapidsnark are installed (`npm install -g rapidsnark@0.0.2` or use the Docker binary).
+2. Ensure Node + rapidsnark are installed (use the Docker binary or the official rapidsnark release; the npm package is older).
 3. Run the service from the repo root:
 
    ```bash
@@ -176,7 +181,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 
 ## Operational Tips
 
-- **Key management / artifacts** – `prover/circuits/build` must contain `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, `settlement_js/settlement.wasm`, and `settlement_js/generate_witness.js`. Use `prover/circuits/generate_keys.sh` (requires `snarkjs`, Node) and store the outputs in a bucket with restricted access (read-only mount into the container). CI can pull a tar/zip of the `build/` directory via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .`. Refresh keys before releasing new circuits and rerun `check_artifacts.sh` to validate integrity. Hash-verify artifacts on boot for production readiness.
+- **Key management / artifacts** – The source of truth is the `prover/artifacts` submodule. Use `prover/circuits/export_artifacts.sh` to generate/export `prover/circuits/build/*` plus `contracts/*/cache/settlement-vk.json` (derived from `settlement_deploy.json`), and `prover/circuits/import_from_artifacts.sh` (or `./run_local.sh`/`./run_prod.sh`) to sync vetted files into `prover/circuits/build` and the contract caches. CI can pull a tar/zip of `prover/circuits/build` via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .`. Refresh keys before releasing new circuits and rerun `check_artifacts.sh`/`cmd/verify-artifacts` to validate integrity.
 - **Concurrency tuning** – Start with the default `PROVER_MAX_CONCURRENCY=runtime.NumCPU()` and raise it incrementally only after measuring CPU saturation and memory usage (rapidsnark typically peaks around 250–350 MB per job for this circuit). Set `PROVER_TEMP_DIR` to tmpfs for lower I/O latency if available.
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.
@@ -187,17 +192,40 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 ## Docker Notes
 
 - `docker-compose.yml` mounts `./prover/circuits` into the container so locally generated artifacts are available.
-- The Dockerfile installs Node 20 + `rapidsnark@0.0.2`; override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
+- The Dockerfile installs Node 20 + rapidsnark v0.0.7 (GitHub release); override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
 - Running `./run_local.sh` rebuilds the prover image, so re-run after regenerating circuits.
 
+## Step-by-Step: Artifacts Submodule (Source of Truth)
 
+1. Update the artifacts submodule:
 
+   ```bash
+   git submodule update --init --recursive prover/artifacts
+   ```
 
-  Step-by-step (single source of truth = artifacts submodule):
+2. If the circuit changed, regenerate + export artifacts (otherwise skip to step 4):
 
-  1. Generate + stage artifacts: cd prover/circuits && bash export_artifacts.sh (writes to prover/artifacts/...).
-  2. Commit/push the submodule: cd prover/artifacts && git status -> add/commit/push; then cd .. and git add prover/artifacts to update the pointer in the main repo.
-  3. Deploy verifier from the vetted vk: use contracts/zen/cache/settlement-vk.json (populated by export/import) with your forge script ... Deploy.s.sol flow; set RM_VERIFIER_ADDRESS to the new verifier.
-  4. Sync artifacts on any machine/CI: cd prover/circuits && bash import_from_artifacts.sh (copies vetted artifacts into prover/circuits/build and vk caches).
-  5. Run services: mount prover/artifacts/prover/circuits/build (or run the import script) for the prover; restart worker/API with RM_PROVER_ENABLED=true, RM_AUTO_SETTLEMENT_ENABLED=true, RM_AUTO_SETTLEMENT_TX_ENABLED=true, and the funded signer/RPC envs.
-  6. Validate alignment: cast call <verifier> "circuitHash()(bytes32)" must equal jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json.
+   ```bash
+   cd prover/circuits
+   bash export_artifacts.sh
+   ```
+
+3. Commit/push the artifacts repo, then update the submodule pointer in the main repo.
+4. Sync vetted artifacts into the runtime build/caches:
+
+   ```bash
+   cd prover/circuits
+   bash import_from_artifacts.sh
+   ```
+
+   `./run_local.sh` and `./run_prod.sh` also sync `contracts/*/cache/settlement-vk.json` from `settlement_deploy.json`.
+
+5. Validate alignment:
+
+   ```bash
+   jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json
+   cast call <verifier> "circuitHash()(bytes32)" --rpc-url <RPC_URL>
+   ```
+
+6. If the circuit hash changed, redeploy the verifier and update `RM_VERIFIER_ADDRESS`.
+7. Start the stack with `./run_local.sh` or `./run_prod.sh`.
