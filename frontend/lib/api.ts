@@ -15,7 +15,7 @@ import { slugify } from "./slugs";
 import { logger } from "./logging";
 import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
-import { fetchMarketActivity, fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
+import { fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
 const resolvedEnv = getServerEnv();
 export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
@@ -583,7 +583,7 @@ export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
       workerHeartbeat: components?.worker
         ? {
             marketsProcessed: components.worker.detail
-              ? parseInt(components.worker.detail.replace(/[^\d]/g, ""), 10) || undefined
+              ? parseInt(components.worker.detail.replace(/\D/g, ""), 10) || undefined
               : undefined,
             latencyMs: components.worker.latency_ms ?? null,
             timestamp: payload?.timestamp,
@@ -764,17 +764,8 @@ export async function fetchInvestorKpis(
   preloadedStats?: MarketStatusStat[],
   preloadedHealth?: HealthSnapshot | null,
 ): Promise<InvestorKpis> {
-  const statsPromise =
-    Array.isArray(preloadedStats) && preloadedStats.length >= 0
-      ? Promise.resolve(preloadedStats)
-      : fetchMarketStatsBreakdown();
-  const healthPromise =
-    typeof preloadedHealth !== "undefined" ? Promise.resolve(preloadedHealth) : fetchHealthSnapshot();
-
-  const [statsResult, healthResult] = await Promise.allSettled([statsPromise, healthPromise]);
-
-  const stats = statsResult.status === "fulfilled" ? statsResult.value : [];
-  const health = healthResult.status === "fulfilled" ? healthResult.value : null;
+  const stats = Array.isArray(preloadedStats) ? preloadedStats : await fetchMarketStatsBreakdown();
+  const health = typeof preloadedHealth !== "undefined" ? preloadedHealth : await fetchHealthSnapshot();
 
   const liveStat = stats.find((item) => item.status === "live")?.count ?? 0;
   const finalizedStat = stats.find((item) => item.status === "finalized")?.count ?? 0;

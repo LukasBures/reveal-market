@@ -82,7 +82,7 @@ export function SearchMarketsClient({
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       startTransition(() => {
-        runSearch(query);
+        void runSearch(query);
       });
     },
     [query, runSearch],

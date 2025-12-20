@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
+
 type CodeProps = {
-  children: React.ReactNode;
+  children: ReactNode;
   inline?: boolean;
 };
 

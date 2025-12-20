@@ -22,7 +22,6 @@ const CATEGORY_ALIASES: Record<string, string> = {
   tech: "ai-tech",
 };
 
-export const categoryLabels = Object.values(CATEGORY_MAP);
 export const categorySlugs = Object.keys(CATEGORY_MAP);
 
 export function slugify(value: string): string {

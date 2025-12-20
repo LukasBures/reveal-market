@@ -15,7 +15,7 @@ const mockDefaultChain = vi.hoisted(() => ({
 })) as const;
 
 const hooks = vi.hoisted(() => ({
-  useAccount: vi.fn(),
+  useConnection: vi.fn(),
   useChainId: vi.fn(),
   useReadContract: vi.fn(),
   useWriteContract: vi.fn(),
@@ -31,7 +31,7 @@ const pricingMocks = vi.hoisted(() => ({
 vi.mock("wagmi", async () => {
   return {
     defaultChain: mockDefaultChain,
-    useAccount: hooks.useAccount,
+    useConnection: hooks.useConnection,
     useChainId: hooks.useChainId,
     useReadContract: hooks.useReadContract,
     useWriteContract: hooks.useWriteContract,
@@ -73,10 +73,10 @@ describe("Trade status polling", () => {
   });
 
   it("polls trade status when tx hash is present", async () => {
-    hooks.useAccount.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
     hooks.useReadContract.mockReturnValue({ data: 0n });
-    hooks.useWriteContract.mockReturnValue({ writeContractAsync: vi.fn() });
+    hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
     hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
     apiMocks.statusMock.mockResolvedValue({ status: "confirmed", txHash: "0xtx" });
 
@@ -94,10 +94,10 @@ describe("Trade status polling", () => {
   });
 
   it("omits market address when requesting preview without a market address", async () => {
-    hooks.useAccount.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
     hooks.useReadContract.mockReturnValue({ data: 0n });
-    hooks.useWriteContract.mockReturnValue({ writeContractAsync: vi.fn() });
+    hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
     hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
     pricingMocks.fetchPricingPreview.mockResolvedValue({
       stake_zen: 0.1,

@@ -16,7 +16,7 @@ const mockDefaultChain = vi.hoisted(() => ({
 })) as const;
 
 const hoisted = vi.hoisted(() => ({
-  useAccount: vi.fn(),
+  useConnection: vi.fn(),
   useChainId: vi.fn(),
   fetchPositions: vi.fn(),
   fetchClaimBundles: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("wagmi", async () => {
   return {
     ...actual,
     defaultChain: mockDefaultChain,
-    useAccount: hoisted.useAccount,
+    useConnection: hoisted.useConnection,
     useChainId: hoisted.useChainId,
     useWriteContract: hoisted.useWriteContract,
     useReadContract: hoisted.useReadContract,
@@ -54,7 +54,7 @@ vi.mock("@/lib/api", () => ({
 
 describe("DashboardClient", () => {
   beforeEach(() => {
-    hoisted.useAccount.mockReset();
+    hoisted.useConnection.mockReset();
     hoisted.useChainId.mockReset();
     hoisted.fetchPositions.mockReset();
     hoisted.fetchClaimBundles.mockReset();
@@ -63,17 +63,17 @@ describe("DashboardClient", () => {
     hoisted.useReadContract.mockReset();
     hoisted.usePublicClient.mockReset();
     hoisted.useSignMessage.mockReset();
-    hoisted.useSignMessage.mockReturnValue({ signMessageAsync: vi.fn().mockResolvedValue("0xsig") });
+    hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
     hoisted.useReadContract.mockReturnValue({ data: 0n });
     hoisted.useWriteContract.mockReturnValue({
-      writeContractAsync: vi.fn(),
+      mutateAsync: vi.fn(),
       isPending: false,
       error: undefined,
     });
   });
 
   it("prompts to connect when wallet is disconnected", () => {
-    hoisted.useAccount.mockReturnValue({ address: undefined, isConnected: false });
+    hoisted.useConnection.mockReturnValue({ address: undefined, isConnected: false });
     hoisted.useChainId.mockReturnValue(undefined);
 
     render(<DashboardClient />);
@@ -82,20 +82,20 @@ describe("DashboardClient", () => {
   });
 
   it("renders positions and triggers claim action", async () => {
-    hoisted.useAccount.mockReturnValue({
+    hoisted.useConnection.mockReturnValue({
       address: "0x9999999999999999999999999999999999999999",
       isConnected: true,
     });
     hoisted.useChainId.mockReturnValue(2651420);
-    const writeContractAsync = vi.fn().mockResolvedValue("0xclaim");
+    const writeContract = vi.fn().mockResolvedValue("0xclaim");
     hoisted.useWriteContract.mockReturnValue({
-      writeContractAsync,
+      mutateAsync: writeContract,
       isPending: false,
       error: undefined,
     });
     hoisted.useReadContract.mockReturnValue({ data: 0n });
     hoisted.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
-    hoisted.useSignMessage.mockReturnValue({ signMessageAsync: vi.fn().mockResolvedValue("0xsig") });
+    hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
     hoisted.fetchMarketByEventId.mockResolvedValue({
       outcomes: ["Yes", "No"],
     });
@@ -156,7 +156,7 @@ describe("DashboardClient", () => {
     const claimButton = screen.getAllByRole("button").find((btn) => btn.textContent?.trim().toLowerCase() === "claim");
     expect(claimButton).toBeTruthy();
     fireEvent.click(claimButton!);
-    await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
     expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2);
     expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(2);
   });

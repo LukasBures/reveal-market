@@ -9,13 +9,12 @@ import { MarketFomoOverlay } from "./MarketFomoOverlay";
 type Props = {
   marketId: string;
   tokenIds?: string[];
-  outcomes?: string[];
   outcomePrices?: number[];
 };
 
-export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outcomePrices = [] }: Props) {
+export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] }: Props) {
   const [range, setRange] = useState<"1H" | "24H" | "7D" | "MAX">("24H");
-  const [selectedOutcome, setSelectedOutcome] = useState<number>(0);
+  const selectedOutcome = 0;
   const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -62,11 +61,10 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomes = [], outc
       if (last && Math.abs(last.y - fallbackSeed) < 1e-6 && now - last.x < minIntervalMs) {
         return prev;
       }
-      const next = [
+      return [
         ...prev.slice(-199),
         { x: now, y: fallbackSeed, fx_stale: streamState.fxStale, timestamp: new Date(now).toISOString() },
       ];
-      return next;
     });
   }, [history.length, fallbackSeed, streamState.fxStale, streamState.lastUpdated]);
 

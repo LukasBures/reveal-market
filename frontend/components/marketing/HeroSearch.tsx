@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useRef, useState, useTransition } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
 import type { MarketSummary } from "@/lib/api-types";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
@@ -59,7 +59,8 @@ export function HeroSearch({ initialSearch = "" }: Props) {
         });
         clearTimeout(timeoutId);
         if (!res.ok) {
-          throw new Error(`suggestions failed (${res.status})`);
+          setLoadingSuggestions(false);
+          return;
         }
         const payload = await res.json();
         const mapped = Array.isArray(payload) ? payload.map(mapApiMarketToSummary) : [];
@@ -101,7 +102,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
   };
 
   const handleKeyboardNavigation = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
+    (event: KeyboardEvent<HTMLInputElement>) => {
       if (!suggestionsVisible || suggestions.length === 0) return;
       if (event.key === "ArrowDown" || event.key === "Tab") {
         event.preventDefault();
@@ -121,7 +122,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
     [suggestionsVisible, suggestions, highlightedIndex, router],
   );
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const query = search.trim();
     if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {

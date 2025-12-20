@@ -15,7 +15,7 @@ const mockDefaultChain = vi.hoisted(() => ({
 })) as const;
 
 const hooks = vi.hoisted(() => ({
-  useAccount: vi.fn(),
+  useConnection: vi.fn(),
   useChainId: vi.fn(),
   useReadContract: vi.fn(),
   useWriteContract: vi.fn(),
@@ -25,7 +25,7 @@ const hooks = vi.hoisted(() => ({
 vi.mock("wagmi", async () => {
   return {
     defaultChain: mockDefaultChain,
-    useAccount: hooks.useAccount,
+    useConnection: hooks.useConnection,
     useChainId: hooks.useChainId,
     useReadContract: hooks.useReadContract,
     useWriteContract: hooks.useWriteContract,
@@ -79,10 +79,10 @@ vi.mock("@/lib/pricing-client", () => ({
 
 describe("Escrow funding guard", () => {
   beforeEach(() => {
-    hooks.useAccount.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(1); // wrong chain
     hooks.useReadContract.mockReturnValue({ data: 0n });
-    hooks.useWriteContract.mockReturnValue({ writeContractAsync: vi.fn().mockResolvedValue("0xhash") });
+    hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xhash") });
     hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
   });
 

@@ -71,7 +71,7 @@ When deploying, ensure these values align with the CDN or reverse proxy domain s
 
 ## Getting Started
 
-> **Prereqs**: Node.js 20 LTS (the repo root `.nvmrc` pins this). Use `nvm use` or your preferred version manager before installing dependencies so Next.js 15.4.7, wagmi 2.x, and the WalletConnect stack all share the same runtime assumptions.
+> **Prereqs**: Node.js 20 LTS (the repo root `.nvmrc` pins this). Use `nvm use` or your preferred version manager before installing dependencies so Next.js 15.4.7, wagmi 3.x, and the WalletConnect stack all share the same runtime assumptions.
 
 ```bash
 cd frontend
@@ -92,7 +92,7 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 
 ### Wallet connections
 
-`Connect Wallet` in the main nav is powered by Wagmi 2 + WalletConnect v2 with viem transports for Mainnet, Base, and zkSync. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online. WalletConnect stays available everywhere via QR/deep links.
+`Connect Wallet` in the main nav is powered by Wagmi 3 + WalletConnect v2 with viem transports for Mainnet, Base, and zkSync. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online. WalletConnect stays available everywhere via QR/deep links.
 
 ---
 
@@ -188,7 +188,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 ## Streaming & FX
 
-- **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav`, `OutcomeQuote`, and `StakeQuoteCard`.
+- **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav` and `StakeQuoteCard`.
 - **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
 - **WSS/TLS** – Streamer defaults follow `RM_ENVIRONMENT` (prod → `https://stream.revealmarket.xyz`, local → `http://localhost:8100`) and auto-switch to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
 - **Env summary** – Defaults come from `RM_ENVIRONMENT` (prod/local presets). Override with `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only when needed; keep streamer-side `STREAMER_WORSEN_PERCENT` aligned.

@@ -172,13 +172,13 @@ const fetchApiFxQuote = async (): Promise<FxQuote> => {
 export async function fetchStreamerFxQuote(path = FX_DEFAULT_PATH): Promise<FxQuote> {
   const normalizedPath = normalizeFxPath(path);
   if (mixedContentBlocked) {
-    // Browser would block streamer over http on an https page; use API endpoint instead.
+    // Browser would block streamer over http on a https page; use API endpoint instead.
     return fetchApiFxQuote();
   }
   try {
     const res = await fetch(getStreamerEndpoint(normalizedPath, true), { cache: "no-store" });
     if (!res.ok) {
-      throw new Error(`FX fetch failed: ${res.status}`);
+      return fetchApiFxQuote();
     }
     const payload = await res.json();
     return mapFxPayload(payload);
@@ -186,21 +186,6 @@ export async function fetchStreamerFxQuote(path = FX_DEFAULT_PATH): Promise<FxQu
     // Fallback to API if streamer is unreachable.
     return fetchApiFxQuote();
   }
-}
-
-export async function fetchFxQuote(): Promise<FxQuote> {
-  const res = await fetch(getEndpoint("/pricing/fx"), { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`FX fetch failed: ${res.status}`);
-  }
-  return (await res.json()) as FxQuote;
-}
-
-export async function fetchPricingQuote(
-  stakeZen: number,
-  opts: { walletAddress: string; marketAddress: string; outcomeId: number; marketId?: string },
-): Promise<PricingQuote> {
-  return fetchPricingQuoteWithMeta(stakeZen, opts);
 }
 
 export async function fetchPricingPreview(

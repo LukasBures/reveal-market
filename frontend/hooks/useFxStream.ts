@@ -203,7 +203,7 @@ function startConnection(path: string) {
         const delay = Math.min(conn.backoff, 10_000);
         // Treat suspension/closure as stale and let REST fill in.
         setState(conn, { wsConnected: false, status: "stale" });
-        if (evt && typeof evt.reason === "string" && evt.reason.toLowerCase().includes("suspension")) {
+        if (evt?.reason?.toLowerCase().includes("suspension")) {
           console.warn("FX socket closed due to suspension; falling back to REST");
         } else {
           console.warn("FX socket closed, reconnecting", { delay });

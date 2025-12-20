@@ -25,12 +25,6 @@ export function MarketDetailMetadata({ market }: Props) {
     | Record<string, any>
     | null;
   const gamma = extraData?.gamma as Record<string, any> | undefined;
-  const sourceSlug =
-    typeof gamma?.slug === "string" && gamma.slug.trim()
-      ? gamma.slug
-      : typeof market.slug === "string"
-        ? market.slug
-        : undefined;
   const clobPairId =
     typeof gamma?.clobPairId === "string"
       ? gamma.clobPairId

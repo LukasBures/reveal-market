@@ -151,11 +151,6 @@ export type PositionRecord = {
   potential_payout_wei?: number | string | null;
 };
 
-export type PositionsResponse = {
-  positions: PositionRecord[];
-  escrow_balance_wei?: number | string | null;
-};
-
 export type ClaimBundle = {
   marketId: string;
   marketAddress: string;
@@ -168,10 +163,6 @@ export type ClaimBundle = {
   merkleProof: string[];
   leaf: string;
   user: string;
-};
-
-export type ClaimBundlesResponse = {
-  bundles: ClaimBundle[];
 };
 
 export type MarketStatusStat = {

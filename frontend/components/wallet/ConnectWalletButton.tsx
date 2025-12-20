@@ -5,13 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connector } from "wagmi";
-import {
-  useAccount,
-  useConnect,
-  useDisconnect,
-  useSignMessage,
-  useSwitchChain,
-} from "wagmi";
+import { useConnect, useConnectors, useConnection, useDisconnect, useSwitchChain } from "wagmi";
 import { defaultChain } from "@/lib/wagmi";
 
 type ConnectorOption = {
@@ -110,28 +104,21 @@ function formatAddress(address?: string | null) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-function formatSignature(signature?: string | null) {
-  if (!signature) {
-    return null;
-  }
-  return `${signature.slice(0, 10)}…${signature.slice(-8)}`;
-}
-
 export function ConnectWalletButton() {
-  const { address, chain, status: accountStatus, connector: activeConnector } = useAccount();
-  const { connect, connectors, status: connectStatus, error: connectError } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { data: signature, error: signError, isPending: isSigning, signMessageAsync } = useSignMessage();
+  const { address, chain, status: accountStatus, connector: activeConnector } = useConnection();
+  const { mutate: connect, status: connectStatus, error: connectError } = useConnect();
+  const connectors = useConnectors();
+  const { mutate: disconnect } = useDisconnect();
   const {
-    chains,
     error: switchError,
     isPending: isSwitching,
-    switchChain: switchChainRaw,
-    switchChainAsync,
+    mutate: switchChainMutate,
+    mutateAsync: switchChainMutateAsync,
   } = useSwitchChain();
-  const switchChain: typeof switchChainRaw | undefined = switchChainRaw;
+  const switchChainSupported = typeof activeConnector?.switchChain === "function";
+  const switchChain = switchChainSupported ? switchChainMutate : undefined;
+  const switchChainAsync = switchChainSupported ? switchChainMutateAsync : undefined;
 
-  const [message, setMessage] = useState("gm from Reveal Market");
   const [isModalOpen, setModalOpen] = useState(false);
   const [selectedOption, setSelectedOption] = useState<ConnectorOption | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -143,8 +130,6 @@ export function ConnectWalletButton() {
   const isConnected = accountStatus === "connected" && Boolean(address);
   const activeConnectorId = activeConnector?.id;
   const connectErrorMessage = formatErrorMessage(connectError);
-  const signErrorMessage = formatErrorMessage(signError);
-  const switchErrorMessage = formatErrorMessage(switchError);
   const chainMismatch = isConnected && chain?.id !== defaultChain.id;
 
   useEffect(() => {
@@ -298,17 +283,6 @@ export function ConnectWalletButton() {
     connect({ connector });
   };
 
-  const handleSignMessage = async () => {
-    if (!message.trim()) {
-      return;
-    }
-    try {
-      await signMessageAsync({ message });
-    } catch {
-      // handled by wagmi state
-    }
-  };
-
   const handleSwitchChain = () => {
     if (!switchChain && !switchChainAsync) {
       setSwitchFailure(`Switch to ${defaultChain.name} in your wallet to continue.`);
@@ -323,8 +297,6 @@ export function ConnectWalletButton() {
       );
     });
   };
-  const messageDisabled = !message.trim();
-
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelectedOption(null);

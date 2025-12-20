@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import type { Mock } from "vitest";
 import { useFxStream } from "./useFxStream";
 import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 
@@ -8,7 +9,6 @@ class WebSocketMock {
   static OPEN = 1;
   url: string;
   readyState = WebSocketMock.OPEN;
-  onopen: ((ev?: any) => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: ((ev?: any) => void) | null = null;
   onerror: ((ev?: any) => void) | null = null;
@@ -32,14 +32,12 @@ describe("useFxStream", () => {
 
   beforeEach(() => {
     WebSocketMock.instances = [];
-    // @ts-expect-error override for tests
-    global.WebSocket = WebSocketMock;
+    global.WebSocket = WebSocketMock as unknown as typeof WebSocket;
     global.fetch = vi.fn();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    // @ts-expect-error restore
     global.WebSocket = originalWebSocket;
     global.fetch = originalFetch;
     vi.clearAllTimers();
@@ -77,7 +75,7 @@ describe("useFxStream", () => {
   });
 
   it("falls back to HTTP when socket silent", async () => {
-    (global.fetch as unknown as vi.Mock).mockResolvedValue({
+    (global.fetch as unknown as Mock).mockResolvedValue({
       ok: true,
       json: async () => ({ zen_usd: 9.1, raw_zen_usd: 9.4, stale: false }),
     });

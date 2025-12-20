@@ -8,13 +8,11 @@ import { resolveUrlConfig } from "@/lib/env-presets";
 
 ensureLocalStorage();
 
-declare global {
-  // Prevent HMR from re-initializing WalletConnect multiple times.
-  // eslint-disable-next-line no-var
-  var __wagmiConfig: Config | undefined;
-  // eslint-disable-next-line no-var
-  var __wagmiWalletConnectors: CreateConnectorFn[] | undefined;
-}
+// Prevent HMR from re-initializing WalletConnect multiple times.
+const globalState = globalThis as typeof globalThis & {
+  __wagmiConfig?: Config;
+  __wagmiWalletConnectors?: CreateConnectorFn[];
+};
 
 const EXPECTED_CHAIN_ID = 2651420;
 const FALLBACK_CHAIN_NAME = "Horizen Testnet";
@@ -102,11 +100,11 @@ const createWalletConnectors = (): CreateConnectorFn[] => {
 };
 
 const getWalletConnectors = (): CreateConnectorFn[] => {
-  if (globalThis.__wagmiWalletConnectors) {
-    return globalThis.__wagmiWalletConnectors;
+  if (globalState.__wagmiWalletConnectors) {
+    return globalState.__wagmiWalletConnectors;
   }
   const connectors = createWalletConnectors();
-  globalThis.__wagmiWalletConnectors = connectors;
+  globalState.__wagmiWalletConnectors = connectors;
   return connectors;
 };
 
@@ -120,4 +118,4 @@ const buildWagmiConfig = (): Config =>
     ssr: true,
   });
 
-export const wagmiConfig: Config = globalThis.__wagmiConfig ?? (globalThis.__wagmiConfig = buildWagmiConfig());
+export const wagmiConfig: Config = globalState.__wagmiConfig ?? (globalState.__wagmiConfig = buildWagmiConfig());

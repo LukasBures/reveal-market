@@ -16,11 +16,11 @@ vi.mock("@/lib/wagmi", () => ({
 }));
 
 vi.mock("wagmi", () => ({
-  useAccount: () => ({ address: undefined }),
+  useConnection: () => ({ address: undefined, connector: undefined, status: "disconnected" }),
   useChainId: () => 2651420,
-  useSwitchChain: () => ({ switchChain: vi.fn(), chains: [{ id: 2651420 }], isPending: false, error: null }),
+  useSwitchChain: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }),
   useReadContract: () => ({ data: undefined, isFetching: false, refetch: vi.fn() }),
-  useWriteContract: () => ({ writeContractAsync: vi.fn(), error: null }),
+  useWriteContract: () => ({ mutateAsync: vi.fn(), error: null }),
   usePublicClient: () => undefined,
 }));
 
@@ -44,10 +44,8 @@ class WebSocketMock {
 }
 
 beforeAll(() => {
-  // @ts-expect-error test shim
-  global.EventSource = EventSourceMock;
-  // @ts-expect-error test shim
-  global.WebSocket = WebSocketMock;
+  global.EventSource = EventSourceMock as unknown as typeof EventSource;
+  global.WebSocket = WebSocketMock as unknown as typeof WebSocket;
 });
 
 beforeEach(() => {

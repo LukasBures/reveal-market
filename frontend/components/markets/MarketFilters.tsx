@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { KeyboardEvent } from "react";
 import type { MarketSummary } from "@/lib/api-types";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
@@ -127,7 +128,8 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
         });
         clearTimeout(timeoutId);
         if (!response.ok) {
-          throw new Error(`suggestions failed (${response.status})`);
+          setLoadingSuggestions(false);
+          return;
         }
         const payload = await response.json();
         const results = Array.isArray(payload) ? payload.map(mapApiMarketToSummary) : [];
@@ -168,7 +170,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
   };
 
   const handleKeyboardNavigation = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
+    (event: KeyboardEvent<HTMLInputElement>) => {
       if (!suggestionsVisible || suggestions.length === 0) {
         return;
       }

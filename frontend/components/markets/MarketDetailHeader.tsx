@@ -12,7 +12,6 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
     | null;
-  const prices = Array.isArray(market.outcomePrices) ? market.outcomePrices : [];
   const gamma = (extraData?.gamma || {}) as Record<string, any>;
   const toNumber = (value: unknown): number | null => {
     if (typeof value === "number" && Number.isFinite(value)) return value;

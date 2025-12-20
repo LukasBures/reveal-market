@@ -173,7 +173,6 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
               <MarketDetailChart
                 marketId={priceStreamMarketId}
                 tokenIds={tokenIds}
-                outcomes={Array.isArray(market.outcomes) ? market.outcomes : []}
                 outcomePrices={market.outcomePrices ?? []}
               />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">

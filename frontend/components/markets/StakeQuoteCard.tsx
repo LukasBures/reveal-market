@@ -11,7 +11,7 @@ import {
 } from "@/lib/pricing-client";
 import { fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId } from "wagmi";
+import { useChainId, useConnection } from "wagmi";
 import { formatTime } from "@/lib/formatters";
 import { defaultChain } from "@/lib/wagmi";
 
@@ -96,10 +96,10 @@ export function StakeQuoteCard({
   const previewKeyRef = useRef<string | null>(null);
   const previewInFlightRef = useRef(false);
   const lastPreviewAtRef = useRef(0);
-  const { fx, status, fxReceivedAt, ageSeconds } = useFxStream(FX_DEFAULT_PATH);
+  const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
-  const { address } = useAccount();
+  const { address } = useConnection();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
@@ -124,7 +124,7 @@ export function StakeQuoteCard({
   const priceForOutcome = useCallback(
     (index: number): number | null => {
       const value = normalizedPrices[index];
-      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (Number.isFinite(value)) return value;
       return null;
     },
     [normalizedPrices],
@@ -150,11 +150,6 @@ export function StakeQuoteCard({
     return Math.max(0, Math.min(PER_BET_CAP_ZEN, minCap));
   }, [quote]);
   const capExhausted = effectiveMaxStake <= 0;
-  const fxAgeSeconds = useMemo(() => {
-    if (typeof ageSeconds === "number") return Math.max(0, ageSeconds);
-    if (fxReceivedAt) return Math.max(0, (Date.now() - Date.parse(fxReceivedAt)) / 1000);
-    return null;
-  }, [ageSeconds, fxReceivedAt]);
   const quoteExpiryMs = useMemo(() => getQuoteExpiryMs(quote), [quote]);
   const quoteExpired = quoteExpiryMs ? quoteExpiryMs <= Date.now() : false;
 
@@ -443,10 +438,6 @@ export function StakeQuoteCard({
     }
     return null;
   }, [quote, priceForOutcome, selectedOutcome, stakeZen]);
-  const profitZen = useMemo(() => {
-    if (toWinZen === null || !Number.isFinite(stakeZen)) return null;
-    return toWinZen - stakeZen;
-  }, [toWinZen, stakeZen]);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const txHashIsHex = typeof txHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(txHash);
   const ctaLabel = txLoading
@@ -468,7 +459,6 @@ export function StakeQuoteCard({
     selectedOutcome === 0
       ? "shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/30"
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
-  const missingPayout = !quote || quote.payout_zen === null || quote.payout_zen === undefined;
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const submitBlockedReason =
@@ -535,21 +525,26 @@ export function StakeQuoteCard({
         : previewQuote;
       setQuote(issuedQuote);
       if (!issuedQuote.quote_id) {
-        throw new Error("Quote unavailable");
+        setTxError("Quote unavailable");
+        return;
       }
       const issuedExpiry = getQuoteExpiryMs(issuedQuote);
       if (!issuedExpiry || issuedExpiry <= Date.now()) {
-        throw new Error("Quote expired");
+        setTxError("Quote expired. Refreshing…");
+        setRefreshNonce((prev) => prev + 1);
+        return;
       }
       if (issuedQuote.chain_id && chainId && Number(issuedQuote.chain_id) !== chainId) {
-        throw new Error(`Switch to chain ${issuedQuote.chain_id} to trade.`);
+        setTxError(`Switch to chain ${issuedQuote.chain_id} to trade.`);
+        return;
       }
       if (stakeZen !== issuedQuote.stake_zen) {
-        throw new Error("Stake changed. Refresh the quote.");
+        setTxError("Stake changed. Refresh the quote.");
+        return;
       }
       const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id);
       const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;
-      const respHash = resp.tx_hash && typeof resp.tx_hash === "string" ? resp.tx_hash : null;
+      const respHash = resp.tx_hash || null;
       if (respHash || respJob) {
         setTxHash(respHash || null);
         setRelayerJobId(respJob);

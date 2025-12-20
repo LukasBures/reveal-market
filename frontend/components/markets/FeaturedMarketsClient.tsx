@@ -52,7 +52,6 @@ export function FeaturedMarketsClient({
   const [offset, setOffset] = useState(initialMarkets.length);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [autoLoadCount, setAutoLoadCount] = useState(0);
-  const [autoLoadTriggered, setAutoLoadTriggered] = useState(false);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [intersectionSupported, setIntersectionSupported] = useState(false);
@@ -118,7 +117,6 @@ export function FeaturedMarketsClient({
     setHasMore(initialLikelyMore && seeded.length < maxItems);
     setOffset(initialMarkets.length);
     setAutoLoadCount(0);
-    setAutoLoadTriggered(false);
     setIsLoadingMore(false);
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
@@ -130,19 +128,13 @@ export function FeaturedMarketsClient({
     if (!refreshedMarkets) {
       return;
     }
-    setMarkets((prev) => {
-      const merged = normalizeMarkets([...(refreshedMarkets || []), ...prev]);
-      return merged;
-    });
+    setMarkets((prev) => normalizeMarkets([...(refreshedMarkets || []), ...prev]));
   }, [refreshedMarkets, normalizeMarkets]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
       const nextLimit = Number.isFinite(remainingSlots) ? Math.min(batchSize, remainingSlots) : batchSize;
       if (!hasMore || isPending || isLoadingMore || nextLimit <= 0) return;
-      if (mode === "auto") {
-        setAutoLoadTriggered(true);
-      }
       const fetchOffset = offset;
       setIsLoadingMore(true);
       setShowLoadingState(true);
@@ -165,7 +157,6 @@ export function FeaturedMarketsClient({
           setOffset(fetchOffset + additions.length);
           setHasMore(computedHasMore);
           if (mode === "auto" && newItemsAdded > 0) {
-            setAutoLoadTriggered(true);
             setAutoLoadCount((count) => count + 1);
           }
         } catch (error) {
@@ -189,10 +180,10 @@ export function FeaturedMarketsClient({
       searchQuery,
       status,
       trending,
+      closesWithinHours,
       normalizeMarkets,
       batchSize,
       orderBy,
-      maxItems,
     ],
   );
 

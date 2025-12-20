@@ -12,7 +12,7 @@ import {
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useAccount, useChainId, useSwitchChain } from "wagmi";
+import { useChainId, useConnection, useSwitchChain } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
@@ -87,12 +87,14 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   }, [ageSeconds, fxReceivedAt]);
   const tradingHaltedByStream = liveStore.status === "closed" || liveStore.status === "halted";
   const isTradable = !isResolved && !isLocked && !tradingHaltedByStream;
-  const { address } = useAccount();
+  const { address, connector } = useConnection();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
   const missingZenToken = !ZEN_TOKEN_ADDRESS;
-  const { switchChain } = useSwitchChain();
+  const { mutate: switchChainMutate } = useSwitchChain();
+  const switchChainSupported = typeof connector?.switchChain === "function";
+  const switchChain = switchChainSupported ? switchChainMutate : undefined;
   const [resolvedMarketAddress, setResolvedMarketAddress] = useState<string | null>(market.marketAddress ?? null);
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quoteDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,8 +121,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   }, [effectiveMaxStake]);
   const capExhausted = effectiveMaxStake <= 0;
 
-  const requestQuote = useCallback(
-    (reason: string) => {
+  const requestQuote = useCallback(() => {
       if (quoteRefreshTimer.current) {
         clearTimeout(quoteRefreshTimer.current);
         quoteRefreshTimer.current = null;
@@ -173,8 +174,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
         })
         .catch((err) => setError((err as Error).message))
         .finally(() => setLoading(false));
-    },
-    [
+    }, [
       fx,
       fxStaleCombined,
       stakeZen,
@@ -188,14 +188,13 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
       isResolutionWaiting,
       commitsBlocked,
       isDisputed,
-    ],
-  );
+    ]);
 
   useEffect(() => {
     if (quoteDebounceTimer.current) {
       clearTimeout(quoteDebounceTimer.current);
     }
-    quoteDebounceTimer.current = setTimeout(() => requestQuote("init"), 250);
+    quoteDebounceTimer.current = setTimeout(() => requestQuote(), 250);
     return () => {
       if (quoteDebounceTimer.current) {
         clearTimeout(quoteDebounceTimer.current);
@@ -238,7 +237,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
           clearTimeout(quoteRefreshTimer.current);
           quoteRefreshTimer.current = null;
         }
-        requestQuote("expired");
+        requestQuote();
         return false;
       }
       const seconds = Math.ceil(remainingMs / 1000);
@@ -252,7 +251,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
       if (!alive) clearInterval(countdown);
     }, 1000);
     const refreshInMs = Math.max(500, expiresTs - Date.now() - 1500);
-    quoteRefreshTimer.current = setTimeout(() => requestQuote("expiry_refresh"), refreshInMs);
+    quoteRefreshTimer.current = setTimeout(() => requestQuote(), refreshInMs);
     return () => {
       clearInterval(countdown);
       if (quoteRefreshTimer.current) clearTimeout(quoteRefreshTimer.current);
@@ -320,15 +319,11 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     (quoteExpired && "Quote expired") ||
     null;
 
-  const requiredAllowance = 0n;
-  const hasAllowance = true;
-  const needsApproval = false;
-
   // Seed initial prices from streamer history if nothing live has arrived yet.
   useEffect(() => {
     let cancelled = false;
-    const hasLive = livePrices.some((p) => typeof p === "number");
-    const hasInitial = prices.some((p) => typeof p === "number");
+    const hasLive = livePrices.some((p) => Number.isFinite(p));
+    const hasInitial = prices.some((p) => Number.isFinite(p));
     if (hasLive || hasInitial || outcomes.length === 0) return;
     const load = async () => {
       try {
@@ -346,7 +341,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
           }),
         );
         if (cancelled) return;
-        if (historyPrices.some((p) => typeof p === "number")) {
+        if (historyPrices.some((p) => Number.isFinite(p))) {
           seedInitialOutcomes(streamMarketId, historyPrices as number[], tokenIds);
         }
       } catch {
@@ -397,7 +392,8 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
         setResolvedMarketAddress(signedQuote.market_address);
       }
       if (!signedQuote.quote_id) {
-        throw new Error("Quote missing identifier");
+        setTxError("Quote missing identifier");
+        return;
       }
       const result = await commitTrade(signedQuote.quote_id);
       setTxHash(result.tx_hash);
@@ -721,7 +717,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => requestQuote("manual_refresh")}
+                          onClick={() => requestQuote()}
                           className="inline-flex items-center justify-center rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                           disabled={!isTradable}
                         >

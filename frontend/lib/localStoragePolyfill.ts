@@ -23,7 +23,7 @@ export function ensureLocalStorage() {
     get length() {
       return store.size;
     },
-  };
+  } satisfies Storage;
 
   try {
     Object.defineProperty(globalThis, "localStorage", {

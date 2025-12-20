@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach} from "vitest";
 import { useLiveOutcomePrices } from "./useLiveOutcomePrices";
 
 class EventSourceMock {
@@ -23,13 +23,11 @@ describe("useLiveOutcomePrices", () => {
   const originalEventSource = global.EventSource;
 
   beforeEach(() => {
-    // @ts-expect-error override
-    global.EventSource = EventSourceMock;
+    global.EventSource = EventSourceMock as unknown as typeof EventSource;
     EventSourceMock.instances = [];
   });
 
   afterEach(() => {
-    // @ts-expect-error restore
     global.EventSource = originalEventSource;
   });
 

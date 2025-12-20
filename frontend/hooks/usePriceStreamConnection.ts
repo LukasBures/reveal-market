@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import {
   createMarketStream,
   createMarketWebSocket,
@@ -370,9 +370,8 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
   return conn;
 }
 
-function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
+  function subscribe(marketId: string, tokenIds: string[], onChange: () => void) {
   const normalizedTokens = normalizeTokens(tokenIds);
-  const key = `${marketId}|${normalizedTokens.join(",")}`;
   const conn = startConnection(marketId, normalizedTokens);
   if (conn.idleCloseTimer) {
     clearTimeout(conn.idleCloseTimer);

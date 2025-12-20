@@ -7,32 +7,32 @@ import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 type WagmiAccountState = {
   address?: `0x${string}` | undefined;
   chain?: { id: number; name: string };
+  connector?: Connector | undefined;
   status: "connected" | "connecting" | "disconnected" | "reconnecting";
 };
 
 type WagmiConnectState = {
-  connect: (args: { connector: Connector }) => void;
-  connectors: Connector[];
+  mutate: (args: { connector: Connector }) => void;
   status: "idle" | "pending" | "success" | "error";
   error: Error | null;
 };
 
 type WagmiDisconnectState = {
-  disconnect: () => void;
+  mutate: () => void;
 };
 
 type WagmiSignMessageState = {
   data?: `0x${string}` | undefined;
   error: Error | null;
   isPending: boolean;
-  signMessageAsync: (args: { message: string }) => Promise<string>;
+  mutateAsync: (args: { message: string }) => Promise<string>;
 };
 
 type WagmiSwitchChainState = {
-  chains: { id: number; name: string }[];
   error: Error | null;
   isPending: boolean;
-  switchChain?: (args: { chainId: number }) => void;
+  mutate: (args: { chainId: number }) => void;
+  mutateAsync?: (args: { chainId: number }) => Promise<void>;
 };
 
 const createConnector = (id: string, name: string, ready = true): Connector =>
@@ -54,6 +54,7 @@ const hoistedDefaults = vi.hoisted(() => ({
 
 let currentAccountState: WagmiAccountState;
 let currentConnectState: WagmiConnectState;
+let currentConnectorsState: Connector[];
 let currentDisconnectState: WagmiDisconnectState;
 let currentSignMessageState: WagmiSignMessageState;
 let currentSwitchChainState: WagmiSwitchChainState;
@@ -63,8 +64,9 @@ vi.mock("wagmi", async () => {
   return {
     ...actual,
     defaultChain: hoistedDefaults.defaultChain,
-    useAccount: () => currentAccountState,
+    useConnection: () => currentAccountState,
     useConnect: () => currentConnectState,
+    useConnectors: () => currentConnectorsState,
     useDisconnect: () => currentDisconnectState,
     useSignMessage: () => currentSignMessageState,
     useSwitchChain: () => currentSwitchChainState,
@@ -82,25 +84,25 @@ describe("ConnectWalletButton", () => {
       status: "disconnected",
     };
     currentConnectState = {
-      connect: vi.fn(),
-      connectors: [metaMaskConnector, injectedConnector, coinbaseConnector, walletConnectConnector],
+      mutate: vi.fn(),
       status: "idle",
       error: null,
     };
+    currentConnectorsState = [metaMaskConnector, injectedConnector, coinbaseConnector, walletConnectConnector];
     currentDisconnectState = {
-      disconnect: vi.fn(),
+      mutate: vi.fn(),
     };
     currentSignMessageState = {
       data: undefined,
       error: null,
       isPending: false,
-      signMessageAsync: vi.fn(async ({ message }: { message: string }) => `0xsigned-${message}`),
+      mutateAsync: vi.fn(async ({ message }: { message: string }) => `0xsigned-${message}`),
     };
     currentSwitchChainState = {
-      chains: [hoistedDefaults.defaultChain],
       error: null,
       isPending: false,
-      switchChain: vi.fn(),
+      mutate: vi.fn(),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
     };
     vi.clearAllMocks();
   });
@@ -124,7 +126,7 @@ describe("ConnectWalletButton", () => {
     connectCta = screen.getByRole("button", { name: /connect with walletconnect/i });
     fireEvent.click(connectCta);
 
-    expect(currentConnectState.connect).toHaveBeenCalledWith({ connector: walletConnectConnector });
+    expect(currentConnectState.mutate).toHaveBeenCalledWith({ connector: walletConnectConnector });
   });
 
   it("allows managing a connected session inside the modal", () => {
@@ -140,13 +142,13 @@ describe("ConnectWalletButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /0x1234…5678/i }));
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
-    expect(currentDisconnectState.disconnect).toHaveBeenCalledTimes(1);
+    expect(currentDisconnectState.mutate).toHaveBeenCalledTimes(1);
 
     expect(screen.queryByRole("button", { name: /sign message/i })).not.toBeInTheDocument();
   });
 
   it("renders a fallback when no connectors are available", () => {
-    currentConnectState.connectors = [];
+    currentConnectorsState = [];
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
@@ -172,9 +174,9 @@ describe("ConnectWalletButton", () => {
     currentAccountState = {
       address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
       chain: { id: 1, name: "Other Chain" },
+      connector: createConnector("injected", "Injected"),
       status: "connected",
     };
-    currentSwitchChainState.switchChain = undefined;
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
@@ -189,9 +191,9 @@ describe("ConnectWalletButton", () => {
     currentAccountState = {
       address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
       chain: { id: 1, name: "Other Chain" },
+      connector: createConnector("injected", "Injected"),
       status: "connected",
     };
-    currentSwitchChainState.switchChain = undefined;
 
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /0xabcd/i }));
@@ -201,7 +203,7 @@ describe("ConnectWalletButton", () => {
   });
 
   it("hides injected wallets when the browser has no compatible providers", () => {
-    currentConnectState.connectors = [
+    currentConnectorsState = [
       createConnector("metaMask", "MetaMask", false),
       createConnector("injected", "Injected", false),
       createConnector("coinbaseWalletSDK", "Coinbase Wallet", false),

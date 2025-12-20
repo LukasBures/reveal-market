@@ -18,7 +18,6 @@ const normalizeKeywords = (keywords: string[]): string[] => {
   const seen = new Set<string>();
   const unique: string[] = [];
   [...keywords, SITE_NAME].forEach((keyword) => {
-    if (typeof keyword !== "string") return;
     const trimmed = keyword.trim();
     if (!trimmed) return;
     const lowered = trimmed.toLowerCase();
@@ -32,8 +31,8 @@ const normalizeKeywords = (keywords: string[]): string[] => {
 const cleanTitle = (title: string): string =>
   title.trim().replace(new RegExp(`\\s*\\|\\s*${SITE_NAME}$`, "i"), "");
 
-type RobotsMeta = Exclude<Metadata["robots"], string>;
-type RobotsInfo = Exclude<RobotsMeta["googleBot"], string | undefined>;
+type RobotsMeta = Exclude<Metadata["robots"], string | null | undefined>;
+type RobotsInfo = Omit<RobotsMeta, "googleBot">;
 
 const DEFAULT_ROBOTS: RobotsMeta = {
   index: true,
@@ -65,9 +64,6 @@ const mergeRobots = (robots?: Metadata["robots"]): Metadata["robots"] => {
     };
     return merged;
   }
-  const derivedGoogleBot: RobotsInfo = {
-    ...(typeof DEFAULT_ROBOTS.googleBot === "object" ? DEFAULT_ROBOTS.googleBot : {}),
-  };
   const mirrorKeys = [
     "index",
     "follow",
@@ -82,13 +78,18 @@ const mergeRobots = (robots?: Metadata["robots"]): Metadata["robots"] => {
     "max-video-preview",
     "max-image-preview",
     "max-snippet",
-  ] as const;
+  ] as const satisfies ReadonlyArray<keyof RobotsInfo>;
+  type MirrorKey = typeof mirrorKeys[number];
+  const derivedGoogleBot: Partial<Record<MirrorKey, RobotsInfo[MirrorKey]>> = {
+    ...(typeof DEFAULT_ROBOTS.googleBot === "object" ? DEFAULT_ROBOTS.googleBot : {}),
+  };
   mirrorKeys.forEach((key) => {
-    if (typeof robots[key] !== "undefined") {
-      (derivedGoogleBot as RobotsInfo)[key] = robots[key];
+    const value = robots[key] as RobotsInfo[MirrorKey] | undefined;
+    if (typeof value !== "undefined") {
+      derivedGoogleBot[key] = value;
     }
   });
-  merged.googleBot = derivedGoogleBot;
+  merged.googleBot = derivedGoogleBot as RobotsInfo;
   return merged;
 };
 

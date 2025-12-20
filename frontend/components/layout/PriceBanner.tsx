@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAccount, useSwitchChain } from "wagmi";
+import { useConnection, useSwitchChain } from "wagmi";
 import { defaultChain } from "@/lib/wagmi";
 
 type PriceBannerProps = {
@@ -11,8 +11,10 @@ type PriceBannerProps = {
 };
 
 export function PriceBanner({ fxLabel, fxStale, fxError }: PriceBannerProps) {
-  const { chain, status: accountStatus } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const { chain, status: accountStatus, connector } = useConnection();
+  const { mutate: switchChainMutate, isPending: isSwitching } = useSwitchChain();
+  const switchChainSupported = typeof connector?.switchChain === "function";
+  const switchChain = switchChainSupported ? switchChainMutate : undefined;
   const wrongNetwork = useMemo(() => {
     if (accountStatus !== "connected") return false;
     if (!chain?.id) return false;

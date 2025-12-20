@@ -7,14 +7,18 @@ const hoisted = vi.hoisted(() => ({
   defaultChain: { id: 999, name: "Test Chain" },
 }));
 
-type AccountState = { chain?: { id: number }; status: "connected" | "disconnected" | "connecting" | "reconnecting" };
+type AccountState = {
+  chain?: { id: number };
+  connector?: { switchChain?: () => void } | undefined;
+  status: "connected" | "disconnected" | "connecting" | "reconnecting";
+};
 
 let accountState: AccountState;
 let switchChainMock: ReturnType<typeof vi.fn>;
 
 vi.mock("wagmi", () => ({
-  useAccount: () => accountState,
-  useSwitchChain: () => ({ switchChain: switchChainMock, isPending: false }),
+  useConnection: () => accountState,
+  useSwitchChain: () => ({ mutate: switchChainMock, isPending: false }),
 }));
 
 vi.mock("@/lib/wagmi", () => ({
@@ -28,7 +32,7 @@ describe("PriceBanner", () => {
   });
 
   it("prompts a network switch when on the wrong chain", () => {
-    accountState = { chain: { id: 1 }, status: "connected" };
+    accountState = { chain: { id: 1 }, connector: { switchChain: switchChainMock }, status: "connected" };
 
     render(<PriceBanner fxLabel="FX: 1 ZEN" fxError={null} fxStale={false} />);
 

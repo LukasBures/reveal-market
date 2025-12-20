@@ -120,7 +120,9 @@ export function ContactForm({ siteKey }: ContactFormProps) {
         body: JSON.stringify({ ...payload, turnstileToken }),
       });
       if (!response.ok) {
-        throw new Error(`Request failed (${response.status})`);
+        setError("We couldn't submit that. Please try again in a moment.");
+        setStatus("error");
+        return;
       }
       setStatus("success");
       event.currentTarget.reset();

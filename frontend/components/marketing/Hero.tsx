@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import { HeroSearch } from "./HeroSearch";
 
@@ -9,21 +8,6 @@ type HeroStat = {
   label: string;
   value: string;
 };
-
-const heroHighlights = [
-  {
-    title: "Hidden while live",
-    description: "Entries stay sealed until the market settles, so sizing never hits a public board.",
-  },
-  {
-    title: "Receipts on settle",
-    description: "When outcomes post, everyone sees a clear, human-readable breakdown.",
-  },
-  {
-    title: "Ops that talks",
-    description: "Pauses, rule tweaks, and claims get called out before you make a move.",
-  },
-] as const;
 
 type HeroProps = {
   stats: HeroStat[];

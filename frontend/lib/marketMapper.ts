@@ -33,8 +33,6 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     item.extra_data?.gamma?.volume ??
     0;
   const volume24hUsd = Number(volumeCandidate) || 0;
-  const liquidity =
-    Number(item.liquidity_usd ?? item.liquidityUsd ?? item.extra_data?.liquidity_usd ?? 0) || undefined;
   const orderbookVolumeUsd =
     Number(item.orderbook_volume_usd ?? item.orderbookVolumeUsd ?? item.extra_data?.orderbook_volume_usd ?? 0) ||
     undefined;

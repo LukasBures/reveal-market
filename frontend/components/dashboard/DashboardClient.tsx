@@ -1,8 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
-import { useSignMessage } from "wagmi";
+import { useChainId, useConnection, usePublicClient, useReadContract, useSignMessage, useWriteContract } from "wagmi";
 import type { Address, Hex } from "viem";
 import { bytesToHex, encodePacked, erc20Abi, hexToBytes, keccak256, maxUint256 } from "viem";
 import { fetchPositions, fetchClaimBundles, fetchMarketByEventId } from "@/lib/api";
@@ -154,7 +153,7 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
 }
 
 export function DashboardClient() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const chainId = useChainId();
   const chainMismatch = Boolean(chainId && chainId !== defaultChain.id);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
@@ -173,9 +172,9 @@ export function DashboardClient() {
   const [sortBy, setSortBy] = useState<"recent" | "stake" | "closes">("recent");
   const [searchQuery, setSearchQuery] = useState("");
   const { claimTicket, isPending: claimPending, error: claimError } = useClaimTicket();
-  const { writeContractAsync } = useWriteContract();
+  const { mutateAsync: writeContract } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
-  const { signMessageAsync } = useSignMessage();
+  const { mutateAsync: signMessage } = useSignMessage();
   const explorerBaseEnv = (process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? "").replace(/\/+$/, "");
   const explorerBase =
     explorerBaseEnv || (defaultChain.blockExplorers?.default?.url?.replace(/\/+$/, "") ?? "");
@@ -270,7 +269,7 @@ export function DashboardClient() {
         const signature =
           bundleSignature && bundleSignature.length > 0
             ? bundleSignature
-            : await signMessageAsync({ message });
+            : await signMessage({ message });
         if (!bundleSignature) {
           setBundleSignature(signature);
         }
@@ -289,7 +288,7 @@ export function DashboardClient() {
         return [];
       }
     },
-    [bundleSignature, sanitizeUserActionError, signMessageAsync],
+    [bundleSignature, sanitizeUserActionError, signMessage],
   );
 
   const fetchBundlesWithUi = useMemo(
@@ -331,7 +330,7 @@ export function DashboardClient() {
     const amountWei = BigInt(Math.floor(amountZen * 1e18));
     try {
       if (!escrowAllowance || escrowAllowance < amountWei) {
-        const approveHash = await writeContractAsync({
+        const approveHash = await writeContract({
           address: tokenAddress as Address,
           abi: erc20Abi,
           functionName: "approve",
@@ -343,7 +342,7 @@ export function DashboardClient() {
           await publicClient.waitForTransactionReceipt({ hash: approveHash as any });
         }
       }
-      const depositHash = await writeContractAsync({
+      const depositHash = await writeContract({
         address: escrowAddress as Address,
         abi: [
           {
@@ -396,7 +395,7 @@ export function DashboardClient() {
       return;
     }
     try {
-      const withdrawHash = await writeContractAsync({
+      const withdrawHash = await writeContract({
         address: escrowAddress as Address,
         abi: [
           {
@@ -603,10 +602,9 @@ export function DashboardClient() {
         const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
         const toWinZen =
           toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
-        const quoteId = p.quote_id ?? (p as any).quoteId ?? (bundle as any)?.quoteId ?? null;
         const createdAtTs = parseDate(p.created_at);
         const closesAtTs = parseDate(p.closes_at);
-        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle, createdAtTs, closesAtTs };
+        return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, idx, marketTitle, createdAtTs, closesAtTs };
       });
   }, [bundleLookup, marketDetails, normalizeWei, positions]);
   const filteredPositions = useMemo(() => {
@@ -842,7 +840,7 @@ export function DashboardClient() {
               <p className="text-xs text-slate-400">{roi !== null ? `${(roi * 100).toFixed(1)}%` : "—"}</p>
             </div>
           </div>
-          {filteredPositions.map(({ position: p, bundle, bundleKey, outcomeLabel, toWinZen, quoteId, idx, marketTitle }) => (
+          {filteredPositions.map(({ position: p, bundle, bundleKey, outcomeLabel, toWinZen, idx, marketTitle }) => (
             <div
               key={`${p.market_id}-${p.ticket_id ?? idx}`}
               className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg shadow-black/30"

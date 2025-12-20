@@ -67,8 +67,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
     offsetRef.current = initialReceipts.length;
   }, [filters, initialReceipts, pageSize]);
 
-  const loadMore = useCallback(
-    (mode: "auto" | "manual" = "manual") => {
+  const loadMore = useCallback(() => {
       if (!hasMore || isPending) {
         return;
       }
@@ -89,9 +88,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
           setHasMore(false);
         }
       });
-    },
-    [hasMore, isPending, pageSize],
-  );
+    }, [hasMore, isPending, pageSize]);
 
   useEffect(() => {
     const target = sentinelRef.current;
@@ -103,7 +100,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
         for (const entry of entries) {
           if (entry.isIntersecting) {
             observer.disconnect();
-            loadMore("auto");
+            loadMore();
             break;
           }
         }
@@ -122,7 +119,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
         <div className="flex justify-center">
           <button
             type="button"
-            onClick={() => loadMore("manual")}
+            onClick={() => loadMore()}
             disabled={isPending}
             className="rounded-full border border-white/20 px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 disabled:cursor-not-allowed disabled:opacity-40"
           >

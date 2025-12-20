@@ -44,9 +44,9 @@ vi.mock("@/hooks/useFxStream", () => ({
 }));
 
 vi.mock("wagmi", () => ({
-  useAccount: () => ({ address: undefined }),
+  useConnection: () => ({ address: undefined, connector: undefined, status: "disconnected" }),
   useChainId: () => 2651420,
-  useSwitchChain: () => ({ switchChain: vi.fn() }),
+  useSwitchChain: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
 
 vi.mock("@/lib/wagmi", () => ({

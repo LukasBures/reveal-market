@@ -79,5 +79,3 @@ export function resolveUrlConfig() {
     streamerInternal,
   });
 }
-
-export type UrlConfig = ReturnType<typeof resolveUrlConfig>;

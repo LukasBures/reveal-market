@@ -14,13 +14,6 @@ if (rawZen.length > 0) {
 
 export const ZEN_TOKEN_ADDRESS: Address | null = normalizedZen;
 
-export function requireZenTokenAddress(): Address {
-  if (!ZEN_TOKEN_ADDRESS) {
-    throw new Error("ZEN token address is not configured (set NEXT_PUBLIC_ZEN_TOKEN_ADDRESS)");
-  }
-  return ZEN_TOKEN_ADDRESS;
-}
-
 const rawEscrow = (process.env.NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS ?? "").trim();
 let normalizedEscrow: Address | null = null;
 if (rawEscrow.length > 0) {
