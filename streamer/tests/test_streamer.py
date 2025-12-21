@@ -9,14 +9,15 @@ import pytest
 from app.config import Settings
 from app.data_streamer import DataStreamer
 from app.main import _sse_events
-from app.metrics import get_metrics
+from app.metrics import StreamerMetrics, get_metrics
 from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
+from prometheus_client import CollectorRegistry
 
 
 class StubState(StreamState):
-    def __init__(self):
-        super().__init__(Settings(rest_poll_seconds=5, ws_reconnect_seconds=5))
+    def __init__(self, settings: Settings | None = None):
+        super().__init__(settings or Settings(rest_poll_seconds=5, ws_reconnect_seconds=5))
         self.cached = []
 
     async def cache_tick(self, market_id: str, outcome: str, payload: dict) -> None:
@@ -144,7 +145,7 @@ async def test_flush_loop_handles_cache_errors(caplog):
 
 
 @pytest.mark.asyncio
-async def test_normalize_skips_when_fx_stale(monkeypatch):
+async def test_normalize_publishes_when_fx_stale_by_default():
     state = StubState()
     stale_quote = FxQuote(zen_usd=Decimal("1.0"), fetched_at=None, stale=True)  # type: ignore[arg-type]
 
@@ -153,6 +154,22 @@ async def test_normalize_skips_when_fx_stale(monkeypatch):
 
     state.get_fx = stale_fx  # type: ignore[assignment]
     streamer = DataStreamer(state, state.settings)
+    data = {"id": "m1", "outcomePrices": [0.5, 0.25]}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.cached
+
+
+@pytest.mark.asyncio
+async def test_normalize_skips_when_fx_stale_if_disabled():
+    settings = Settings(publish_when_fx_stale=False, rest_poll_seconds=5, ws_reconnect_seconds=5)
+    state = StubState(settings)
+    stale_quote = FxQuote(zen_usd=Decimal("1.0"), fetched_at=None, stale=True)  # type: ignore[arg-type]
+
+    async def stale_fx():
+        return stale_quote
+
+    state.get_fx = stale_fx  # type: ignore[assignment]
+    streamer = DataStreamer(state, settings)
     data = {"id": "m1", "outcomePrices": [0.5, 0.25]}
     await streamer._normalize_and_publish(data, source="rest")
     assert not state.cached
@@ -216,6 +233,50 @@ async def test_metrics_mark_stale_without_fx():
     streamer = PriceStreamer(state, state.settings)
     streamer._update_fx_metrics()
     assert streamer.metric_fx_stale._value.get() == 1
+
+
+def test_upstream_metrics_wiring():
+    registry = CollectorRegistry()
+    metrics = StreamerMetrics(registry=registry)
+    settings = Settings(rtds_enabled=True, rest_poll_seconds=5, ws_reconnect_seconds=5)
+    state = StreamState(settings, metrics=metrics)
+    streamer = DataStreamer(state, settings, metrics=metrics)
+    ts = datetime(2024, 1, 1, tzinfo=UTC)
+
+    streamer._set_clob_ws_connected(True)
+    assert state.clob_ws_connected is True
+    assert metrics.clob_ws_connected._value.get() == 1
+
+    streamer._record_clob_rest_poll(success=True, ts=ts)
+    assert state.clob_rest_last_poll == ts
+    assert state.clob_rest_last_success == ts
+    assert metrics.clob_rest_last_poll_ts._value.get() == ts.timestamp()
+    assert metrics.clob_rest_last_success_ts._value.get() == ts.timestamp()
+
+    streamer._set_rtds_connected(True)
+    assert state.rtds_connected is True
+    assert metrics.rtds_ws_connected._value.get() == 1
+
+
+@pytest.mark.asyncio
+async def test_start_records_rtds_enabled_flag():
+    registry = CollectorRegistry()
+    metrics = StreamerMetrics(registry=registry)
+    settings = Settings(rtds_enabled=True, rest_poll_seconds=5, ws_reconnect_seconds=5)
+    state = StreamState(settings, metrics=metrics)
+    streamer = DataStreamer(state, settings, metrics=metrics)
+
+    async def noop():
+        return None
+
+    streamer._ws_loop = noop  # type: ignore[assignment]
+    streamer._rest_poll_loop = noop  # type: ignore[assignment]
+    streamer._flush_loop = noop  # type: ignore[assignment]
+    streamer._rtds_loop = noop  # type: ignore[assignment]
+
+    await streamer.start()
+    assert metrics.rtds_enabled._value.get() == 1
+    await streamer.stop()
 
 
 @pytest.mark.asyncio

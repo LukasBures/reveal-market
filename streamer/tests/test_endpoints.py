@@ -55,6 +55,54 @@ def test_health_endpoint_reports_fx(test_app):
     assert "status" in payload
 
 
+def test_health_endpoint_reports_upstream_status(monkeypatch):
+    settings = Settings(rtds_enabled=True)
+    state = StreamState(settings)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(zen_usd=1, fetched_at=now, stale=False, source="test")
+    state.fx_last_update = now
+    state.fx_ws_connected = True
+    state.clob_ws_connected = True
+    state.clob_ws_last_message = now - timedelta(seconds=5)
+    state.clob_ws_last_error = None
+    state.clob_rest_last_poll = now - timedelta(seconds=10)
+    state.clob_rest_last_success = now - timedelta(seconds=10)
+    state.clob_rest_last_error = "timeout"
+    state.rtds_connected = True
+    state.rtds_last_message = now - timedelta(seconds=3)
+    state.rtds_last_error = None
+
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/healthz")
+        payload = resp.json()
+        assert payload["clob_ws_connected"] is True
+        assert payload["clob_ws_last_message"] == state.clob_ws_last_message.isoformat()
+        assert payload["clob_rest_last_poll"] == state.clob_rest_last_poll.isoformat()
+        assert payload["clob_rest_last_success"] == state.clob_rest_last_success.isoformat()
+        assert payload["clob_rest_last_error"] == "timeout"
+        assert payload["rtds_enabled"] is True
+        assert payload["rtds_connected"] is True
+        assert payload["rtds_last_message"] == state.rtds_last_message.isoformat()
+
+
 def test_health_status_stale(monkeypatch):
     settings = Settings(market_stale_seconds=60)
     state = StreamState(settings)
@@ -206,6 +254,37 @@ def test_stream_endpoint_connects(test_app):
             break
 
 
+def test_stream_sse_bootstrap_payloads(test_app):
+    client, state = test_app
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            await asyncio.sleep(0.01)
+            return None
+
+        async def close(self):
+            return
+
+    async def fake_subscribe(market_id: str):
+        return DummyPubSub()
+
+    async def fake_bootstrap(_market_id: str, *, max_outcomes: int = 6):
+        _ = max_outcomes
+        return ['{"market_id":"m1","outcome":0,"price":"0.42"}']
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+    state.get_bootstrap_payloads = fake_bootstrap  # type: ignore[assignment]
+    with client.stream("GET", "/stream", params={"market_id": "m1", "max_events": 1, "heartbeat": 1}) as resp:
+        assert resp.status_code == 200
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            if line.startswith(b"data: "):
+                payload = line.replace(b"data: ", b"").decode()
+                assert '"price":"0.42"' in payload
+                break
+
+
 def test_stream_websocket_sends_messages(test_app):
     client, state = test_app
 
@@ -245,6 +324,32 @@ def test_stream_websocket_sends_messages(test_app):
         assert '"price":"0.42"' in incoming
     # Subscription should have been registered at least once.
     assert "m1" in state._acquired_history
+
+
+def test_stream_ws_bootstrap_payloads(test_app):
+    client, state = test_app
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            await asyncio.sleep(0.01)
+            return None
+
+        async def close(self):
+            return
+
+    async def fake_subscribe(market_id: str):
+        return DummyPubSub()
+
+    async def fake_bootstrap(_market_id: str, *, max_outcomes: int = 6):
+        _ = max_outcomes
+        return ['{"market_id":"m1","outcome":0,"price":"0.99"}']
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+    state.get_bootstrap_payloads = fake_bootstrap  # type: ignore[assignment]
+
+    with client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1") as ws:
+        message = ws.receive_text()
+        assert '"price":"0.99"' in message
 
 
 def test_dashboard_endpoint(monkeypatch):

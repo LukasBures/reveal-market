@@ -12,6 +12,7 @@ REQUIRED = {
     "RELAYER_ESCROW_ADDRESS": "0x" + "2" * 40,
     "RELAYER_HOST": "127.0.0.1",
     "RELAYER_PORT": "8000",
+    "RELAYER_BEARER_TOKEN": "test-token",
 }
 
 
@@ -45,10 +46,17 @@ def test_load_config_uses_defaults(monkeypatch):
     monkeypatch.delenv("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", raising=False)
     monkeypatch.delenv("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", raising=False)
     monkeypatch.delenv("RELAYER_HTTP_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("RELAYER_PREFLIGHT_MODE", raising=False)
+    monkeypatch.delenv("RELAYER_RATE_LIMIT_REQUESTS", raising=False)
+    monkeypatch.delenv("RELAYER_RATE_LIMIT_WINDOW_SECONDS", raising=False)
+    monkeypatch.delenv("RELAYER_IP_ALLOWLIST", raising=False)
+    monkeypatch.delenv("RELAYER_TRUST_X_FORWARDED_FOR", raising=False)
+    monkeypatch.setenv("RELAYER_ALLOW_INSECURE_AUTH", "true")
 
     cfg = load_config()
     assert isinstance(cfg, RelayerConfig)
     assert cfg.bearer_token is None
+    assert cfg.allow_insecure_auth is True
     assert cfg.max_block_age_seconds == 60
     assert cfg.min_relayer_balance_wei == 0
     assert cfg.max_retries == 3
@@ -62,6 +70,11 @@ def test_load_config_uses_defaults(monkeypatch):
     assert cfg.min_escrow_token_balance_wei == 0
     assert cfg.min_relayer_token_allowance_wei == 0
     assert cfg.http_timeout_seconds == 10
+    assert cfg.preflight_mode == "none"
+    assert cfg.rate_limit_requests == 30
+    assert cfg.rate_limit_window_seconds == 60
+    assert cfg.ip_allowlist == []
+    assert cfg.trust_x_forwarded_for is False
 
 
 def test_load_config_applies_overrides(monkeypatch):
@@ -82,6 +95,11 @@ def test_load_config_applies_overrides(monkeypatch):
         RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI="10",  # noqa: S106 - test fixture value
         RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI="20",  # noqa: S106 - test fixture value
         RELAYER_HTTP_TIMEOUT_SECONDS="15",
+        RELAYER_PREFLIGHT_MODE="both",
+        RELAYER_RATE_LIMIT_REQUESTS="5",
+        RELAYER_RATE_LIMIT_WINDOW_SECONDS="12",
+        RELAYER_IP_ALLOWLIST="127.0.0.1,10.0.0.0/24",
+        RELAYER_TRUST_X_FORWARDED_FOR="true",
     )
 
     cfg = load_config()
@@ -99,3 +117,29 @@ def test_load_config_applies_overrides(monkeypatch):
     assert cfg.min_escrow_token_balance_wei == 10
     assert cfg.min_relayer_token_allowance_wei == 20
     assert cfg.http_timeout_seconds == 15
+    assert cfg.preflight_mode == "both"
+    assert cfg.rate_limit_requests == 5
+    assert cfg.rate_limit_window_seconds == 12
+    assert len(cfg.ip_allowlist) == 2
+    assert cfg.trust_x_forwarded_for is True
+
+
+def test_load_config_requires_bearer_token_by_default(monkeypatch):
+    _seed_env(monkeypatch)
+    monkeypatch.delenv("RELAYER_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("RELAYER_ALLOW_INSECURE_AUTH", raising=False)
+
+    with pytest.raises(RuntimeError) as exc:
+        load_config()
+
+    assert "RELAYER_BEARER_TOKEN" in str(exc.value)
+
+
+def test_load_config_allows_insecure_auth_override(monkeypatch):
+    _seed_env(monkeypatch)
+    monkeypatch.delenv("RELAYER_BEARER_TOKEN", raising=False)
+    monkeypatch.setenv("RELAYER_ALLOW_INSECURE_AUTH", "true")
+
+    cfg = load_config()
+    assert cfg.bearer_token is None
+    assert cfg.allow_insecure_auth is True

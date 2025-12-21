@@ -177,6 +177,70 @@ func TestProofHandlerSuccess(t *testing.T) {
 	}
 }
 
+func TestProofHandlerRequiresSecret(t *testing.T) {
+	stub := &stubProver{ready: true, circuitHash: "0x1"}
+	cfg := newTestConfig(t)
+	cfg.SharedSecret = "secret"
+	app := newApp(cfg, stub)
+	payload := settlementProofRequest{
+		MarketID:       "0xabc",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped on unauthorized request")
+	}
+}
+
+func TestProofHandlerAcceptsSecret(t *testing.T) {
+	stub := &stubProver{
+		backend:     "stub-backend",
+		circuitHash: "0x1",
+		ready:       true,
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
+		},
+	}
+	cfg := newTestConfig(t)
+	cfg.SharedSecret = "secret"
+	app := newApp(cfg, stub)
+	payload := settlementProofRequest{
+		MarketID:       "0xabc",
+		MerkleRoot:     "0x1",
+		WinningOutcome: "0",
+		PoolTotals:     []string{"10", "0"},
+		TotalEscrow:    "10",
+		TotalLiability: "9",
+		RakeBps:        "50",
+		CircuitHash:    "0x1",
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", "secret")
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected prover call, got %d", stub.calls)
+	}
+}
+
 func TestProofHandlerStream(t *testing.T) {
 	stub := &stubProver{
 		backend:     "stub-backend",

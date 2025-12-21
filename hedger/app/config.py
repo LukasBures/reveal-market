@@ -80,6 +80,7 @@ class Settings(BaseSettings):
 
     prover_base_url: str = Field(default="http://prover:8085")
     prover_timeout_seconds: int = Field(default=30)
+    prover_shared_secret: str | None = Field(default=None)
     bridge_endpoint: str = Field(default="https://bridge.revealmarket.xyz/submit")
     lp_vault_address: str = Field(default="0x0000000000000000000000000000000000000000")
 

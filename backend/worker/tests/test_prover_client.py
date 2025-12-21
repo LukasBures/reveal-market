@@ -15,6 +15,7 @@ def test_prover_client_success():
         assert payload["marketId"] == "0x123"
         assert "tickets" not in payload
         assert "payoutMultiplierWad" not in payload
+        assert request.headers.get("X-Prover-Secret") == "secret"
         return httpx.Response(
             status_code=200,
             json={
@@ -28,7 +29,7 @@ def test_prover_client_success():
         )
 
     transport = httpx.MockTransport(handler)
-    client = ProverClient("http://prover", timeout_seconds=2.0, transport=transport)
+    client = ProverClient("http://prover", timeout_seconds=2.0, shared_secret="secret", transport=transport)
     request = SettlementProofRequest(
         market_id="0x123",
         merkle_root="0xroot",

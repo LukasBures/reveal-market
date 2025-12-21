@@ -31,7 +31,7 @@ from .polymarket import (
     _parse_group_threshold,
 )
 from .resolution import apply_resolution
-from .settlement import _upsert_settlement_from_chain
+from .settlement import _upsert_settlement_from_chain, settlement_needs_refresh
 from .summary_jobs import maybe_enqueue_summary_job
 
 logger = runtime.logger
@@ -662,7 +662,7 @@ async def collect_market_changes_with_summary(
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == db_market.id)
             )
             settlement = settlement_result.scalar_one_or_none()
-            if settlement is None:
+            if settlement is None or settlement_needs_refresh(settlement):
                 # Best-effort hydrate settlement from chain once when we have a final resolution and commitments.
                 hydrated = None
                 try:
@@ -690,13 +690,13 @@ async def collect_market_changes_with_summary(
                             market_id=db_market.id,
                             error=str(exc),
                         )
-                if settlement is None:
+                if settlement is None or settlement_needs_refresh(settlement):
                     if logger.isEnabledFor(logging.DEBUG):
                         log_event(
                             logger,
                             logging.DEBUG,
                             event="worker.proof.skipped_missing_settlement",
-                            message="skipping proof job because settlement snapshot is missing",
+                            message="skipping proof job because settlement snapshot is missing or incomplete",
                             event_id=db_market.event_id,
                             market_id=db_market.id,
                         )

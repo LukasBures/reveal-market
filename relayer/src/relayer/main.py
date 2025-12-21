@@ -8,6 +8,7 @@ from .app import create_app
 from .config import load_config
 from .logging_setup import configure_logging
 from .queue import TxQueue
+from .security import RateLimiter
 from .service import build_service
 
 middleware_module = importlib.import_module("web3.middleware")
@@ -43,6 +44,7 @@ service = build_service(
     min_escrow_token_balance_wei=cfg.min_escrow_token_balance_wei,
     min_relayer_token_allowance_wei=cfg.min_relayer_token_allowance_wei,
     fee_bump_percent=cfg.fee_bump_percent,
+    preflight_mode=cfg.preflight_mode,
     api_base_url=cfg.api_base_url,
     api_bearer_token=cfg.api_bearer_token,
     api_timeout_seconds=cfg.api_timeout_seconds,
@@ -56,6 +58,10 @@ queue = TxQueue(
     max_attempts=cfg.queue_max_attempts,
     fee_bump_percent=cfg.fee_bump_percent,
 )
+
+rate_limiter = None
+if cfg.rate_limit_requests > 0:
+    rate_limiter = RateLimiter(cfg.rate_limit_requests, cfg.rate_limit_window_seconds)
 
 logger.info(
     "relayer_boot",
@@ -76,4 +82,7 @@ app = create_app(
     cfg.rpc_url,
     bearer_token=cfg.bearer_token,
     tx_queue=queue,
+    rate_limiter=rate_limiter,
+    ip_allowlist=cfg.ip_allowlist,
+    trust_x_forwarded_for=cfg.trust_x_forwarded_for,
 )

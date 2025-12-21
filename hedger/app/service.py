@@ -99,6 +99,7 @@ class HedgerService:
         self.settlement = SettlementCoordinator(
             base_url=settings.prover_base_url,
             timeout_seconds=settings.prover_timeout_seconds,
+            shared_secret=settings.prover_shared_secret,
             repository=self.repository,
         )
         self.lock_manager: RedisLockManager | None = None

@@ -47,6 +47,41 @@ class StreamerMetrics:
             ["source", "reason"],
             registry=registry,
         )
+        self.clob_ws_connected = Gauge(
+            "streamer_clob_ws_connected",
+            "CLOB websocket connectivity (1=connected,0=disconnected)",
+            registry=registry,
+        )
+        self.clob_ws_last_message_ts = Gauge(
+            "streamer_clob_ws_last_message_timestamp_seconds",
+            "Unix timestamp of last CLOB websocket message",
+            registry=registry,
+        )
+        self.clob_rest_last_poll_ts = Gauge(
+            "streamer_clob_rest_last_poll_timestamp_seconds",
+            "Unix timestamp of last CLOB REST poll attempt",
+            registry=registry,
+        )
+        self.clob_rest_last_success_ts = Gauge(
+            "streamer_clob_rest_last_success_timestamp_seconds",
+            "Unix timestamp of last successful CLOB REST poll",
+            registry=registry,
+        )
+        self.rtds_ws_connected = Gauge(
+            "streamer_rtds_ws_connected",
+            "RTDS websocket connectivity (1=connected,0=disconnected)",
+            registry=registry,
+        )
+        self.rtds_last_message_ts = Gauge(
+            "streamer_rtds_last_message_timestamp_seconds",
+            "Unix timestamp of last RTDS message",
+            registry=registry,
+        )
+        self.rtds_enabled = Gauge(
+            "streamer_rtds_enabled",
+            "RTDS enabled flag (1=enabled,0=disabled)",
+            registry=registry,
+        )
 
     def record_delivery(self, transport: str, payload: Any) -> None:
         """Increment delivery counter with parsed labels."""
@@ -96,6 +131,27 @@ class StreamerMetrics:
                 stale.append(market_id)
         self.stale_market_total.set(len(stale))
         return stale
+
+    def record_clob_ws_connected(self, connected: bool) -> None:
+        self.clob_ws_connected.set(1 if connected else 0)
+
+    def record_clob_ws_message(self, ts: datetime) -> None:
+        self.clob_ws_last_message_ts.set(ts.timestamp())
+
+    def record_clob_rest_poll(self, ts: datetime) -> None:
+        self.clob_rest_last_poll_ts.set(ts.timestamp())
+
+    def record_clob_rest_success(self, ts: datetime) -> None:
+        self.clob_rest_last_success_ts.set(ts.timestamp())
+
+    def record_rtds_ws_connected(self, connected: bool) -> None:
+        self.rtds_ws_connected.set(1 if connected else 0)
+
+    def record_rtds_message(self, ts: datetime) -> None:
+        self.rtds_last_message_ts.set(ts.timestamp())
+
+    def record_rtds_enabled(self, enabled: bool) -> None:
+        self.rtds_enabled.set(1 if enabled else 0)
 
 
 _metrics: StreamerMetrics | None = None

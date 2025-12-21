@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -242,10 +243,12 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if errMsg != "" {
 		payload["artifact_error"] = errMsg
 	}
+	status := http.StatusOK
 	if !ready {
 		payload["status"] = "degraded"
+		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, http.StatusOK, payload)
+	writeJSON(w, status, payload)
 }
 
 func (a *app) heartbeatHandler(w http.ResponseWriter, r *http.Request) {
@@ -374,6 +377,18 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
+	}
+	secret := strings.TrimSpace(a.cfg.SharedSecret)
+	if secret != "" {
+		provided := strings.TrimSpace(r.Header.Get("X-Prover-Secret"))
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+			logLine("warn", "prover.request.unauthorized", map[string]any{
+				"path":   r.URL.Path,
+				"method": r.Method,
+			})
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid prover secret", nil)
+			return
+		}
 	}
 	ready, missing, mismatches, artifactErr := a.readyForProof()
 	if !ready {

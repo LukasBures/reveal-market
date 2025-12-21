@@ -12,7 +12,7 @@ from psycopg.rows import dict_row
 from structlog import get_logger
 from web3.exceptions import Web3Exception
 
-from .metrics import QUEUE_DEPTH, QUEUE_OUTCOMES
+from .metrics import QUEUE_DEADLETTER_DEPTH, QUEUE_DEPTH, QUEUE_OLDEST_BACKLOG_AGE_SECONDS, QUEUE_OUTCOMES
 from .service import RelayerService, TxSendError
 
 logger = get_logger()
@@ -392,11 +392,40 @@ class TxQueue:
                 except TimeoutError:
                     continue
 
+    def _get_queue_stats_sync(self) -> dict[str, Any]:
+        now = int(time.time())
+        query = """
+            SELECT
+                SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END) AS depth,
+                SUM(CASE WHEN status = 'deadletter' THEN 1 ELSE 0 END) AS deadletter,
+                MIN(CASE WHEN status IN ('pending', 'running') THEN created_at ELSE NULL END) AS oldest_backlog
+            FROM jobs
+        """
+        with self._lock, self._connect() as conn:
+            row = conn.execute(query).fetchone()
+        if not row:
+            return {"depth": 0, "deadletter": 0, "oldestBacklogAgeSeconds": None}
+        depth = int(row["depth"] or 0)
+        deadletter = int(row["deadletter"] or 0)
+        oldest_backlog_raw = row["oldest_backlog"]
+        oldest_backlog_age = None
+        if oldest_backlog_raw is not None:
+            oldest_backlog_age = max(0, now - int(oldest_backlog_raw))
+        return {
+            "depth": depth,
+            "deadletter": deadletter,
+            "oldestBacklogAgeSeconds": oldest_backlog_age,
+        }
+
+    async def get_stats(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._get_queue_stats_sync)
+
     def _update_depth(self) -> None:
-        with self._connect() as conn:
-            row = conn.execute("SELECT COUNT(*) as cnt FROM jobs WHERE status IN ('pending', 'running')").fetchone()
-            depth = int(row["cnt"]) if row else 0
-            QUEUE_DEPTH.set(depth)
+        stats = self._get_queue_stats_sync()
+        QUEUE_DEPTH.set(stats["depth"])
+        QUEUE_DEADLETTER_DEPTH.set(stats["deadletter"])
+        oldest_backlog_age = stats["oldestBacklogAgeSeconds"]
+        QUEUE_OLDEST_BACKLOG_AGE_SECONDS.set(oldest_backlog_age or 0)
 
     def _list_deadletter_sync(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:

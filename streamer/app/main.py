@@ -51,11 +51,21 @@ async def _sse_events(
     *,
     metrics=None,
     on_close: Callable[[], None] | None = None,
+    bootstrap_payloads: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     try:
         effective_heartbeat = min(heartbeat_seconds, 1) if max_events else heartbeat_seconds
         heartbeat = asyncio.create_task(asyncio.sleep(effective_heartbeat))
         emitted = 0
+        if bootstrap_payloads:
+            for payload in bootstrap_payloads:
+                yield f"data: {payload}\n\n"
+                if metrics:
+                    with suppress(Exception):
+                        metrics.record_delivery("sse", payload)
+                emitted += 1
+                if max_events and emitted >= max_events:
+                    return
         while True:
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=effective_heartbeat)
             if message and message.get("data"):
@@ -218,6 +228,16 @@ def create_app() -> FastAPI:
     async def _health_payload() -> dict:
         fx = await state.get_fx()
         stale_markets = state.stale_markets(settings.market_stale_seconds)
+        now = datetime.now(UTC)
+
+        def _age_seconds(ts: datetime | None) -> float | None:
+            if not ts:
+                return None
+            return (now - ts).total_seconds()
+
+        def _iso(ts: datetime | None) -> str | None:
+            return ts.isoformat() if ts else None
+
         if stale_markets:
             stale_sample = stale_markets[:50]
             extra = {
@@ -246,6 +266,20 @@ def create_app() -> FastAPI:
             "fx_ws_connected": state.fx_ws_connected,
             "fx_last_error": state.fx_last_error,
             "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
+            "clob_ws_connected": state.clob_ws_connected,
+            "clob_ws_last_message": _iso(state.clob_ws_last_message),
+            "clob_ws_last_message_age_seconds": _age_seconds(state.clob_ws_last_message),
+            "clob_ws_last_error": state.clob_ws_last_error,
+            "clob_rest_last_poll": _iso(state.clob_rest_last_poll),
+            "clob_rest_last_poll_age_seconds": _age_seconds(state.clob_rest_last_poll),
+            "clob_rest_last_success": _iso(state.clob_rest_last_success),
+            "clob_rest_last_success_age_seconds": _age_seconds(state.clob_rest_last_success),
+            "clob_rest_last_error": state.clob_rest_last_error,
+            "rtds_enabled": settings.rtds_enabled,
+            "rtds_connected": state.rtds_connected,
+            "rtds_last_message": _iso(state.rtds_last_message),
+            "rtds_last_message_age_seconds": _age_seconds(state.rtds_last_message),
+            "rtds_last_error": state.rtds_last_error,
             "stale_markets": stale_markets,
             "stale_count": len(stale_markets),
             "market_stale_threshold_seconds": settings.market_stale_seconds,
@@ -713,6 +747,7 @@ def create_app() -> FastAPI:
                 "symbols": symbols,
             },
         )
+        bootstrap_payloads = await state.get_bootstrap_payloads(market_id)
         return StreamingResponse(
             _sse_events(
                 pubsub,
@@ -720,6 +755,7 @@ def create_app() -> FastAPI:
                 max_events=max_events,
                 metrics=metrics,
                 on_close=lambda: (state.release_assets(assets_for_release), _release_connection()),
+                bootstrap_payloads=bootstrap_payloads,
             ),
             media_type="text/event-stream",
         )
@@ -796,6 +832,11 @@ def create_app() -> FastAPI:
                 "symbols": symbols,
             },
         )
+        bootstrap_payloads = await state.get_bootstrap_payloads(market_id)
+        for payload in bootstrap_payloads:
+            await websocket.send_text(payload)
+            with suppress(Exception):
+                metrics.record_delivery("ws", payload)
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=heartbeat)

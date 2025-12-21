@@ -23,6 +23,7 @@ type Config struct {
 	ManualCircuitHash   string
 	HeartbeatSeconds    int
 	BackendMode         proverBackendMode
+	SharedSecret        string
 	NodeBinary          string
 	RapidSnarkBinary    string
 	CircuitDir          string
@@ -53,6 +54,7 @@ func LoadConfig() Config {
 		ManualCircuitHash:   getenv("PROVER_CIRCUIT_HASH", ""),
 		HeartbeatSeconds:    intEnv("PROVER_HEARTBEAT_SECONDS", 60),
 		BackendMode:         parseBackendMode(getenv("PROVER_BACKEND", "groth16")),
+		SharedSecret:        getenv("PROVER_SHARED_SECRET", ""),
 		NodeBinary:          getenv("PROVER_NODE_BINARY", "node"),
 		RapidSnarkBinary:    getenv("PROVER_RAPIDSNARK_BINARY", "rapidsnark"),
 		CircuitDir:          baseDir,

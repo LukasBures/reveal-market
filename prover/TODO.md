@@ -2,8 +2,6 @@
 
 ## MVP blockers
 
-- Lock down `/api/v1/proofs/settlement` (shared secret header, mTLS, or network policy) and update the worker client + docs to match.
-- Add a readiness signal that fails when `ready=false` (either return HTTP 503 from `/healthz` or add `/readyz`) and update the Docker/K8s healthcheck to use it.
 - Surface circuit metadata (`circuitName`, `circuitVersion`) from `settlement_hashes.json` in `/healthz` and proof responses for auditing.
 
 ## Post-MVP hardening

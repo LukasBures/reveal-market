@@ -34,5 +34,15 @@ QUEUE_OUTCOMES = Counter(
 
 QUEUE_DEPTH = Gauge(
     "relayer_queue_depth",
-    "Number of pending queue jobs",
+    "Number of pending/running queue jobs",
+)
+
+QUEUE_DEADLETTER_DEPTH = Gauge(
+    "relayer_queue_deadletter_depth",
+    "Number of deadletter queue jobs",
+)
+
+QUEUE_OLDEST_BACKLOG_AGE_SECONDS = Gauge(
+    "relayer_queue_oldest_backlog_age_seconds",
+    "Age in seconds of the oldest pending/running queue job",
 )

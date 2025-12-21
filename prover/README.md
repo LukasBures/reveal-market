@@ -75,6 +75,7 @@ Concurrency is guarded by a semaphore so at most `PROVER_MAX_CONCURRENCY` rapids
 | `PROVER_LISTEN_ADDR` | `0.0.0.0:8085` | HTTP bind address. |
 | `PROVER_VERSION` | `dev` | Version string surfaced in `/healthz` and proof responses. |
 | `PROVER_LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
+| `PROVER_SHARED_SECRET` | empty | Optional shared secret; when set, clients must send `X-Prover-Secret`. |
 | `PROVER_CIRCUIT_DIR` | `circuits/build` | Base directory for circuit artifacts. |
 | `PROVER_WITNESS_SCRIPT` | `${PROVER_CIRCUIT_DIR}/settlement_js/generate_witness.js` | Path to the Circom witness script. |
 | `PROVER_WASM_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_js/settlement.wasm` | Path to the WASM file used by the witness script. |
@@ -97,11 +98,12 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 
 | Endpoint | Method | Description |
 | --- | --- | --- |
-| `/healthz` | GET | Returns status, backend mode, circuit hash, uptime, and last heartbeat/proof timestamps. |
+| `/healthz` | GET | Returns status, backend mode, circuit hash, uptime, and last heartbeat/proof timestamps. Returns HTTP 503 when `ready=false`. |
 | `/heartbeat` | GET | Lightweight liveness check used by Docker. |
 | `/api/v1/proofs/settlement` | POST | Accepts the settlement payload and responds with Groth16 proof data. |
 
 Streaming responses are supported by passing `?stream=1` or an `Accept: text/event-stream` header. Events include `accepted`, `proof`, `error`, and `cancelled`.
+If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on requests or the service will return HTTP 401.
 
 **Request body** mirrors `settlementProofRequest`:
 
@@ -201,7 +203,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.
 - **Alerting** – Monitor `prover.request.failed` logs and add Prometheus alerts for rising 5xx counts, long proof latencies, or repeated rapidsnark exits to detect artifact corruption early.
-- **TLS / exposure** – If exposing the prover externally, front it with a reverse proxy (e.g., Caddy or Nginx) that terminates TLS and rate-limits the proof endpoint. The service does not implement auth; keep `/api/v1/proofs/settlement` behind internal networks or enforce a shared secret at the ingress. Only `/healthz` and `/metrics` should be internet-reachable in most deployments.
+- **TLS / exposure** – If exposing the prover externally, front it with a reverse proxy (e.g., Caddy or Nginx) that terminates TLS and rate-limits the proof endpoint. The service only supports shared-secret auth; set `PROVER_SHARED_SECRET` and require `X-Prover-Secret`, or keep `/api/v1/proofs/settlement` on internal networks. Only `/healthz` and `/metrics` should be internet-reachable in most deployments.
 - **Deployment steps** – Generate/mount artifacts, set env (`PROVER_LISTEN_ADDR`, `PROVER_CIRCUIT_DIR`, `PROVER_RAPIDSNARK_BINARY`, `PROVER_NODE_BINARY`, timeout/concurrency, `PROVER_TEMP_DIR`), run `./run_tests.sh` (fails if artifacts missing), then start the service. Post-deploy smoke: hit `/healthz` and submit a small proof payload; alert on `artifacts_ok=0` or repeated `prover.request.failed`.
 
 ## Docker Notes

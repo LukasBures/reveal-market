@@ -21,6 +21,10 @@ class Settings(BaseSettings):
         default=cast(AnyHttpUrl, "https://clob.polymarket.com"),
         description="Optional Polymarket CLOB host used by py_clob_client for midpoint fetches",
     )
+    clob_rest_url: AnyHttpUrl = Field(
+        default=cast(AnyHttpUrl, "https://clob.polymarket.com/markets"),
+        description="Polymarket CLOB REST markets URL",
+    )
     subgraph_default_url: AnyHttpUrl | None = Field(
         default=None,
         description="Default Polymarket subgraph endpoint (used when type-specific endpoints are unset)",
@@ -112,6 +116,10 @@ class Settings(BaseSettings):
     ws_reconnect_seconds: float = Field(default=5.0, ge=0.01, description="Backoff between WS reconnect attempts")
     rtds_enabled: bool = Field(default=False, description="Enable RTDS websocket ingestion (disabled by default)")
     publish_throttle_ms: int = Field(default=300, ge=50, description="Throttle for publishing ticks to Redis (ms)")
+    publish_when_fx_stale: bool = Field(
+        default=True,
+        description="Publish market ticks even when FX is stale (payloads include fx_stale flag).",
+    )
     max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
     cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")
     pubsub_prefix: str = Field(default="streamer:stream", description="Redis pubsub channel prefix for streams")

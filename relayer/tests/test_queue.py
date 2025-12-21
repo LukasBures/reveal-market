@@ -147,3 +147,27 @@ async def test_worker_survives_unexpected_error(tmp_path):
     assert queue._worker is not None  # noqa: SLF001
     assert not queue._worker.done()  # noqa: SLF001
     await queue.stop()
+
+
+@pytest.mark.asyncio
+async def test_queue_stats_reports_backlog_and_deadletter(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    stats = await queue.get_stats()
+    assert stats["depth"] == 0
+    assert stats["deadletter"] == 0
+    assert stats["oldestBacklogAgeSeconds"] is None
+
+    job_id = await queue.enqueue("commit", {"foo": "bar"})
+    stats = await queue.get_stats()
+    assert stats["depth"] == 1
+    assert stats["oldestBacklogAgeSeconds"] is not None
+
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute("UPDATE jobs SET status = 'deadletter' WHERE id = ?", (job_id,))
+
+    stats = await queue.get_stats()
+    assert stats["depth"] == 0
+    assert stats["deadletter"] == 1

@@ -211,6 +211,7 @@ class Settings(BaseSettings):
     prover_enabled: bool = Field(default=False)
     prover_base_url: AnyHttpUrl | None = Field(default=None)
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
+    prover_shared_secret: SecretStr | None = Field(default=None)
     proof_cache_prefix: str = Field(default="reveal_market:proof_receipts")
     proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
@@ -266,6 +267,7 @@ class Settings(BaseSettings):
         "settlement_max_priority_fee_gwei",
         "goldsky_subgraph_url",
         "goldsky_api_key",
+        "prover_shared_secret",
         mode="before",
     )
     @classmethod

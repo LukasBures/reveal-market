@@ -212,6 +212,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_PROVER_ENABLED` | Toggle settlement-proof requests (requires `RM_AUTO_SETTLEMENT_ENABLED=true`). When false, the worker skips prover calls entirely. |
 | `RM_PROVER_BASE_URL` | Base URL for the `prover` container (defaults to `http://prover:8085` in docker-compose). |
 | `RM_PROVER_TIMEOUT_SECONDS` | HTTP timeout when calling the prover service. |
+| `RM_PROVER_SHARED_SECRET` | Optional shared secret; when set, the worker sends `X-Prover-Secret` to the prover. |
 | `RM_PROOF_CACHE_PREFIX` / `RM_PROOF_CACHE_TTL_SECONDS` | Redis key namespace + TTL for cached proof receipts. |
 | `RM_PROOF_QUEUE_KEY` / `RM_PROOF_QUEUE_DEDUPE_KEY` | Redis list/set used for background proof jobs so ingestion doesn’t block. |
 | `RM_PROOF_QUEUE_POLL_SECONDS` | Sleep between queue polls; defaults to 1s. |

@@ -18,8 +18,9 @@ set -euo pipefail
 #   PROTOCOL_LIABILITY_CAP_WEI   Per-market liability cap from protocol pool (wei)
 #   CIRCUIT_HASH                 Settlement circuit hash to enforce
 # Optional:
-#   USE_STUB_VERIFIER=1    Use stub verifier (skips SETTLEMENT_VK_JSON)
+#   USE_STUB_VERIFIER=1    Use stub verifier (skips SETTLEMENT_VK_JSON/SETTLEMENT_VK_PATH)
 #   SETTLEMENT_VK_JSON     Full verifying key JSON when USE_STUB_VERIFIER=0
+#   SETTLEMENT_VK_PATH     Path to verifying key JSON (default: cache/settlement-vk.json)
 #   CHAIN_ID               Chain id for broadcasting (passed to forge)
 #   FORGE_BROADCAST_ARGS   Extra args to append to forge script (e.g., --legacy)
 # ----------------------------------------------------------------------
@@ -66,7 +67,7 @@ require_env "CIRCUIT_HASH"
 USE_STUB_VERIFIER="${USE_STUB_VERIFIER:-0}"
 if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
   if [[ -z "${SETTLEMENT_VK_JSON:-}" ]]; then
-    DEFAULT_VK_PATH="${ROOT_DIR}/cache/settlement_deploy.json"
+    DEFAULT_VK_PATH="${ROOT_DIR}/cache/settlement-vk.json"
     echo "$DEFAULT_VK_PATH"
     VK_PATH="${SETTLEMENT_VK_PATH:-${DEFAULT_VK_PATH}}"
     if [[ -f "${VK_PATH}" ]]; then

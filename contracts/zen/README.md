@@ -20,6 +20,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 - Fixed ticket value per market (constant in storage) with per-market `maxCommitments` to size the anonymity set and cap liability.
 - Rake skimmed at commit time and tracked via pool events; settlement asserts proof rake matches current config so mismatched circuits fail.
 - Commit deadlines enforce monotonic extensions only; `setCommitsPaused`/`setClaimsPaused` allow emergency halts without killing markets.
+- Escape hatch: relayer or factory owner can `enableRefunds` after the commit deadline to cancel settlement and refund net tickets.
 - Authorization signer enforced on every commit; digest binds market, id, commitment, user, nonce, expiry, ticket value, chain id. Nonces and expiries prevent replay.
 - ProtocolPool tracks per-market draws and global balance; `ProtocolPool.draw` reverts on cap breach. Surplus flows back after settlement.
 - Circuit hash stored in factory and market; settlement checks proof hash to prevent mismatched circuits.

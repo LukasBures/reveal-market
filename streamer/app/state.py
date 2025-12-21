@@ -69,11 +69,21 @@ class StreamState:
         self._fx_prev_price_ts: datetime | None = None
         self._fx_rejection_count: int = 0
         self._fx_lock = asyncio.Lock()
+        self.clob_ws_connected: bool = False
+        self.clob_ws_last_message: datetime | None = None
+        self.clob_ws_last_connect: datetime | None = None
+        self.clob_ws_last_error: str | None = None
+        self.clob_rest_last_poll: datetime | None = None
+        self.clob_rest_last_success: datetime | None = None
+        self.clob_rest_last_error: str | None = None
+        self.rtds_connected: bool = False
+        self.rtds_last_message: datetime | None = None
+        self.rtds_last_connect: datetime | None = None
+        self.rtds_last_error: str | None = None
         self.subscriptions = SubscriptionManager(max_items=self.settings.max_subscriptions)
         self.last_seen: dict[str, datetime] = {}
         self.last_published: dict[str, datetime] = {}
         self.tick_sizes: dict[str, Decimal] = {}
-        self._rtds_connected = False
         self.rtds_symbols: set[str] = set()
         self.rtds_symbols_version: int = 0
         self.market_tokens: dict[str, list[str]] = {}
@@ -324,6 +334,54 @@ class StreamState:
         key = f"{self.settings.cache_prefix}:{market_id}:{outcome}"
         data = await self.redis.hgetall(key)
         return data or {}
+
+    async def get_bootstrap_payloads(self, market_id: str, *, max_outcomes: int = 6) -> list[str]:
+        """Return cached price payloads for a market to bootstrap new streams."""
+
+        if not self.redis or not market_id or max_outcomes <= 0:
+            return []
+
+        outcomes: list[str] = []
+        tokens = self.market_tokens.get(market_id)
+        if tokens:
+            outcomes = [str(idx) for idx in range(min(len(tokens), max_outcomes))]
+        else:
+            outcomes = await self._discover_cached_outcomes(market_id, max_outcomes)
+            if not outcomes:
+                outcomes = [str(idx) for idx in range(min(2, max_outcomes))]
+
+        payloads: list[str] = []
+        for outcome in outcomes:
+            cached = await self.get_latest(market_id, outcome)
+            if cached:
+                payloads.append(json.dumps(cached))
+        return payloads
+
+    async def _discover_cached_outcomes(self, market_id: str, max_outcomes: int) -> list[str]:
+        if not self.redis or max_outcomes <= 0:
+            return []
+        scan_iter = getattr(self.redis, "scan_iter", None)
+        if scan_iter is None:
+            return []
+        pattern = f"{self.settings.cache_prefix}:{market_id}:*"
+        outcomes: list[str] = []
+        try:
+            async for key in scan_iter(match=pattern, count=100):
+                key_str = str(key)
+                outcome = key_str.rsplit(":", 1)[-1]
+                if not outcome.isdigit():
+                    continue
+                outcomes.append(outcome)
+                if len(outcomes) >= max_outcomes:
+                    break
+        except Exception as exc:
+            logger.debug(
+                "bootstrap outcome scan failed",
+                extra={"event": "stream.bootstrap.scan_failed", "market_id": market_id, "error": str(exc)},
+            )
+            return []
+        unique = sorted(set(outcomes), key=int)
+        return unique[:max_outcomes]
 
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:
         now = datetime.now(UTC)

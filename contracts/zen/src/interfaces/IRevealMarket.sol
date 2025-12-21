@@ -5,7 +5,8 @@ interface IRevealMarket {
     enum Phase {
         Commit,
         Locked,
-        Settled
+        Settled,
+        Cancelled
     }
 
     struct CommitAuth {

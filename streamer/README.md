@@ -26,10 +26,10 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 - Environment variables (examples use `STREAMER_` prefix; see `.env.example` and `app/config.py` for the full list):
   - Mode/presets: `RM_ENVIRONMENT=local|prod` (overrides `STREAMER_PUBLIC_BASE_URL`, `STREAMER_INTERNAL_BASE_URL`, `STREAMER_CORS_ALLOW_ORIGINS` via `app/env_presets.py`).
   - Core: `STREAMER_REDIS_URL`, `STREAMER_API_HOST`, `STREAMER_API_PORT`
-  - Polymarket: `STREAMER_CLOB_WS_URL`, `STREAMER_CLOB_HOST`, `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_ENABLED`, `STREAMER_RTDS_PING_SECONDS`, `STREAMER_REST_POLL_SECONDS`, `STREAMER_WS_RECONNECT_SECONDS`
+  - Polymarket: `STREAMER_CLOB_WS_URL`, `STREAMER_CLOB_HOST`, `STREAMER_CLOB_REST_URL`, `STREAMER_RTDS_WS_URL`, `STREAMER_RTDS_ENABLED`, `STREAMER_RTDS_PING_SECONDS`, `STREAMER_REST_POLL_SECONDS`, `STREAMER_WS_RECONNECT_SECONDS`
   - Subgraphs: `STREAMER_SUBGRAPH_DEFAULT_URL` (or granular `STREAMER_SUBGRAPH_MARKETS_URL`, `STREAMER_SUBGRAPH_TRADES_URL`, `STREAMER_SUBGRAPH_ACTIVITY_URL`, `STREAMER_SUBGRAPH_POSITIONS_URL`, `STREAMER_SUBGRAPH_OPEN_INTEREST_URL`, `STREAMER_SUBGRAPH_PNL_URL`)
   - FX: `STREAMER_FX_PRIMARY_WS_URL`, `STREAMER_FX_PRIMARY_REST_URL`, `STREAMER_FX_SECONDARY_REST_URL`, `STREAMER_FX_REST_INTERVAL_SECONDS`, `STREAMER_FX_WS_STALE_TTL_SECONDS`, `STREAMER_FX_MAX_AGE_SECONDS`, `STREAMER_FX_MAX_JUMP_PERCENT`, `STREAMER_FX_JUMP_WINDOW_SECONDS`, `STREAMER_FX_MIN_PRICE`, `STREAMER_FX_MAX_PRICE`, `STREAMER_FX_MAX_CONSECUTIVE_REJECTIONS`
-  - Pricing/display: `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT` (only worsen applies here)
+  - Pricing/display: `STREAMER_WORSEN_PERCENT`, `STREAMER_HAIRCUT_PERCENT`, `STREAMER_RAKE_PERCENT` (only worsen applies here), `STREAMER_PUBLISH_WHEN_FX_STALE`
   - Hosts/CORS: `STREAMER_PUBLIC_BASE_URL`, `STREAMER_INTERNAL_BASE_URL`, `STREAMER_CORS_ALLOW_ORIGINS`, `STREAMER_CORS_ALLOW_METHODS`, `STREAMER_CORS_ALLOW_HEADERS`, `STREAMER_CORS_ALLOW_CREDENTIALS`
   - Health/history: `STREAMER_MARKET_STALE_SECONDS`, `STREAMER_MARKET_STALE_EVICT_SECONDS`, `STREAMER_PUBLISH_THROTTLE_MS`, `STREAMER_HISTORY_LIMIT`, `STREAMER_HISTORY_TTL_SECONDS`, `STREAMER_HISTORY_DEBOUNCE_SECONDS`
   - Access/ops: `STREAMER_ACCESS_TOKEN`, `STREAMER_CONTROL_TOKEN`, `STREAMER_SIGNING_SECRET`, `STREAMER_MAX_SUBSCRIPTIONS`, `STREAMER_MAX_ACTIVE_CONNECTIONS`, `STREAMER_RATE_LIMIT_PER_MINUTE`
@@ -164,7 +164,7 @@ The bundled `docker-compose.yml` includes Redis and exposes `8100`; healthcheck 
 
 ## Notes
 - Keep subscriptions scoped (assets_ids/symbols) to limit bandwidth.
-- If FX is stale, market publishes pause (except the fallback price). Cached payloads remain available via `/clob/*` and `/history`.
+- Market publishes continue when FX is stale and payloads include `fx_stale=true`. Set `STREAMER_PUBLISH_WHEN_FX_STALE=false` to pause publishes until FX recovers. Cached payloads remain available via `/clob/*` and `/history`.
 - Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.
 - Frontend consumers default to Horizen Testnet (chain id `2651420`); align CORS origins/hosts and pricing chain envs when pointing at a different network.
 - Prometheus: gauges/counters expose FX source/staleness, WS health, stream deliveries/dropped events, ingest drops, tick totals, and per-market staleness (`/metrics`). Watch for `streamer.host.mismatch`/`streamer.cors.mismatch` logs when hosts or CORS config diverge from frontend/API origins.

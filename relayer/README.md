@@ -19,11 +19,14 @@ Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to t
 - `CHAIN_ID`: matching chain ID (e.g., `2651420`).
 - `RELAYER_HOST`: bind host (e.g., `0.0.0.0`).
 - `RELAYER_PORT`: bind port (e.g., `8088`).
-- `RELAYER_BEARER_TOKEN` (optional): if set, `Authorization: Bearer <token>` is required for `/commit`, `/claim`, `/status`, and `/admin/*`.
+- `RELAYER_BEARER_TOKEN`: required unless `RELAYER_ALLOW_INSECURE_AUTH=true`; used for `Authorization: Bearer <token>` on `/commit`, `/claim`, `/status`, and `/admin/*`.
+- `RELAYER_ALLOW_INSECURE_AUTH` (default `false`): set to `true` to allow unauthenticated access in local dev.
 - `RELAYER_MAX_BLOCK_AGE_SECONDS` (default `60`): mark health degraded if the latest block is older.
 - `RELAYER_MIN_BALANCE_WEI` (default `0`): mark health degraded when relayer ETH balance is below this.
 - `RELAYER_MAX_RETRIES` (default `3`), `RELAYER_RETRY_BACKOFF_SECONDS` (default `0.5`), `RELAYER_TX_TIMEOUT_SECONDS` (default `120`): tx retry/backoff + receipt wait tuning.
 - `RELAYER_HTTP_TIMEOUT_SECONDS` (default `10`): RPC HTTP request timeout.
+- `RELAYER_PREFLIGHT_MODE` (default `none`): set to `call`, `estimate`, or `both` to run `eth_call`/`estimate_gas` checks before sending.
+- Abuse protection: `RELAYER_RATE_LIMIT_REQUESTS` (default `30`, set `0` to disable), `RELAYER_RATE_LIMIT_WINDOW_SECONDS` (default `60`), `RELAYER_IP_ALLOWLIST` (comma-separated IPs/CIDRs), `RELAYER_TRUST_X_FORWARDED_FOR` (default `false`).
 - Queue + bumping: prefer Postgres via `RM_DATABASE_URL` (e.g., `postgresql+psycopg2://user:<REDACTED>@host:5432/db` or `postgresql://...`); fallback SQLite path via `RELAYER_QUEUE_DB_PATH` (default `relayer_queue.db`). Tuning: `RELAYER_QUEUE_POLL_SECONDS` (default `1`), `RELAYER_QUEUE_MAX_ATTEMPTS` (default `5`), `RELAYER_FEE_BUMP_PERCENT` (default `0.15` bump per retry).
 - Token health thresholds: `RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI`, `RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI`.
 - Backend ingest (optional): `RELAYER_API_BASE_URL`, `RELAYER_API_BEARER_TOKEN`, `RELAYER_API_TIMEOUT_SECONDS` (default `10`).
@@ -61,9 +64,17 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=src uv run pytest
 # or: make test
 ```
 
+## Rate-limit smoke test
+```bash
+cd relayer
+RELAYER_BEARER_TOKEN=<REDACTED>
+```
+The script sends expired `/commit` payloads and expects a `429` after the configured limit.
+
 ## Notes
 - Service uses a durable queue with automatic fee bumping; set `RM_DATABASE_URL` to a Postgres instance to persist across restarts (mount a volume if using SQLite).
 - Gas funding: ensure the relayer EOA is funded on the target network; health exposes ETH balance, collateral token balances/allowances, and block freshness.
 - Contracts must match the deployed ABI (commit/claim paths). Update `abi.py` if needed.
 - Queue mode is the default in `relayer.main`; to run synchronous commits/claims, construct the app without a `TxQueue`.
+- Rate limiting and allowlists are enforced in-memory per relayer instance; configure upstream proxies for global limits.
 - Logs are structured JSON with timestamp/level/event fields and tx metadata for observability.

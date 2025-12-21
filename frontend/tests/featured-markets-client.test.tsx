@@ -63,6 +63,9 @@ describe("FeaturedMarketsClient", () => {
         pageSize={1}
         maxItems={3}
         searchQuery="sample"
+        categoryFilter="Politics"
+        status="settled"
+        onlyActive={false}
       />,
     );
 
@@ -77,9 +80,9 @@ describe("FeaturedMarketsClient", () => {
       expect.any(Number),
       expect.objectContaining({
         searchQuery: "sample",
-        category: undefined,
+        category: "politics",
         offset: 1,
-        status: "active",
+        status: "settled",
         coalesceGroups: false,
         orderBy: "volume",
       }),

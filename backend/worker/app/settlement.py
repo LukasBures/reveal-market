@@ -72,6 +72,41 @@ def _hex_to_bytes(value: str | None) -> bytes:
         return b""
 
 
+def _is_empty_hex(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (bytes, bytearray)):
+        return len(value) == 0 or all(b == 0 for b in value)
+    if not isinstance(value, str):
+        value = str(value)
+    cleaned = value.strip().lower()
+    if cleaned.startswith("0x"):
+        cleaned = cleaned[2:]
+    if not cleaned:
+        return True
+    return all(ch == "0" for ch in cleaned)
+
+
+def settlement_needs_refresh(settlement: shared_models.Settlement | None) -> bool:
+    """Return True when a settlement snapshot is missing critical fields."""
+
+    if settlement is None:
+        return True
+    if _is_empty_hex(settlement.merkle_root) or _is_empty_hex(settlement.circuit_hash):
+        return True
+    if settlement.commitments_count is None:
+        return True
+    if settlement.pool_total_yes is None or settlement.pool_total_no is None:
+        return True
+    if settlement.total_escrow is None or settlement.total_liability is None:
+        return True
+    if settlement.rake_bps is None:
+        return True
+    if settlement.winning_outcome_id is None:
+        return True
+    return False
+
+
 async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[str, Any]:
     """Return settlement-related state from the on-chain market contract."""
 
@@ -109,14 +144,14 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
 
 
 async def _upsert_settlement_from_chain(
-    session: AsyncSession, market: shared_models.Market
+    session: AsyncSession, market: shared_models.Market, *, force: bool = False
 ) -> shared_models.Settlement | None:
     """Populate the settlement snapshot from on-chain state when available."""
 
     if not market.market_address or not runtime.settings.rpc_url:
         return None
     existing = await shared_repository.get_settlement_by_market_id(session, market.id)
-    if existing is not None:
+    if existing is not None and not force and not settlement_needs_refresh(existing):
         return existing
     web3 = get_async_web3(str(runtime.settings.rpc_url))
     try:
@@ -130,7 +165,7 @@ async def _upsert_settlement_from_chain(
             market_id=getattr(market, "event_id", None),
             error=str(exc),
         )
-        return None
+        return existing
 
     payload = {
         "merkle_root": snapshot.get("commitments_root"),
@@ -143,10 +178,7 @@ async def _upsert_settlement_from_chain(
         "winning_outcome_id": snapshot.get("winning_outcome_id"),
         "circuit_hash": snapshot.get("circuit_hash"),
     }
-    await shared_repository.upsert_settlement_snapshot(session, market.id, payload)
-    return (
-        await session.execute(select(shared_models.Settlement).where(shared_models.Settlement.market_id == market.id))
-    ).scalar_one_or_none()
+    return await shared_repository.upsert_settlement_snapshot(session, market.id, payload)
 
 
 def _hydrate_public_signals(public_signals: Sequence[Any]) -> list[int]:

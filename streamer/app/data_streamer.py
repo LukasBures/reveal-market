@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.streamer.data")
-CLOB_MARKETS_URL = "https://clob.polymarket.com/markets"
 CLOB_PAGE_SIZE = 500
 
 
@@ -113,6 +112,52 @@ class DataStreamer:
             )
         self.metric_ticks = DataStreamer._metric_ticks_shared
 
+    def _set_clob_ws_connected(self, connected: bool, *, error: str | None = None) -> None:
+        self.state.clob_ws_connected = connected
+        if connected:
+            self.state.clob_ws_last_error = None
+        elif error:
+            self.state.clob_ws_last_error = error
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_clob_ws_connected(connected)
+
+    def _record_clob_ws_message(self) -> None:
+        now = datetime.now(UTC)
+        self.state.clob_ws_last_message = now
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_clob_ws_message(now)
+
+    def _record_clob_rest_poll(self, *, success: bool, ts: datetime | None = None) -> None:
+        now = ts or datetime.now(UTC)
+        self.state.clob_rest_last_poll = now
+        if success:
+            self.state.clob_rest_last_success = now
+            self.state.clob_rest_last_error = None
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_clob_rest_poll(now)
+                if success:
+                    self.stream_metrics.record_clob_rest_success(now)
+
+    def _set_rtds_connected(self, connected: bool, *, error: str | None = None) -> None:
+        self.state.rtds_connected = connected
+        if connected:
+            self.state.rtds_last_error = None
+        elif error:
+            self.state.rtds_last_error = error
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_rtds_ws_connected(connected)
+
+    def _record_rtds_message(self) -> None:
+        now = datetime.now(UTC)
+        self.state.rtds_last_message = now
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_rtds_message(now)
+
     def _ensure_rtds_client(self) -> None:
         """Initialise a lightweight RTDS client for subscription fan-out tests."""
 
@@ -156,6 +201,11 @@ class DataStreamer:
             asyncio.create_task(self._rest_poll_loop(), name="rest-poll"),
             asyncio.create_task(self._flush_loop(), name="flush-loop"),
         ]
+        if self.stream_metrics:
+            with suppress(Exception):
+                self.stream_metrics.record_rtds_enabled(self.settings.rtds_enabled)
+                self.stream_metrics.record_clob_ws_connected(False)
+                self.stream_metrics.record_rtds_ws_connected(False)
         if self.settings.rtds_enabled:
             self._tasks.append(asyncio.create_task(self._rtds_loop(), name="rtds-loop"))
 
@@ -171,6 +221,8 @@ class DataStreamer:
     async def _ws_loop(self) -> None:
         while not self._stop.is_set():
             if not self.state.subscriptions.assets:
+                if self.state.clob_ws_connected:
+                    self._set_clob_ws_connected(False)
                 logger.debug(
                     "CLOB ws idle; no subscriptions yet",
                     extra={
@@ -201,6 +253,8 @@ class DataStreamer:
                                 "subscriptions": len(self.state.subscriptions.assets),
                             },
                         )
+                        self.state.clob_ws_last_connect = datetime.now(UTC)
+                        self._set_clob_ws_connected(True)
                         last_version = await self._refresh_clob_subscription(ws, last_version=-1)
                         msg_count = 0
                         while not self._stop.is_set():
@@ -209,6 +263,7 @@ class DataStreamer:
                             except TimeoutError:
                                 last_version = await self._refresh_clob_subscription(ws, last_version)
                                 continue
+                            self._record_clob_ws_message()
                             try:
                                 payload = json.loads(raw)
                             except json.JSONDecodeError:
@@ -233,6 +288,7 @@ class DataStreamer:
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
+                        self._set_clob_ws_connected(False, error=str(exc))
                         logger.warning(
                             "CLOB ws loop error",
                             extra={
@@ -242,6 +298,8 @@ class DataStreamer:
                             },
                         )
                         await asyncio.sleep(self.settings.ws_reconnect_seconds)
+                if self.state.clob_ws_connected:
+                    self._set_clob_ws_connected(False)
             except asyncio.CancelledError:
                 raise
 
@@ -249,9 +307,12 @@ class DataStreamer:
         while not self._stop.is_set():
             try:
                 await self._poll_rest()
+                self._record_clob_rest_poll(success=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - network path
+                self.state.clob_rest_last_error = str(exc)
+                self._record_clob_rest_poll(success=False)
                 logger.warning("REST poll failed", extra={"event": "polymarket.rest.failed", "error": str(exc)})
             await asyncio.sleep(self.settings.rest_poll_seconds)
 
@@ -289,7 +350,7 @@ class DataStreamer:
                 params = {"limit": CLOB_PAGE_SIZE}
                 if cursor:
                     params["cursor"] = cursor
-                res = await client.get(CLOB_MARKETS_URL, params=params)
+                res = await client.get(str(self.settings.clob_rest_url), params=params)
                 res.raise_for_status()
                 payload = res.json()
                 markets = payload if isinstance(payload, list) else payload.get("data") or []
@@ -536,10 +597,15 @@ class DataStreamer:
         except (ArithmeticError, ValueError, TypeError):
             best_ask_val = None
         fx = await self.state.get_fx()
-        if fx.stale and fx.source != "fallback":
+        if fx.stale and not self.settings.publish_when_fx_stale:
             logger.warning(
                 "Skipping publish due to stale FX",
-                extra={"event": "publish.skipped.fx_stale", "market_id": market_id, "fx_source": fx.source},
+                extra={
+                    "event": "publish.skipped.fx_stale",
+                    "market_id": market_id,
+                    "fx_source": fx.source,
+                    "policy": "block",
+                },
             )
             if self.stream_metrics:
                 with suppress(Exception):
@@ -642,12 +708,15 @@ class DataStreamer:
                 ):
                     if self._stop.is_set():
                         break
+                    self.state.rtds_last_connect = datetime.now(UTC)
+                    self._set_rtds_connected(True)
                     await ws.send(json.dumps({"action": "subscribe", "subscriptions": [s.to_wire() for s in subs]}))
                     self._rtds_last_version = current_version
                     try:
                         async for raw in ws:
                             if self._stop.is_set():
                                 break
+                            self._record_rtds_message()
                             try:
                                 payload = json.loads(raw)
                             except json.JSONDecodeError:
@@ -669,7 +738,10 @@ class DataStreamer:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - reconnect path
+                self._set_rtds_connected(False, error=str(exc))
                 logger.warning("RTDS loop error", extra={"event": "rtds.error", "error": str(exc)})
+            if self.state.rtds_connected:
+                self._set_rtds_connected(False)
             await asyncio.sleep(self.settings.ws_reconnect_seconds)
 
     def _build_rtds_subscriptions(self) -> list[Subscription]:

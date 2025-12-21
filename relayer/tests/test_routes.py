@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from relayer.app import create_app
 from relayer.queue import TxQueue
+from relayer.security import RateLimiter
 from relayer.schemas import ClaimRequest, CommitRequest
 
 
@@ -40,6 +41,12 @@ class FakeService:
             "escrowOwner": self.account.address,
         }
 
+    def validate_commit_payload(self, _payload):
+        return None
+
+    def validate_claim_payload(self, _payload):
+        return None
+
 
 class IngestService(FakeService):
     def __init__(self):
@@ -68,6 +75,21 @@ def test_healthz(client):
     assert body["status"] == "ok"
     assert body["relayer"] == "0xrelayer"
     assert body["escrow"] == "0xescrow"
+
+
+def test_healthz_includes_queue_stats(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queue"]["enabled"] is True
+    assert body["queue"]["depth"] == 0
+    assert body["queue"]["deadletter"] == 0
+    assert body["queue"]["oldestBacklogAgeSeconds"] is None
 
 
 def test_metrics(client):
@@ -340,3 +362,28 @@ def test_metrics_use_route_template_for_params(tmp_path):
 
     metrics = client.get("/metrics")
     assert b'endpoint="/admin/queue/deadletter/{job_id}/replay"' in metrics.content
+
+
+def test_rate_limit_blocks_commit_requests():
+    service = FakeService()
+    limiter = RateLimiter(1, 60)
+    app = create_app(service, 1, "http://localhost", bearer_token="secret", rate_limiter=limiter)
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+    headers = {"Authorization": "Bearer secret"}
+
+    resp = client.post("/commit", json=payload, headers=headers)
+    assert resp.status_code == 200
+
+    resp = client.post("/commit", json=payload, headers=headers)
+    assert resp.status_code == 429

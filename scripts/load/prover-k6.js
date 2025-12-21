@@ -3,6 +3,7 @@ import { check, sleep } from "k6";
 
 const BASE_URL = __ENV.PROVER_BASE_URL || "http://localhost:8085";
 const STREAM = __ENV.PROVER_STREAM === "1";
+const SHARED_SECRET = __ENV.PROVER_SHARED_SECRET || "";
 
 export const options = {
   vus: Number(__ENV.VUS || 20),
@@ -26,8 +27,12 @@ const payload = {
 
 export default function () {
   const url = `${BASE_URL}/api/v1/proofs/settlement${STREAM ? "?stream=1" : ""}`;
+  const headers = { "Content-Type": "application/json" };
+  if (SHARED_SECRET) {
+    headers["X-Prover-Secret"] = SHARED_SECRET;
+  }
   const res = http.post(url, JSON.stringify(payload), {
-    headers: { "Content-Type": "application/json" },
+    headers,
     timeout: `${__ENV.REQUEST_TIMEOUT_MS || 5000}ms`,
   });
 

@@ -8,6 +8,20 @@ const sanitizeNumber = (value: unknown): number => {
 export type MarketSortOption = "totalVolume";
 export type VolumePreference = "24h" | "total";
 
+export const MARKET_CATEGORY_FILTERS = [
+  "Crypto",
+  "Finance",
+  "Sports",
+  "Politics",
+  "Geopolitics",
+  "Tech",
+  "Entertainment",
+  "Elections",
+  "Science",
+] as const;
+
+export type MarketCategoryFilter = (typeof MARKET_CATEGORY_FILTERS)[number];
+
 /**
  * Returns a non-negative volume metric. Defaults to 24h volume; `total` uses lifetime volume first.
  */

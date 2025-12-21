@@ -83,11 +83,18 @@ class ProverClient:
         base_url: str,
         *,
         timeout_seconds: float = 5.0,
+        shared_secret: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.shared_secret = shared_secret
         self._transport = transport
+
+    def _headers(self) -> dict[str, str] | None:
+        if self.shared_secret:
+            return {"X-Prover-Secret": self.shared_secret}
+        return None
 
     def generate_settlement_proof(self, request: SettlementProofRequest | dict[str, Any]) -> SettlementProofResponse:
         """Submit a proof job and synchronously retrieve the receipt."""
@@ -109,7 +116,7 @@ class ProverClient:
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
-                response = client.post(url, json=payload)
+                response = client.post(url, json=payload, headers=self._headers())
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(
@@ -132,11 +139,18 @@ class AsyncProverClient:
         base_url: str,
         *,
         timeout_seconds: float = 5.0,
+        shared_secret: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.shared_secret = shared_secret
         self._transport = transport
+
+    def _headers(self) -> dict[str, str] | None:
+        if self.shared_secret:
+            return {"X-Prover-Secret": self.shared_secret}
+        return None
 
     async def generate_settlement_proof(
         self, request: SettlementProofRequest | dict[str, Any]
@@ -158,7 +172,7 @@ class AsyncProverClient:
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
             async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=self._headers())
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(

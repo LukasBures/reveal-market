@@ -9,7 +9,6 @@
   - Fix `run_deploy.sh` default VK path and align `contracts/zen/.env.example` with the env names it expects (`PRIVATE_KEY`, `AUTHORIZATION_SIGNER`, `ZEN_TOKEN_ADDRESS`, etc.).
   - Add a `CreateMarket` script (or `cast` recipe) that emits JSON output for backend ingestion and preserves deterministic market ids/addresses.
 - **Settlement safety**
-  - Add a timeout cancel/refund path if the oracle never posts a result or proof.
   - Add a claim deadline + sweep for unclaimed payouts (to `ProtocolPool` or escrow) so funds do not remain stranded.
 - **Payout routing decision**
   - Decide whether claims pay users directly or credit `RelayerEscrow`; wire `creditFromMarket` or remove it and update relayer/backend assumptions.

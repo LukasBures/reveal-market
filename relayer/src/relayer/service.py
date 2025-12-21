@@ -70,6 +70,7 @@ class RelayerService:
     min_escrow_token_balance_wei: int = 0
     min_relayer_token_allowance_wei: int = 0
     fee_bump_percent: float = 0.15
+    preflight_mode: str = "none"
     api_base_url: str | None = None
     api_bearer_token: str | None = None
     api_timeout_seconds: int = 10
@@ -79,6 +80,124 @@ class RelayerService:
         if self._nonce_lock is None:
             self._nonce_lock = asyncio.Lock()
         return self._nonce_lock
+
+    def _require_field(self, payload: Mapping[str, Any], key: str) -> Any:
+        if key not in payload or payload[key] is None:
+            raise TxSendError(f"{key}_missing", kind="invalid", permanent=True)
+        return payload[key]
+
+    def _require_uint(self, value: Any, key: str, *, allow_zero: bool = True) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as err:
+            raise TxSendError(f"{key}_invalid", kind="invalid", permanent=True) from err
+        if parsed < 0 or (not allow_zero and parsed == 0):
+            raise TxSendError(f"{key}_invalid", kind="invalid", permanent=True)
+        return parsed
+
+    def _require_hex(self, value: Any, key: str, *, length_bytes: int | None = None) -> bytes:
+        if not isinstance(value, str):
+            raise TxSendError(f"{key}_not_string", kind="invalid", permanent=True)
+        if not value.startswith("0x"):
+            raise TxSendError(f"{key}_missing_0x", kind="invalid", permanent=True)
+        try:
+            raw = Web3.to_bytes(hexstr=value)
+        except ValueError as err:
+            raise TxSendError(f"{key}_invalid_hex", kind="invalid", permanent=True) from err
+        if length_bytes is not None and len(raw) != length_bytes:
+            raise TxSendError(f"{key}_invalid_length", kind="invalid", permanent=True)
+        return raw
+
+    def _validate_commit_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        chain_id = self._require_uint(self._require_field(payload, "chain_id"), "chain_id")
+        if chain_id != self.chain_id:
+            raise TxSendError(f"chain_id_mismatch:{chain_id}", kind="invalid", permanent=True)
+
+        ticket_value = self._require_uint(
+            self._require_field(payload, "ticket_value_wei"),
+            "ticket_value_wei",
+            allow_zero=False,
+        )
+        nonce = self._require_uint(self._require_field(payload, "nonce"), "nonce")
+        expiry = self._require_uint(
+            self._require_field(payload, "expiry"),
+            "expiry",
+            allow_zero=False,
+        )
+        if expiry <= int(time.time()):
+            raise TxSendError("expiry_in_past", kind="invalid", permanent=True)
+
+        commitment_bytes = self._require_hex(
+            self._require_field(payload, "commitment"),
+            "commitment",
+            length_bytes=32,
+        )
+        signature_bytes = self._require_hex(
+            self._require_field(payload, "signature"),
+            "signature",
+            length_bytes=65,
+        )
+        try:
+            user_addr: ChecksumAddress = self.web3.to_checksum_address(
+                self._require_field(payload, "user")
+            )
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(
+                self._require_field(payload, "market")
+            )
+        except ValueError as err:
+            raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
+
+        return {
+            "chain_id": chain_id,
+            "ticket_value": ticket_value,
+            "nonce": nonce,
+            "expiry": expiry,
+            "commitment_bytes": commitment_bytes,
+            "signature_bytes": signature_bytes,
+            "user_addr": user_addr,
+            "market_addr": market_addr,
+        }
+
+    def _validate_claim_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        ticket_id = self._require_uint(self._require_field(payload, "ticket_id"), "ticket_id")
+        outcome_id = self._require_uint(self._require_field(payload, "outcome_id"), "outcome_id")
+        amount = self._require_uint(
+            self._require_field(payload, "amount"),
+            "amount",
+            allow_zero=False,
+        )
+
+        salt_value = self._require_field(payload, "salt")
+        self._require_hex(salt_value, "salt", length_bytes=32)
+        proof_value = self._require_field(payload, "merkle_proof")
+        if not isinstance(proof_value, list):
+            raise TxSendError("merkle_proof_invalid", kind="invalid", permanent=True)
+        for idx, item in enumerate(proof_value):
+            self._require_hex(item, f"merkle_proof[{idx}]", length_bytes=32)
+
+        try:
+            user_addr: ChecksumAddress = self.web3.to_checksum_address(
+                self._require_field(payload, "user")
+            )
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(
+                self._require_field(payload, "market")
+            )
+        except ValueError as err:
+            raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
+
+        return {
+            "ticket_id": ticket_id,
+            "outcome_id": outcome_id,
+            "amount": amount,
+            "user_addr": user_addr,
+            "market_addr": market_addr,
+        }
+
+    def validate_commit_payload(self, payload: Mapping[str, Any]) -> None:
+        self._validate_commit_payload(payload)
+
+    def validate_claim_payload(self, payload: Mapping[str, Any]) -> None:
+        self._validate_claim_payload(payload)
 
     async def _build_base_tx(
         self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
@@ -268,26 +387,39 @@ class RelayerService:
                 )
             await asyncio.sleep(poll_interval)
 
+    async def _preflight_tx(self, tx: TxParams, action: str) -> None:
+        if self.preflight_mode == "none":
+            return
+        if self.preflight_mode in ("call", "both"):
+            try:
+                await asyncio.to_thread(self.web3.eth.call, tx)
+            except (Web3Exception, ValueError, Exception) as err:
+                logger.warning("relayer.preflight.call_failed", action=action, error=str(err))
+                raise TxSendError("preflight_call_failed", kind="invalid", permanent=True) from err
+        if self.preflight_mode in ("estimate", "both"):
+            try:
+                await asyncio.to_thread(self.web3.eth.estimate_gas, tx)
+            except (Web3Exception, ValueError, Exception) as err:
+                logger.warning("relayer.preflight.estimate_failed", action=action, error=str(err))
+                raise TxSendError("preflight_estimate_failed", kind="invalid", permanent=True) from err
+
     async def commit(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
-        ticket_value = int(payload["ticket_value_wei"])
-        chain_id = int(payload.get("chain_id") or self.chain_id)
-        if chain_id != self.chain_id:
-            raise TxSendError(f"chain_id_mismatch:{chain_id}", nonce=nonce_override)
-        commitment = Web3.to_bytes(hexstr=payload["commitment"])
-        if len(commitment) != 32:
-            raise TxSendError("invalid_commitment_length", nonce=nonce_override)
-        user_addr: ChecksumAddress = self.web3.to_checksum_address(payload["user"])
-        market_addr: ChecksumAddress = self.web3.to_checksum_address(payload["market"])
+        validation = self._validate_commit_payload(payload)
+        ticket_value = validation["ticket_value"]
+        chain_id = validation["chain_id"]
+        commitment = validation["commitment_bytes"]
+        signature_bytes = validation["signature_bytes"]
+        user_addr = validation["user_addr"]
+        market_addr = validation["market_addr"]
         auth = (
             commitment,
             user_addr,
-            int(payload["nonce"]),
-            int(payload["expiry"]),
+            validation["nonce"],
+            validation["expiry"],
             ticket_value,
         )
-        signature_bytes = Web3.to_bytes(hexstr=payload["signature"])
         logger.info(
             "relayer.commit.prepare",
             user=payload.get("user"),
@@ -307,33 +439,36 @@ class RelayerService:
                 auth,
                 signature_bytes,
             ).build_transaction(base_tx)
+            await self._preflight_tx(tx, "commit")
             return await self._send_and_wait(tx, "commit")
 
     async def claim(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
-        market_addr: ChecksumAddress = self.web3.to_checksum_address(payload["market"])
+        validation = self._validate_claim_payload(payload)
+        market_addr = validation["market_addr"]
         market = self.web3.eth.contract(address=market_addr, abi=CLAIM_ABI)
         logger.info(
             "relayer.claim.prepare",
             user=payload.get("user"),
             market=payload.get("market"),
-            ticket_id=int(payload["ticket_id"]),
-            outcome_id=int(payload["outcome_id"]),
-            amount=int(payload["amount"]),
+            ticket_id=validation["ticket_id"],
+            outcome_id=validation["outcome_id"],
+            amount=validation["amount"],
             bump_factor=bump_factor,
             nonce_override=nonce_override,
         )
         async with self._get_nonce_lock():
             base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
             tx = market.functions.claim(
-                payload["user"],
-                int(payload["ticket_id"]),
-                int(payload["outcome_id"]),
-                int(payload["amount"]),
+                validation["user_addr"],
+                validation["ticket_id"],
+                validation["outcome_id"],
+                validation["amount"],
                 payload["salt"],
                 payload["merkle_proof"],
             ).build_transaction(base_tx)
+            await self._preflight_tx(tx, "claim")
             return await self._send_and_wait(tx, "claim")
 
     async def health(self) -> dict[str, Any]:
@@ -522,6 +657,7 @@ def build_service(
     min_escrow_token_balance_wei: int = 0,
     min_relayer_token_allowance_wei: int = 0,
     fee_bump_percent: float = 0.15,
+    preflight_mode: str = "none",
     api_base_url: str | None = None,
     api_bearer_token: str | None = None,
     api_timeout_seconds: int = 10,
@@ -542,6 +678,7 @@ def build_service(
         min_escrow_token_balance_wei=min_escrow_token_balance_wei,
         min_relayer_token_allowance_wei=min_relayer_token_allowance_wei,
         fee_bump_percent=fee_bump_percent,
+        preflight_mode=preflight_mode,
         api_base_url=api_base_url,
         api_bearer_token=api_bearer_token,
         api_timeout_seconds=api_timeout_seconds,

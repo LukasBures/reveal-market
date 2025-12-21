@@ -14,9 +14,16 @@ logger = logging.getLogger("reveal_market.hedger.settlement")
 class SettlementCoordinator:
     """Coordinates prover job submission and contract settlement."""
 
-    def __init__(self, base_url: str, timeout_seconds: int, repository: HedgerRepository | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: int,
+        shared_secret: str | None = None,
+        repository: HedgerRepository | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.shared_secret = shared_secret
         self.repository = repository
         self.client = httpx.AsyncClient()
 
@@ -24,9 +31,11 @@ class SettlementCoordinator:
         """Send settlement input to the prover and persist a receipt."""
 
         started = time.perf_counter()
+        headers = {"X-Prover-Secret": self.shared_secret} if self.shared_secret else None
         response = await self.client.post(
             f"{self.base_url}/api/v1/proofs/settlement",
             json=payload,
+            headers=headers,
             timeout=self.timeout_seconds,
         )
         response.raise_for_status()

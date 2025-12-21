@@ -10,8 +10,7 @@ import { categorySlugFromLabel } from "@/lib/slugs";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
 import { mapApiMarketToSummary } from "@/lib/marketMapper";
 import { formatNumber } from "@/lib/formatters";
-
-const categories = ["Crypto", "Finance", "Sports", "Politics", "Geopolitics", "Tech", "Entertainment", "Elections", "Science"];
+import { MARKET_CATEGORY_FILTERS } from "@/lib/markets";
 
 type Props = {
   initialSearch?: string;
@@ -206,7 +205,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
   );
 
   useEffect(() => {
-    categories.slice(0, 4).forEach((category) => {
+    MARKET_CATEGORY_FILTERS.slice(0, 4).forEach((category) => {
       const slug = categorySlugFromLabel(category);
       if (!slug) return;
       const path = `/categories/${encodeURIComponent(slug)}` as Route;
@@ -312,7 +311,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
       </div>
       <div className="divider-gradient my-8" aria-hidden="true" />
       <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
-        {categories.map((category) => {
+        {MARKET_CATEGORY_FILTERS.map((category) => {
           const slug = categorySlugFromLabel(category);
           if (!slug) return null;
           return (

@@ -12,6 +12,10 @@ import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {RelayerEscrow} from "./RelayerEscrow.sol";
 
+interface IOwnable {
+    function owner() external view returns (address);
+}
+
 /// @notice Minimal commit/reveal market using fixed-size tickets and ZK-verified settlement.
 contract RevealMarket is IRevealMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -74,6 +78,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event ResultPosted(uint256 indexed winningOutcomeId);
     event Settled(uint256 totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
+    event RefundsEnabled(address indexed caller);
+    event Refunded(address indexed caller, address indexed user, uint256 indexed ticketId, uint256 amount);
     event AuthorizationSignerUpdated(address indexed signer);
     event OracleUpdated(address indexed oracle);
     event RelayerEscrowUpdated(address indexed relayer);
@@ -81,6 +87,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     error AlreadyInitialized();
     error NotRelayer();
+    error NotAuthorized();
     error NotOracle();
     error InvalidPhase();
     error CommitWindowClosed();
@@ -110,9 +117,16 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error ClaimsPaused();
     error DeadlineExtendOnly();
     error InvalidAddress();
+    error RefundsNotEnabled();
+    error RefundsUnavailable();
 
     modifier onlyRelayer() {
         _onlyRelayer();
+        _;
+    }
+
+    modifier onlyRelayerOrFactoryOwner() {
+        _onlyRelayerOrFactoryOwner();
         _;
     }
 
@@ -129,6 +143,14 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     function _onlyRelayer() internal view {
         address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
         if (msg.sender != relayerEscrow && msg.sender != relayerOwner) revert NotRelayer();
+    }
+
+    function _onlyRelayerOrFactoryOwner() internal view {
+        address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
+        address factoryOwner = IOwnable(factory).owner();
+        if (msg.sender != relayerEscrow && msg.sender != relayerOwner && msg.sender != factoryOwner) {
+            revert NotAuthorized();
+        }
     }
 
     function _onlyOracle() internal view {
@@ -305,6 +327,39 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit Claimed(msg.sender, user, ticketId, amount);
     }
 
+    /// @notice Enables refunds after the commit window closes; cancels further settlement/claims.
+    function enableRefunds() external onlyRelayerOrFactoryOwner {
+        if (phase == Phase.Settled) revert InvalidPhase();
+        if (block.timestamp < commitDeadline) revert RefundsUnavailable();
+        if (phase == Phase.Cancelled) return;
+        commitsPaused = true;
+        claimsPaused = true;
+        phase = Phase.Cancelled;
+        emit RefundsEnabled(msg.sender);
+    }
+
+    /// @notice Refunds a ticket when the market is cancelled (escape hatch when oracle stalls).
+    function refund(
+        address user,
+        uint256 ticketId,
+        uint256 outcomeId,
+        uint256 amount,
+        bytes32 salt,
+        bytes32[] calldata merkleProof
+    ) external nonReentrant onlyRelayerOrFactoryOwner {
+        if (phase != Phase.Cancelled) revert RefundsNotEnabled();
+        if (user == address(0)) revert InvalidAddress();
+        if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, user);
+        if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
+
+        claimedTickets[ticketId] = true;
+        uint256 rake = (ticketSize * rakeBps) / 10_000;
+        uint256 refundAmount = ticketSize - rake;
+        IERC20(collateralToken).safeTransfer(user, refundAmount);
+        emit Refunded(msg.sender, user, ticketId, refundAmount);
+    }
+
     /// @notice Returns the sealed commitment stored at an index (for off-chain auditing).
     function commitmentAt(uint256 index) external view returns (bytes32) {
         return commitments[index];
@@ -434,6 +489,14 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             index >>= 1;
         }
         return computed == commitmentsRoot;
+    }
+
+    function _verifyRefundLeaf(uint256 ticketId, bytes32 leaf, bytes32[] calldata proof) internal view returns (bool) {
+        if (commitmentsRoot == bytes32(0)) {
+            if (ticketId >= commitments.length) return false;
+            return commitments[ticketId] == leaf;
+        }
+        return _verifyLeaf(ticketId, leaf, proof);
     }
 
     /// @notice Returns the next ticket id (commitments length); useful for off-chain pre-checks.
