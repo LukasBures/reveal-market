@@ -10,6 +10,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | --- | --- |
 | Market discovery | `/markets`, `/categories/{slug}`, `/markets/suggest` (all Redis-backed) |
 | Market detail & settlement | `/markets/{event_id}` and `/resolution/{condition_id}` with sync invalidation from the worker |
+| Trade + relayer | `/pricing/quote`, `/pricing/preview`, `/pricing/submit`, `/trade/commit`, `/positions`, `/claim/bundles`, `/trade/claim`, `/trade/status`, relayer ingest hooks |
 | Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, and Polymarket; `/metrics` exposes Prometheus counters |
 | Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
@@ -25,8 +26,9 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 - **Caching** – List/detail/resolution payloads cached in Redis JSON with schema + logical tags; startup and interval hydrators repopulate `/markets`, categories, and suggest. Clean bypass when Redis is down (no tag pollution).
 - **Search & detail** – Market payloads are normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns removed. `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event}` are async + cache-tagged; search uses indexed Postgres vectors (no cache).
 - **Health/metrics** – `/health` fans DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` for probes.
-- **Signed pricing** – `/pricing/quote` ignores client FX, fetches streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
-- **Rate limiting** – Async Redis-backed middleware exists; forwarded-header trust needs hardening (see backend/TODO.md).
+- **Signed pricing** - `/pricing/quote` ignores client FX, fetches streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and persists quotes in Postgres; `/pricing/preview` returns unsigned previews; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
+- **Trade + relayer** - `/trade/commit` consumes a quote, builds CommitAuth signatures, forwards to the relayer (with Redis queue fallback), and records commitment snapshots; `/positions`, `/claim/bundles`, `/trade/claim`, and `/trade/status` expose claim/settlement state; relayer ingest hooks can push commitments/settlements.
+- **Rate limiting** - Async Redis-backed middleware with trusted proxy allowlist plus in-memory fallback; disabled by default.
 - **Observability** – Structured logs with request_id, Prometheus instrumentation, cache hit/miss counters, quote expiry sweeper; Python healthcheck scripts for Docker probes.
 
 ---
@@ -95,7 +97,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_ENABLE_SECURITY_HEADERS` | Toggles CSP/HSTS/COOP middleware. |
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
 | `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 0.1 ZEN max; quotes above this return 400). |
-| FX feed | Hardcoded to the streamer `/fx/zen-usd`; env vars no longer switch FX sources. Quotes reject when FX is stale/unavailable. |
+| FX feed | Pricing uses the streamer `/fx/zen-usd`; `RM_FX_FEED_URL` currently only informs health/CORS checks. Quotes reject when FX is stale/unavailable. |
 | `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. API signs the ABI-packed digest used by `RevealMarket.commitWithQuote`, bound to chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId. |
 
 ### How the pipeline stays fresh
@@ -143,11 +145,26 @@ keccak256(
 
 `app.server.build_quote_digest` (and the test suite) enforce this shape. Changing it requires a deliberate contract + backend dual upgrade.
 
+### Trade + relayer
+
+| Variable | Description |
+| --- | --- |
+| `RM_AUTHORIZATION_SIGNER_PRIVATE_KEY` | Private key used to sign CommitAuth payloads for `commitWithAuthorization`. |
+| `RM_AUTHORIZATION_SIGNER` | Expected on-chain signer address for CommitAuth verification. |
+| `RM_RELAYER_BASE_URL` | Base URL for relayer commit/claim calls. |
+| `RM_RELAYER_BEARER_TOKEN` | Optional bearer token for relayer auth. |
+| `RM_RELAYER_QUEUE_ENABLED`, `RM_RELAYER_QUEUE_KEY` | Enable and configure Redis-backed relayer queue fallback. |
+| `RM_RELAYER_QUEUE_MAX_ATTEMPTS`, `RM_RELAYER_QUEUE_RESULT_TTL_SECONDS` | Retry policy and TTL for queued relayer jobs. |
+| `RM_RELAYER_WEBHOOK_SECRET` | Shared secret for relayer ingestion hooks (`/relayer/commitments`, `/relayer/settlements`). |
+| `RM_TICKET_SIZE_WEI`, `RM_COMMIT_NONCE_TTL_SECONDS` | CommitAuth sizing and nonce expiry settings. |
+| `RM_RELAYER_ESCROW_ADDRESS` | Optional escrow contract address used for balance checks. |
+
 ### Operations & runbook (API)
 
 - Probes: `/live` (liveness) and `/ready`/`/healthz` (readiness: DB, Redis, worker heartbeat, Polymarket, signer, CORS). Metrics at `/metrics`.
 - Cache strategy: versioned keys (`v1:`) with tag invalidation; startup and jittered refresh hydrators; hydrate lock prevents stampedes; clean bypass when Redis is unavailable.
 - Pricing quotes: FX fetched server-side with retry/backoff + cache; per-user/per-market caps enforced via the quote ledger; quote expiry sweeper runs in the background (interval configurable via `RM_QUOTE_EXPIRY_SWEEP_INTERVAL_SECONDS`).
+- Relayer queue: failed relayer calls are queued in Redis (`RM_RELAYER_QUEUE_KEY`) and replayed by the background loop; `/trade/status` resolves job ids once results are recorded.
 - Clearing caches: bumping cache version or flushing Redis keys with prefix `v1:` invalidates prior entries. Tags (`cache:tag:*`) group list/detail/resolution keys; hydrators will repopulate hot paths.
 
 ---

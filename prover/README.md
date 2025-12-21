@@ -1,6 +1,6 @@
 # Reveal Market Prover
 
-Go microservice that turns settlement payloads into Groth16 proof receipts using Horizen’s reference circuit. It exposes a simple HTTP API, heartbeat endpoints, Prometheus metrics, and structured logs that mirror the API/worker format so downstream services can treat proof generation as another regulated dependency. There is no mock mode: startup and `/healthz` fail if artifacts are missing.
+Go microservice that turns settlement payloads into Groth16 proof receipts using Horizen’s reference circuit. It exposes a simple HTTP API, heartbeat endpoints, Prometheus metrics, and structured logs that mirror the API/worker format so downstream services can treat proof generation as another regulated dependency. There is no mock mode: startup fails if artifacts are missing, and `/healthz` reports `ready=false` when artifacts or backend checks fail.
 
 The service now boots a rapidsnark-backed pipeline by default:
 
@@ -34,7 +34,17 @@ The vetted, source-of-truth artifacts live in the `prover/artifacts` submodule. 
 - Artifact checks (`check_artifacts.sh`, `cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, or WASM/witness assets are missing or hash mismatched.
 - Concurrency guarded by semaphore (`PROVER_MAX_CONCURRENCY`); per-proof timeout wraps witness + rapidsnark; temporary directories cleaned after each job.
 - Integration tests include stubbed rapidsnark/Node plus real artifact flow in CI; repo-root `./run_tests.sh` calls into the same checks.
-- Metrics: `prover_request_latency_seconds` histogram, success/failure counters, `prover_active_proofs`, `prover_artifacts_ok`, and last proof latency gauges; `/healthz` carries circuit hash/readiness.
+- Metrics: `prover_request_latency_seconds` histogram, counters (`prover_proofs_success_total`, `prover_proofs_failure_total`), gauges (`prover_active_proofs`, `prover_artifacts_ok`, `prover_last_proof_latency_ms`, `prover_up`); `/healthz` carries circuit hash/readiness.
+
+## MVP Scope
+
+The current settlement circuit is intentionally minimal and only enforces:
+- `winningOutcomeId` is 0 or 1.
+- `rakeBps` <= 10000.
+- `poolTotalYes + poolTotalNo <= totalEscrow`.
+- `padding` equals zero (to keep a 10-signal ABI).
+
+It does not prove ticket commitments, Merkle inclusion, payout correctness, or liability accounting (the `totalLiability` signal is not constrained). Treat the proofs as a demo integrity check until the circuit is extended and new artifacts are generated.
 
 ## Architecture Overview
 
@@ -53,7 +63,7 @@ The vetted, source-of-truth artifacts live in the `prover/artifacts` submodule. 
 - Each request is validated and converted into a deterministic witness input JSON file.
 - Node executes `generate_witness.js`, which loads `settlement.wasm` to produce `witness.wtns`.
 - The rapidsnark binary consumes the proving key + witness to emit `proof.json` and `public.json`.
-- The Go service parses both outputs, normalizes them into Solidity calldata/public signals, and returns a signed response with timestamps, backend metadata, and warnings (if any).
+- The Go service parses both outputs, normalizes them into Solidity calldata/public signals, and returns a response with timestamps, backend metadata, and warnings (if any).
 
 Concurrency is guarded by a semaphore so at most `PROVER_MAX_CONCURRENCY` rapidsnark processes run at once. Temporary files live under `PROVER_TEMP_DIR` and are removed after each job, keeping the filesystem clean and ensuring secrets never persist longer than needed. Internal buffer pools reduce allocations when hashing artifacts or encoding witness inputs.
 
@@ -64,6 +74,7 @@ Concurrency is guarded by a semaphore so at most `PROVER_MAX_CONCURRENCY` rapids
 | `PROVER_BACKEND` | `groth16` | Only Groth16 (rapidsnark) is supported; the process exits if artifacts are missing or invalid. |
 | `PROVER_LISTEN_ADDR` | `0.0.0.0:8085` | HTTP bind address. |
 | `PROVER_VERSION` | `dev` | Version string surfaced in `/healthz` and proof responses. |
+| `PROVER_LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
 | `PROVER_CIRCUIT_DIR` | `circuits/build` | Base directory for circuit artifacts. |
 | `PROVER_WITNESS_SCRIPT` | `${PROVER_CIRCUIT_DIR}/settlement_js/generate_witness.js` | Path to the Circom witness script. |
 | `PROVER_WASM_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_js/settlement.wasm` | Path to the WASM file used by the witness script. |
@@ -90,6 +101,8 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 | `/heartbeat` | GET | Lightweight liveness check used by Docker. |
 | `/api/v1/proofs/settlement` | POST | Accepts the settlement payload and responds with Groth16 proof data. |
 
+Streaming responses are supported by passing `?stream=1` or an `Accept: text/event-stream` header. Events include `accepted`, `proof`, `error`, and `cancelled`.
+
 **Request body** mirrors `settlementProofRequest`:
 
 ```jsonc
@@ -107,6 +120,8 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 
 Public signals emitted by the circuit are fixed at ten slots in this order:
 `[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding(0)]`.
+
+Fetch the expected `circuit_hash` from `/healthz` and include it in requests. Mismatches return HTTP 400.
 
 **Response body** (`settlementProofResponse`):
 
@@ -127,7 +142,7 @@ Public signals emitted by the circuit are fixed at ten slots in this order:
 }
 ```
 
-Errors are returned as JSON with `error` and `message` fields (`invalid_request`, `prover_error`, etc.). Validation happens before expensive witness/proving work, so clients get fast failures when payloads are malformed. The API returns HTTP 503 if the backend marks itself unready (e.g., artifacts missing).
+Errors are returned as JSON with `error` and `message` fields (`invalid_request`, `prover_error`, etc.). Validation happens before expensive witness/proving work, so clients get fast failures when payloads are malformed. Requests above `PROVER_MAX_REQUEST_BYTES` return HTTP 413. The API returns HTTP 503 if the backend marks itself unready (e.g., artifacts missing).
 
 ## Local Testing
 
@@ -157,7 +172,7 @@ curl -X POST http://localhost:8085/api/v1/proofs/settlement \
 
 If the artifacts are missing or the Groth16 toolchain fails, the service exits with a non-zero status so orchestrators can alert immediately—no mock mode is available.
 
-> **CI note:** `go test ./...` now includes an integration test that exercises the full request → witness → rapidsnark pipeline using deterministic stub binaries plus fresh artifacts created in `t.TempDir()`. GitHub Actions additionally installs rapidsnark, pulls private circuit artifacts via `prover/scripts/download_artifacts.sh` (set `PROVER_ARTIFACTS_URL` and optionally `PROVER_ARTIFACTS_SHA256`), and verifies `rapidsnark --version` so we know the binary is runnable in automation.
+> **CI note:** `go test ./...` now includes an integration test that exercises the full request → witness → rapidsnark pipeline using deterministic stub binaries plus fresh artifacts created in `t.TempDir()`. GitHub Actions installs rapidsnark and seeds circuit artifacts either via `prover/scripts/download_artifacts.sh` (`PROVER_ARTIFACTS_URL` and optionally `PROVER_ARTIFACTS_SHA256`) or the `prover/artifacts` submodule before running `go run ./cmd/verify-artifacts` and `./run_tests.sh`.
 
 ## Testing
 
@@ -186,7 +201,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.
 - **Alerting** – Monitor `prover.request.failed` logs and add Prometheus alerts for rising 5xx counts, long proof latencies, or repeated rapidsnark exits to detect artifact corruption early.
-- **TLS / exposure** – If exposing the prover externally, front it with a reverse proxy (e.g., Caddy or Nginx) that terminates TLS and rate-limits the proof endpoint. Only `/healthz` and `/metrics` should be internet-reachable in most deployments; lock `/api/v1/proofs/settlement` behind internal networks.
+- **TLS / exposure** – If exposing the prover externally, front it with a reverse proxy (e.g., Caddy or Nginx) that terminates TLS and rate-limits the proof endpoint. The service does not implement auth; keep `/api/v1/proofs/settlement` behind internal networks or enforce a shared secret at the ingress. Only `/healthz` and `/metrics` should be internet-reachable in most deployments.
 - **Deployment steps** – Generate/mount artifacts, set env (`PROVER_LISTEN_ADDR`, `PROVER_CIRCUIT_DIR`, `PROVER_RAPIDSNARK_BINARY`, `PROVER_NODE_BINARY`, timeout/concurrency, `PROVER_TEMP_DIR`), run `./run_tests.sh` (fails if artifacts missing), then start the service. Post-deploy smoke: hit `/healthz` and submit a small proof payload; alert on `artifacts_ok=0` or repeated `prover.request.failed`.
 
 ## Docker Notes

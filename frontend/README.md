@@ -1,6 +1,6 @@
 # Reveal Market Frontend
 
-This directory hosts the marketing + investor documentation experience for Reveal Market. It is a Next.js 15 App Router project that mirrors the polish of a modern crypto venue: glassmorphism surfaces, responsive typography, rich SEO metadata, and parity with the backend’s security posture.
+This directory hosts the Reveal Market web experience (marketing, docs, search, trading, proofs, and dashboard). It is a Next.js 15 App Router project that mirrors the polish of a modern crypto venue: glassmorphism surfaces, responsive typography, rich SEO metadata, and security headers aligned with the backend.
 
 ---
 
@@ -24,9 +24,11 @@ This directory hosts the marketing + investor documentation experience for Revea
 
 | Area | Description |
 | ---- | ----------- |
-| `app/` | App Router entrypoints. Key routes: `/` (hero + featured markets), `/categories/[category]`, `/markets/[eventId]`, `/docs/*`. |
-| `components/` | Shared UI: navigation, footers, market cards/grids, metadata panels, skeleton states, etc. |
-| `lib/` | Client helpers (`lib/api.ts`, `lib/seo.ts`, slug parsing utilities). |
+| `app/` | App Router routes + API proxies + server actions. Key routes: `/` (hero + featured markets), `/markets/search`, `/markets/[eventId]`, `/dashboard`, `/proofs`, `/docs/*`, `/contact`. |
+| `components/` | Shared UI: navigation, footers, market cards/grids, trade panels, dashboards, proofs, docs. |
+| `hooks/` | Streaming + FX hooks (`usePriceStream`, `useFxStream`, `useLiveOutcomePrices`). |
+| `lib/` | API clients, env presets, logging, market mappers, wagmi config. |
+| `tests/` | Vitest suites + test utilities. |
 | `public/` | Static assets (icons, favicons, OpenGraph image pipeline). |
 | `next.config.mjs` | Security headers (CSP, HSTS, COOP/CORP, Referrer-Policy, Permissions-Policy) + bundle tweaks. |
 
@@ -34,22 +36,22 @@ Tech stack callouts:
 
 - **Next.js 15 App Router** with React Server Components, Suspense, and `next/image` where applicable.
 - **Tailwind (utility-first)** layered with custom glassmorphism helpers defined in `app/globals.css`.
-- **Vitest + Testing Library** for behavioral tests.
-- **ESLint + Typescript** enforced via `npm run lint`.
-- **Live pricing UI** – Streams Polymarket odds + Binance ZEN/USDT FX from `streamer` (via SSE and `/pricing/fx`). Market detail pages fetch `clobTokenIds` from the backend and include them in `assets_ids` when opening `/stream`/`/stream/ws`, so live prices/books/trades start immediately. A 0.1 ZEN per-stake UI cap mirrors backend limits.
-- **Collateral token** – Stakes and payouts use ZEN (ERC20 collateral at `0x070040A826B586b58569750ED43cb5979b171e8d` on Horizen Testnet).
+- **Vitest + Testing Library** for behavioral tests; **ESLint + TypeScript** enforced via `npm run lint`.
+- **Live pricing UI** – Streams market data from the streamer over WS/SSE (prefers WS, SSE fallback) and uses `clobTokenIds` for `assets_ids` so books/trades hydrate fast; optional toggles can disable streams.
+- **Collateral + escrow** – ZEN token + relayer escrow addresses come from `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` and `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS`; dashboard supports approve/deposit/withdraw and claim flows.
 - **Server actions + API proxies** – SSR routes call the FastAPI backend directly, while `app/api/*` proxies pass search/proofs/contact traffic through Next to preserve cookies/headers. `AppProviders` shares a single React Query + Wagmi config across the tree.
 - **Streaming + FX resilience** – `usePriceStream`/`useLiveOutcomePrices` multiplex a shared WS stream per market with backoff and history seeding; `useFxStream` keeps one FX WS alive with HTTP fallbacks and stale guards so price cards stay safe when WS is blocked or slow.
-- **Signed quotes + on-chain commit** – Quote requests carry wallet + market address + outcome ID; the backend signs the ABI-packed digest enforced by `RevealMarket.commitWithQuote`. The client builds a `SignedQuote` and submits the transaction via wagmi/viem, refreshing quotes on expiry.
+- **Signed quotes + relayer commit** – Preview quotes from `/pricing/preview`, signed quotes from `/pricing/quote`, submit via `/trade/commit`, and poll `/trade/status` for tx hash; on-chain claims use `claim` via wagmi/viem.
 
 ## What’s Implemented Today
 
 - **SSR-first data** – All routes fetch directly from the FastAPI backend; cache tags mirror worker invalidation so `revalidateTag` and server actions stay aligned. Suggestions proxy through `/app/api/markets/suggest` to avoid double hits.
-- **Live pricing** – `useLiveOutcomePrices` ties SSE/WS `/stream` to market detail; history hydrates from backend/streamer and merges live ticks. FX uses WS-first `/fx/zen-usd` with HTTP fallback + stale warnings that block trades.
-- **Quote submission** – Stake panels clamp to 0.1 ZEN, require wallet + market address + outcome id, fetch signed quotes from `/pricing/quote`, and submit `commitWithQuote` via wagmi/viem; expiry/chain mismatch triggers auto-refresh.
-- **Security posture** – `next.config.mjs` ships CSP/HSTS/COOP/Permissions-Policy; GA/gtag only allowed in production. App Router routes opt into `metadata` from `lib/seo.ts` so sitemap/robots stay accurate.
-- **Testing** – Vitest covers hero CTA, navs, featured markets pagination, search suggestions, market cards/metadata, and FX/streaming hooks. `frontend/run_tests.sh` fails fast when the API `/health` is unreachable to mirror CI.
-- **Observability** – Structured logs per fetch helper, client heartbeat in `RootLayout`, and streaming hooks surface source/staleness for ops dashboards.
+- **Search + discovery** – Hero suggestions, `/markets/search` with load-more pagination, and category pages reuse the same cached fetchers.
+- **Live pricing** – `usePriceStream`/`useLiveOutcomePrices` tie WS/SSE `/stream` to market detail; history hydrates from the streamer and merges live ticks. FX uses WS-first `/fx/zen-usd` with HTTP fallback + stale warnings that block trades.
+- **Trading flow** – Stake panels enforce the 0.1 ZEN ticket size + caps, request previews from `/pricing/preview`, fetch signed quotes from `/pricing/quote`, submit `/trade/commit`, and poll `/trade/status` for relayer/tx updates.
+- **Positions + escrow** – `/dashboard` shows escrow balances, approve/deposit/withdraw, positions, and per-ticket claims after a bundle signature.
+- **Proof receipts** – `/proofs` streams receipts with infinite scroll and supports deep links via query params.
+- **Security + observability** – `next.config.mjs` ships CSP/HSTS/COOP/Permissions-Policy; GA/gtag only allowed in production. Structured logs and a client heartbeat run from `RootLayout`, plus Vitest coverage across navs, markets, streaming hooks, dashboards, and proofs.
 
 ---
 
@@ -59,11 +61,21 @@ Defaults are derived from `RM_ENVIRONMENT` (`local` → localhost:3000/8000/8100
 
 | Variable | Purpose |
 | -------- | ------- |
+| `RM_ENVIRONMENT` | Preset mode (`local` or `prod`) for API/streamer/site defaults. |
+| `RM_API_BASE_URL` / `NEXT_PUBLIC_API_BASE_URL` | Override FastAPI base for SSR + client calls. |
+| `NEXT_PUBLIC_PRICE_STREAMER_URL` / `STREAMER_INTERNAL_URL` | Streamer base for WS/SSE; internal URL is used server-side in Docker. |
+| `NEXT_PUBLIC_SITE_URL` / `RM_SITE_URL` | Canonical site URL for metadata, sitemap, and SEO. |
 | `LANDING_ACCESS_CODE` | Optional gatekeeper code for the marketing landing page. When omitted, the gate is disabled. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project ID. Required for the Connect Wallet modal + QR code flows. |
 | `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_CHAIN_NAME` | Target chain for wagmi/viem (defaults: Horizen Testnet `2651420`, name `"Horizen Testnet"`). |
-| `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | RPC + explorer for the target chain (defaults: `https://horizen-testnet.rpc.caldera.xyz/http`, `https://horizen-testnet.explorer.caldera.xyz`). |
+| `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_BLOCK_EXPLORER_URL` / `NEXT_PUBLIC_EXPLORER_BASE_URL` | RPC + explorer for the target chain (defaults: `https://horizen-testnet.rpc.caldera.xyz/http`, `https://horizen-testnet.explorer.caldera.xyz`). |
+| `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` / `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` | ERC20 collateral + escrow addresses (required for dashboard funding + claim UX). |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Google Analytics (empty to disable). |
+
+Optional toggles:
+
+- `NEXT_PUBLIC_DISABLE_STREAMER_WS` / `NEXT_PUBLIC_DISABLE_PRICE_STREAMS` – force SSE fallback or disable streaming entirely.
+- `NEXT_PUBLIC_LOG_LEVEL`, `NEXT_PUBLIC_ENABLE_BROWSER_LOGS`, `NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT`, `NEXT_PUBLIC_HEARTBEAT_INTERVAL_MS` – tune logging and heartbeat behavior.
 
 When deploying, ensure these values align with the CDN or reverse proxy domain so CSP/HSTS headers reference the correct origin.
 
@@ -79,6 +91,8 @@ npm install
 npm run dev        # serves on :3000 (hit https://revealmarket.xyz via your TLS proxy/hosts entry)
 ```
 
+Ensure the backend + streamer are reachable (e.g., `./run_local.sh`) or point `RM_API_BASE_URL`/`NEXT_PUBLIC_PRICE_STREAMER_URL` at staging so SSR + streaming calls succeed.
+
 Useful scripts:
 
 - `npm run lint` – ESLint (includes Next.js rules + custom config).
@@ -88,11 +102,11 @@ Useful scripts:
 
 Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, etc.) if you prefer a single entry point.
 
-> **Self-contained tests:** `npm run test` and `frontend/run_tests.sh` stub backend calls so the suite runs without the API stack. Opt into an online health check with `FRONTEND_REQUIRE_API=true` if you want to fail fast when the configured `/health` endpoint is unreachable.
+> **Tests & backend dependency:** `npm run test` mocks fetch in most suites; `frontend/run_tests.sh` runs lint/test/build. For CI parity, start the backend stack (or point `RM_API_BASE_URL` at staging) and set `FRONTEND_REQUIRE_API=true` to enforce the `/health` check.
 
 ### Wallet connections
 
-`Connect Wallet` in the main nav is powered by Wagmi 3 + WalletConnect v2 with viem transports for Mainnet, Base, and zkSync. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online. WalletConnect stays available everywhere via QR/deep links.
+`Connect Wallet` in the main nav is powered by Wagmi 3 + WalletConnect v2 plus injected/coinbase connectors. The app targets a single chain (defaults to Horizen Testnet `2651420`) and will auto-prompt a switch when a mismatched chain is detected. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal comes online.
 
 ---
 
@@ -104,16 +118,21 @@ Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, e
 - `loadFeaturedMarketsAction(limit, options)` – A server action used by `FeaturedMarketsClient` and other client entry points so “Load more” reuses the same fetcher/cache tags that SSR used.
 - `useFeaturedMarkets({ limit, searchQuery, category, initialData })` – React Query hook that wraps the server action and provides stale-while-revalidate behavior to client components.
 - `fetchMarketByEventId(eventId)` – Loads detail data and merges backend-provided metadata with Gamma-derived extras (`clob_pair_id`, `resolution_source`, etc.).
+- `fetchGroupedMarkets(groupSlug)` – Loads grouped market bundles for multi-outcome events and the group selector.
 - `fetchMarketStatsBreakdown()` / `fetchHealthSnapshot()` – Used for KPI cards, doc callouts, and investor narratives.
 - `fetchProofReceipts(limit, { offset, marketId, eventId, conditionId, requestId })` – Backed by the `/proofs` API and used by `/proofs`’ infinite scroll client to keep the page lightweight.
 - `fetchMarketSuggestions(query, limit)` – Powers `/app/api/markets/suggest` so the global search dropdown hits a cached Next.js route instead of calling the backend twice per keystroke.
-- `fetchPricingQuoteWithMeta(stakeZen, { walletAddress, marketAddress, outcomeId, marketId })` – Requests signed quotes compatible with `RevealMarket.commitWithQuote`; missing fields are rejected.
+- `fetchPricingPreview(...)` / `fetchPricingQuoteWithMeta(...)` – Preview quotes for UI plus signed quotes for trades, with caps and expiries baked in.
+- `submitTrade(quoteId)` / `fetchTradeStatus(...)` – Sends `/trade/commit` and polls `/trade/status` for relayer updates + tx hash.
+- `fetchPositions(wallet)` / `fetchClaimBundles(wallet, signature)` – Powers the `/dashboard` positions table and claim flow.
 
 Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast while still respecting backend invalidation tags that the worker publishes.
 
 ### Trading flow (FX + quotes)
 - FX hook prefers WS/WSS (`/fx/zen-usd`, aliased from `/fx/zen-usdc`) with periodic HTTP fallback; after a few fallbacks it re-attempts WS automatically.
-- Quote requests include wallet, market address, and outcome id; the backend signs the on-chain digest. Client components surface expiry and call `commitWithQuote` with the signed payload via wagmi/viem. Ensure the connected chain matches the quote’s `chain_id`.
+- Preview quotes (`/pricing/preview`) keep the UI responsive; signed quotes (`/pricing/quote`) include caps, expiry, and `quote_id`.
+- Trades submit to `/trade/commit` (relayer) and poll `/trade/status` for tx hash + confirmations; ensure the connected chain matches the quote’s `chain_id`.
+- Stake size is fixed at 0.1 ZEN and capped further by per-user/per-market limits; stale FX disables trading.
 
 ### Lazy loading & pagination
 
@@ -132,7 +151,7 @@ Every fetch call sets `cache` + `next.revalidate` hints so hydration stays fast 
   - `MarketGrid` + `MarketCard` (supports 2/3/4 column layouts automatically)
   - `MarketDetailHeader/Metadata/Sidebar/Outcomes`
 - **Spacing** – Use the existing Tailwind spacing scale (`px-4 py-6`, `rounded-3xl`, etc.) to maintain visual rhythm.
-- **Typography** – Manrope is loaded via `next/font/google`. When adding new copy, keep headings within `text-3xl`–`text-4xl` and supporting paragraphs at `text-base` or `text-sm` for readability on mobile.
+- **Typography** – Manrope is loaded via `next/font/google`; Autobus Bold is a local display face (use `font-display` when needed). When adding new copy, keep headings within `text-3xl`–`text-4xl` and supporting paragraphs at `text-base` or `text-sm` for readability on mobile.
 - **Brand assets** – Source logos, gradients, and lockups are stored in [this shared Drive folder](https://drive.google.com/drive/u/0/folders/1tHh_4g5wugT2LusltcLbopsyyH1MupQd); reference it before exporting new files into `public/brand` or the mockups directory.
 
 When in doubt, wrap new sections in `glass-panel` to inherit the global blur/gradient aesthetic.
@@ -171,7 +190,7 @@ If you introduce new components, test at these breakpoints:
   1. `npm run lint`
   2. `npm run test`
   3. Manually inspect `/`, `/categories/politics`, `/markets/<eventId>` in responsive mode.
-  4. For CI parity run `./frontend/run_tests.sh`, which now fails fast if the configured API base can’t answer `/health`.
+  4. For CI parity run `./frontend/run_tests.sh` with the backend reachable; set `FRONTEND_REQUIRE_API=true` to enforce the `/health` check.
 
 CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
@@ -183,21 +202,21 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
 - **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Backend-ready builds** – `frontend/run_tests.sh` now refuses to run unless the API base resolves and responds to `/health` (defaults come from `RM_ENVIRONMENT`: prod → `https://api.revealmarket.xyz`, local → `http://localhost:8000`).
+- **Backend-aware builds** – SSR fetches hit the API; for CI/MVP runs keep the backend reachable (or point `RM_API_BASE_URL` at staging). Use `FRONTEND_REQUIRE_API=true` to enforce a `/health` check locally.
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ## Streaming & FX
 
 - **FX source** – Frontend consumes the streamer FX websocket at `/fx/zen-usd` (worsen% applied). Hook: `useFxStream(path)` handles WS with backoff, HTTP fallback, and stale/error states; used by `MainNav` and `StakeQuoteCard`.
-- **Market prices** – Live odds stream from streamer `/stream` (SSE) via `useLiveOutcomePrices(eventId)`, which surfaces `display_price` (worsen% applied) and `fx_stale` flags on market detail pages.
+- **Market prices** – Live odds stream from streamer `/stream` (WS preferred, SSE fallback) via `usePriceStream` and `useLiveOutcomePrices`, surfacing `display_price` and `fx_stale` flags on market detail pages.
 - **WSS/TLS** – Streamer defaults follow `RM_ENVIRONMENT` (prod → `https://stream.revealmarket.xyz`, local → `http://localhost:8100`) and auto-switch to `wss://` for websockets. Caddy config for TLS termination lives in `docker/caddy/Caddyfile`.
-- **Env summary** – Defaults come from `RM_ENVIRONMENT` (prod/local presets). Override with `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only when needed; keep streamer-side `STREAMER_WORSEN_PERCENT` aligned.
+- **Env summary** – Defaults come from `RM_ENVIRONMENT` (prod/local presets). Override with `RM_API_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_PRICE_STREAMER_URL`/`STREAMER_INTERNAL_URL` only when needed; `NEXT_PUBLIC_DISABLE_STREAMER_WS` and `NEXT_PUBLIC_DISABLE_PRICE_STREAMS` control stream behavior.
 
 ## Deployment / Runbook
 
-- **Env vars**: Mostly preset by `RM_ENVIRONMENT`; optional overrides include `RM_API_BASE_URL`, `STREAMER_INTERNAL_URL`, wallet provider keys, and any analytics keys (ensure CSP allows them).
+- **Env vars**: Mostly preset by `RM_ENVIRONMENT`; optional overrides include `RM_API_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL`/`STREAMER_INTERNAL_URL`, `NEXT_PUBLIC_SITE_URL`, wallet provider keys, and analytics keys. Ensure `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` + `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` are set for escrow/claim flows.
 - **TLS**: Terminate at Caddy/Nginx; streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
-- **Health**: API `/healthz`, streamer `/healthz`; frontend relies on a reachable API (build/tests fail fast if `/health` is down).
+- **Health**: API `/health` (or `/healthz`), streamer `/healthz`; keep the backend reachable for CI/MVP runs and consider `FRONTEND_REQUIRE_API=true` for local checks.
 - **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
 - **Smoke**: Run `npm run lint && npm run test && npm run build`; for live pricing, confirm `MainNav` shows FX and a market detail page receives live price ticks.
 
@@ -209,7 +228,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - Every fetch helper logs success/error states (`fetchFeaturedMarkets:success`, `fetchProofReceipts:error`, etc.) so you can correlate frontend issues with backend traces.
 - `ensureHeartbeat()` runs in `RootLayout`, so every container (dev server, `next start`, Docker standalone) proves liveness even when traffic is idle.
 - When running under Docker, `docker/frontend/Dockerfile` uses a multi-stage build: `npm ci` runs in a deps layer, source is copied from the repo (no host `node_modules` bind mounts), and the final image serves the standalone output as a non-root user.
-- For noisy environments, drop `NEXT_PUBLIC_LOG_LEVEL=warn` or tweak the heartbeat interval; for deep debugging set `LOG_LEVEL=debug` to surface client fetch metadata.
+- For noisy environments, drop `NEXT_PUBLIC_LOG_LEVEL=warn` or tweak the heartbeat interval; set `NEXT_PUBLIC_ENABLE_BROWSER_LOGS=true` + `NEXT_PUBLIC_FRONTEND_LOG_ENDPOINT` to ship client logs, and use `LOG_LEVEL=debug` for server-side fetch metadata.
 
 ---
 
@@ -217,7 +236,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 1. `npm install && npm run lint && npm run test`.
 2. `npm run build` (ensures there are no SSG/ISR surprises).
-3. Ensure `RM_ENVIRONMENT=production` in your hosting platform; override `RM_API_BASE_URL`/`STREAMER_INTERNAL_URL` only if pointing at non-standard hosts.
+3. Ensure `RM_ENVIRONMENT=production` in your hosting platform; override `RM_API_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL`/`STREAMER_INTERNAL_URL`, and `NEXT_PUBLIC_SITE_URL` only if pointing at non-standard hosts; set `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` + `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` for live trading.
 4. Serve over HTTPS so CSP/HSTS headers take effect. If you terminate TLS upstream (Cloudflare, Fastly, etc.), mirror the security headers there.
 5. Configure caching:
    - Static assets: long-lived CDN cache.
@@ -232,7 +251,10 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | The app tolerates offline builds; if you prefer to fail fast, set `FRONTEND_REQUIRE_API=true` and ensure the API answers at the configured base before running `npm run build`. |
+| `Unable to reach backend` during build | Ensure the API answers `/health` at the configured base or point `RM_API_BASE_URL` at staging; set `FRONTEND_REQUIRE_API=true` if you want `run_tests.sh` to enforce it. |
+| WalletConnect QR modal missing | Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and restart the dev server. |
+| Trade/escrow buttons disabled | Check for chain mismatch and confirm `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` + `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` are set. |
+| Streamer/FX blocked on HTTPS | Use HTTPS/WSS streamer URLs or set `NEXT_PUBLIC_DISABLE_STREAMER_WS=true` to force REST/SSE fallback. |
 | CSP violations in dev | Update `next.config.mjs` to include any new external domains (fonts, analytics, etc.). |
 | Scroll layouts jitter on mobile | Confirm `body` retains `scrollbar-gutter` and that new sections don’t override `overflow`. |
 | Jest/Vitest can’t parse component | Remember to mark hooks/components that need browser APIs with `"use client"`. |

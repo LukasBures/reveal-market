@@ -1,22 +1,25 @@
-# TODO – Zen Contracts
+# TODO – Zen Contracts (MVP)
 
-- **Verifier refresh + circuit hash alignment**
-  - Regenerate Groth16 artifacts and deploy a fresh verifier; update factory configs (`circuitHash`) and caches (`contracts/cache/settlement-vk.json`, prover hashes) so settlement cannot verify with stale circuits.
+## MVP blockers
+- **Circuit + verifier alignment**
+  - Regenerate Groth16 artifacts and deploy a fresh verifier; update `contracts/zen/cache/settlement-vk.json`, factory `circuitHash`, and prover hashes so settlement cannot verify with stale circuits.
   - Add a script/assertion to compare on-chain `circuitHash()` with cached hash before settlement; fail CI when mismatched.
+  - Update `docs/settlement-circuit.md` to match current signals (marketId is factory id, `totalEscrow` is net-of-rake, protocol cap allowed).
+- **Deployment + env hygiene**
+  - Fix `run_deploy.sh` default VK path and align `contracts/zen/.env.example` with the env names it expects (`PRIVATE_KEY`, `AUTHORIZATION_SIGNER`, `ZEN_TOKEN_ADDRESS`, etc.).
+  - Add a `CreateMarket` script (or `cast` recipe) that emits JSON output for backend ingestion and preserves deterministic market ids/addresses.
+- **Settlement safety**
+  - Add a timeout cancel/refund path if the oracle never posts a result or proof.
+  - Add a claim deadline + sweep for unclaimed payouts (to `ProtocolPool` or escrow) so funds do not remain stranded.
+- **Payout routing decision**
+  - Decide whether claims pay users directly or credit `RelayerEscrow`; wire `creditFromMarket` or remove it and update relayer/backend assumptions.
+- **MVP test gaps**
+  - Add regression tests for pause/rotation sequencing, cap updates mid-market, and multi-claim ordering.
 
-- **Test coverage + fuzzing**
+## Post-MVP hardening
+- **Fuzz/invariant coverage**
   - Fuzz Merkle inclusion/replay protection (duplicate tickets, reused salts, mismatched ticketId/outcome) and protocol cap edges (pool depletion, surplus distribution).
-  - Add multi-claim sequencing tests with interleaved pauses and cap updates; cover rake updates mid-market and ensure settlement enforces proof rake equals storage.
-  - Include invariant tests for deadline extension monotonicity and signer/oracle rotations.
-
-- **Deployment scripts**
-  - Production-grade `script/Deploy*.s.sol` with env-driven parameters (ticket size, max commits, rake bps, cap, oracle, relayer, signer, verifier, circuit hash).
-  - Add scripts for factory/escrow/pool rotation and rake sync across markets; include broadcast + summary output for backend ingestion.
-
 - **Monitoring/telemetry**
-  - Emit explicit events for protocol pool draws/repayments and relayer credits if downstream analytics expect them; document ABI for backend/hedger/relayer.
-  - Consider exposing view functions for outstanding liability, collected rake, and per-market cap to simplify dashboards.
-
-- **Admin & safety**
-  - Document signer lifecycle (rotation cadence, timelock/pauser expectations) and add optional timelocks/pauses on admin actions if required by ops.
-  - Add guardrails for `setCommitsPaused`/`setClaimsPaused` misuse (e.g., cannot unpause settled markets) and consider emit reason codes for pauses.
+  - Confirm event ABI expectations for backend/hedger/relayer and add view helpers for outstanding liability, collected rake, and per-market cap if needed.
+- **Admin guardrails**
+  - Document signer/oracle rotation cadence and add optional timelocks for sensitive actions if required by ops.
