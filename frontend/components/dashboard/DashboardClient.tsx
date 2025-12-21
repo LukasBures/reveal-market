@@ -239,6 +239,13 @@ export function DashboardClient() {
     const [message] = raw.split("Version:");
     return message.trim() || "Transaction failed";
   };
+  const waitForReceipt = async (hash: Hex, label: string) => {
+    if (!publicClient) return;
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`${label} reverted`);
+    }
+  };
   const sanitizeUserActionError = useCallback((err: unknown): string => {
     const raw = err instanceof Error ? err.message : String(err);
     const [message] = raw.split("Version:");
@@ -338,9 +345,7 @@ export function DashboardClient() {
           chainId,
         });
         setEscrowStatus(`Approve tx: ${approveHash.slice(0, 10)}…${approveHash.slice(-6)}`);
-        if (publicClient) {
-          await publicClient.waitForTransactionReceipt({ hash: approveHash as any });
-        }
+        await waitForReceipt(approveHash as Hex, "Approval");
       }
       const depositHash = await writeContract({
         address: escrowAddress as Address,
@@ -358,9 +363,7 @@ export function DashboardClient() {
         chainId,
       });
       setEscrowStatus(`Deposit tx: ${depositHash.slice(0, 10)}…${depositHash.slice(-6)}`);
-      if (publicClient) {
-        await publicClient.waitForTransactionReceipt({ hash: depositHash as any });
-      }
+      await waitForReceipt(depositHash as Hex, "Deposit");
       await refetchTokenBalance();
       await refetchEscrowAllowance();
       await refetchOnchainEscrow();
@@ -411,9 +414,7 @@ export function DashboardClient() {
         chainId,
       });
       setEscrowStatus(`Withdraw tx: ${withdrawHash.slice(0, 10)}…${withdrawHash.slice(-6)}`);
-      if (publicClient) {
-        await publicClient.waitForTransactionReceipt({ hash: withdrawHash as any });
-      }
+      await waitForReceipt(withdrawHash as Hex, "Withdraw");
       await refetchTokenBalance();
       await refetchEscrowAllowance();
       await refetchOnchainEscrow();

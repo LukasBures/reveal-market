@@ -36,9 +36,9 @@ DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://hori
 DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "testnet_zenith_token_random_1764886505.txt"
 # Edit these to set a default token and amount.
 DEFAULT_TOKEN_ADDRESS = "0x070040A826B586b58569750ED43cb5979b171e8d"  # noqa: S105
-DEFAULT_TOKEN_AMOUNT = "5"  # noqa: S105
+DEFAULT_TOKEN_AMOUNT = "2"  # noqa: S105
 # Optional default destination; leave blank to require --to.
-DEFAULT_DESTINATION = "0x33c65aac00ace0b48876d9b87990e0c44f780708"  # noqa: S105
+DEFAULT_DESTINATION = "0x9D9E384Fb4425B90A1537Dd106CeB3fc79887f56"  # noqa: S105
 
 ERC20_ABI: list[dict[str, Any]] = [
     {
