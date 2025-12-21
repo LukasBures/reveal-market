@@ -284,12 +284,12 @@ export function ConnectWalletButton() {
   };
 
   const handleSwitchChain = () => {
-    if (!switchChain && !switchChainAsync) {
+    const switchFn = switchChainAsync ?? switchChain;
+    if (!switchFn) {
       setSwitchFailure(`Switch to ${defaultChain.name} in your wallet to continue.`);
       return;
     }
     setSwitchFailure(null);
-    const switchFn = switchChainAsync ?? switchChain;
     Promise.resolve(switchFn({ chainId: defaultChain.id })).catch((error: unknown) => {
       setSwitchFailure(
         formatErrorMessage(error instanceof Error ? error : switchError) ??
