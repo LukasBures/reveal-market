@@ -148,6 +148,14 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         assertEq(market.nextTicketId(), 2);
     }
 
+    function testPoseidonLeafMatchesVector() external pure {
+        address vectorUser = address(0x1111111111111111111111111111111111111111);
+        bytes32 salt = hex"2222222222222222222222222222222222222222222222222222222222222222";
+        bytes32 expected = hex"183bb100f347db5e6da1760f30a6dc78e11662f5c53ff63160c51f2d433c65ee";
+        bytes32 leaf = _poseidonLeaf(42, 1, 123456789, salt, vectorUser);
+        assertEq(leaf, expected, "poseidon leaf mismatch");
+    }
+
     function testCommitEmitsAndTracksEscrowAndRake() external {
         bytes32 leaf = _leaf(0, 0, ticketSize, bytes32("salt"), user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({

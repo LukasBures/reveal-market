@@ -24,6 +24,7 @@ from prometheus_client import REGISTRY
 from shared import cache_async as shared_cache
 from shared import models as shared_models
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
+from shared.merkle import build_merkle_root_and_paths
 from shared.models import Base, Market, Settlement
 from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -932,6 +933,47 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
     monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
 
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    leaf_hex = "0x" + "02" * 32
+    root_bytes, _ = build_merkle_root_and_paths([bytes.fromhex(leaf_hex[2:])])
+
+    async with session_factory() as session:
+        market_row = Market(id=1, event_id="evt-proof", title="Proof Market", oracle="polymarket")
+        session.add(market_row)
+        await session.flush()
+        session.add(
+            shared_models.Commitment(
+                id=1,
+                market_id=market_row.id,
+                user_address="0x1",
+                outcome_id=0,
+                amount_wei=1,
+                salt="0x1",
+                ticket_hash=leaf_hex,
+                leaf=leaf_hex,
+                leaf_index=0,
+            )
+        )
+        session.add(
+            Settlement(
+                id=1,
+                market_id=market_row.id,
+                merkle_root="0x" + root_bytes.hex(),
+                commitments_count=1,
+                pool_total_yes=1,
+                pool_total_no=0,
+                total_escrow=1,
+                total_liability=1,
+                rake_bps=0,
+                winning_outcome_id=0,
+                circuit_hash="0xabc",
+            )
+        )
+        await session.commit()
+
     redis_client = DummyRedis()
     market_payload = MarketPayload(
         event_id="evt-proof",
@@ -940,18 +982,19 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
         outcome_prices=[0.6, 0.4],
     )
     market_snapshot = {
+        "market_id": 1,
         "event_id": "evt-proof",
         "market_address": "0xabc",
         "condition_id": "0xabc",
-        "commitments_root": "0xroot",
+        "commitments_root": "0x" + root_bytes.hex(),
         "tickets": [
             {
                 "user": "0x1",
                 "outcomeId": "0",
                 "amount": "1",
                 "salt": "0x1",
-                "ticketHash": "0x2",
-                "leaf": "0x2",
+                "ticketHash": leaf_hex,
+                "leaf": leaf_hex,
                 "merklePath": [],
                 "merkleIndex": 0,
             }
@@ -963,14 +1006,17 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
         "winning_outcome_id": 0,
         "circuit_hash": "0xabc",
     }
-    assert await proofs.maybe_generate_settlement_proof(
-        redis_client,
-        market_snapshot=market_snapshot,
-        market_payload=market_payload,
-        condition_id="0xabc",
-    )
-    assert fake_prover.called_with is not None
-    assert redis_client.last_set is not None
+    try:
+        assert await proofs.maybe_generate_settlement_proof(
+            redis_client,
+            market_snapshot=market_snapshot,
+            market_payload=market_payload,
+            condition_id="0xabc",
+        )
+        assert fake_prover.called_with is not None
+        assert redis_client.last_set is not None
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

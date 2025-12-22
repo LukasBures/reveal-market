@@ -13,7 +13,11 @@ def test_prover_client_success():
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["marketId"] == "0x123"
-        assert "tickets" not in payload
+        assert payload["batchIndex"] == "0"
+        assert payload["commitmentsCount"] == "1"
+        assert payload["tickets"] == [
+            {"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}
+        ]
         assert "payoutMultiplierWad" not in payload
         assert request.headers.get("X-Prover-Secret") == "secret"
         return httpx.Response(
@@ -39,6 +43,9 @@ def test_prover_client_success():
         total_liability="90",
         rake_bps=100,
         circuit_hash="0x1234",
+        batch_index="0",
+        commitments_count="1",
+        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}],
     )
     response = client.generate_settlement_proof(request)
     assert response.proof == "0xdeadbeef"
@@ -63,6 +70,9 @@ def test_prover_client_raises_on_error():
         total_liability="10",
         rake_bps=0,
         circuit_hash="0x1234",
+        batch_index="0",
+        commitments_count="1",
+        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}],
     )
     try:
         client.generate_settlement_proof(request)

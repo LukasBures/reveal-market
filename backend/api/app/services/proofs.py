@@ -96,6 +96,21 @@ def _coalesce(*values: Any) -> Any:
     return None
 
 
+def _is_empty_hex(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (bytes, bytearray)):
+        return len(value) == 0 or all(b == 0 for b in value)
+    if not isinstance(value, str):
+        value = str(value)
+    cleaned = value.strip().lower()
+    if cleaned.startswith("0x"):
+        cleaned = cleaned[2:]
+    if not cleaned:
+        return True
+    return all(ch == "0" for ch in cleaned)
+
+
 def build_proof_receipt_model(
     receipt: shared_models.SettlementReceipt,
     settlement: shared_models.Settlement | None,
@@ -115,10 +130,13 @@ def build_proof_receipt_model(
         signals = []
     parsed_signals = _parse_public_signals(signals)
 
+    settlement_root = getattr(settlement, "merkle_root", None) if settlement is not None else None
+    if _is_empty_hex(settlement_root):
+        settlement_root = None
     merkle_root = _coalesce(
-        getattr(settlement, "merkle_root", None) if settlement is not None else None,
         _cached_value(cached, "merkleRoot"),
         parsed_signals.get("merkle_root"),
+        settlement_root,
     )
     pool_total_yes = _normalize_bigint(
         _coalesce(

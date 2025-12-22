@@ -24,6 +24,18 @@ from app.services.proofs import build_proof_receipt_model
 router = APIRouter()
 
 
+def _root_cache_key(receipt: shared_models.SettlementReceipt) -> str | None:
+    signals = receipt.public_signals
+    if isinstance(signals, (list, tuple)) and signals:
+        try:
+            root_signal = str(signals[0])
+        except Exception:
+            root_signal = None
+        if root_signal:
+            return proof_receipt_cache_key(f"root:{root_signal}")
+    return None
+
+
 @router.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"], include_in_schema=False)
 async def list_proof_receipts(
     request: Request,
@@ -99,8 +111,12 @@ async def list_proof_receipts(
     for receipt_row, settlement_row, market_row in rows:
         cached_payload = None
         condition_value = getattr(market_row, "condition_id", None) if market_row is not None else None
-        if cache_available and condition_value:
-            cached_payload = await get_json(cache, proof_receipt_cache_key(str(condition_value)))
+        if cache_available:
+            key = _root_cache_key(receipt_row)
+            if key:
+                cached_payload = await get_json(cache, key)
+            if cached_payload is None and condition_value:
+                cached_payload = await get_json(cache, proof_receipt_cache_key(str(condition_value)))
             if cached_payload is not None:
                 cache_hits += 1
         receipts.append(build_proof_receipt_model(receipt_row, settlement_row, market_row, cached_payload))

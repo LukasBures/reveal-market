@@ -86,6 +86,21 @@ def _normalize_bytes32(value: Any) -> str | None:
     return str(value)
 
 
+def _is_empty_hex(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (bytes, bytearray)):
+        return len(value) == 0 or all(b == 0 for b in value)
+    if not isinstance(value, str):
+        value = str(value)
+    cleaned = value.strip().lower()
+    if cleaned.startswith("0x"):
+        cleaned = cleaned[2:]
+    if not cleaned:
+        return True
+    return all(ch == "0" for ch in cleaned)
+
+
 def _parse_json_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
@@ -766,7 +781,18 @@ def _batch_root_for_ticket(settlement: models.Settlement, ticket_id: int) -> str
         batch_index = int(ticket_id) // BATCH_SIZE
         if batch_index < len(batch_roots):
             return str(batch_roots[batch_index])
+    if _is_empty_hex(getattr(settlement, "merkle_root", None)):
+        return None
     return settlement.merkle_root
+
+
+def _has_valid_roots(settlement: models.Settlement | None) -> bool:
+    if settlement is None:
+        return False
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    if batch_roots:
+        return True
+    return not _is_empty_hex(getattr(settlement, "merkle_root", None))
 
 
 async def _build_merkle_proof_for_commitment(
@@ -777,7 +803,7 @@ async def _build_merkle_proof_for_commitment(
     batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
 
-    if not batch_roots and settlement.merkle_root:
+    if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
         batch_counts = [settlement.commitments_count]
     if not batch_roots:
@@ -1443,7 +1469,7 @@ async def list_claim_bundles(
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
             continue
-        has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root) if settlement else False
+        has_roots = _has_valid_roots(settlement)
         if settlement is None or not has_roots or settlement.winning_outcome_id is None:
             refreshed = await _maybe_backfill_settlement(session, market)
             if refreshed is not None:
@@ -1498,7 +1524,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     settlement = (
         await session.execute(select(models.Settlement).where(models.Settlement.market_id == market.id))
     ).scalar_one_or_none()
-    has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root) if settlement else False
+    has_roots = _has_valid_roots(settlement)
     if settlement is None or settlement.winning_outcome_id is None or not has_roots:
         settlement = await _maybe_backfill_settlement(session, market) or settlement
     if settlement is None or settlement.winning_outcome_id is None:
@@ -1506,7 +1532,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_final")
     winning_outcome = settlement.winning_outcome_id
-    has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root)
+    has_roots = _has_valid_roots(settlement)
     if not has_roots:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_missing")
     commitment_with_path = await repository_async.get_commitment_with_path_for_wallet(
@@ -1523,7 +1549,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
     batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
-    if not batch_roots and settlement.merkle_root:
+    if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
         batch_counts = [settlement.commitments_count]
     if not settings.relayer_base_url:

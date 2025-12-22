@@ -512,7 +512,13 @@ async def maybe_generate_settlement_proof(
             "commitmentsCount": payload.get("commitmentsCount"),
             "proof_hash": f"0x{proof_hash}" if proof_hash else None,
         }
-        cache_key_target = (
+        root_signal = None
+        if response.public_signals:
+            try:
+                root_signal = str(response.public_signals[0])
+            except Exception:
+                root_signal = None
+        cache_key_target = f"root:{root_signal}" if root_signal else (
             normalized_condition
             or payload.get("conditionId")
             or payload.get("marketId")

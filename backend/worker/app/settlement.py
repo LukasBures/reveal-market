@@ -64,6 +64,8 @@ def _batch_root_for_ticket(settlement: shared_models.Settlement, ticket_id: int)
         batch_index = int(ticket_id) // BATCH_SIZE
         if batch_index < len(batch_roots):
             return str(batch_roots[batch_index])
+    if _is_empty_hex(getattr(settlement, "merkle_root", None)):
+        return None
     return settlement.merkle_root
 
 
@@ -126,11 +128,15 @@ def settlement_needs_refresh(settlement: shared_models.Settlement | None) -> boo
 
     if settlement is None:
         return True
-    if _is_empty_hex(settlement.merkle_root) or _is_empty_hex(settlement.circuit_hash):
-        return True
     batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
-    if settlement.commitments_count and not batch_roots:
+    has_batch_roots = bool(batch_roots)
+    has_merkle_root = not _is_empty_hex(getattr(settlement, "merkle_root", None))
+    if not has_batch_roots and not has_merkle_root:
+        return True
+    if _is_empty_hex(settlement.circuit_hash):
+        return True
+    if settlement.commitments_count and not has_batch_roots and not has_merkle_root:
         return True
     if batch_roots and (not batch_counts or len(batch_counts) != len(batch_roots)):
         return True
@@ -380,7 +386,7 @@ async def _build_merkle_proof_for_commitment(
 
     batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
-    if not batch_roots and settlement.merkle_root:
+    if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
         batch_counts = [settlement.commitments_count]
     if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
@@ -612,7 +618,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             if winning_outcome_id is None:
                 continue
             batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not batch_roots and settlement.merkle_root is None:
+            if not batch_roots and _is_empty_hex(settlement.merkle_root):
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
                 batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
@@ -638,7 +644,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             _mark_dirty()
             session.add(settlement)
             batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not batch_roots and settlement.merkle_root:
+            if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
                 batch_roots = [settlement.merkle_root]
             if not batch_roots:
                 log_event(
@@ -676,11 +682,11 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             batch_indexes: list[int] = []
             for index, root in enumerate(batch_roots):
                 root_signal = _root_to_signal(root)
-                receipt = receipt_by_root.get(root_signal or "")
-                if receipt is None or not receipt.proof or not receipt.public_signals:
+                batch_receipt = receipt_by_root.get(root_signal or "")
+                if batch_receipt is None or not batch_receipt.proof or not batch_receipt.public_signals:
                     continue
-                proofs.append(str(receipt.proof))
-                public_signals_list.append(cast(Sequence[Any], receipt.public_signals))
+                proofs.append(str(batch_receipt.proof))
+                public_signals_list.append(cast(Sequence[Any], batch_receipt.public_signals))
                 batch_indexes.append(index)
 
             if len(proofs) != len(batch_roots):

@@ -420,6 +420,8 @@ def upgrade() -> None:
         ),
         sa.Column("merkle_root", sa.String(length=66), nullable=True),
         sa.Column("commitments_count", sa.Integer(), nullable=True),
+        sa.Column("batch_roots", sa.JSON(), nullable=True),
+        sa.Column("batch_counts", sa.JSON(), nullable=True),
         sa.Column("pool_total_yes", sa.BigInteger(), nullable=True),
         sa.Column("pool_total_no", sa.BigInteger(), nullable=True),
         sa.Column("total_escrow", sa.BigInteger(), nullable=True),

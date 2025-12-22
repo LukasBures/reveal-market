@@ -1,5 +1,6 @@
 import pytest
 from shared.models import Base, Commitment, Settlement
+from shared.poseidon import int_to_bytes32, poseidon_t3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from worker.app.merkle import build_merkle_root_and_paths
@@ -24,15 +25,17 @@ def test_merkle_root_and_paths():
     root, paths = build_merkle_root_and_paths(leaves)
     assert root and len(paths) == 3
     # Recompute root for leaf 0 using path
-    from eth_utils import keccak
-
     computed = leaves[0]
     idx = 0
     for sibling in paths[0]:
         if idx & 1:
-            computed = keccak(sibling + computed)
+            computed = int_to_bytes32(
+                poseidon_t3(int.from_bytes(sibling, "big"), int.from_bytes(computed, "big"))
+            )
         else:
-            computed = keccak(computed + sibling)
+            computed = int_to_bytes32(
+                poseidon_t3(int.from_bytes(computed, "big"), int.from_bytes(sibling, "big"))
+            )
         idx >>= 1
     assert computed == root
 
@@ -75,10 +78,14 @@ def test_build_prover_payload(session):
     session.add(s)
     session.commit()
 
-    payload = build_prover_payload(session, 1)
+    payloads = build_prover_payload(session, 1)
+    assert len(payloads) == 1
+    payload = payloads[0]
     assert payload["marketId"] == "1"
     assert payload["merkleRoot"] == "0x" + root.hex()
-    assert "tickets" not in payload
+    assert payload["batchIndex"] == "0"
+    assert payload["commitmentsCount"] == "2"
+    assert payload["tickets"]
     assert "payoutMultiplierWad" not in payload
     assert payload["poolTotals"] == ["100", "101"]
 

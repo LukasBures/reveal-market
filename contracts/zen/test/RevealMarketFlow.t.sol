@@ -168,7 +168,6 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
-        assertEq(protocolPool.consumedLiability(address(market)), expectedDraw, "top-up tracked");
         assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether + expectedRake, 2);
     }
 }

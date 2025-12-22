@@ -30,6 +30,21 @@ def _normalize_batch_list(value: Any) -> list[Any]:
     return []
 
 
+def _is_empty_hex(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (bytes, bytearray)):
+        return len(value) == 0 or all(b == 0 for b in value)
+    if not isinstance(value, str):
+        value = str(value)
+    cleaned = value.strip().lower()
+    if cleaned.startswith("0x"):
+        cleaned = cleaned[2:]
+    if not cleaned:
+        return True
+    return all(ch == "0" for ch in cleaned)
+
+
 def _build_batch_payloads(
     settlement: Settlement,
     market_id: int,
@@ -39,7 +54,7 @@ def _build_batch_payloads(
         raise SettlementDataMissingError("winning outcome out of range")
     batch_roots = _normalize_batch_list(getattr(settlement, "batch_roots", None))
     batch_counts = _normalize_batch_list(getattr(settlement, "batch_counts", None))
-    if not batch_roots and settlement.merkle_root:
+    if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
         batch_counts = [settlement.commitments_count]
     if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
@@ -70,13 +85,13 @@ def _build_batch_payloads(
 
         for i in range(BATCH_SIZE):
             if i < count:
-                commitment = batch_commitments.get(i)
-                if commitment is None or commitment.leaf is None or commitment.salt is None:
+                batch_commitment = batch_commitments.get(i)
+                if batch_commitment is None or batch_commitment.leaf is None or batch_commitment.salt is None:
                     raise SettlementDataMissingError("missing commitment data for batch")
-                leaf_bytes = bytes.fromhex(commitment.leaf.removeprefix("0x"))
+                leaf_bytes = bytes.fromhex(batch_commitment.leaf.removeprefix("0x"))
                 leaves[i] = leaf_bytes
-                amount = int(commitment.amount_wei)
-                outcome_id = int(commitment.outcome_id)
+                amount = int(batch_commitment.amount_wei)
+                outcome_id = int(batch_commitment.outcome_id)
                 if outcome_id == 0:
                     pool_yes += amount
                 elif outcome_id == 1:
@@ -85,12 +100,14 @@ def _build_batch_payloads(
                 tickets.append(
                     {
                         "ticketId": str(
-                            commitment.leaf_index if commitment.leaf_index is not None else fallback_ticket_id
+                            batch_commitment.leaf_index
+                            if batch_commitment.leaf_index is not None
+                            else fallback_ticket_id
                         ),
                         "outcomeId": str(outcome_id),
                         "amount": str(amount),
-                        "user": str(commitment.user_address or "0x0"),
-                        "salt": str(commitment.salt or "0x0"),
+                        "user": str(batch_commitment.user_address or "0x0"),
+                        "salt": str(batch_commitment.salt or "0x0"),
                     }
                 )
             else:

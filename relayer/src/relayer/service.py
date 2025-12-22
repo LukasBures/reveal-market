@@ -198,6 +198,8 @@ class RelayerService:
         tickets = payload.get("tickets")
         if not isinstance(tickets, list) or not tickets:
             raise TxSendError("tickets_missing", kind="invalid", permanent=True)
+        if not payload.get("event_id") and not payload.get("market_id"):
+            raise TxSendError("market_id_missing", kind="invalid", permanent=True)
         try:
             market_addr: ChecksumAddress = self.web3.to_checksum_address(
                 self._require_field(payload, "market")

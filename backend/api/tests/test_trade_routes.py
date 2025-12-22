@@ -10,7 +10,7 @@ from app.schemas import FxQuoteResponse
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from pydantic import SecretStr
-from web3 import Web3
+from shared.merkle import build_merkle_root_and_paths
 
 
 class _AsyncClientStub:
@@ -197,8 +197,8 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="claim-mkt", address="0x4444444444444444444444444444444444444444")
     commitment_hex = "0x" + "11" * 32
     leaf_bytes = bytes.fromhex(commitment_hex[2:])
-    # Single-leaf tree hashes leaf with itself.
-    merkle_root = Web3.keccak(leaf_bytes + leaf_bytes).hex()
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
 
     db_session.add(
         models.Commitment(
@@ -251,7 +251,9 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     market = _seed_market(db_session, event_id="bundle-mkt", address="0x6666666666666666666666666666666666666666")
     commitment_hex = "0x" + "33" * 32
     leaf_bytes = bytes.fromhex(commitment_hex[2:])
-    merkle_root = Web3.keccak(leaf_bytes + leaf_bytes).hex()
+    root_bytes, paths = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    expected_proof = ["0x" + sibling.hex() for sibling in paths[0]]
 
     db_session.add(
         models.Commitment(
@@ -290,7 +292,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert bundle["marketId"] == market.event_id
     assert bundle["ticketId"] == 0
     assert bundle["amountWei"] == 200
-    assert bundle["merkleProof"] == []
+    assert bundle["merkleProof"] == expected_proof
     assert bundle["commitmentsRoot"].lower() == merkle_root.lower()
     assert bundle["user"].lower() == user.address.lower()
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CommitRequest(BaseModel):
@@ -55,3 +55,9 @@ class LockBatchesRequest(BaseModel):
     relayer_sig: str | None = Field(default=None, description="Optional relayer signature")
     event_id: str | None = Field(default=None, description="Optional event/market id for ingest")
     market_id: str | None = Field(default=None, description="Optional market id for ingest")
+
+    @model_validator(mode="after")
+    def _require_market_identifier(self) -> "LockBatchesRequest":
+        if not (self.event_id or self.market_id):
+            raise ValueError("event_id or market_id required")
+        return self
