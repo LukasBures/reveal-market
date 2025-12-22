@@ -40,16 +40,8 @@ func TestGroth16ProverIntegration(t *testing.T) {
 		t.Fatalf("failed to initialize prover: %v", err)
 	}
 
-	req := settlementProofRequest{
-		MarketID:       "0x2",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	req := buildTestRequest()
+	req.MarketID = "0x2"
 
 	result, err := prover.Generate(context.Background(), req)
 	if err != nil {

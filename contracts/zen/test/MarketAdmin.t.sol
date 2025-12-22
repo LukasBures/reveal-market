@@ -12,8 +12,9 @@ import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PoseidonTestUtils} from "./utils/PoseidonTestUtils.sol";
 
-contract MarketAdminTest is Test {
+contract MarketAdminTest is Test, PoseidonTestUtils {
     RelayerEscrow private relayerEscrow;
     ProtocolPool private protocolPool;
     MarketFactory private factory;
@@ -69,7 +70,7 @@ contract MarketAdminTest is Test {
         assertEq(market.authorizationSigner(), newSigner, "signer rotated");
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("leaf"),
+            commitment: _leaf(0, 0, ticketSize, bytes32("leaf"), user),
             user: user,
             nonce: 1,
             expiry: block.timestamp + 4 hours,
@@ -95,7 +96,7 @@ contract MarketAdminTest is Test {
 
     function testOracleRotation() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("leaf2"),
+            commitment: _leaf(0, 0, ticketSize, bytes32("leaf2"), user),
             user: user,
             nonce: 2,
             expiry: block.timestamp + 4 hours,
@@ -116,12 +117,20 @@ contract MarketAdminTest is Test {
         assertEq(market.oracle(), newOracle);
 
         vm.warp(commitDeadline + 1);
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = auth.commitment;
+        bytes32 root = _buildBatchRoot(leaves, 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+
         vm.prank(oracle);
         vm.expectRevert(RevealMarket.NotOracle.selector);
-        market.lock();
+        market.lockBatches(roots, counts, "");
 
         vm.prank(newOracle);
-        market.lock();
+        market.lockBatches(roots, counts, "");
     }
 
     function testRelayerRotationAllowsNewRelayer() external {
@@ -134,7 +143,7 @@ contract MarketAdminTest is Test {
         assertEq(market.relayerEscrow(), address(newRelayer));
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("leaf3"),
+            commitment: _leaf(0, 0, ticketSize, bytes32("leaf3"), user),
             user: user,
             nonce: 3,
             expiry: block.timestamp + 4 hours,
@@ -163,8 +172,9 @@ contract MarketAdminTest is Test {
         assertEq(market.protocolLiabilityCap(), newCap);
         assertEq(protocolPool.liabilityCap(address(market)), newCap);
 
+        uint256 netTicket = ticketSize - (ticketSize * market.rakeBps()) / 10_000;
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("leaf4"),
+            commitment: _leaf(0, 1, netTicket, bytes32("leaf4"), user),
             user: user,
             nonce: 4,
             expiry: block.timestamp + 4 hours,
@@ -180,14 +190,11 @@ contract MarketAdminTest is Test {
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
 
         vm.warp(commitDeadline + 1);
-        vm.prank(oracle);
-        market.lock();
+        bytes32 root = _lockSingleBatch(oracle, auth.commitment);
         vm.prank(oracle);
         market.postResult(1);
-
-        uint256 netTicket = ticketSize - (ticketSize * market.rakeBps()) / 10_000;
         uint256[10] memory signals = [
-            uint256(market.commitmentsRoot()),
+            uint256(root),
             uint256(1),
             uint256(1),
             netTicket,
@@ -205,6 +212,19 @@ contract MarketAdminTest is Test {
         vm.prank(address(this));
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
         factory.updateProtocolLiabilityCap(address(market), newCap + 1);
+    }
+
+    function _lockSingleBatch(address caller, bytes32 leaf) internal returns (bytes32) {
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = leaf;
+        bytes32 root = _buildBatchRoot(leaves, 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.prank(caller);
+        market.lockBatches(roots, counts, "");
+        return root;
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {
@@ -226,6 +246,14 @@ contract MarketAdminTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
+    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address leafUser)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
+    }
+
     function testRakeBoundsAndOverride() external {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(RevealMarket.InvalidInit.selector));
@@ -243,7 +271,7 @@ contract MarketAdminTest is Test {
         assertEq(market.commitDeadline(), newCommit);
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("deadline-leaf"),
+            commitment: _leaf(0, 0, ticketSize, bytes32("deadline-leaf"), user),
             user: user,
             nonce: 77,
             expiry: block.timestamp + 4 hours,
@@ -259,8 +287,7 @@ contract MarketAdminTest is Test {
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
 
         vm.warp(commitDeadline + 2 days);
-        vm.prank(oracle);
-        market.lock();
+        _lockSingleBatch(oracle, auth.commitment);
 
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
         vm.prank(address(this));
@@ -283,7 +310,7 @@ contract MarketAdminTest is Test {
 
     function testAuthorizationSignerGuard() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: keccak256("guard-leaf"),
+            commitment: _leaf(0, 0, ticketSize, bytes32("guard-leaf"), user),
             user: user,
             nonce: 9,
             expiry: block.timestamp + 4 hours,
@@ -301,8 +328,7 @@ contract MarketAdminTest is Test {
         vm.prank(address(this));
         factory.updateAuthorizationSigner(address(market), makeAddr("newSigner"));
         vm.warp(commitDeadline + 2 days);
-        vm.prank(oracle);
-        market.lock();
+        _lockSingleBatch(oracle, auth.commitment);
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
         vm.prank(address(this));
         factory.updateAuthorizationSigner(address(market), makeAddr("newerSigner"));

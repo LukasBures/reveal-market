@@ -101,7 +101,12 @@ if [[ ! -f "$PTAU_FILE" || $(wc -c <"$PTAU_FILE") -lt ${PTAU_MIN_BYTES} ]]; then
 fi
 
 echo "Compiling circuit..."
-run_circom "$CIRCUIT_FILE" --r1cs --wasm --sym -l "$BUILD_DIR" -o "$BUILD_DIR"
+run_circom "$CIRCUIT_FILE" --r1cs --wasm --sym --c -l "$BUILD_DIR" -o "$BUILD_DIR"
+
+if [[ -d "$BUILD_DIR/settlement_cpp" ]]; then
+  echo "Building C++ witness generator..."
+  make -C "$BUILD_DIR/settlement_cpp"
+fi
 
 echo "Running Groth16 setup..."
 run_snarkjs groth16 setup "$BUILD_DIR/settlement.r1cs" "$PTAU_FILE" "$BUILD_DIR/settlement_0000.zkey"

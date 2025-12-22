@@ -13,6 +13,13 @@ REQUIRED_FILES=(
   "circuits/build/settlement_js/generate_witness.js"
 )
 
+if [[ "${PROVER_WITNESS_MODE:-}" == "cpp" ]]; then
+  REQUIRED_FILES+=("circuits/build/settlement_cpp/settlement")
+fi
+if [[ -n "${PROVER_WITNESS_BINARY:-}" ]]; then
+  REQUIRED_FILES+=("${PROVER_WITNESS_BINARY}")
+fi
+
 missing=0
 for path in "${REQUIRED_FILES[@]}"; do
   if [[ ! -s "$path" ]]; then

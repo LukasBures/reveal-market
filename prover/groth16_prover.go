@@ -38,6 +38,7 @@ type groth16Settings struct {
 	NodeBinary          string
 	RapidSnarkBinary    string
 	WitnessScriptPath   string
+	WitnessBinary       string
 	WasmPath            string
 	ZKeyPath            string
 	TempDir             string
@@ -62,16 +63,24 @@ func newGroth16Prover(settings groth16Settings) (*groth16Prover, error) {
 	if settings.Timeout <= 0 {
 		settings.Timeout = 2 * time.Minute
 	}
-	if err := requireCommand(settings.NodeBinary); err != nil {
-		return nil, err
-	}
 	if err := requireCommand(settings.RapidSnarkBinary); err != nil {
 		return nil, err
 	}
-	for _, path := range []string{settings.WitnessScriptPath, settings.WasmPath, settings.ZKeyPath} {
-		if err := requireFile(path); err != nil {
+	if strings.TrimSpace(settings.WitnessBinary) == "" {
+		if err := requireCommand(settings.NodeBinary); err != nil {
 			return nil, err
 		}
+		if err := requireFile(settings.WitnessScriptPath); err != nil {
+			return nil, err
+		}
+		if err := requireFile(settings.WasmPath); err != nil {
+			return nil, err
+		}
+	} else if err := requireFile(settings.WitnessBinary); err != nil {
+		return nil, err
+	}
+	if err := requireFile(settings.ZKeyPath); err != nil {
+		return nil, err
 	}
 	if err := validateArtifacts(settings); err != nil {
 		return nil, err
@@ -162,6 +171,13 @@ func (p *groth16Prover) Generate(ctx context.Context, req settlementProofRequest
 }
 
 func (p *groth16Prover) runWitness(ctx context.Context, inputFile, witnessFile string) error {
+	if strings.TrimSpace(p.settings.WitnessBinary) != "" {
+		args := []string{inputFile, witnessFile}
+		if err := p.runCommand(ctx, p.settings.WitnessBinary, args, "witness_generation_cpp"); err != nil {
+			return err
+		}
+		return nil
+	}
 	args := []string{p.settings.WitnessScriptPath, p.settings.WasmPath, inputFile, witnessFile}
 	if err := p.runCommand(ctx, p.settings.NodeBinary, args, "witness_generation"); err != nil {
 		return err
@@ -297,10 +313,11 @@ func readPublicSignals(path string) ([]string, error) {
 }
 
 func validateArtifacts(settings groth16Settings) error {
-	artifacts := []string{
-		settings.WitnessScriptPath,
-		settings.WasmPath,
-		settings.ZKeyPath,
+	artifacts := []string{settings.ZKeyPath}
+	if strings.TrimSpace(settings.WitnessBinary) != "" {
+		artifacts = append(artifacts, settings.WitnessBinary)
+	} else {
+		artifacts = append(artifacts, settings.WitnessScriptPath, settings.WasmPath)
 	}
 	for _, path := range artifacts {
 		info, err := os.Stat(path)
@@ -475,7 +492,7 @@ func parseFlexibleBigInt(value string) (*big.Int, error) {
 
 var bn128Modulus = mustBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617")
 
-func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
+func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 	merkleRoot, err := parseHexField(req.MerkleRoot, "merkle_root")
 	if err != nil {
 		return nil, newValidationError(err.Error())
@@ -525,8 +542,54 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
+	if _, err := parseFlexibleNumber(req.BatchIndex, "batch_index"); err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	commitmentsCount, err := parseFlexibleNumber(req.CommitmentsCount, "commitments_count")
+	if err != nil {
+		return nil, newValidationError(err.Error())
+	}
+	if commitmentsCount.Cmp(big.NewInt(settlementBatchSize)) > 0 {
+		return nil, newValidationError("commitments_count must be <= 256")
+	}
+	if len(req.Tickets) != settlementBatchSize {
+		return nil, newValidationError("tickets must contain 256 entries")
+	}
 
-	inputs := map[string]string{
+	ticketIDs := make([]string, settlementBatchSize)
+	outcomeIDs := make([]string, settlementBatchSize)
+	amounts := make([]string, settlementBatchSize)
+	users := make([]string, settlementBatchSize)
+	salts := make([]string, settlementBatchSize)
+	for i, ticket := range req.Tickets {
+		ticketID, err := parseFlexibleNumber(ticket.TicketID, fmt.Sprintf("tickets[%d].ticket_id", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
+		outcomeID, err := parseFlexibleNumber(ticket.OutcomeID, fmt.Sprintf("tickets[%d].outcome_id", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
+		amountValue, err := parseFlexibleNumber(ticket.Amount, fmt.Sprintf("tickets[%d].amount", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
+		userValue, err := parseFlexibleNumber(ticket.User, fmt.Sprintf("tickets[%d].user", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
+		saltValue, err := parseFlexibleNumber(ticket.Salt, fmt.Sprintf("tickets[%d].salt", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
+		ticketIDs[i] = fieldElement(ticketID).String()
+		outcomeIDs[i] = fieldElement(outcomeID).String()
+		amounts[i] = fieldElement(amountValue).String()
+		users[i] = fieldElement(userValue).String()
+		salts[i] = fieldElement(saltValue).String()
+	}
+
+	inputs := map[string]any{
 		"merkleRoot":       fieldElement(merkleRoot).String(),
 		"marketId":         fieldElement(marketID).String(),
 		"winningOutcomeId": fieldElement(winningOutcome).String(),
@@ -537,6 +600,12 @@ func buildWitnessInput(req settlementProofRequest) (map[string]string, error) {
 		"poolTotalNo":      fieldElement(poolNo).String(),
 		"circuitHash":      fieldElement(circuitHash).String(),
 		"padding":          "0",
+		"commitmentsCount": fieldElement(commitmentsCount).String(),
+		"ticketId":         ticketIDs,
+		"outcomeId":        outcomeIDs,
+		"amount":           amounts,
+		"user":             users,
+		"salt":             salts,
 	}
 	return inputs, nil
 }

@@ -12,8 +12,9 @@ import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PoseidonTestUtils} from "./utils/PoseidonTestUtils.sol";
 
-contract RevealMarketFlowTest is Test {
+contract RevealMarketFlowTest is Test, PoseidonTestUtils {
     RelayerEscrow private relayerEscrow;
     ProtocolPool private protocolPool;
     MarketFactory private factory;
@@ -39,7 +40,7 @@ contract RevealMarketFlowTest is Test {
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(ticketId, outcomeId, amount, keccak256(abi.encodePacked(leafUser, salt))));
+        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
     }
 
     function setUp() external {
@@ -83,7 +84,8 @@ contract RevealMarketFlowTest is Test {
         relayerEscrow.deposit(depositAmount);
 
         bytes32 salt = keccak256("salt");
-        uint256 payoutAmount = 2 ether;
+        uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
+        uint256 payoutAmount = ticketSize - rakePerTicket;
         uint256 outcome = 1;
         bytes32 leaf = _leaf(0, outcome, payoutAmount, salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
@@ -115,19 +117,25 @@ contract RevealMarketFlowTest is Test {
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
         assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "user balance debited");
-        uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
         uint256 netTicket = ticketSize - rakePerTicket;
         assertEq(market.totalEscrow(), netTicket, "escrow matches net ticket");
 
         vm.warp(commitDeadline + 1);
         vm.prank(oracle);
-        market.lock();
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = leaf;
+        bytes32 root = _buildBatchRoot(leaves, 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        market.lockBatches(roots, counts, "");
 
         vm.prank(oracle);
         market.postResult(outcome);
 
         uint256[10] memory signals = [
-            uint256(market.commitmentsRoot()),
+            uint256(root),
             uint256(1),
             outcome,
             ticketSize - (ticketSize * rakeBps) / 10_000,
@@ -143,17 +151,16 @@ contract RevealMarketFlowTest is Test {
         market.verifyAndSettle("", signals);
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
-        uint256 expectedDraw = payoutAmount - netTicket;
-        assertApproxEqAbs(protocolPool.consumedLiability(address(market)), expectedDraw, 1);
+        assertEq(protocolPool.consumedLiability(address(market)), 0, "no top-up required");
 
         // Wrong user should fail because user is bound into the commitment leaf
         address impostor = makeAddr("impostor");
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
-        market.claim(impostor, 0, outcome, payoutAmount, salt, new bytes32[](0));
+        market.claim(impostor, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         vm.prank(relayer);
-        market.claim(user, 0, outcome, payoutAmount, salt, new bytes32[](0));
+        market.claim(user, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
         assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "escrow debited once");
@@ -162,6 +169,6 @@ contract RevealMarketFlowTest is Test {
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
         assertEq(protocolPool.consumedLiability(address(market)), expectedDraw, "top-up tracked");
-        assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether - expectedDraw + expectedRake, 2);
+        assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether + expectedRake, 2);
     }
 }

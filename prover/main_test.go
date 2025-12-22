@@ -11,16 +11,7 @@ import (
 )
 
 func TestValidateRequest(t *testing.T) {
-	valid := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x01",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "5",
-		RakeBps:        "100",
-		CircuitHash:    "0xdead",
-	}
+	valid := buildTestRequest()
 	if err := validateRequest(valid); err != nil {
 		t.Fatalf("expected valid request, got error: %v", err)
 	}
@@ -37,6 +28,9 @@ func TestValidateRequest(t *testing.T) {
 		{"missing_rake_bps", func(req *settlementProofRequest) { req.RakeBps = "" }},
 		{"bad_pool_length", func(req *settlementProofRequest) { req.PoolTotals = []string{"1"} }},
 		{"missing_circuit_hash", func(req *settlementProofRequest) { req.CircuitHash = "" }},
+		{"missing_batch_index", func(req *settlementProofRequest) { req.BatchIndex = "" }},
+		{"missing_commitments_count", func(req *settlementProofRequest) { req.CommitmentsCount = "" }},
+		{"bad_ticket_length", func(req *settlementProofRequest) { req.Tickets = req.Tickets[:1] }},
 	}
 
 	for _, tc := range cases {
@@ -51,16 +45,21 @@ func TestValidateRequest(t *testing.T) {
 }
 
 func TestBuildWitnessInput(t *testing.T) {
-	req := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x20",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"7", "3"},
-		TotalEscrow:    "10",
-		TotalLiability: "14",
-		RakeBps:        "50",
-		CircuitHash:    "0xbeef",
+	req := buildTestRequest()
+	req.MerkleRoot = "0x20"
+	req.PoolTotals = []string{"7", "3"}
+	req.TotalLiability = "14"
+	req.CircuitHash = "0xbeef"
+	req.CommitmentsCount = "1"
+	tickets := buildTestTickets()
+	tickets[0] = ticket{
+		TicketID:  "7",
+		OutcomeID: "1",
+		Amount:    "5",
+		User:      "0x02",
+		Salt:      "0x03",
 	}
+	req.Tickets = tickets
 	inputs, err := buildWitnessInput(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -76,55 +75,60 @@ func TestBuildWitnessInput(t *testing.T) {
 		"poolTotalNo":      "3",
 		"circuitHash":      "48879",
 		"padding":          "0",
+		"commitmentsCount": "1",
 	}
 	for key, want := range expected {
-		if got := inputs[key]; got != want {
-			t.Fatalf("input %s mismatch: got %s want %s", key, got, want)
+		got, ok := inputs[key].(string)
+		if !ok || got != want {
+			t.Fatalf("input %s mismatch: got %v want %s", key, inputs[key], want)
 		}
+	}
+	ticketIDs, ok := inputs["ticketId"].([]string)
+	if !ok {
+		t.Fatalf("ticketId input missing or invalid")
+	}
+	if len(ticketIDs) != settlementBatchSize {
+		t.Fatalf("ticketId length mismatch: got %d want %d", len(ticketIDs), settlementBatchSize)
+	}
+	if ticketIDs[0] != "7" {
+		t.Fatalf("ticketId[0] mismatch: got %s want 7", ticketIDs[0])
+	}
+	users, ok := inputs["user"].([]string)
+	if !ok || users[0] != "2" {
+		t.Fatalf("user[0] mismatch: got %v want 2", inputs["user"])
 	}
 }
 
 func TestBuildWitnessInputErrors(t *testing.T) {
-	req := settlementProofRequest{
-		MarketID:       "1",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "1",
-		PoolTotals:     []string{"2", "2"},
-		TotalEscrow:    "3",
-		TotalLiability: "10",
-		RakeBps:        "10",
-		CircuitHash:    "0x1",
-	}
+	req := buildTestRequest()
+	req.PoolTotals = []string{"2", "2"}
+	req.TotalEscrow = "3"
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error when pool totals exceed total escrow")
 	}
 
-	req = settlementProofRequest{
-		MarketID:       "1",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "2",
-		PoolTotals:     []string{"1", "1"},
-		TotalEscrow:    "2",
-		TotalLiability: "3",
-		RakeBps:        "10",
-		CircuitHash:    "0x1",
-	}
+	req = buildTestRequest()
+	req.WinningOutcome = "2"
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error for invalid winning outcome")
 	}
 
-	req = settlementProofRequest{
-		MarketID:       "1",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"1", "1"},
-		TotalEscrow:    "2",
-		TotalLiability: "3",
-		RakeBps:        "20000",
-		CircuitHash:    "0x1",
-	}
+	req = buildTestRequest()
+	req.RakeBps = "20000"
 	if _, err := buildWitnessInput(req); err == nil {
 		t.Fatalf("expected error for rake bps overflow")
+	}
+
+	req = buildTestRequest()
+	req.CommitmentsCount = "257"
+	if _, err := buildWitnessInput(req); err == nil {
+		t.Fatalf("expected error for commitments count overflow")
+	}
+
+	req = buildTestRequest()
+	req.Tickets = []ticket{}
+	if _, err := buildWitnessInput(req); err == nil {
+		t.Fatalf("expected error for ticket length mismatch")
 	}
 }
 
@@ -142,16 +146,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 	}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -182,16 +177,7 @@ func TestProofHandlerRequiresSecret(t *testing.T) {
 	cfg := newTestConfig(t)
 	cfg.SharedSecret = "secret"
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -218,16 +204,7 @@ func TestProofHandlerAcceptsSecret(t *testing.T) {
 	cfg := newTestConfig(t)
 	cfg.SharedSecret = "secret"
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -254,16 +231,7 @@ func TestProofHandlerStream(t *testing.T) {
 	}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement?stream=1", bytes.NewReader(body))
@@ -303,16 +271,7 @@ func TestProofHandlerProverError(t *testing.T) {
 	stub := &stubProver{err: newValidationError("bad payload"), ready: true}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -326,16 +285,7 @@ func TestProofHandlerCircuitHashMismatch(t *testing.T) {
 	stub := &stubProver{ready: true, circuitHash: "0x2"}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -352,16 +302,7 @@ func TestProofHandlerUnready(t *testing.T) {
 	stub := &stubProver{ready: false, circuitHash: "0x1"}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := settlementProofRequest{
-		MarketID:       "0xabc",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))

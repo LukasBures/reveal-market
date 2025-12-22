@@ -13,7 +13,7 @@ from .config import IPAllowEntry
 from .metrics import REQUEST_LATENCY
 from .queue import TxQueue
 from .security import RateLimiter, ip_allowed, resolve_client_ip
-from .schemas import ClaimRequest, CommitRequest
+from .schemas import ClaimRequest, CommitRequest, LockBatchesRequest
 from .service import RelayerService, TxSendError
 
 logger = get_logger()
@@ -202,6 +202,45 @@ def create_app(
         except (Web3Exception, RuntimeError, OverflowError) as err:
             logger.error("claim_failed", error=str(err))
             raise HTTPException(status_code=500, detail="claim_failed") from err
+
+    @app.post("/lock-batches")
+    async def lock_batches(
+        req: LockBatchesRequest,
+        svc: RelayerService = Depends(get_service),
+        _: None = Depends(require_write_access),
+    ) -> Any:
+        try:
+            payload = req.model_dump()
+            payload["market"] = Web3.to_checksum_address(payload["market"])
+            svc.validate_lock_payload(payload)
+            if tx_queue:
+                job_id = await tx_queue.enqueue("lock_batches", payload)
+                logger.info("lock_batches_enqueued", job_id=job_id, market=payload["market"])
+                return JSONResponse(
+                    {"jobId": job_id, "status": "queued"},
+                    status_code=status.HTTP_202_ACCEPTED,
+                )
+            result = await svc.lock_batches(payload)
+            if hasattr(svc, "push_settlement_ingest"):
+                try:
+                    tx_hash = result.get("txHash")
+                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                    await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("lock_batches_ingest_failed", error=str(err), market=payload.get("market"))
+            return result
+        except TxSendError as err:
+            if err.kind == "invalid":
+                logger.warning("lock_batches_invalid_payload", error=str(err))
+                raise HTTPException(status_code=400, detail="invalid_payload") from err
+            logger.error("lock_batches_failed", error=str(err))
+            raise HTTPException(status_code=500, detail="lock_batches_failed") from err
+        except ValueError as err:
+            logger.warning("lock_batches_invalid_address", error=str(err))
+            raise HTTPException(status_code=400, detail="invalid_address") from err
+        except (Web3Exception, RuntimeError, OverflowError) as err:
+            logger.error("lock_batches_failed", error=str(err))
+            raise HTTPException(status_code=500, detail="lock_batches_failed") from err
 
     @app.get("/metrics")
     async def metrics() -> Response:

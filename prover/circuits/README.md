@@ -14,7 +14,7 @@ This directory hosts the reference circuit and helper scripts needed to generate
 
 | File | Description |
 | --- | --- |
-| `settlement.circom` | Finalized settlement circuit exposing ten public signals (merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding=0) while guarding rake/winner/liability/pool sums. |
+| `settlement.circom` | Batch settlement circuit: consumes 256-ticket Poseidon leaves, computes the depth-8 Merkle root + pool totals/liability, and exposes ten public signals (merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding=0). |
 | `generate_keys.sh` | Bash script that compiles the circuit, downloads the PTAU file, runs Groth16 setup, computes proving/verification key hashes + circuitHash, and emits deploy-ready JSON. |
 
 ## Usage
@@ -28,6 +28,7 @@ bash generate_keys.sh
 # Outputs (under build/):
 #   settlement.r1cs           -> constraint system
 #   settlement_js/            -> witness generator artifacts
+#   settlement_cpp/           -> C++ witness generator artifacts
 #   settlement_final.zkey     -> proving key (mount in prover container)
 #   settlement_vk.json        -> verification key (canonical source for hashing)
 #   settlement_hashes.json    -> proving/verification key hashes + circuitHash
@@ -51,7 +52,7 @@ bash import_from_artifacts.sh
 After running the script:
 
 1. Redeploy the Solidity verifier (or rerun `forge script ... Deploy.s.sol`) so the on-chain contract picks up the new verifying key from `contracts/cache/settlement-vk.json`.
-2. Mount `build/settlement_final.zkey` (and `build/settlement_js/` if you need the witness builder) inside the `prover` container so it can generate proofs.
+2. Mount `build/settlement_final.zkey` plus either `build/settlement_js/` (Node witness) or `build/settlement_cpp/settlement` (C++ witness) inside the `prover` container so it can generate proofs.
 
 > ⚠️ This circuit is intentionally lightweight. Extend it with additional checks (ticket commitment hashes, rake accounting, etc.) before calling the system production-ready.
 

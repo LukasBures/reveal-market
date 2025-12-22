@@ -22,6 +22,9 @@ class SettlementProofRequest:
     total_liability: str
     rake_bps: int
     circuit_hash: str
+    batch_index: str
+    commitments_count: str
+    tickets: list[dict[str, Any]]
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -33,6 +36,9 @@ class SettlementProofRequest:
             "totalLiability": self.total_liability,
             "rakeBps": str(self.rake_bps),
             "circuitHash": self.circuit_hash,
+            "batchIndex": self.batch_index,
+            "commitmentsCount": self.commitments_count,
+            "tickets": self.tickets,
         }
 
 
@@ -112,6 +118,9 @@ class ProverClient:
                 "totalLiability",
                 "rakeBps",
                 "circuitHash",
+                "batchIndex",
+                "commitmentsCount",
+                "tickets",
             }
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
@@ -168,6 +177,9 @@ class AsyncProverClient:
                 "totalLiability",
                 "rakeBps",
                 "circuitHash",
+                "batchIndex",
+                "commitmentsCount",
+                "tickets",
             }
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:

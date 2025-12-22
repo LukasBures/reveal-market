@@ -28,6 +28,7 @@ type Config struct {
 	RapidSnarkBinary    string
 	CircuitDir          string
 	WitnessScriptPath   string
+	WitnessBinaryPath   string
 	WasmPath            string
 	ZKeyPath            string
 	VerificationKeyPath string
@@ -59,6 +60,7 @@ func LoadConfig() Config {
 		RapidSnarkBinary:    getenv("PROVER_RAPIDSNARK_BINARY", "rapidsnark"),
 		CircuitDir:          baseDir,
 		WitnessScriptPath:   getenv("PROVER_WITNESS_SCRIPT", filepath.Join(baseDir, "settlement_js", "generate_witness.js")),
+		WitnessBinaryPath:   resolveWitnessBinary(baseDir),
 		WasmPath:            getenv("PROVER_WASM_PATH", filepath.Join(baseDir, "settlement_js", "settlement.wasm")),
 		ZKeyPath:            getenv("PROVER_ZKEY_PATH", filepath.Join(baseDir, "settlement_final.zkey")),
 		VerificationKeyPath: getenv("PROVER_VK_PATH", filepath.Join(baseDir, "settlement_vk.json")),
@@ -70,6 +72,17 @@ func LoadConfig() Config {
 		MaxRequestBytes:     int64(maxRequestBytes),
 	}
 	return conf
+}
+
+func resolveWitnessBinary(baseDir string) string {
+	if value := strings.TrimSpace(getenv("PROVER_WITNESS_BINARY", "")); value != "" {
+		return value
+	}
+	mode := strings.ToLower(strings.TrimSpace(getenv("PROVER_WITNESS_MODE", "")))
+	if mode == "cpp" {
+		return filepath.Join(baseDir, "settlement_cpp", "settlement")
+	}
+	return ""
 }
 
 func parseBackendMode(raw string) proverBackendMode {

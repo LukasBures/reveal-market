@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, cast
 
 from shared.models import Commitment, Settlement
+from shared.merkle import build_merkle_root_and_paths
+from shared.poseidon import BATCH_SIZE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-
-from .merkle import build_merkle_root_and_paths
 
 logger = logging.getLogger("reveal_market.worker.proof_builder")
 
@@ -17,23 +18,128 @@ class SettlementDataMissingError(RuntimeError):
     pass
 
 
-def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
+def _normalize_batch_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _build_batch_payloads(
+    settlement: Settlement,
+    market_id: int,
+    commitments: list[Commitment],
+) -> list[dict[str, Any]]:
+    if settlement.winning_outcome_id not in (0, 1):
+        raise SettlementDataMissingError("winning outcome out of range")
+    batch_roots = _normalize_batch_list(getattr(settlement, "batch_roots", None))
+    batch_counts = _normalize_batch_list(getattr(settlement, "batch_counts", None))
+    if not batch_roots and settlement.merkle_root:
+        batch_roots = [settlement.merkle_root]
+        batch_counts = [settlement.commitments_count]
+    if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
+        raise SettlementDataMissingError("batch roots/counts missing")
+
+    # Build batch commitment lookup.
+    by_batch: dict[int, dict[int, Commitment]] = {}
+    for idx, commitment in enumerate(commitments):
+        leaf_index = commitment.leaf_index if commitment.leaf_index is not None else idx
+        batch_index = int(leaf_index) // BATCH_SIZE
+        rel_index = int(leaf_index) % BATCH_SIZE
+        by_batch.setdefault(batch_index, {})[rel_index] = commitment
+
+    payloads: list[dict[str, Any]] = []
+    for batch_index, root_value in enumerate(batch_roots):
+        count_raw = batch_counts[batch_index] if batch_index < len(batch_counts) else None
+        try:
+            count = int(count_raw or 0)
+        except Exception:
+            raise SettlementDataMissingError("invalid batch count") from None
+        if count <= 0:
+            raise SettlementDataMissingError("invalid batch count")
+        batch_commitments = by_batch.get(batch_index, {})
+        leaves: list[bytes | None] = [None] * count
+        pool_yes = 0
+        pool_no = 0
+        tickets: list[dict[str, Any]] = []
+
+        for i in range(BATCH_SIZE):
+            if i < count:
+                commitment = batch_commitments.get(i)
+                if commitment is None or commitment.leaf is None or commitment.salt is None:
+                    raise SettlementDataMissingError("missing commitment data for batch")
+                leaf_bytes = bytes.fromhex(commitment.leaf.removeprefix("0x"))
+                leaves[i] = leaf_bytes
+                amount = int(commitment.amount_wei)
+                outcome_id = int(commitment.outcome_id)
+                if outcome_id == 0:
+                    pool_yes += amount
+                elif outcome_id == 1:
+                    pool_no += amount
+                fallback_ticket_id = batch_index * BATCH_SIZE + i
+                tickets.append(
+                    {
+                        "ticketId": str(
+                            commitment.leaf_index if commitment.leaf_index is not None else fallback_ticket_id
+                        ),
+                        "outcomeId": str(outcome_id),
+                        "amount": str(amount),
+                        "user": str(commitment.user_address or "0x0"),
+                        "salt": str(commitment.salt or "0x0"),
+                    }
+                )
+            else:
+                tickets.append(
+                    {
+                        "ticketId": "0",
+                        "outcomeId": "0",
+                        "amount": "0",
+                        "user": "0",
+                        "salt": "0",
+                    }
+                )
+
+        if any(leaf is None for leaf in leaves):
+            raise SettlementDataMissingError("batch leaves incomplete")
+        batch_leaves = cast(list[bytes], leaves)
+        computed_root, _ = build_merkle_root_and_paths(batch_leaves)
+        expected_root = bytes.fromhex(str(root_value).removeprefix("0x"))
+        if computed_root != expected_root:
+            raise SettlementDataMissingError("computed batch merkle root does not match stored root")
+
+        total_escrow = pool_yes + pool_no
+        total_liability = pool_yes if settlement.winning_outcome_id == 0 else pool_no
+
+        payloads.append(
+            {
+                "marketId": str(market_id),
+                "merkleRoot": str(root_value),
+                "winningOutcomeId": str(settlement.winning_outcome_id),
+                "poolTotals": [str(pool_yes), str(pool_no)],
+                "totalEscrow": str(total_escrow),
+                "totalLiability": str(total_liability),
+                "rakeBps": str(settlement.rake_bps or 0),
+                "circuitHash": settlement.circuit_hash,
+                "batchIndex": str(batch_index),
+                "commitmentsCount": str(count),
+                "tickets": tickets,
+            }
+        )
+    return payloads
+
+
+def build_prover_payload(session: Session, market_id: int) -> list[dict[str, Any]]:
     settlement = session.execute(select(Settlement).where(Settlement.market_id == market_id)).scalar_one_or_none()
     if not settlement:
         raise SettlementDataMissingError("settlement row not found")
-    required_fields = [
-        settlement.merkle_root,
-        settlement.commitments_count,
-        settlement.total_escrow,
-        settlement.total_liability,
-        settlement.rake_bps,
-        settlement.winning_outcome_id,
-        settlement.circuit_hash,
-    ]
-    if any(v in (None, 0, "") for v in required_fields):
+    required_fields = [settlement.winning_outcome_id, settlement.circuit_hash]
+    if any(v in (None, "") for v in required_fields):
         raise SettlementDataMissingError("settlement missing required fields")
-    if settlement.winning_outcome_id not in (0, 1):
-        raise SettlementDataMissingError("winning outcome out of range")
 
     commitments: list[Commitment] = list(
         session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id))
@@ -43,33 +149,10 @@ def build_prover_payload(session: Session, market_id: int) -> dict[str, Any]:
     if not commitments:
         raise SettlementDataMissingError("no commitments for market")
 
-    merkle_root = cast(str, settlement.merkle_root)
-    total_liability = cast(int, settlement.total_liability)
-
-    leaves = [bytes.fromhex(commitment.leaf.removeprefix("0x")) for commitment in commitments]
-    computed_root, _ = build_merkle_root_and_paths(leaves)
-    expected_root = bytes.fromhex(merkle_root.removeprefix("0x"))
-    if computed_root != expected_root:
-        raise SettlementDataMissingError("computed merkle root does not match stored root")
-
-    winning_pool = settlement.pool_total_yes if settlement.winning_outcome_id == 0 else settlement.pool_total_no
-    if winning_pool in (None, 0):
-        raise SettlementDataMissingError("winning pool missing or zero")
-
-    payload = {
-        "marketId": str(market_id),
-        "merkleRoot": merkle_root,
-        "winningOutcomeId": settlement.winning_outcome_id,
-        "poolTotals": [str(settlement.pool_total_yes or 0), str(settlement.pool_total_no or 0)],
-        "totalEscrow": str(settlement.total_escrow),
-        "totalLiability": str(total_liability),
-        "rakeBps": str(settlement.rake_bps or 0),
-        "circuitHash": settlement.circuit_hash,
-    }
-    return payload
+    return _build_batch_payloads(settlement, market_id, commitments)
 
 
-async def build_prover_payload_async(session: AsyncSession, market_id: int) -> dict[str, Any]:
+async def build_prover_payload_async(session: AsyncSession, market_id: int) -> list[dict[str, Any]]:
     """Async version of build_prover_payload using AsyncSession primitives."""
 
     settlement = (
@@ -77,19 +160,9 @@ async def build_prover_payload_async(session: AsyncSession, market_id: int) -> d
     ).scalar_one_or_none()
     if not settlement:
         raise SettlementDataMissingError("settlement row not found")
-    required_fields = [
-        settlement.merkle_root,
-        settlement.commitments_count,
-        settlement.total_escrow,
-        settlement.total_liability,
-        settlement.rake_bps,
-        settlement.winning_outcome_id,
-        settlement.circuit_hash,
-    ]
-    if any(v in (None, 0, "") for v in required_fields):
+    required_fields = [settlement.winning_outcome_id, settlement.circuit_hash]
+    if any(v in (None, "") for v in required_fields):
         raise SettlementDataMissingError("settlement missing required fields")
-    if settlement.winning_outcome_id not in (0, 1):
-        raise SettlementDataMissingError("winning outcome out of range")
 
     commitments: list[Commitment] = list(
         (await session.execute(select(Commitment).where(Commitment.market_id == market_id).order_by(Commitment.id)))
@@ -99,27 +172,4 @@ async def build_prover_payload_async(session: AsyncSession, market_id: int) -> d
     if not commitments:
         raise SettlementDataMissingError("no commitments for market")
 
-    merkle_root = cast(str, settlement.merkle_root)
-    total_liability = cast(int, settlement.total_liability)
-
-    leaves = [bytes.fromhex(commitment.leaf.removeprefix("0x")) for commitment in commitments]
-    computed_root, _ = build_merkle_root_and_paths(leaves)
-    expected_root = bytes.fromhex(merkle_root.removeprefix("0x"))
-    if computed_root != expected_root:
-        raise SettlementDataMissingError("computed merkle root does not match stored root")
-
-    winning_pool = settlement.pool_total_yes if settlement.winning_outcome_id == 0 else settlement.pool_total_no
-    if winning_pool in (None, 0):
-        raise SettlementDataMissingError("winning pool missing or zero")
-
-    payload = {
-        "marketId": str(market_id),
-        "merkleRoot": merkle_root,
-        "winningOutcomeId": settlement.winning_outcome_id,
-        "poolTotals": [str(settlement.pool_total_yes or 0), str(settlement.pool_total_no or 0)],
-        "totalEscrow": str(settlement.total_escrow),
-        "totalLiability": str(total_liability),
-        "rakeBps": str(settlement.rake_bps or 0),
-        "circuitHash": settlement.circuit_hash,
-    }
-    return payload
+    return _build_batch_payloads(settlement, market_id, commitments)

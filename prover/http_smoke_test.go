@@ -37,16 +37,8 @@ func TestHTTPHandlersHealthAndProof(t *testing.T) {
 		t.Fatalf("expected 200 from healthz, got %d", resp.StatusCode)
 	}
 
-	body := settlementProofRequest{
-		MarketID:       "0x2",
-		MerkleRoot:     "0x1",
-		WinningOutcome: "0",
-		PoolTotals:     []string{"10", "0"},
-		TotalEscrow:    "10",
-		TotalLiability: "9",
-		RakeBps:        "50",
-		CircuitHash:    "0x1",
-	}
+	body := buildTestRequest()
+	body.MarketID = "0x2"
 	payload, _ := json.Marshal(body)
 	proofResp, err := http.Post(srv.URL+"/api/v1/proofs/settlement", "application/json", bytes.NewReader(payload))
 	if err != nil {

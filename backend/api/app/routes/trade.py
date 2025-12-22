@@ -18,8 +18,10 @@ from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from shared import models
 from shared.logging import log_event
+from shared.merkle import build_merkle_path, build_merkle_root_and_paths
 from shared.onchain import OnChainConfigurationError, get_async_web3, load_account, to_checksum
 from shared.onchain.abi import ERC20_ABI, MARKET_FACTORY_ABI, PROTOCOL_POOL_ABI, REVEAL_MARKET_ABI
+from shared.poseidon import BATCH_SIZE, compute_leaf, int_to_bytes32, int_to_hex32, poseidon_t3
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
@@ -82,6 +84,18 @@ def _normalize_bytes32(value: Any) -> str | None:
         except Exception:
             return None
     return str(value)
+
+
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
 
 
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
@@ -738,26 +752,21 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
 
 
 def _compute_merkle_path(leaves: list[bytes], target_index: int) -> list[str]:
-    """Compute merkle path for a given index using keccak256."""
+    """Compute a fixed-depth Poseidon Merkle path for a given index."""
 
     if target_index < 0 or target_index >= len(leaves):
         raise ValueError("invalid target index")
-    current = leaves[:]
-    path: list[str] = []
-    index = target_index
-    while len(current) > 1:
-        next_level: list[bytes] = []
-        for i in range(0, len(current), 2):
-            left = current[i]
-            right = current[i + 1] if i + 1 < len(current) else current[i]
-            combined = Web3.keccak(left + right)
-            next_level.append(combined)
-            if i == index or i + 1 == index:
-                sibling = right if i == index else left
-                path.append("0x" + sibling.hex())
-                index = len(next_level) - 1
-        current = next_level
-    return path
+    siblings = build_merkle_path(leaves, target_index)
+    return ["0x" + sibling.hex() for sibling in siblings]
+
+
+def _batch_root_for_ticket(settlement: models.Settlement, ticket_id: int) -> str | None:
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    if batch_roots:
+        batch_index = int(ticket_id) // BATCH_SIZE
+        if batch_index < len(batch_roots):
+            return str(batch_roots[batch_index])
+    return settlement.merkle_root
 
 
 async def _build_merkle_proof_for_commitment(
@@ -765,12 +774,36 @@ async def _build_merkle_proof_for_commitment(
 ) -> list[str]:
     """Return or compute the Merkle proof for a commitment, persisting it if missing."""
 
-    if not settlement.merkle_root:
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
+
+    if not batch_roots and settlement.merkle_root:
+        batch_roots = [settlement.merkle_root]
+        batch_counts = [settlement.commitments_count]
+    if not batch_roots:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_missing")
     if commitment.leaf_index is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_index_missing")
+    if len(batch_counts) != len(batch_roots):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_count_mismatch")
 
-    commitments_count = settlement.commitments_count
+    batch_index = int(commitment.leaf_index) // BATCH_SIZE
+    if batch_index >= len(batch_roots):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_index_out_of_range")
+    expected_root = str(batch_roots[batch_index])
+    if not expected_root:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_root_missing")
+    batch_count_raw = batch_counts[batch_index] if batch_counts else settlement.commitments_count
+    try:
+        batch_count = int(batch_count_raw or 0)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_count_invalid") from None
+    if batch_count <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_count_invalid")
+    index_in_batch = int(commitment.leaf_index) % BATCH_SIZE
+    if index_in_batch >= batch_count:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_index_invalid")
+
     path_rows = (
         await session.execute(
             select(models.CommitmentMerklePath)
@@ -782,30 +815,35 @@ async def _build_merkle_proof_for_commitment(
 
     if not merkle_proof:
         commitments = await repository_async.list_commitments_by_market(session, market.id)
-        if commitments_count is None:
-            commitments_count = len(commitments)
         if not commitments:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_commitments_recorded")
-        expected_count = settlement.commitments_count
-        if expected_count is not None and int(expected_count) != len(commitments):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"commitment_count_mismatch:expected={expected_count},have={len(commitments)}",
-            )
-        leaves: list[bytes] = []
-        index_lookup: dict[int, int] = {}
+        leaves: list[bytes | None] = [None] * batch_count
         for idx, c in enumerate(commitments):
             leaf_hex = c.leaf or c.ticket_hash
             try:
-                leaves.append(bytes.fromhex(_strip_hex(leaf_hex)))
-                index_lookup[c.leaf_index if c.leaf_index is not None else idx] = idx
+                leaf_index = c.leaf_index if c.leaf_index is not None else idx
+                batch_id = int(leaf_index) // BATCH_SIZE
+                if batch_id != batch_index:
+                    continue
+                rel_index = int(leaf_index) % BATCH_SIZE
+                if rel_index >= batch_count:
+                    continue
+                leaves[rel_index] = bytes.fromhex(_strip_hex(leaf_hex))
             except Exception as exc:  # pragma: no cover - data integrity guard
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"invalid_leaf:{exc}"
                 ) from exc
-        target_index = index_lookup.get(commitment.leaf_index, commitment.leaf_index)
+        if any(leaf is None for leaf in leaves):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="batch_leaf_missing")
+        batch_leaves = cast(list[bytes], leaves)
         try:
-            merkle_proof = _compute_merkle_path(leaves, target_index)
+            computed_root, paths = build_merkle_root_and_paths(batch_leaves)
+            expected_root_bytes = bytes.fromhex(_strip_hex(expected_root))
+            if computed_root != expected_root_bytes:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_mismatch")
+            merkle_proof = ["0x" + sibling.hex() for sibling in paths[index_in_batch]]
+        except HTTPException:
+            raise
         except Exception as exc:  # pragma: no cover - integrity guard
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"merkle_compute_failed:{exc}"
@@ -813,19 +851,27 @@ async def _build_merkle_proof_for_commitment(
         await repository_async.replace_merkle_path(session, commitment.id, merkle_proof)
         await session.flush()
 
-    if not merkle_proof and (commitments_count or 0) > 1:
+    if not merkle_proof:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_path_missing")
 
     try:
-        computed = bytes.fromhex(_strip_hex(commitment.leaf))
-        idx = commitment.leaf_index
-        if not merkle_proof:
-            computed = Web3.keccak(computed + computed)
+        leaf_hex = commitment.leaf or commitment.ticket_hash
+        if not leaf_hex:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="leaf_missing")
+        computed = bytes.fromhex(_strip_hex(leaf_hex))
+        idx = index_in_batch
         for sibling_hex in merkle_proof:
             sibling_bytes = bytes.fromhex(_strip_hex(sibling_hex))
-            computed = Web3.keccak(sibling_bytes + computed) if (idx & 1) else Web3.keccak(computed + sibling_bytes)
+            if idx & 1:
+                computed = int_to_bytes32(
+                    poseidon_t3(int.from_bytes(sibling_bytes, "big"), int.from_bytes(computed, "big"))
+                )
+            else:
+                computed = int_to_bytes32(
+                    poseidon_t3(int.from_bytes(computed, "big"), int.from_bytes(sibling_bytes, "big"))
+                )
             idx //= 2
-        if computed.hex().lower() != _strip_hex(settlement.merkle_root).lower():
+        if computed.hex().lower() != _strip_hex(expected_root).lower():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_mismatch")
     except HTTPException:
         raise
@@ -1040,6 +1086,19 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
         winning_value = int(winning_outcome_id) if settled else None
         commitments_root_hex = _normalize_bytes32(commitments_root)
         circuit_hash_hex = _normalize_bytes32(circuit_hash)
+        batch_roots: list[str] = []
+        batch_counts: list[int] = []
+        try:
+            if int(next_ticket_id or 0) > 0:
+                total_batches = (int(next_ticket_id) + BATCH_SIZE - 1) // BATCH_SIZE
+                for index in range(total_batches):
+                    root_value = await contract.functions.batchRoots(index).call()
+                    count_value = await contract.functions.batchCounts(index).call()
+                    batch_roots.append(_normalize_bytes32(root_value) or str(root_value))
+                    batch_counts.append(int(count_value))
+        except Exception:
+            batch_roots = []
+            batch_counts = []
         settlement_data = {
             "merkle_root": commitments_root_hex or commitments_root,
             "commitments_count": int(next_ticket_id),
@@ -1051,6 +1110,9 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
             "winning_outcome_id": winning_value,
             "circuit_hash": circuit_hash_hex or circuit_hash,
         }
+        if batch_roots:
+            settlement_data["batch_roots"] = batch_roots
+            settlement_data["batch_counts"] = batch_counts
         await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
         if settled and settlement_data["winning_outcome_id"] is not None and not market.resolved_at:
             market.resolved_at = datetime.now(tz=UTC)
@@ -1184,14 +1246,16 @@ async def trade_commit(
     if not quote.wallet_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
     user_address = Web3.to_checksum_address(str(quote.wallet_address))
-    salted_user = Web3.solidity_keccak(
-        ["address", "bytes32"],
-        [user_address, salt_bytes],
-    )
-    commitment = Web3.solidity_keccak(
-        ["uint256", "uint256", "uint256", "bytes32"],
-        [ticket_id, outcome_id, ticket_size_wei, salted_user],
-    ).hex()
+    rake_bps = None
+    if market_record and market_record.rake_bps is not None:
+        rake_bps = int(market_record.rake_bps)
+    elif settings.rake_percent is not None:
+        rake_bps = int(round(float(settings.rake_percent) * 10_000))
+    rake_bps = rake_bps or 0
+    rake_wei = (ticket_size_wei * rake_bps) // 10_000
+    net_amount_wei = ticket_size_wei - rake_wei
+    leaf_value = compute_leaf(ticket_id, outcome_id, net_amount_wei, user_address, salt_hex)
+    commitment = int_to_hex32(leaf_value)
 
     nonce = secrets.randbelow(2**256 - 1)
     expiry = int(time.time()) + int(settings.commit_nonce_ttl_seconds)
@@ -1218,6 +1282,7 @@ async def trade_commit(
         "expiry": expiry,
         "signature": signed.signature.hex(),
         "ticket_value_wei": ticket_size_wei,
+        "amount_wei": net_amount_wei,
         "chain_id": chain_id,
         "event_id": quote.market_id or market_onchain_id,
         "market_id": quote.market_id,
@@ -1261,7 +1326,7 @@ async def trade_commit(
                 "leaf": commitment,
                 "user": quote.wallet_address,
                 "outcomeId": quote.outcome_id,
-                "amount": ticket_size_wei,
+                "amount": net_amount_wei,
                 "salt": salt_hex,
                 "merkleIndex": ticket_id,
                 "merklePath": [],
@@ -1343,7 +1408,9 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 closes_at=getattr(market, "closes_at", None),
                 resolved_at=getattr(market, "resolved_at", None),
                 proof_request_id=settlement.proof_request_id if settlement else None,
-                merkle_root=settlement.merkle_root if settlement else None,
+                merkle_root=_batch_root_for_ticket(settlement, commitment.leaf_index)
+                if settlement and commitment.leaf_index is not None
+                else None,
                 winning_outcome_id=settlement.winning_outcome_id if settlement else None,
                 market_address=market.market_address,
                 resolution_status=getattr(market, "resolution_status", None),
@@ -1376,7 +1443,8 @@ async def list_claim_bundles(
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
             continue
-        if settlement is None or not settlement.merkle_root or settlement.winning_outcome_id is None:
+        has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root) if settlement else False
+        if settlement is None or not has_roots or settlement.winning_outcome_id is None:
             refreshed = await _maybe_backfill_settlement(session, market)
             if refreshed is not None:
                 needs_refresh = True
@@ -1390,14 +1458,17 @@ async def list_claim_bundles(
             or settlement.winning_outcome_id != commitment.outcome_id
         ):
             continue
-        if commitment.leaf_index is None or not settlement.merkle_root or not market.market_address:
+        if commitment.leaf_index is None or not market.market_address:
+            continue
+        batch_root = _batch_root_for_ticket(settlement, commitment.leaf_index)
+        if not batch_root:
             continue
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
         bundles.append(
             schemas.ClaimBundle(
                 marketId=market.event_id,
                 marketAddress=market.market_address,
-                commitmentsRoot=settlement.merkle_root,
+                commitmentsRoot=batch_root,
                 ticketId=commitment.leaf_index,
                 outcomeId=commitment.outcome_id,
                 amountWei=int(commitment.amount_wei),
@@ -1427,14 +1498,16 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     settlement = (
         await session.execute(select(models.Settlement).where(models.Settlement.market_id == market.id))
     ).scalar_one_or_none()
-    if settlement is None or settlement.winning_outcome_id is None or not settlement.merkle_root:
+    has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root) if settlement else False
+    if settlement is None or settlement.winning_outcome_id is None or not has_roots:
         settlement = await _maybe_backfill_settlement(session, market) or settlement
     if settlement is None or settlement.winning_outcome_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_settled")
     if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_final")
     winning_outcome = settlement.winning_outcome_id
-    if not settlement.merkle_root:
+    has_roots = bool(_parse_json_list(getattr(settlement, "batch_roots", None)) or settlement.merkle_root)
+    if not has_roots:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_missing")
     commitment_with_path = await repository_async.get_commitment_with_path_for_wallet(
         session, market.id, payload.wallet_address, winning_outcome, payload.ticket_id
@@ -1448,6 +1521,11 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     merkle_proof = [row.sibling_hash for row in path_rows] if path_rows else []
     if not merkle_proof:
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
+    if not batch_roots and settlement.merkle_root:
+        batch_roots = [settlement.merkle_root]
+        batch_counts = [settlement.commitments_count]
     if not settings.relayer_base_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
     relayer_payload = {
@@ -1458,6 +1536,16 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         "amount": int(commitment.amount_wei),
         "salt": commitment.salt,
         "merkle_proof": merkle_proof,
+        "merkle_root": settlement.merkle_root,
+        "batch_roots": batch_roots,
+        "batch_counts": batch_counts,
+        "commitments_count": settlement.commitments_count,
+        "pool_total_yes": settlement.pool_total_yes,
+        "pool_total_no": settlement.pool_total_no,
+        "total_escrow": settlement.total_escrow,
+        "total_liability": settlement.total_liability,
+        "rake_bps": settlement.rake_bps,
+        "proof_request_id": settlement.proof_request_id,
     }
     headers = {}
     if settings.relayer_bearer_token:
@@ -1529,6 +1617,8 @@ async def ingest_settlement(payload: schemas.SettlementIngestRequest, session: A
     settlement_data = {
         "merkle_root": payload.merkle_root,
         "commitments_count": payload.commitments_count,
+        "batch_roots": payload.batch_roots,
+        "batch_counts": payload.batch_counts,
         "pool_total_yes": payload.pool_total_yes,
         "pool_total_no": payload.pool_total_no,
         "total_escrow": payload.total_escrow,

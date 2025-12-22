@@ -61,3 +61,17 @@ CLAIM_ABI = [
         "type": "function",
     }
 ]
+
+LOCK_BATCHES_ABI = [
+    {
+        "inputs": [
+            {"internalType": "bytes32[]", "name": "roots", "type": "bytes32[]"},
+            {"internalType": "uint16[]", "name": "counts", "type": "uint16[]"},
+            {"internalType": "bytes", "name": "relayerSig", "type": "bytes"},
+        ],
+        "name": "lockBatches",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    }
+]

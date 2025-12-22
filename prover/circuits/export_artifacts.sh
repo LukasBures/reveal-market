@@ -31,6 +31,11 @@ done
 rm -rf "$DEST/prover/circuits/build/settlement_js"
 cp -R "$SCRIPT_DIR/build/settlement_js" "$DEST/prover/circuits/build/settlement_js"
 
+rm -rf "$DEST/prover/circuits/build/settlement_cpp"
+if [[ -d "$SCRIPT_DIR/build/settlement_cpp" ]]; then
+  cp -R "$SCRIPT_DIR/build/settlement_cpp" "$DEST/prover/circuits/build/settlement_cpp"
+fi
+
 cp "$SCRIPT_DIR/build/settlement_deploy.json" "$DEST/contracts/cache/settlement-vk.json"
 cp "$SCRIPT_DIR/build/settlement_deploy.json" "$DEST/contracts/zen/cache/settlement-vk.json"
 

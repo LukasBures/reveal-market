@@ -419,6 +419,8 @@ class Settlement(Base):
     )
     merkle_root: Mapped[str | None] = mapped_column(String(66), nullable=True)
     commitments_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    batch_roots: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    batch_counts: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     pool_total_yes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     pool_total_no: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     total_escrow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

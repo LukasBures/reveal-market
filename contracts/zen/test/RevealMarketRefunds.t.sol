@@ -12,8 +12,9 @@ import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PoseidonTestUtils} from "./utils/PoseidonTestUtils.sol";
 
-contract RevealMarketRefundsTest is Test {
+contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
     RelayerEscrow private relayerEscrow;
     ProtocolPool private protocolPool;
     MarketFactory private factory;
@@ -157,6 +158,6 @@ contract RevealMarketRefundsTest is Test {
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(ticketId, outcomeId, amount, keccak256(abi.encodePacked(leafUser, salt))));
+        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
     }
 }

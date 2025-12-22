@@ -14,8 +14,9 @@ from web3.contract import Contract
 from web3.exceptions import TimeExhausted, TransactionNotFound, Web3Exception
 from web3.types import BlockData, TxParams, TxReceipt, Wei
 
-from .abi import CLAIM_ABI, COMMIT_ABI
+from .abi import CLAIM_ABI, COMMIT_ABI, LOCK_BATCHES_ABI
 from .metrics import HEALTH_CHECKS, TX_LATENCY, TX_OUTCOMES
+from .poseidon import BATCH_SIZE, build_batch_root, compute_leaf, int_to_hex32
 
 logger = get_logger()
 
@@ -193,11 +194,94 @@ class RelayerService:
             "market_addr": market_addr,
         }
 
+    def _validate_lock_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        tickets = payload.get("tickets")
+        if not isinstance(tickets, list) or not tickets:
+            raise TxSendError("tickets_missing", kind="invalid", permanent=True)
+        try:
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(
+                self._require_field(payload, "market")
+            )
+        except ValueError as err:
+            raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
+
+        relayer_sig = payload.get("relayer_sig")
+        relayer_sig_bytes = b""
+        if relayer_sig is not None:
+            relayer_sig_bytes = self._require_hex(relayer_sig, "relayer_sig")
+        return {
+            "market_addr": market_addr,
+            "tickets": tickets,
+            "relayer_sig": relayer_sig_bytes,
+        }
+
+    def _build_batch_roots(self, tickets: list[Mapping[str, Any]]) -> tuple[list[str], list[int], int]:
+        batch_map: dict[int, dict[int, int]] = {}
+        for idx, ticket in enumerate(tickets):
+            if not isinstance(ticket, Mapping):
+                raise TxSendError("tickets_invalid", kind="invalid", permanent=True)
+            ticket_id = self._require_uint(ticket.get("ticket_id"), f"tickets[{idx}].ticket_id")
+            outcome_id = self._require_uint(ticket.get("outcome_id"), f"tickets[{idx}].outcome_id")
+            amount = self._require_uint(ticket.get("amount"), f"tickets[{idx}].amount", allow_zero=True)
+            try:
+                user_addr: ChecksumAddress = self.web3.to_checksum_address(
+                    self._require_field(ticket, "user")
+                )
+            except ValueError as err:
+                raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
+            salt_raw = self._require_field(ticket, "salt")
+            self._require_hex(salt_raw, f"tickets[{idx}].salt", length_bytes=32)
+
+            computed_leaf = compute_leaf(ticket_id, outcome_id, amount, user_addr, salt_raw)
+            leaf_raw = ticket.get("leaf")
+            if leaf_raw is not None:
+                leaf_bytes = self._require_hex(leaf_raw, f"tickets[{idx}].leaf", length_bytes=32)
+                if int.from_bytes(leaf_bytes, "big") != computed_leaf:
+                    raise TxSendError("leaf_mismatch", kind="invalid", permanent=True)
+
+            batch_index = ticket_id // BATCH_SIZE
+            index_in_batch = ticket_id % BATCH_SIZE
+            batch = batch_map.setdefault(batch_index, {})
+            if index_in_batch in batch:
+                raise TxSendError("ticket_index_duplicate", kind="invalid", permanent=True)
+            batch[index_in_batch] = computed_leaf
+
+        if not batch_map:
+            raise TxSendError("tickets_missing", kind="invalid", permanent=True)
+
+        max_batch_index = max(batch_map.keys())
+        roots: list[str] = []
+        counts: list[int] = []
+        total_count = 0
+        for batch_index in range(max_batch_index + 1):
+            batch = batch_map.get(batch_index)
+            if batch is None:
+                raise TxSendError("batch_index_gap", kind="invalid", permanent=True)
+            count = max(batch.keys()) + 1
+            if count > BATCH_SIZE:
+                raise TxSendError("batch_size_exceeded", kind="invalid", permanent=True)
+            if len(batch) != count:
+                raise TxSendError("batch_index_gap", kind="invalid", permanent=True)
+            try:
+                leaves = [batch[i] for i in range(count)]
+            except KeyError as err:
+                raise TxSendError("batch_index_gap", kind="invalid", permanent=True) from err
+            root_int = build_batch_root(leaves)
+            roots.append(int_to_hex32(root_int))
+            counts.append(count)
+            total_count += count
+        if total_count != len(tickets):
+            raise TxSendError("batch_count_mismatch", kind="invalid", permanent=True)
+        return roots, counts, total_count
+
     def validate_commit_payload(self, payload: Mapping[str, Any]) -> None:
         self._validate_commit_payload(payload)
 
     def validate_claim_payload(self, payload: Mapping[str, Any]) -> None:
         self._validate_claim_payload(payload)
+
+    def validate_lock_payload(self, payload: Mapping[str, Any]) -> None:
+        self._validate_lock_payload(payload)
 
     async def _build_base_tx(
         self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
@@ -471,6 +555,34 @@ class RelayerService:
             await self._preflight_tx(tx, "claim")
             return await self._send_and_wait(tx, "claim")
 
+    async def lock_batches(
+        self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
+    ) -> dict[str, str | int]:
+        validation = self._validate_lock_payload(payload)
+        market_addr = validation["market_addr"]
+        roots, counts, total_count = self._build_batch_roots(validation["tickets"])
+        if isinstance(payload, dict):
+            payload["batch_roots"] = roots
+            payload["batch_counts"] = counts
+            payload["commitments_count"] = total_count
+            payload["merkle_root"] = roots[0] if len(roots) == 1 else None
+
+        market = self.web3.eth.contract(address=market_addr, abi=LOCK_BATCHES_ABI)
+        relayer_sig = validation["relayer_sig"]
+        logger.info(
+            "relayer.lock_batches.prepare",
+            market=payload.get("market"),
+            batch_count=len(roots),
+            commitments_count=total_count,
+            bump_factor=bump_factor,
+            nonce_override=nonce_override,
+        )
+        async with self._get_nonce_lock():
+            base_tx = await self._build_base_tx(0, nonce_override, bump_factor)
+            tx = market.functions.lockBatches(roots, counts, relayer_sig).build_transaction(base_tx)
+            await self._preflight_tx(tx, "lock_batches")
+            return await self._send_and_wait(tx, "lock_batches")
+
     async def health(self) -> dict[str, Any]:
         issues: list[str] = []
         rpc_timeout = 2.0
@@ -585,7 +697,7 @@ class RelayerService:
             "leaf": payload.get("commitment"),
             "user": payload.get("user"),
             "outcome_id": payload.get("outcome_id"),
-            "amount_wei": payload.get("ticket_value_wei"),
+            "amount_wei": payload.get("amount_wei") or payload.get("ticket_value_wei"),
             "salt": payload.get("salt"),
             "leaf_index": payload.get("ticket_id"),
             "merkle_path": payload.get("merkle_path") or [],
@@ -619,6 +731,8 @@ class RelayerService:
             "market_id": market_id,
             "merkle_root": payload.get("merkle_root"),
             "commitments_count": payload.get("commitments_count"),
+            "batch_roots": payload.get("batch_roots"),
+            "batch_counts": payload.get("batch_counts"),
             "pool_total_yes": payload.get("pool_total_yes"),
             "pool_total_no": payload.get("pool_total_no"),
             "total_escrow": payload.get("total_escrow"),

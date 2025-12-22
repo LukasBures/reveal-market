@@ -256,6 +256,8 @@ class TxQueue:
                 result = await self.service.commit(payload, nonce_override=nonce, bump_factor=bump_factor)
             elif row["action"] == "claim":
                 result = await self.service.claim(payload, nonce_override=nonce, bump_factor=bump_factor)
+            elif row["action"] == "lock_batches":
+                result = await self.service.lock_batches(payload, nonce_override=nonce, bump_factor=bump_factor)
             else:
                 raise RuntimeError(f"unknown action {row['action']}")
 
@@ -277,6 +279,11 @@ class TxQueue:
                     await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
                 except Exception as err:  # pragma: no cover - best-effort ingest
                     logger.warning("queue.claim.ingest_failed", job_id=job_id, error=str(err))
+            if row["action"] == "lock_batches":
+                try:
+                    await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
+                except Exception as err:  # pragma: no cover - best-effort ingest
+                    logger.warning("queue.lock_batches.ingest_failed", job_id=job_id, error=str(err))
             logger.info(
                 "queue.job.succeeded",
                 job_id=job_id,
@@ -545,4 +552,12 @@ class TxQueue:
             summary["ticket_id"] = payload.get("ticket_id")
             summary["outcome_id"] = payload.get("outcome_id")
             summary["amount"] = payload.get("amount")
+        elif action == "lock_batches":
+            summary["market"] = payload.get("market")
+            summary["event_id"] = payload.get("event_id") or payload.get("market_id")
+            tickets = payload.get("tickets")
+            if isinstance(tickets, list):
+                summary["ticket_count"] = len(tickets)
+            if payload.get("batch_roots"):
+                summary["batch_count"] = len(payload.get("batch_roots") or [])
         return summary

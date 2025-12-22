@@ -4,8 +4,8 @@ Go microservice that turns settlement payloads into Groth16 proof receipts using
 
 The service now boots a rapidsnark-backed pipeline by default:
 
-1. Write witness inputs to disk (derived from the worker request; now just the 10 public signals, no ticket details).
-2. Execute the Circom-generated `generate_witness.js` with Node to create `witness.wtns`.
+1. Write witness inputs to disk (derived from the worker request: batch ticket arrays + public signals).
+2. Execute the Circom-generated `generate_witness.js` with Node (or the C++ witness binary) to create `witness.wtns`.
 3. Call `rapidsnark` with the mounted `settlement_final.zkey` to emit `proof.json` + `public.json`.
 4. Convert the proof + public signals into Solidity calldata directly inside Go—no `snarkjs` roundtrips.
 5. Return a cache- and log-safe response with proof JSON, public signals, calldata, backend metadata, and Groth16 circuit hash.
@@ -21,9 +21,12 @@ If the compiled artifacts are missing (for example, on a brand-new clone), the s
   - `circuits/build/settlement_deploy.json`
   - `circuits/build/settlement_js/settlement.wasm`
   - `circuits/build/settlement_js/generate_witness.js`
+  - `circuits/build/settlement_cpp/settlement` (optional C++ witness binary)
 - `snarkjs` is still required locally when running `generate_keys.sh` because the setup script shells out to it for Groth16 key generation, but runtime proof generation relies on the rapidsnark binary.
 - `rapidsnark` CLI on PATH (or pinned via `PROVER_RAPIDSNARK_BINARY`). Docker images install v0.0.7 from GitHub releases for AMD64/ARM64; local dev can use `npm i -g rapidsnark@0.0.2` if you prefer the NPM build.
 - Fast storage for `/tmp` (or set `PROVER_TEMP_DIR` to tmpfs) to reduce witness/proof I/O latency.
+
+If you set `PROVER_WITNESS_BINARY` (or `PROVER_WITNESS_MODE=cpp`), Node is optional at runtime; it is still required to run `generate_keys.sh`.
 
 > **Tip:** `docker/prover/Dockerfile` installs Node 20 and pulls `rapidsnark v0.0.7` from official releases, mounting `./prover/circuits` into `/app/circuits`. Run `bash prover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2`; stick to the bundled binary unless you need a different build.
 > **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
@@ -38,20 +41,21 @@ The vetted, source-of-truth artifacts live in the `prover/artifacts` submodule. 
 
 ## MVP Scope
 
-The current settlement circuit is intentionally minimal and only enforces:
-- `winningOutcomeId` is 0 or 1.
-- `rakeBps` <= 10000.
-- `poolTotalYes + poolTotalNo <= totalEscrow`.
+The current settlement circuit now enforces:
+- `winningOutcomeId` is 0 or 1 and `rakeBps` <= 10000.
+- `commitmentsCount` <= 256 with active tickets constrained to outcome 0/1 and inactive amounts forced to zero.
+- Poseidon leaf hashing + depth-8 Merkle root for a 256-ticket batch.
+- Pool totals and `totalLiability` computed directly from the active ticket amounts.
 - `padding` equals zero (to keep a 10-signal ABI).
 
-It does not prove ticket commitments, Merkle inclusion, payout correctness, or liability accounting (the `totalLiability` signal is not constrained). Treat the proofs as a demo integrity check until the circuit is extended and new artifacts are generated.
+It still does not verify external market metadata, authorization signatures, or multi-batch aggregation beyond what the on-chain contract enforces. Treat the proofs as a batch integrity check until the circuit is extended and new artifacts are generated.
 
 ## Architecture Overview
 
 ```
-┌────────────┐   JSON payload   ┌──────────────────────┐   witness.wtns   ┌──────────────────────┐
-│ HTTP API   │ ───────────────▶ │ generate_witness.js  │ ───────────────▶ │  rapidsnark CLI      │
-└────────────┘                  │  (Node + Circom)     │                  │  (proof + signals)   │
+┌────────────┐   JSON payload   ┌─────────────────────────────┐   witness.wtns   ┌──────────────────────┐
+│ HTTP API   │ ───────────────▶ │ witness generator (Node/C++) │ ───────────────▶ │  rapidsnark CLI      │
+└────────────┘                  │  generate_witness.js / C++  │                  │  (proof + signals)   │
        ▲                        └──────────────────────┘                  └──────────────────────┘
        │                                 │                                      │
        │                                 ▼                                      ▼
@@ -61,7 +65,7 @@ It does not prove ticket commitments, Merkle inclusion, payout correctness, or l
 ```
 
 - Each request is validated and converted into a deterministic witness input JSON file.
-- Node executes `generate_witness.js`, which loads `settlement.wasm` to produce `witness.wtns`.
+- A witness generator runs either via Node (`generate_witness.js` + `settlement.wasm`) or the C++ binary (`settlement_cpp/settlement`) to produce `witness.wtns`.
 - The rapidsnark binary consumes the proving key + witness to emit `proof.json` and `public.json`.
 - The Go service parses both outputs, normalizes them into Solidity calldata/public signals, and returns a response with timestamps, backend metadata, and warnings (if any).
 
@@ -77,8 +81,10 @@ Concurrency is guarded by a semaphore so at most `PROVER_MAX_CONCURRENCY` rapids
 | `PROVER_LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
 | `PROVER_SHARED_SECRET` | empty | Optional shared secret; when set, clients must send `X-Prover-Secret`. |
 | `PROVER_CIRCUIT_DIR` | `circuits/build` | Base directory for circuit artifacts. |
-| `PROVER_WITNESS_SCRIPT` | `${PROVER_CIRCUIT_DIR}/settlement_js/generate_witness.js` | Path to the Circom witness script. |
-| `PROVER_WASM_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_js/settlement.wasm` | Path to the WASM file used by the witness script. |
+| `PROVER_WITNESS_SCRIPT` | `${PROVER_CIRCUIT_DIR}/settlement_js/generate_witness.js` | Path to the Circom witness script (used when `PROVER_WITNESS_BINARY` is unset). |
+| `PROVER_WITNESS_BINARY` | empty | Optional path to the C++ witness generator (e.g., `${PROVER_CIRCUIT_DIR}/settlement_cpp/settlement`). |
+| `PROVER_WITNESS_MODE` | empty | Set to `cpp` to default `PROVER_WITNESS_BINARY` to the compiled C++ witness binary. |
+| `PROVER_WASM_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_js/settlement.wasm` | Path to the WASM file used by the Node witness script. |
 | `PROVER_ZKEY_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_final.zkey` | Groth16 proving key. |
 | `PROVER_VK_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_vk.json` | Verification key used for artifact hash validation. |
 | `PROVER_HASHES_PATH` | `${PROVER_CIRCUIT_DIR}/settlement_hashes.json` | Circuit hash manifest used to validate artifacts. |
@@ -116,7 +122,14 @@ If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on requests or the s
   "totalEscrow": "10000000000000000000",
   "totalLiability": "9000000000000000000",
   "rakeBps": "100",
-  "circuitHash": "0xdead..."
+  "circuitHash": "0xdead...",
+  "batchIndex": "0",
+  "commitmentsCount": "2",
+  "tickets": [
+    { "ticketId": "0", "outcomeId": "0", "amount": "7", "user": "0xabc...", "salt": "0x01" },
+    { "ticketId": "1", "outcomeId": "1", "amount": "3", "user": "0xdef...", "salt": "0x02" }
+    // Pad to 256 entries with zeros.
+  ]
 }
 ```
 
@@ -169,8 +182,10 @@ Errors are returned as JSON with `error` and `message` fields (`invalid_request`
 ```bash
 curl -X POST http://localhost:8085/api/v1/proofs/settlement \
   -H "Content-Type: application/json" \
-  -d '{"marketId":"0x123","merkleRoot":"0xbeef","winningOutcomeId":"1","poolTotals":["70","30"],"totalEscrow":"100","totalLiability":"90","rakeBps":"100","circuitHash":"0xdead"}'
+  -d '{"marketId":"0x123","merkleRoot":"0xbeef","winningOutcomeId":"1","poolTotals":["70","30"],"totalEscrow":"100","totalLiability":"90","rakeBps":"100","circuitHash":"0xdead","batchIndex":"0","commitmentsCount":"2","tickets":[{"ticketId":"0","outcomeId":"0","amount":"70","user":"0x1","salt":"0x1"},{"ticketId":"1","outcomeId":"1","amount":"30","user":"0x2","salt":"0x2"}]}'
 ```
+
+Pad `tickets` to 256 entries (zeros for inactive rows).
 
 If the artifacts are missing or the Groth16 toolchain fails, the service exits with a non-zero status so orchestrators can alert immediately—no mock mode is available.
 

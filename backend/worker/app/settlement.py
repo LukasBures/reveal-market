@@ -17,6 +17,7 @@ from shared import repository_async as shared_repository
 from shared.logging import log_event
 from shared.onchain import get_async_web3, to_checksum
 from shared.onchain.abi import REVEAL_MARKET_ABI
+from shared.poseidon import BATCH_SIZE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import AsyncWeb3
@@ -43,6 +44,39 @@ def _normalize_bytes32(value: Any) -> str | None:
     if callable(hex_value):
         return str(hex_value())
     return str(value)
+
+
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _batch_root_for_ticket(settlement: shared_models.Settlement, ticket_id: int) -> str | None:
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    if batch_roots:
+        batch_index = int(ticket_id) // BATCH_SIZE
+        if batch_index < len(batch_roots):
+            return str(batch_roots[batch_index])
+    return settlement.merkle_root
+
+
+def _root_to_signal(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value)
+    try:
+        if raw.lower().startswith("0x"):
+            return str(int(raw, 16))
+        return str(int(raw))
+    except Exception:
+        return None
 
 
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
@@ -94,6 +128,12 @@ def settlement_needs_refresh(settlement: shared_models.Settlement | None) -> boo
         return True
     if _is_empty_hex(settlement.merkle_root) or _is_empty_hex(settlement.circuit_hash):
         return True
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
+    if settlement.commitments_count and not batch_roots:
+        return True
+    if batch_roots and (not batch_counts or len(batch_counts) != len(batch_roots)):
+        return True
     if settlement.commitments_count is None:
         return True
     if settlement.pool_total_yes is None or settlement.pool_total_no is None:
@@ -128,6 +168,19 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         result_posted = bool(await contract.functions.resultPosted().call())
     except Exception:
         result_posted = winning_outcome_id is not None
+    batch_roots: list[str] = []
+    batch_counts: list[int] = []
+    try:
+        if int(next_ticket_id or 0) > 0:
+            total_batches = (int(next_ticket_id) + BATCH_SIZE - 1) // BATCH_SIZE
+            for index in range(total_batches):
+                root_value = await contract.functions.batchRoots(index).call()
+                count_value = await contract.functions.batchCounts(index).call()
+                batch_roots.append(_normalize_bytes32(root_value) or str(root_value))
+                batch_counts.append(int(count_value))
+    except Exception:
+        batch_roots = []
+        batch_counts = []
     return {
         "commitments_count": int(next_ticket_id),
         "phase": int(phase_value),
@@ -140,6 +193,8 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         "commitments_root": _normalize_bytes32(commitments_root),
         "circuit_hash": _normalize_bytes32(circuit_hash),
         "result_posted": result_posted,
+        "batch_roots": batch_roots,
+        "batch_counts": batch_counts,
     }
 
 
@@ -170,6 +225,8 @@ async def _upsert_settlement_from_chain(
     payload = {
         "merkle_root": snapshot.get("commitments_root"),
         "commitments_count": snapshot.get("commitments_count"),
+        "batch_roots": snapshot.get("batch_roots"),
+        "batch_counts": snapshot.get("batch_counts"),
         "pool_total_yes": snapshot.get("pool_total_yes"),
         "pool_total_no": snapshot.get("pool_total_no"),
         "total_escrow": snapshot.get("total_escrow"),
@@ -256,6 +313,38 @@ async def _submit_verify_and_settle(
     return tx_hash.hex(), getattr(receipt, "blockNumber", None)
 
 
+async def _submit_verify_and_settle_batched(
+    web3: AsyncWeb3,
+    account,
+    market_address: str,
+    proofs: Sequence[str],
+    public_signals: Sequence[Sequence[Any]],
+    batch_indexes: Sequence[int],
+) -> tuple[str, int | None]:
+    contract = _build_market_contract(web3, market_address)
+    hydrated_signals = [_hydrate_public_signals(signals) for signals in public_signals]
+    proof_bytes = [bytes.fromhex(proof.removeprefix("0x")) for proof in proofs]
+    batch_indexes_int = [int(value) for value in batch_indexes]
+    base_tx: TxParams = {
+        "from": account.address,
+        "nonce": await web3.eth.get_transaction_count(account.address),
+        "gas": 1_200_000,
+    }
+    if runtime.settings.settlement_gas_price_gwei is not None:
+        base_tx["gasPrice"] = cast(Wei, int(runtime.settings.settlement_gas_price_gwei * 1e9))
+    if runtime.settings.settlement_max_priority_fee_gwei is not None:
+        base_tx["maxPriorityFeePerGas"] = cast(Wei, int(runtime.settings.settlement_max_priority_fee_gwei * 1e9))
+    tx = await contract.functions.verifyAndSettleBatched(proof_bytes, hydrated_signals, batch_indexes_int).build_transaction(
+        base_tx
+    )
+    if "gasPrice" not in tx and "maxFeePerGas" not in tx:
+        tx["gasPrice"] = await web3.eth.gas_price
+    signed = account.sign_transaction(tx)
+    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
+    receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    return tx_hash.hex(), getattr(receipt, "blockNumber", None)
+
+
 async def _resolve_winning_outcome(session: AsyncSession, market: shared_models.Market) -> int | None:
     resolution = None
     if market.condition_id:
@@ -269,7 +358,10 @@ async def _resolve_winning_outcome(session: AsyncSession, market: shared_models.
 
 
 async def _build_merkle_proof_for_commitment(
-    session: AsyncSession, market_db_id: int, commitment: shared_models.Commitment
+    session: AsyncSession,
+    market_db_id: int,
+    settlement: shared_models.Settlement,
+    commitment: shared_models.Commitment,
 ) -> list[str]:
     """Return stored merkle path or recompute from existing leaves."""
 
@@ -285,21 +377,56 @@ async def _build_merkle_proof_for_commitment(
     siblings = [row.sibling_hash for row in path_rows] if path_rows else []
     if siblings:
         return siblings
+
+    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+    batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
+    if not batch_roots and settlement.merkle_root:
+        batch_roots = [settlement.merkle_root]
+        batch_counts = [settlement.commitments_count]
+    if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
+        return []
+    if commitment.leaf_index is None:
+        return []
+
+    batch_index = int(commitment.leaf_index) // BATCH_SIZE
+    if batch_index >= len(batch_roots):
+        return []
+    count_raw = batch_counts[batch_index] if batch_index < len(batch_counts) else None
+    try:
+        count = int(count_raw or 0)
+    except Exception:
+        return []
+    if count <= 0:
+        return []
+    index_in_batch = int(commitment.leaf_index) % BATCH_SIZE
+    if index_in_batch >= count:
+        return []
+
     commitments = await shared_repository.list_commitments_by_market(session, market_db_id)
-    leaves: list[bytes] = []
-    index_lookup: dict[int, int] = {}
+    leaves: list[bytes | None] = [None] * count
     for idx, row in enumerate(commitments):
-        leaf_bytes = _hex_to_bytes(row.leaf)
+        leaf_bytes = _hex_to_bytes(row.leaf or row.ticket_hash)
         if not leaf_bytes:
             return []
-        leaves.append(leaf_bytes)
-        if row.leaf_index is not None:
-            index_lookup[row.leaf_index] = idx
-    if commitment.leaf_index is None or commitment.leaf_index not in index_lookup:
+        leaf_index = row.leaf_index if row.leaf_index is not None else idx
+        batch_id = int(leaf_index) // BATCH_SIZE
+        if batch_id != batch_index:
+            continue
+        rel_index = int(leaf_index) % BATCH_SIZE
+        if rel_index >= count:
+            continue
+        leaves[rel_index] = leaf_bytes
+    if any(leaf is None for leaf in leaves):
         return []
-    _, paths = build_merkle_root_and_paths(leaves)
+    batch_leaves = cast(list[bytes], leaves)
     try:
-        return [sibling.hex() for sibling in paths[index_lookup[commitment.leaf_index]]]
+        computed_root, paths = build_merkle_root_and_paths(batch_leaves)
+        expected_root = bytes.fromhex(str(batch_roots[batch_index]).removeprefix("0x"))
+        if computed_root != expected_root:
+            return []
+        proof = ["0x" + sibling.hex() for sibling in paths[index_in_batch]]
+        await shared_repository.replace_merkle_path(session, commitment.id, proof)
+        return proof
     except Exception:
         return []
 
@@ -327,8 +454,8 @@ async def _build_relayer_claim_payloads(
                 commitment_id=getattr(commitment, "id", None),
             )
             continue
-        merkle_proof = await _build_merkle_proof_for_commitment(session, market.id, commitment)
-        if not merkle_proof and (settlement.commitments_count or 0) > 1:
+        merkle_proof = await _build_merkle_proof_for_commitment(session, market.id, settlement, commitment)
+        if not merkle_proof:
             log_event(
                 logger,
                 logging.WARNING,
@@ -338,6 +465,7 @@ async def _build_relayer_claim_payloads(
                 commitment_id=getattr(commitment, "id", None),
             )
             continue
+        batch_root = _batch_root_for_ticket(settlement, commitment.leaf_index)
         payloads.append(
             {
                 "user": commitment.user_address,
@@ -347,8 +475,10 @@ async def _build_relayer_claim_payloads(
                 "amount": int(commitment.amount_wei),
                 "salt": commitment.salt or "0x0",
                 "merkle_proof": merkle_proof,
-                "merkle_root": settlement.merkle_root,
+                "merkle_root": batch_root,
                 "commitments_count": settlement.commitments_count,
+                "batch_roots": getattr(settlement, "batch_roots", None),
+                "batch_counts": getattr(settlement, "batch_counts", None),
                 "pool_total_yes": settlement.pool_total_yes,
                 "pool_total_no": settlement.pool_total_no,
                 "total_escrow": settlement.total_escrow,
@@ -481,9 +611,11 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             winning_outcome_id = settlement.winning_outcome_id or await _resolve_winning_outcome(session, market)
             if winning_outcome_id is None:
                 continue
-            if settlement.merkle_root is None:
+            batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+            if not batch_roots and settlement.merkle_root is None:
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
+                batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
             if not runtime.settings.auto_settlement_tx_enabled:
                 if relayer_enabled:
                     enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
@@ -505,38 +637,78 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             settlement.submission_error = None
             _mark_dirty()
             session.add(settlement)
-            receipt = None
-            if settlement.proof_request_id:
-                receipt = await shared_repository.get_settlement_receipt_by_request_id(
-                    session, settlement.proof_request_id
+            batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+            if not batch_roots and settlement.merkle_root:
+                batch_roots = [settlement.merkle_root]
+            if not batch_roots:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.settlement.missing_roots",
+                    message="skipping settlement submission due to missing batch roots",
+                    market_id=getattr(market, "event_id", None),
                 )
-            if receipt is None or not receipt.proof or not receipt.public_signals:
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                settlement.submission_error = "missing_batch_roots"
+                _mark_dirty()
+                continue
+
+            receipts = list(
+                (
+                    await session.execute(
+                        select(shared_models.SettlementReceipt).where(
+                            shared_models.SettlementReceipt.market_id == settlement.market_id
+                        )
+                    )
+                ).scalars()
+            )
+            receipt_by_root: dict[str, shared_models.SettlementReceipt] = {}
+            for receipt in receipts:
+                if not receipt.proof or not receipt.public_signals:
+                    continue
+                signals = receipt.public_signals
+                if isinstance(signals, (list, tuple)) and signals:
+                    root_signal = str(signals[0])
+                    receipt_by_root.setdefault(root_signal, receipt)
+
+            proofs: list[str] = []
+            public_signals_list: list[Sequence[Any]] = []
+            batch_indexes: list[int] = []
+            for index, root in enumerate(batch_roots):
+                root_signal = _root_to_signal(root)
+                receipt = receipt_by_root.get(root_signal or "")
+                if receipt is None or not receipt.proof or not receipt.public_signals:
+                    continue
+                proofs.append(str(receipt.proof))
+                public_signals_list.append(cast(Sequence[Any], receipt.public_signals))
+                batch_indexes.append(index)
+
+            if len(proofs) != len(batch_roots):
                 log_event(
                     logger,
                     logging.DEBUG,
                     event="worker.settlement.missing_proof",
-                    message="skipping settlement submission due to missing proof receipt",
+                    message="skipping settlement submission due to missing batch proofs",
                     market_id=getattr(market, "event_id", None),
                 )
                 settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
                 settlement.submission_error = "missing_proof_receipt"
                 _mark_dirty()
                 continue
-            proof = receipt.proof
             try:
-                public_signals: Sequence[Any] = cast(Sequence[Any], receipt.public_signals or [])
                 await _maybe_post_result(
                     web3,
                     account,
                     _build_market_contract(web3, market.market_address),
                     winning_outcome_id,
                 )
-                tx_hash, block_number = await _submit_verify_and_settle(
+                tx_hash, block_number = await _submit_verify_and_settle_batched(
                     web3,
                     account,
                     market.market_address,
-                    proof,
-                    public_signals,
+                    proofs,
+                    public_signals_list,
+                    batch_indexes,
                 )
             except Exception as exc:  # pragma: no cover - on-chain errors
                 log_event(
@@ -563,7 +735,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                 logger,
                 logging.INFO,
                 event="worker.settlement.tx_submitted",
-                message="submitted verifyAndSettle",
+                message="submitted verifyAndSettleBatched",
                 market_id=getattr(market, "event_id", None),
                 tx_hash=tx_hash,
                 block_number=block_number,

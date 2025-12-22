@@ -188,6 +188,8 @@ async def _persist_settlement_snapshot(session: AsyncSession, market_id: int, sn
     settlement_fields = {
         "merkle_root": snapshot.get("merkleRoot") or snapshot.get("commitments_root"),
         "commitments_count": _as_int(snapshot.get("commitmentsCount") or snapshot.get("commitments_count")),
+        "batch_roots": snapshot.get("batchRoots") or snapshot.get("batch_roots"),
+        "batch_counts": snapshot.get("batchCounts") or snapshot.get("batch_counts"),
         "pool_total_yes": _as_int(snapshot.get("poolTotalYes") or (snapshot.get("poolTotals") or [None, None])[0]),
         "pool_total_no": _as_int(snapshot.get("poolTotalNo") or (snapshot.get("poolTotals") or [None, None])[-1]),
         "total_escrow": _as_int(snapshot.get("totalEscrow") or snapshot.get("total_escrow")),
@@ -242,6 +244,8 @@ def _build_snapshot_payload(
         "totalLiability": str(market_snapshot["total_liability"]),
         "rakeBps": str(market_snapshot.get("rake_bps", 0)),
         "circuitHash": market_snapshot["circuit_hash"],
+        "batchRoots": market_snapshot.get("batch_roots") or market_snapshot.get("batchRoots"),
+        "batchCounts": market_snapshot.get("batch_counts") or market_snapshot.get("batchCounts"),
     }
 
 
@@ -333,8 +337,7 @@ async def maybe_generate_settlement_proof(
             event_id=market_snapshot.get("event_id"),
         )
         return False
-    payload: dict[str, Any] | None = None
-    persisted_snapshot = False
+    payloads: list[dict[str, Any]] | None = None
     try:
         async with session_scope() as session:
             if numeric_market_id is None:
@@ -366,9 +369,7 @@ async def maybe_generate_settlement_proof(
                     normalized_condition = record_condition.lower()
                 if market_address is None:
                     market_address = getattr(market_record, "market_address", None)
-            payload = await build_prover_payload_async(session, numeric_market_id)
-            await _persist_settlement_snapshot(session, numeric_market_id, payload)
-            persisted_snapshot = True
+            payloads = await build_prover_payload_async(session, numeric_market_id)
             settlement_row = (
                 await session.execute(
                     select(shared_models.Settlement).where(shared_models.Settlement.market_id == numeric_market_id)
@@ -381,19 +382,33 @@ async def maybe_generate_settlement_proof(
             await _notify_status_change()
     except (ValueError, SettlementDataMissingError) as exc:
         fallback = _build_snapshot_payload(market_snapshot, market_payload, market_identifier or "")
+        if fallback and numeric_market_id is not None:
+            try:
+                async with session_scope() as session:
+                    await _persist_settlement_snapshot(session, numeric_market_id, fallback)
+            except Exception:
+                pass
         # If a chain snapshot is available, try to hydrate settlement data before giving up.
-        if payload is None and numeric_market_id is not None and runtime.settings.rpc_url:
+        if payloads is None and numeric_market_id is not None and runtime.settings.rpc_url:
             try:
                 async with session_scope() as session:
                     market_record = await session.get(shared_models.Market, numeric_market_id)
                     if market_record and getattr(market_record, "market_address", None):
                         refreshed = await _upsert_settlement_from_chain(session, market_record)
                         if refreshed is not None:
-                            try:
-                                payload = await build_prover_payload_async(session, numeric_market_id)
-                                persisted_snapshot = True
-                            except SettlementDataMissingError:
-                                payload = None
+                            payloads = await build_prover_payload_async(session, numeric_market_id)
+                            settlement_row = (
+                                await session.execute(
+                                    select(shared_models.Settlement).where(
+                                        shared_models.Settlement.market_id == numeric_market_id
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                            if settlement_row:
+                                settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
+                                session.add(settlement_row)
+                            await session.flush()
+                            await _notify_status_change()
             except Exception as refresh_exc:  # pragma: no cover - best-effort hydrate
                 log_event(
                     logger,
@@ -403,42 +418,17 @@ async def maybe_generate_settlement_proof(
                     market_id=market_identifier,
                     error=str(refresh_exc),
                 )
-        if payload is None:
-            if not fallback:
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    event="worker.proof.incomplete",
-                    message="skipping proof generation due to missing settlement fields",
-                    error=str(exc),
-                    event_id=market_snapshot.get("event_id"),
-                )
-                return False
-            payload = fallback
-    if payload is not None and numeric_market_id is not None and not persisted_snapshot:
-        try:
-            async with session_scope() as session:
-                await _persist_settlement_snapshot(session, numeric_market_id, payload)
-                settlement_row = (
-                    await session.execute(
-                        select(shared_models.Settlement).where(shared_models.Settlement.market_id == numeric_market_id)
-                    )
-                ).scalar_one_or_none()
-                if settlement_row:
-                    settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
-                    session.add(settlement_row)
-                    await session.flush()
-                    await _notify_status_change()
-        except Exception as exc:  # pragma: no cover - defensive snapshot persistence
+        if not payloads:
             log_event(
                 logger,
-                logging.WARNING,
-                event="worker.proof.snapshot.persist_failed",
-                message="failed to persist settlement snapshot",
+                logging.DEBUG,
+                event="worker.proof.incomplete",
+                message="skipping proof generation due to missing settlement fields",
                 error=str(exc),
-                market_id=numeric_market_id,
+                event_id=market_snapshot.get("event_id"),
             )
-    if payload is None:
+            return False
+    if not payloads:
         log_event(
             logger,
             logging.DEBUG,
@@ -447,89 +437,97 @@ async def maybe_generate_settlement_proof(
             event_id=market_snapshot.get("event_id"),
         )
         return False
+    first_payload = payloads[0]
     log_event(
         logger,
         logging.DEBUG,
         event="worker.proof.request_ready",
         message="constructed settlement proof request",
-        market_id=payload.get("marketId"),
-        merkle_root=payload.get("merkleRoot"),
+        market_id=first_payload.get("marketId"),
+        merkle_root=first_payload.get("merkleRoot"),
     )
-    try:
-        response = await runtime.PROVER_CLIENT.generate_settlement_proof(payload)
-    except ProverError as exc:
-        if numeric_market_id is not None:
-            try:
-                async with session_scope() as session:
-                    settlement_row = (
-                        await session.execute(
-                            select(shared_models.Settlement).where(
-                                shared_models.Settlement.market_id == numeric_market_id
+
+    results: list[tuple[dict[str, Any], Any, str | None]] = []
+    for payload in payloads:
+        try:
+            response = await runtime.PROVER_CLIENT.generate_settlement_proof(payload)
+        except ProverError as exc:
+            if numeric_market_id is not None:
+                try:
+                    async with session_scope() as session:
+                        settlement_row = (
+                            await session.execute(
+                                select(shared_models.Settlement).where(
+                                    shared_models.Settlement.market_id == numeric_market_id
+                                )
                             )
-                        )
-                    ).scalar_one_or_none()
-                    if settlement_row:
-                        settlement_row.proof_status = shared_models.SettlementProofStatus.FAILED.value
-                        session.add(settlement_row)
-            except Exception as status_exc:  # pragma: no cover - defensive status update
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="worker.proof.status_update_failed",
-                    message="failed to mark settlement proof as failed",
-                    error=str(status_exc),
-                    market_id=numeric_market_id,
-                )
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.proof.failed",
-            message="prover rejected settlement request",
-            error=str(exc),
-            event_id=market_snapshot.get("event_id"),
-        )
-        await _notify_status_change()
-        return False
+                        ).scalar_one_or_none()
+                        if settlement_row:
+                            settlement_row.proof_status = shared_models.SettlementProofStatus.FAILED.value
+                            session.add(settlement_row)
+                except Exception as status_exc:  # pragma: no cover - defensive status update
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.proof.status_update_failed",
+                        message="failed to mark settlement proof as failed",
+                        error=str(status_exc),
+                        market_id=numeric_market_id,
+                    )
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.failed",
+                message="prover rejected settlement request",
+                error=str(exc),
+                event_id=market_snapshot.get("event_id"),
+            )
+            await _notify_status_change()
+            return False
 
-    proof_hash = None
-    try:
-        from eth_utils import keccak
-
-        proof_hash_source = (response.proof or "") + "".join(response.public_signals or [])
-        proof_hash = keccak(proof_hash_source.encode()).hex()
-    except Exception:  # pragma: no cover - defensive
         proof_hash = None
+        try:
+            from eth_utils import keccak
 
-    cache_payload = {
-        **response.to_json(),
-        "marketId": payload.get("marketId"),
-        "eventId": market_event_id or market_payload.event_id,
-        "conditionId": normalized_condition or payload.get("conditionId"),
-        "marketAddress": market_address or market_snapshot.get("market_address"),
-        "merkleRoot": payload.get("merkleRoot"),
-        "poolTotals": payload.get("poolTotals"),
-        "totalEscrow": payload.get("totalEscrow"),
-        "totalLiability": payload.get("totalLiability"),
-        "rakeBps": payload.get("rakeBps"),
-        "winningOutcomeId": payload.get("winningOutcomeId"),
-        "proof_hash": f"0x{proof_hash}" if proof_hash else None,
-    }
-    cache_key_target = (
-        normalized_condition
-        or payload.get("conditionId")
-        or payload.get("marketId")
-        or market_event_id
-        or market_identifier
-        or ""
-    )
-    cache_key = proof_receipt_cache_key(str(cache_key_target))
-    if redis_client is not None:
-        await shared_cache.set_json(
-            redis_client,
-            cache_key,
-            cache_payload,
-            runtime.settings.proof_cache_ttl_seconds,
+            proof_hash_source = (response.proof or "") + "".join(response.public_signals or [])
+            proof_hash = keccak(proof_hash_source.encode()).hex()
+        except Exception:  # pragma: no cover - defensive
+            proof_hash = None
+
+        results.append((payload, response, proof_hash))
+
+        cache_payload = {
+            **response.to_json(),
+            "marketId": payload.get("marketId"),
+            "eventId": market_event_id or market_payload.event_id,
+            "conditionId": normalized_condition or payload.get("conditionId"),
+            "marketAddress": market_address or market_snapshot.get("market_address"),
+            "merkleRoot": payload.get("merkleRoot"),
+            "poolTotals": payload.get("poolTotals"),
+            "totalEscrow": payload.get("totalEscrow"),
+            "totalLiability": payload.get("totalLiability"),
+            "rakeBps": payload.get("rakeBps"),
+            "winningOutcomeId": payload.get("winningOutcomeId"),
+            "batchIndex": payload.get("batchIndex"),
+            "commitmentsCount": payload.get("commitmentsCount"),
+            "proof_hash": f"0x{proof_hash}" if proof_hash else None,
+        }
+        cache_key_target = (
+            normalized_condition
+            or payload.get("conditionId")
+            or payload.get("marketId")
+            or market_event_id
+            or market_identifier
+            or ""
         )
+        cache_key = proof_receipt_cache_key(str(cache_key_target))
+        if redis_client is not None:
+            await shared_cache.set_json(
+                redis_client,
+                cache_key,
+                cache_payload,
+                runtime.settings.proof_cache_ttl_seconds,
+            )
 
     try:
         async with session_scope() as session:
@@ -555,22 +553,27 @@ async def maybe_generate_settlement_proof(
             )
             if settlement:
                 settlement.proof_status = shared_models.SettlementProofStatus.GENERATED.value
-                settlement.proof_request_id = response.request_id
-                settlement.proof_hash = f"0x{proof_hash}" if proof_hash else None
+                if len(results) == 1:
+                    settlement.proof_request_id = results[0][1].request_id
+                    settlement.proof_hash = f"0x{results[0][2]}" if results[0][2] else None
+                else:
+                    settlement.proof_request_id = None
+                    settlement.proof_hash = None
                 session.add(settlement)
             if numeric_market_id is not None:
-                await shared_repository.record_settlement_receipt(
-                    session,
-                    market_id=numeric_market_id,
-                    market_address=market_address,
-                    request_id=response.request_id,
-                    proof_hash=f"0x{proof_hash}" if proof_hash else None,
-                    proof=response.proof,
-                    public_signals=response.public_signals,
-                    prover_version=response.prover_version,
-                    circuit_hash=response.circuit_hash,
-                    generated_at=response.generated_at,
-                )
+                for payload, response, proof_hash in results:
+                    await shared_repository.record_settlement_receipt(
+                        session,
+                        market_id=numeric_market_id,
+                        market_address=market_address,
+                        request_id=response.request_id,
+                        proof_hash=f"0x{proof_hash}" if proof_hash else None,
+                        proof=response.proof,
+                        public_signals=response.public_signals,
+                        prover_version=response.prover_version,
+                        circuit_hash=response.circuit_hash,
+                        generated_at=response.generated_at,
+                    )
     except Exception as exc:  # pragma: no cover - best effort
         log_event(
             logger,
@@ -582,16 +585,18 @@ async def maybe_generate_settlement_proof(
         )
 
     await _notify_status_change()
-    log_event(
-        logger,
-        logging.DEBUG,
-        event="worker.proof.generated",
-        message="cached settlement proof receipt",
-        event_id=market_event_id,
-        condition_id=normalized_condition or condition_id or market_snapshot.get("condition_id"),
-        prover_version=response.prover_version,
-        nonce=getattr(response, "request_id", None),
-    )
+    for payload, response, _proof_hash in results:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.proof.generated",
+            message="cached settlement proof receipt",
+            event_id=market_event_id,
+            condition_id=normalized_condition or condition_id or market_snapshot.get("condition_id"),
+            prover_version=response.prover_version,
+            nonce=getattr(response, "request_id", None),
+            batch_index=payload.get("batchIndex"),
+        )
     return True
 
 

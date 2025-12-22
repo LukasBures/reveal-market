@@ -430,6 +430,8 @@ class SettlementIngestRequest(BaseModel):
     event_id: str | None = None
     merkle_root: str | None = Field(default=None, alias="merkleRoot")
     commitments_count: int | None = Field(default=None, alias="commitmentsCount")
+    batch_roots: list[str] | None = Field(default=None, alias="batchRoots")
+    batch_counts: list[int] | None = Field(default=None, alias="batchCounts")
     pool_total_yes: int | None = Field(default=None, alias="poolTotalYes")
     pool_total_no: int | None = Field(default=None, alias="poolTotalNo")
     total_escrow: int | None = Field(default=None, alias="totalEscrow")

@@ -10,6 +10,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IProtocolPool} from "./interfaces/IProtocolPool.sol";
 import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
+import {PoseidonT3} from "./crypto/PoseidonT3.sol";
 import {RelayerEscrow} from "./RelayerEscrow.sol";
 
 interface IOwnable {
@@ -20,6 +21,9 @@ interface IOwnable {
 contract RevealMarket is IRevealMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
+
+    uint256 public constant BATCH_SIZE = 256;
+    uint8 public constant MERKLE_DEPTH = 8;
 
     struct InitParams {
         address factory;
@@ -55,6 +59,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     Phase public override phase;
     bytes32 public commitmentsRoot;
+    bytes32[] public batchRoots;
+    uint16[] public batchCounts;
     uint256 public totalEscrow;
     uint256 public totalLiability;
     uint256 public rakeAmount;
@@ -119,6 +125,11 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error InvalidAddress();
     error RefundsNotEnabled();
     error RefundsUnavailable();
+    error UseLockBatches();
+    error BatchCountMismatch();
+    error BatchSizeExceeded();
+    error InvalidBatchIndex();
+    error BatchProofLengthMismatch();
 
     modifier onlyRelayer() {
         _onlyRelayer();
@@ -236,11 +247,37 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     /// @notice Locks the market and stores the Merkle root over commitments.
     function lock() external onlyOracle {
+        revert UseLockBatches();
+    }
+
+    /// @notice Locks the market with batch Merkle roots (depth-8 Poseidon tree per batch).
+    function lockBatches(bytes32[] calldata roots, uint16[] calldata counts, bytes calldata relayerSig)
+        external
+        onlyOracle
+    {
         if (phase != Phase.Commit) revert InvalidPhase();
         if (block.timestamp < commitDeadline) revert CommitWindowClosed();
         if (commitments.length == 0) revert NothingToLock();
+        if (roots.length == 0 || roots.length != counts.length) revert BatchCountMismatch();
+        relayerSig;
 
-        commitmentsRoot = _computeCommitmentsRoot();
+        uint256 total = 0;
+        for (uint256 i = 0; i < counts.length; ++i) {
+            uint256 count = counts[i];
+            if (count == 0) revert BatchCountMismatch();
+            if (count > BATCH_SIZE) revert BatchSizeExceeded();
+            total += count;
+        }
+        if (total != commitments.length) revert BatchCountMismatch();
+
+        delete batchRoots;
+        delete batchCounts;
+        for (uint256 i = 0; i < roots.length; ++i) {
+            batchRoots.push(roots[i]);
+            batchCounts.push(counts[i]);
+        }
+
+        commitmentsRoot = roots.length == 1 ? roots[0] : bytes32(0);
         phase = Phase.Locked;
         emit Locked(commitmentsRoot, commitments.length);
     }
@@ -261,11 +298,12 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         onlyOracle
         nonReentrant
     {
+        if (batchRoots.length != 1) revert InvalidBatchIndex();
         if (phase != Phase.Locked) revert InvalidPhase();
         if (!resultPosted) revert ResultMissing();
 
         if (
-            publicSignals[0] != uint256(commitmentsRoot) || publicSignals[1] != marketId
+            publicSignals[0] != uint256(batchRoots[0]) || publicSignals[1] != marketId
                 || publicSignals[2] != winningOutcomeId || publicSignals[3] != totalEscrow
         ) revert TotalsMismatch();
         if (publicSignals[5] != rakeBps) revert RakeMismatch();
@@ -275,32 +313,56 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bool ok = IVerifier(verifier).verifyProof(proof, publicSignals);
         if (!ok) revert InvalidProof();
 
-        totalLiability = publicSignals[4];
-        poolTotalYes = publicSignals[6];
-        poolTotalNo = publicSignals[7];
+        _finalizeSettlement(publicSignals[3], publicSignals[4], publicSignals[6], publicSignals[7]);
+    }
 
-        rakeAmount = rakeCollected;
-        uint256 required = totalLiability;
-        if (required > totalEscrow + protocolLiabilityCap) revert LiabilityExceedsCoverage();
+    /// @notice Verifies Groth16 proofs per batch and settles the market in one transaction.
+    function verifyAndSettleBatched(
+        bytes[] calldata proofs,
+        uint256[10][] calldata publicSignals,
+        uint16[] calldata batchIndexes
+    ) external onlyOracle nonReentrant {
+        if (phase != Phase.Locked) revert InvalidPhase();
+        if (!resultPosted) revert ResultMissing();
+        if (proofs.length != publicSignals.length || proofs.length != batchIndexes.length) {
+            revert BatchProofLengthMismatch();
+        }
+        uint256 batchCount = batchRoots.length;
+        if (batchCount == 0 || proofs.length != batchCount) revert BatchProofLengthMismatch();
 
-        uint256 balance = IERC20(collateralToken).balanceOf(address(this));
-        if (required > balance) {
-            uint256 deficit = required - balance;
-            protocolTopUp = deficit;
-            IProtocolPool(protocolPool).draw(address(this), deficit);
+        bool[] memory seen = new bool[](batchCount);
+        uint256 totalEscrowSum = 0;
+        uint256 totalLiabilitySum = 0;
+        uint256 poolYesSum = 0;
+        uint256 poolNoSum = 0;
+
+        for (uint256 i = 0; i < proofs.length; ++i) {
+            uint256 batchIndex = batchIndexes[i];
+            if (batchIndex >= batchCount) revert InvalidBatchIndex();
+            if (seen[batchIndex]) revert InvalidBatchIndex();
+            seen[batchIndex] = true;
+
+            uint256[10] calldata signals = publicSignals[i];
+            if (
+                signals[0] != uint256(batchRoots[batchIndex]) || signals[1] != marketId
+                    || signals[2] != winningOutcomeId
+            ) revert TotalsMismatch();
+            if (signals[5] != rakeBps) revert RakeMismatch();
+            if (signals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
+            if (signals[9] != 0) revert PaddingMismatch();
+
+            bool ok = IVerifier(verifier).verifyProof(proofs[i], signals);
+            if (!ok) revert InvalidProof();
+
+            totalEscrowSum += signals[3];
+            totalLiabilitySum += signals[4];
+            poolYesSum += signals[6];
+            poolNoSum += signals[7];
         }
 
-        if (required > IERC20(collateralToken).balanceOf(address(this))) revert InsufficientCoverage();
+        if (totalEscrowSum != totalEscrow) revert TotalsMismatch();
 
-        // forward any surplus immediately; keep only what is needed for claims
-        uint256 tokenBalance = IERC20(collateralToken).balanceOf(address(this));
-        uint256 surplus = tokenBalance > totalLiability ? tokenBalance - totalLiability : 0;
-        if (surplus > 0) {
-            IERC20(collateralToken).safeTransfer(protocolPool, surplus);
-        }
-
-        phase = Phase.Settled;
-        emit Settled(totalLiability, rakeAmount, protocolTopUp, poolTotalYes, poolTotalNo);
+        _finalizeSettlement(totalEscrowSum, totalLiabilitySum, poolYesSum, poolNoSum);
     }
 
     /// @notice Winning tickets reveal and route payouts back to the relayer escrow.
@@ -429,6 +491,40 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         claimsPaused = paused;
     }
 
+    function _finalizeSettlement(
+        uint256 totalEscrow_,
+        uint256 totalLiability_,
+        uint256 poolYes_,
+        uint256 poolNo_
+    ) internal {
+        totalLiability = totalLiability_;
+        poolTotalYes = poolYes_;
+        poolTotalNo = poolNo_;
+
+        rakeAmount = rakeCollected;
+        uint256 required = totalLiability_;
+        if (required > totalEscrow_ + protocolLiabilityCap) revert LiabilityExceedsCoverage();
+
+        uint256 balance = IERC20(collateralToken).balanceOf(address(this));
+        if (required > balance) {
+            uint256 deficit = required - balance;
+            protocolTopUp = deficit;
+            IProtocolPool(protocolPool).draw(address(this), deficit);
+        }
+
+        if (required > IERC20(collateralToken).balanceOf(address(this))) revert InsufficientCoverage();
+
+        // forward any surplus immediately; keep only what is needed for claims
+        uint256 tokenBalance = IERC20(collateralToken).balanceOf(address(this));
+        uint256 surplus = tokenBalance > totalLiability_ ? tokenBalance - totalLiability_ : 0;
+        if (surplus > 0) {
+            IERC20(collateralToken).safeTransfer(protocolPool, surplus);
+        }
+
+        phase = Phase.Settled;
+        emit Settled(totalLiability_, rakeAmount, protocolTopUp, poolTotalYes, poolTotalNo);
+    }
+
     /// @notice Extend-only deadline updates. Cannot shorten.
     function extendCommitDeadline(uint256 newDeadline) external onlyFactory {
         if (newDeadline <= commitDeadline) revert DeadlineExtendOnly();
@@ -436,63 +532,44 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         commitDeadline = newDeadline;
     }
 
-    function _computeCommitmentsRoot() internal view returns (bytes32) {
-        uint256 count = commitments.length;
-        bytes32[] memory nodes = new bytes32[](count);
-        for (uint256 i = 0; i < count; ++i) {
-            nodes[i] = commitments[i];
-        }
-        while (count > 1) {
-            uint256 next = 0;
-            for (uint256 i = 0; i < count; i += 2) {
-                if (i + 1 == count) {
-                    nodes[next] = keccak256(abi.encodePacked(nodes[i], nodes[i]));
-                } else {
-                    nodes[next] = keccak256(abi.encodePacked(nodes[i], nodes[i + 1]));
-                }
-                next++;
-            }
-            count = next;
-        }
-        return nodes[0];
-    }
-
     function _computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address user)
         internal
         pure
         returns (bytes32 hash)
     {
-        bytes32 userSalt = keccak256(abi.encodePacked(user, salt));
-        assembly ("memory-safe") {
-            let ptr := mload(0x40)
-            mstore(ptr, ticketId)
-            mstore(add(ptr, 0x20), outcomeId)
-            mstore(add(ptr, 0x40), amount)
-            mstore(add(ptr, 0x60), userSalt)
-            hash := keccak256(ptr, 0x80)
-            mstore(0x40, add(ptr, 0x80))
-        }
+        uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
+        uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
+        uint256 h2 = PoseidonT3.poseidon([amount, userSalt]);
+        uint256 leaf = PoseidonT3.poseidon([h1, h2]);
+        hash = bytes32(leaf);
     }
 
     function _verifyLeaf(uint256 ticketId, bytes32 leaf, bytes32[] calldata proof) internal view returns (bool) {
         if (ticketId >= commitments.length) return false;
         if (commitments[ticketId] != leaf) return false;
-        bytes32 computed = leaf;
-        uint256 index = ticketId;
-        for (uint256 i = 0; i < proof.length; ++i) {
-            bytes32 sibling = proof[i];
+        if (proof.length != MERKLE_DEPTH) return false;
+        if (batchRoots.length == 0) return false;
+        uint256 batchIndex = ticketId / BATCH_SIZE;
+        if (batchIndex >= batchRoots.length) return false;
+        uint256 indexInBatch = ticketId % BATCH_SIZE;
+        if (indexInBatch >= batchCounts[batchIndex]) return false;
+
+        uint256 computed = uint256(leaf);
+        uint256 index = indexInBatch;
+        for (uint256 i = 0; i < MERKLE_DEPTH; ++i) {
+            uint256 sibling = uint256(proof[i]);
             if ((index & 1) == 1) {
-                computed = keccak256(abi.encodePacked(sibling, computed));
+                computed = PoseidonT3.poseidon([sibling, computed]);
             } else {
-                computed = keccak256(abi.encodePacked(computed, sibling));
+                computed = PoseidonT3.poseidon([computed, sibling]);
             }
             index >>= 1;
         }
-        return computed == commitmentsRoot;
+        return computed == uint256(batchRoots[batchIndex]);
     }
 
     function _verifyRefundLeaf(uint256 ticketId, bytes32 leaf, bytes32[] calldata proof) internal view returns (bool) {
-        if (commitmentsRoot == bytes32(0)) {
+        if (batchRoots.length == 0) {
             if (ticketId >= commitments.length) return false;
             return commitments[ticketId] == leaf;
         }

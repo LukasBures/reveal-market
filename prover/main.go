@@ -25,6 +25,7 @@ import (
 const (
 	defaultLogLevel       = "INFO"
 	artifactCheckInterval = 60 * time.Second
+	settlementBatchSize   = 256
 )
 
 var (
@@ -46,6 +47,17 @@ type settlementProofRequest struct {
 	TotalLiability string   `json:"totalLiability"`
 	RakeBps        string   `json:"rakeBps"`
 	CircuitHash    string   `json:"circuitHash"`
+	BatchIndex       string   `json:"batchIndex"`
+	CommitmentsCount string   `json:"commitmentsCount"`
+	Tickets          []ticket `json:"tickets"`
+}
+
+type ticket struct {
+	TicketID  string `json:"ticketId"`
+	OutcomeID string `json:"outcomeId"`
+	Amount    string `json:"amount"`
+	User      string `json:"user"`
+	Salt      string `json:"salt"`
 }
 
 // settlementProofResponse is returned to callers after Groth16 generation.
@@ -180,6 +192,7 @@ func initProver(cfg shared.Config) proverEngine {
 		NodeBinary:        cfg.NodeBinary,
 		RapidSnarkBinary:  cfg.RapidSnarkBinary,
 		WitnessScriptPath: cfg.WitnessScriptPath,
+		WitnessBinary:     cfg.WitnessBinaryPath,
 		WasmPath:          cfg.WasmPath,
 		ZKeyPath:          cfg.ZKeyPath,
 		TempDir:           cfg.TempDir,
@@ -657,6 +670,12 @@ func validateRequest(req settlementProofRequest) error {
 		return errors.New("poolTotals must contain two entries (YES and NO)")
 	case strings.TrimSpace(req.CircuitHash) == "":
 		return errors.New("circuitHash required")
+	case strings.TrimSpace(req.BatchIndex) == "":
+		return errors.New("batchIndex required")
+	case strings.TrimSpace(req.CommitmentsCount) == "":
+		return errors.New("commitmentsCount required")
+	case len(req.Tickets) != settlementBatchSize:
+		return fmt.Errorf("tickets must contain %d entries", settlementBatchSize)
 	default:
 		return nil
 	}

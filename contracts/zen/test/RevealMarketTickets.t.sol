@@ -12,8 +12,9 @@ import {IRevealMarket} from "../src/interfaces/IRevealMarket.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PoseidonTestUtils} from "./utils/PoseidonTestUtils.sol";
 
-contract RevealMarketTicketsTest is Test {
+contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
     RelayerEscrow private relayerEscrow;
     ProtocolPool private protocolPool;
     MarketFactory private factory;
@@ -117,7 +118,7 @@ contract RevealMarketTicketsTest is Test {
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(ticketId, outcomeId, amount, keccak256(abi.encodePacked(leafUser, salt))));
+        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
     }
 
     function testNextTicketIdIncrementsWithCommits() external {
@@ -240,6 +241,14 @@ contract RevealMarketTicketsTest is Test {
         );
     }
 
+    function testPoseidonLeafMatchesHarness() external {
+        RevealMarketHarness harness = new RevealMarketHarness();
+        bytes32 salt = bytes32(uint256(123));
+        bytes32 expected = _poseidonLeaf(7, 1, ticketSize, salt, user);
+        bytes32 actual = harness.computeLeaf(7, 1, ticketSize, salt, user);
+        assertEq(actual, expected, "poseidon leaf mismatch");
+    }
+
     function testCommitRevertsWhenSignatureUsesDifferentUser() external {
         bytes32 leaf = _leaf(0, 1, ticketSize, bytes32("salt-user"), user);
         IRevealMarket.CommitAuth memory auth = _buildAuth(leaf, 11, block.timestamp + 12 hours, user);
@@ -284,5 +293,15 @@ contract RevealMarketTicketsTest is Test {
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         relayerEscrow.commitOnBehalf(user, address(market2), auth, sig);
+    }
+}
+
+contract RevealMarketHarness is RevealMarket {
+    function computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address user)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _computeLeaf(ticketId, outcomeId, amount, salt, user);
     }
 }
