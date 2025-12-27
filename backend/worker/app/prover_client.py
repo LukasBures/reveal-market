@@ -197,3 +197,41 @@ class AsyncProverClient:
             raise ProverError("failed to generate proof") from exc
         data = response.json()
         return SettlementProofResponse.from_payload(data)
+
+    async def fetch_health(self) -> dict[str, Any]:
+        """Return the prover health payload (used for circuit hash alignment)."""
+
+        url = f"{self.base_url}/healthz"
+        try:
+            async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+                response = await client.get(url, headers=self._headers())
+        except httpx.HTTPError as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="prover.health.failed",
+                message="failed to fetch prover health payload",
+                error=str(exc),
+            )
+            raise ProverError("failed to fetch prover health") from exc
+        try:
+            payload = response.json()
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.ERROR,
+                event="prover.health.decode_failed",
+                message="failed to decode prover health payload",
+                error=str(exc),
+            )
+            raise ProverError("failed to decode prover health payload") from exc
+        if response.status_code >= 400:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="prover.health.non_200",
+                message="prover health returned non-200 status",
+                status=response.status_code,
+            )
+        payload["_status_code"] = response.status_code
+        return payload

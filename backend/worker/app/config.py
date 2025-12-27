@@ -216,6 +216,7 @@ class Settings(BaseSettings):
     proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
     relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
+    relayer_http_timeout_seconds: float = Field(default=10.0, gt=0)
     relayer_queue_enabled: bool = Field(default=True, description="Enable Redis-backed relayer claim queue")
     relayer_queue_key: str = Field(default="reveal_market:relayer_queue", description="Redis key for relayer jobs")
     proof_queue_key: str = Field(default="reveal_market_worker:proof_queue")
@@ -228,6 +229,20 @@ class Settings(BaseSettings):
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
+    auto_lock_batches_enabled: bool = Field(
+        default=False,
+        description="Automatically submit lockBatches once commit deadlines pass and commitments exist",
+    )
+    lock_batches_use_relayer: bool = Field(
+        default=False,
+        description="Route lockBatches submissions through the relayer API instead of direct RPC",
+    )
+    lock_batches_max_per_tick: int = Field(default=3, ge=1)
+    lock_batches_relayer_poll_seconds: float = Field(default=2.0, ge=0.5)
+    lock_batches_relayer_max_attempts: int = Field(default=15, ge=1)
+    lock_batches_gas_limit: int = Field(default=800_000, ge=100_000)
+    lock_batches_gas_price_gwei: float | None = Field(default=None, ge=0)
+    lock_batches_max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     auto_settlement_enabled: bool = Field(
         default=False, description="Automatically request settlement proofs when data is present"
     )
@@ -265,6 +280,8 @@ class Settings(BaseSettings):
         "polymarket_archived_filter",
         "settlement_gas_price_gwei",
         "settlement_max_priority_fee_gwei",
+        "lock_batches_gas_price_gwei",
+        "lock_batches_max_priority_fee_gwei",
         "goldsky_subgraph_url",
         "goldsky_api_key",
         "prover_shared_secret",
@@ -356,6 +373,12 @@ def validate_required_settings(settings: Settings) -> None:
         "RM_PROVER_BASE_URL",
         when=settings.prover_enabled and (settings.auto_settlement_enabled or settings.prover_enabled),
     )
+    require("RM_RPC_URL", when=settings.auto_lock_batches_enabled)
+    if settings.auto_lock_batches_enabled:
+        if settings.lock_batches_use_relayer:
+            require("RM_RELAYER_BASE_URL")
+        else:
+            require("RM_SETTLEMENT_SIGNER_PRIVATE_KEY")
     require(
         "RM_SETTLEMENT_SIGNER_PRIVATE_KEY",
         when=settings.auto_settlement_tx_enabled,

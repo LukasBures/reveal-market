@@ -39,14 +39,14 @@ func init() {
 }
 
 type settlementProofRequest struct {
-	MarketID       string   `json:"marketId"`
-	MerkleRoot     string   `json:"merkleRoot"`
-	WinningOutcome string   `json:"winningOutcomeId"`
-	PoolTotals     []string `json:"poolTotals"`
-	TotalEscrow    string   `json:"totalEscrow"`
-	TotalLiability string   `json:"totalLiability"`
-	RakeBps        string   `json:"rakeBps"`
-	CircuitHash    string   `json:"circuitHash"`
+	MarketID         string   `json:"marketId"`
+	MerkleRoot       string   `json:"merkleRoot"`
+	WinningOutcome   string   `json:"winningOutcomeId"`
+	PoolTotals       []string `json:"poolTotals"`
+	TotalEscrow      string   `json:"totalEscrow"`
+	TotalLiability   string   `json:"totalLiability"`
+	RakeBps          string   `json:"rakeBps"`
+	CircuitHash      string   `json:"circuitHash"`
 	BatchIndex       string   `json:"batchIndex"`
 	CommitmentsCount string   `json:"commitmentsCount"`
 	Tickets          []ticket `json:"tickets"`

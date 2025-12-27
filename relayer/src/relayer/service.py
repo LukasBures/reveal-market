@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import httpx
 from eth_account.signers.local import LocalAccount
-from eth_typing import ChecksumAddress
+from eth_typing import ChecksumAddress, HexStr
 from structlog import get_logger
 from web3 import Web3
 from web3.contract import Contract
@@ -102,7 +102,7 @@ class RelayerService:
         if not value.startswith("0x"):
             raise TxSendError(f"{key}_missing_0x", kind="invalid", permanent=True)
         try:
-            raw = Web3.to_bytes(hexstr=value)
+            raw = Web3.to_bytes(hexstr=cast(HexStr, value))
         except ValueError as err:
             raise TxSendError(f"{key}_invalid_hex", kind="invalid", permanent=True) from err
         if length_bytes is not None and len(raw) != length_bytes:
@@ -139,12 +139,8 @@ class RelayerService:
             length_bytes=65,
         )
         try:
-            user_addr: ChecksumAddress = self.web3.to_checksum_address(
-                self._require_field(payload, "user")
-            )
-            market_addr: ChecksumAddress = self.web3.to_checksum_address(
-                self._require_field(payload, "market")
-            )
+            user_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(payload, "user"))
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(payload, "market"))
         except ValueError as err:
             raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
 
@@ -177,12 +173,8 @@ class RelayerService:
             self._require_hex(item, f"merkle_proof[{idx}]", length_bytes=32)
 
         try:
-            user_addr: ChecksumAddress = self.web3.to_checksum_address(
-                self._require_field(payload, "user")
-            )
-            market_addr: ChecksumAddress = self.web3.to_checksum_address(
-                self._require_field(payload, "market")
-            )
+            user_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(payload, "user"))
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(payload, "market"))
         except ValueError as err:
             raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
 
@@ -201,9 +193,7 @@ class RelayerService:
         if not payload.get("event_id") and not payload.get("market_id"):
             raise TxSendError("market_id_missing", kind="invalid", permanent=True)
         try:
-            market_addr: ChecksumAddress = self.web3.to_checksum_address(
-                self._require_field(payload, "market")
-            )
+            market_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(payload, "market"))
         except ValueError as err:
             raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
 
@@ -226,9 +216,7 @@ class RelayerService:
             outcome_id = self._require_uint(ticket.get("outcome_id"), f"tickets[{idx}].outcome_id")
             amount = self._require_uint(ticket.get("amount"), f"tickets[{idx}].amount", allow_zero=True)
             try:
-                user_addr: ChecksumAddress = self.web3.to_checksum_address(
-                    self._require_field(ticket, "user")
-                )
+                user_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(ticket, "user"))
             except ValueError as err:
                 raise TxSendError("invalid_address", kind="invalid", permanent=True) from err
             salt_raw = self._require_field(ticket, "salt")
@@ -256,9 +244,9 @@ class RelayerService:
         counts: list[int] = []
         total_count = 0
         for batch_index in range(max_batch_index + 1):
-            batch = batch_map.get(batch_index)
-            if batch is None:
+            if batch_index not in batch_map:
                 raise TxSendError("batch_index_gap", kind="invalid", permanent=True)
+            batch = batch_map[batch_index]
             count = max(batch.keys()) + 1
             if count > BATCH_SIZE:
                 raise TxSendError("batch_size_exceeded", kind="invalid", permanent=True)
@@ -694,16 +682,38 @@ class RelayerService:
         if not self.api_base_url:
             return
         event_id = payload.get("event_id") or payload.get("market_id")
-        ticket = {
-            "ticket_hash": payload.get("commitment"),
-            "leaf": payload.get("commitment"),
+        required = {
+            "commitment": payload.get("commitment"),
             "user": payload.get("user"),
             "outcome_id": payload.get("outcome_id"),
-            "amount_wei": payload.get("amount_wei") or payload.get("ticket_value_wei"),
+            "amount_wei": payload.get("amount_wei"),
             "salt": payload.get("salt"),
-            "leaf_index": payload.get("ticket_id"),
-            "merkle_path": payload.get("merkle_path") or [],
-            "tx_hash": tx_hash,
+            "ticket_id": payload.get("ticket_id"),
+        }
+        missing = [
+            field
+            for field, value in required.items()
+            if value is None or (isinstance(value, str) and not value.strip())
+        ]
+        if not event_id:
+            missing.append("event_id")
+        if missing:
+            logger.warning(
+                "relayer.ingest.commit_skipped",
+                market=payload.get("market"),
+                missing_fields=missing,
+            )
+            return
+        ticket = {
+            "ticketHash": required["commitment"],
+            "leaf": required["commitment"],
+            "user_address": required["user"],
+            "outcomeId": required["outcome_id"],
+            "amount": required["amount_wei"],
+            "salt": required["salt"],
+            "merkleIndex": required["ticket_id"],
+            "merklePath": payload.get("merkle_path") or [],
+            "txHash": tx_hash,
         }
         body = {"event_id": event_id, "tickets": [ticket]}
         headers = {}
@@ -728,19 +738,26 @@ class RelayerService:
         if not self.api_base_url:
             return
         market_id = payload.get("market_id") or payload.get("event_id") or payload.get("market")
+        if not market_id:
+            logger.warning(
+                "relayer.ingest.settlement_skipped",
+                market=payload.get("market"),
+                reason="market_id_missing",
+            )
+            return
         body = {
             "event_id": market_id,
             "market_id": market_id,
-            "merkle_root": payload.get("merkle_root"),
-            "commitments_count": payload.get("commitments_count"),
-            "batch_roots": payload.get("batch_roots"),
-            "batch_counts": payload.get("batch_counts"),
-            "pool_total_yes": payload.get("pool_total_yes"),
-            "pool_total_no": payload.get("pool_total_no"),
-            "total_escrow": payload.get("total_escrow"),
-            "total_liability": payload.get("total_liability"),
-            "rake_bps": payload.get("rake_bps"),
-            "proof_request_id": payload.get("proof_request_id"),
+            "merkleRoot": payload.get("merkle_root"),
+            "commitmentsCount": payload.get("commitments_count"),
+            "batchRoots": payload.get("batch_roots"),
+            "batchCounts": payload.get("batch_counts"),
+            "poolTotalYes": payload.get("pool_total_yes"),
+            "poolTotalNo": payload.get("pool_total_no"),
+            "totalEscrow": payload.get("total_escrow"),
+            "totalLiability": payload.get("total_liability"),
+            "rakeBps": payload.get("rake_bps"),
+            "proofRequestId": payload.get("proof_request_id"),
         }
         headers = {}
         if self.api_bearer_token:

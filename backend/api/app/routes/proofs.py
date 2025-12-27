@@ -36,6 +36,45 @@ def _root_cache_key(receipt: shared_models.SettlementReceipt) -> str | None:
     return None
 
 
+def _root_signal_from_value(value: object) -> str | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return str(int.from_bytes(value, "big")) if value else None
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned.startswith("0x"):
+                return str(int(cleaned[2:] or "0", 16))
+            return str(int(cleaned))
+        return str(int(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _root_cache_key_from_batch(
+    receipt: shared_models.SettlementReceipt, settlement: shared_models.Settlement | None
+) -> str | None:
+    if settlement is None:
+        return None
+    batch_index = getattr(receipt, "batch_index", None)
+    if batch_index is None:
+        return None
+    try:
+        index = int(batch_index)
+    except (TypeError, ValueError):
+        return None
+    batch_roots = getattr(settlement, "batch_roots", None)
+    if not isinstance(batch_roots, (list, tuple)):
+        return None
+    if index < 0 or index >= len(batch_roots):
+        return None
+    root_signal = _root_signal_from_value(batch_roots[index])
+    if not root_signal:
+        return None
+    return proof_receipt_cache_key(f"root:{root_signal}")
+
+
 @router.get("/proofs", response_model=list[schemas.ProofReceipt], tags=["proofs"], include_in_schema=False)
 async def list_proof_receipts(
     request: Request,
@@ -115,6 +154,10 @@ async def list_proof_receipts(
             key = _root_cache_key(receipt_row)
             if key:
                 cached_payload = await get_json(cache, key)
+            if cached_payload is None and settlement_row is not None:
+                key = _root_cache_key_from_batch(receipt_row, settlement_row)
+                if key:
+                    cached_payload = await get_json(cache, key)
             if cached_payload is None and condition_value:
                 cached_payload = await get_json(cache, proof_receipt_cache_key(str(condition_value)))
             if cached_payload is not None:

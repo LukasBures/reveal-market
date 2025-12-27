@@ -29,13 +29,9 @@ def test_merkle_root_and_paths():
     idx = 0
     for sibling in paths[0]:
         if idx & 1:
-            computed = int_to_bytes32(
-                poseidon_t3(int.from_bytes(sibling, "big"), int.from_bytes(computed, "big"))
-            )
+            computed = int_to_bytes32(poseidon_t3(int.from_bytes(sibling, "big"), int.from_bytes(computed, "big")))
         else:
-            computed = int_to_bytes32(
-                poseidon_t3(int.from_bytes(computed, "big"), int.from_bytes(sibling, "big"))
-            )
+            computed = int_to_bytes32(poseidon_t3(int.from_bytes(computed, "big"), int.from_bytes(sibling, "big")))
         idx >>= 1
     assert computed == root
 

@@ -2,38 +2,7 @@ default_language_version:
   python: python3.12
 
 repos:
-  # Run contract snapshots first so later fixers don't loop on regenerated files.
-  - repo: local
-    hooks:
-      - id: forge-snapshot
-        name: forge snapshot (contracts/* workspaces)
-        description: "Regenerate gas snapshots when contracts change"
-        entry: |
-          bash -c "
-            set -euo pipefail
-            ROOT=\"$(git rev-parse --show-toplevel)\"
-            # Only run if staged contract files changed to avoid slowing other commits.
-            if ! (git diff --cached --name-only -- \"contracts/\" && git diff --name-only -- \"contracts/\") | grep -E '\.(sol|t\.sol|toml)$' >/dev/null; then
-              echo 'No contract changes; skipping forge snapshot.'
-              exit 0
-            fi
-            for DIR in \"$ROOT\"/contracts/*; do
-              [ -d \"$DIR\" ] || continue
-              [ -f \"$DIR/foundry.toml\" ] || continue
-              cd \"$DIR\"
-              echo \"Running forge snapshot in $DIR\"
-              forge snapshot
-              for SNAP in \"$DIR\"/.gas-snapshot; do
-                [ -f \"$SNAP\" ] || continue
-                python -c \"from pathlib import Path; p=Path('$SNAP'); p.write_text(p.read_text().rstrip('\\\\n') + '\\\\n')\"
-              done
-            done
-          "
-        language: system
-        pass_filenames: false
-        files: ^contracts/
-
-  # Fast, formatting-only checks next
+  # Fast, formatting-only checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -53,18 +22,18 @@ repos:
   # Heavier project-specific hooks ordered from faster to slower
   - repo: local
     hooks:
-      - id: ruff-lint
-        name: ruff check
-        description: "Run 'ruff check' for extremely fast Python linting"
-        entry: ruff check --fix --force-exclude --config pyproject.toml
-        language: python
-        types_or: [python, pyi, jupyter]
-        require_serial: true
-        additional_dependencies: ["ruff>=0.6.9"]
       - id: ruff-format
         name: ruff format
         description: "Run 'ruff format' for extremely fast Python formatting"
         entry: ruff format --force-exclude --config pyproject.toml
+        language: python
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+        additional_dependencies: ["ruff>=0.6.9"]
+      - id: ruff-lint
+        name: ruff check
+        description: "Run 'ruff check' for extremely fast Python linting"
+        entry: ruff check --fix --force-exclude --config pyproject.toml
         language: python
         types_or: [python, pyi, jupyter]
         require_serial: true
@@ -75,18 +44,10 @@ repos:
         entry: bash -c 'set -euo pipefail; files=$(git ls-files -- '\''prover/*.go'\'' '\''prover/**/*.go'\''); if [ -z "$files" ]; then echo "No Go files under prover/"; exit 0; fi; echo "$files" | xargs gofmt -w'
         language: system
         pass_filenames: false
-      - id: mypy-api
-        name: mypy (api)
-        description: "Static type checks for backend API"
-        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared'
-        language: system
-        types_or: [python]
-        pass_filenames: false
-        require_serial: true
-      - id: mypy-worker
-        name: mypy (worker)
-        description: "Static type checks for worker"
-        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared'
+      - id: mypy-relayer
+        name: mypy (relayer)
+        description: "Static type checks for relayer"
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project relayer -- mypy --config-file pyproject.toml relayer/src/relayer'
         language: system
         types_or: [python]
         pass_filenames: false
@@ -99,11 +60,56 @@ repos:
         types_or: [python]
         pass_filenames: false
         require_serial: true
-      - id: mypy-relayer
-        name: mypy (relayer)
-        description: "Static type checks for relayer"
-        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project relayer -- mypy --config-file pyproject.toml relayer/src/relayer'
+      - id: mypy-worker
+        name: mypy (worker)
+        description: "Static type checks for worker"
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/worker -- mypy --config-file pyproject.toml backend/worker/app backend/shared'
         language: system
         types_or: [python]
         pass_filenames: false
         require_serial: true
+      - id: mypy-api
+        name: mypy (api)
+        description: "Static type checks for backend API"
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project backend/api -- mypy --config-file pyproject.toml backend/api/app backend/shared'
+        language: system
+        types_or: [python]
+        pass_filenames: false
+        require_serial: true
+
+  # Gas snapshots (slowest)
+  - repo: local
+    hooks:
+      - id: forge-snapshot
+        name: forge snapshot (contracts/* workspaces)
+        description: "Regenerate gas snapshots when contracts change"
+        entry: |
+          bash -c "
+            set -euo pipefail
+            ROOT=\"$(git rev-parse --show-toplevel)\"
+            # Only run if contract files changed to avoid slowing other commits.
+            changed_files=\"$( (git diff --cached --name-only -- \"contracts/\" && git diff --name-only -- \"contracts/\") | grep -E '\.(sol|t\.sol|toml)$' || true )\"
+            if [ -z \"$changed_files\" ]; then
+              echo 'No contract changes; skipping forge snapshot.'
+              exit 0
+            fi
+            for DIR in \"$ROOT\"/contracts/*; do
+              [ -d \"$DIR\" ] || continue
+              [ -f \"$DIR/foundry.toml\" ] || continue
+              rel_dir=\"${DIR#${ROOT}/}\"
+              if ! echo \"$changed_files\" | grep -q \"^${rel_dir}/\"; then
+                echo \"No contract changes in ${rel_dir}; skipping forge snapshot.\"
+                continue
+              fi
+              cd \"$DIR\"
+              echo \"Running forge snapshot in $DIR\"
+              forge snapshot
+              for SNAP in \"$DIR\"/.gas-snapshot; do
+                [ -f \"$SNAP\" ] || continue
+                python3 -c \"from pathlib import Path; p=Path('$SNAP'); p.write_text(p.read_text().rstrip('\\\\n') + '\\\\n')\"
+              done
+            done
+          "
+        language: system
+        pass_filenames: false
+        files: ^contracts/

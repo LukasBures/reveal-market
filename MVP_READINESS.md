@@ -23,6 +23,7 @@ This checklist closes the minimum gaps for a production-ready MVP. Use it before
 
 ## 4) Proofs End-to-End
 - Ingest real commitments/settlements into Postgres (commitment + settlement tables populated).
+- Ensure `lockBatches` runs after commit deadlines so `batch_roots`/`batch_counts` land on-chain and in the settlement snapshot.
 - Run worker with `RM_PROVER_ENABLED=true` and `RM_AUTO_SETTLEMENT_ENABLED=true`.
 - Confirm proof receipts cached in Redis and settlement records carry proof metadata (request_id/hash/status).
 - Verify prover health (`/healthz`) and sample proof generation succeeds with stored data.

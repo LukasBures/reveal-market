@@ -1,14 +1,17 @@
-"""Settlement automation: build snapshots, request proofs, and submit on-chain transactions."""
+"""Settlement automation: lock batches, build snapshots, request proofs, and submit on-chain transactions."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
+import time
 from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import httpx
 from eth_account import Account
 from eth_typing import ChecksumAddress
 from redis.asyncio import Redis
@@ -18,7 +21,7 @@ from shared.logging import log_event
 from shared.onchain import get_async_web3, to_checksum
 from shared.onchain.abi import REVEAL_MARKET_ABI
 from shared.poseidon import BATCH_SIZE
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import AsyncWeb3
 from web3.contract.async_contract import AsyncContract
@@ -28,7 +31,7 @@ from . import runtime
 from .cache_ops import invalidate_cache_tags
 from .database import session_scope
 from .merkle import build_merkle_root_and_paths
-from .metrics import RELAYER_QUEUE_COUNTER
+from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER
 
 logger = runtime.logger
 
@@ -123,6 +126,62 @@ def _is_empty_hex(value: Any) -> bool:
     return all(ch == "0" for ch in cleaned)
 
 
+class LockBatchDataError(RuntimeError):
+    """Raised when commitments are incomplete or malformed for batch locking."""
+
+
+def _normalize_leaf_hex(value: str | None) -> bytes:
+    if not value:
+        raise LockBatchDataError("missing_commitment_leaf")
+    cleaned = value.removeprefix("0x")
+    try:
+        raw = bytes.fromhex(cleaned)
+    except ValueError as exc:
+        raise LockBatchDataError("invalid_commitment_leaf") from exc
+    if len(raw) != 32:
+        raise LockBatchDataError("invalid_commitment_leaf_length")
+    return raw
+
+
+def _build_batch_roots_from_commitments(
+    commitments: list[shared_models.Commitment],
+) -> tuple[list[str], list[int], int, str | None]:
+    if not commitments:
+        raise LockBatchDataError("no_commitments")
+
+    leaves_by_index: dict[int, bytes] = {}
+    max_index = -1
+    for commitment in commitments:
+        if commitment.leaf_index is None:
+            raise LockBatchDataError("missing_leaf_index")
+        leaf_index = int(commitment.leaf_index)
+        if leaf_index < 0:
+            raise LockBatchDataError("invalid_leaf_index")
+        if leaf_index in leaves_by_index:
+            raise LockBatchDataError("duplicate_leaf_index")
+        leaf_hex = commitment.leaf or commitment.ticket_hash
+        leaves_by_index[leaf_index] = _normalize_leaf_hex(leaf_hex)
+        if leaf_index > max_index:
+            max_index = leaf_index
+
+    total_count = max_index + 1
+    if len(leaves_by_index) != total_count:
+        raise LockBatchDataError("leaf_index_gap")
+
+    batch_roots: list[str] = []
+    batch_counts: list[int] = []
+    for batch_index in range((total_count + BATCH_SIZE - 1) // BATCH_SIZE):
+        start = batch_index * BATCH_SIZE
+        end = min(total_count, start + BATCH_SIZE)
+        batch_leaves = [leaves_by_index[i] for i in range(start, end)]
+        root, _ = build_merkle_root_and_paths(batch_leaves)
+        batch_roots.append("0x" + root.hex())
+        batch_counts.append(end - start)
+
+    merkle_root = batch_roots[0] if len(batch_roots) == 1 else None
+    return batch_roots, batch_counts, total_count, merkle_root
+
+
 def settlement_needs_refresh(settlement: shared_models.Settlement | None) -> bool:
     """Return True when a settlement snapshot is missing critical fields."""
 
@@ -161,7 +220,7 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         commitments_root,
         next_ticket_id,
         phase_value,
-        _commit_deadline,
+        commit_deadline,
         winning_outcome_id,
     ) = await contract.functions.marketState().call()
     total_escrow = await contract.functions.totalEscrow().call()
@@ -170,6 +229,10 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     pool_total_no = await contract.functions.poolTotalNo().call()
     rake_bps = await contract.functions.rakeBps().call()
     circuit_hash = await contract.functions.circuitHash().call()
+    try:
+        oracle = await contract.functions.oracle().call()
+    except Exception:
+        oracle = None
     try:
         result_posted = bool(await contract.functions.resultPosted().call())
     except Exception:
@@ -201,6 +264,8 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
         "result_posted": result_posted,
         "batch_roots": batch_roots,
         "batch_counts": batch_counts,
+        "commit_deadline": int(commit_deadline) if commit_deadline is not None else None,
+        "oracle": str(oracle) if oracle is not None else None,
     }
 
 
@@ -238,10 +303,117 @@ async def _upsert_settlement_from_chain(
         "total_escrow": snapshot.get("total_escrow"),
         "total_liability": snapshot.get("total_liability"),
         "rake_bps": snapshot.get("rake_bps"),
-        "winning_outcome_id": snapshot.get("winning_outcome_id"),
         "circuit_hash": snapshot.get("circuit_hash"),
     }
+    winning_outcome_id = snapshot.get("winning_outcome_id")
+    result_posted = bool(snapshot.get("result_posted"))
+    phase_value = snapshot.get("phase")
+    try:
+        phase_value = int(phase_value) if phase_value is not None else None
+    except (TypeError, ValueError):
+        phase_value = None
+    if winning_outcome_id is not None and (result_posted or (phase_value is not None and phase_value >= 2)):
+        payload["winning_outcome_id"] = winning_outcome_id
     return await shared_repository.upsert_settlement_snapshot(session, market.id, payload)
+
+
+async def _fetch_relayer_address(relayer_base_url: str) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
+            resp = await client.get(relayer_base_url.rstrip("/") + "/healthz")
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        address = payload.get("relayer") or payload.get("address")
+        return str(address) if address else None
+    except Exception:
+        return None
+
+
+async def _poll_relayer_job(
+    relayer_base_url: str,
+    job_id: str,
+    *,
+    headers: dict[str, str],
+    poll_seconds: float,
+    max_attempts: int,
+) -> dict[str, Any] | None:
+    for _ in range(max_attempts):
+        try:
+            status_url = relayer_base_url.rstrip("/") + "/status"
+            async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
+                resp = await client.post(status_url, json={"jobId": job_id}, headers=headers)
+            if resp.status_code == 200:
+                payload = resp.json()
+                status = str(payload.get("status") or "").lower()
+                if status in {"succeeded", "confirmed"}:
+                    return payload
+                if status in {"failed", "deadletter"}:
+                    return payload
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.relayer.status_poll_failed",
+                message="failed to poll relayer status",
+                job_id=job_id,
+                error=str(exc),
+            )
+        await asyncio.sleep(poll_seconds)
+    return None
+
+
+async def _submit_lock_batches(
+    web3: AsyncWeb3,
+    account,
+    market_address: str,
+    batch_roots: list[str],
+    batch_counts: list[int],
+) -> tuple[str, int | None]:
+    contract = _build_market_contract(web3, market_address)
+    base_tx: TxParams = {
+        "from": account.address,
+        "nonce": await web3.eth.get_transaction_count(account.address),
+        "gas": int(runtime.settings.lock_batches_gas_limit),
+    }
+    if runtime.settings.lock_batches_gas_price_gwei is not None:
+        base_tx["gasPrice"] = cast(Wei, int(runtime.settings.lock_batches_gas_price_gwei * 1e9))
+    if runtime.settings.lock_batches_max_priority_fee_gwei is not None:
+        base_tx["maxPriorityFeePerGas"] = cast(Wei, int(runtime.settings.lock_batches_max_priority_fee_gwei * 1e9))
+    tx = await contract.functions.lockBatches(batch_roots, batch_counts, b"").build_transaction(base_tx)
+    if "gasPrice" not in tx and "maxFeePerGas" not in tx:
+        tx["gasPrice"] = await web3.eth.gas_price
+    signed = account.sign_transaction(tx)
+    tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
+    receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    return tx_hash.hex(), getattr(receipt, "blockNumber", None)
+
+
+async def _call_relayer_lock_batches(
+    *,
+    relayer_base_url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    poll_seconds: float,
+    max_attempts: int,
+) -> dict[str, Any] | None:
+    async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
+        resp = await client.post(relayer_base_url.rstrip("/") + "/lock-batches", json=payload, headers=headers)
+    if resp.status_code in {200, 201}:
+        return resp.json()
+    if resp.status_code == 202:
+        body = resp.json()
+        job_id = body.get("jobId") or body.get("job_id")
+        if not job_id:
+            return body
+        return await _poll_relayer_job(
+            relayer_base_url,
+            str(job_id),
+            headers=headers,
+            poll_seconds=poll_seconds,
+            max_attempts=max_attempts,
+        )
+    raise RuntimeError(f"relayer_lock_batches_failed:{resp.status_code}")
 
 
 def _hydrate_public_signals(public_signals: Sequence[Any]) -> list[int]:
@@ -340,9 +512,9 @@ async def _submit_verify_and_settle_batched(
         base_tx["gasPrice"] = cast(Wei, int(runtime.settings.settlement_gas_price_gwei * 1e9))
     if runtime.settings.settlement_max_priority_fee_gwei is not None:
         base_tx["maxPriorityFeePerGas"] = cast(Wei, int(runtime.settings.settlement_max_priority_fee_gwei * 1e9))
-    tx = await contract.functions.verifyAndSettleBatched(proof_bytes, hydrated_signals, batch_indexes_int).build_transaction(
-        base_tx
-    )
+    tx = await contract.functions.verifyAndSettleBatched(
+        proof_bytes, hydrated_signals, batch_indexes_int
+    ).build_transaction(base_tx)
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)
@@ -361,6 +533,289 @@ async def _resolve_winning_outcome(session: AsyncSession, market: shared_models.
         except Exception:
             return None
     return None
+
+
+async def _list_lock_candidates(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int,
+) -> list[shared_models.Market]:
+    commitments = select(shared_models.Commitment.market_id).distinct().subquery()
+    stmt = (
+        select(shared_models.Market)
+        .join(commitments, shared_models.Market.id == commitments.c.market_id)
+        .where(shared_models.Market.market_address.isnot(None))
+        .where(shared_models.Market.status != shared_models.MarketStatusEnum.CANCELLED.value)
+        .where(
+            or_(
+                shared_models.Market.commits_blocked_at.isnot(None),
+                shared_models.Market.closes_at <= now,
+                shared_models.Market.resolution_status.isnot(None),
+            )
+        )
+        .order_by(shared_models.Market.closes_at.asc(), shared_models.Market.id.asc())
+        .limit(limit)
+    )
+    rows = await session.execute(stmt)
+    return list(rows.scalars())
+
+
+async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
+    """Submit lockBatches for markets that have passed their commit deadline."""
+
+    if not runtime.settings.auto_lock_batches_enabled:
+        return 0
+    if not runtime.settings.rpc_url:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.lock_batches.disabled",
+            message="auto lock-batches disabled (missing RPC URL)",
+        )
+        return 0
+
+    now = datetime.now(tz=UTC)
+    use_relayer = bool(runtime.settings.lock_batches_use_relayer and runtime.settings.relayer_base_url)
+    relayer_address: str | None = None
+    if use_relayer:
+        relayer_address = await _fetch_relayer_address(str(runtime.settings.relayer_base_url))
+
+    account = None
+    signer = runtime.settings.settlement_signer_private_key
+    if signer is not None:
+        account = Account.from_key(signer.get_secret_value())
+    if not use_relayer and account is None:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.lock_batches.disabled",
+            message="auto lock-batches disabled (missing signer)",
+        )
+        return 0
+
+    web3 = get_async_web3(str(runtime.settings.rpc_url))
+    submitted = 0
+    async with session_scope() as session:
+        candidates = await _list_lock_candidates(
+            session,
+            now=now,
+            limit=runtime.settings.lock_batches_max_per_tick,
+        )
+        for market in candidates:
+            if not market.market_address:
+                continue
+            use_relayer_for_market = use_relayer
+            try:
+                snapshot = await _fetch_onchain_snapshot(web3, market.market_address)
+            except Exception as exc:  # pragma: no cover - network error
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.lock_batches.chain_fetch_failed",
+                    message="failed to fetch on-chain market state",
+                    market_id=getattr(market, "event_id", None),
+                    error=str(exc),
+                )
+                LOCK_BATCHES_COUNTER.labels(outcome="chain_fetch_failed").inc()
+                continue
+
+            phase_value = snapshot.get("phase")
+            if phase_value is None or int(phase_value) != 0:
+                settlement = await shared_repository.get_settlement_by_market_id(session, market.id)
+                if settlement is None or settlement_needs_refresh(settlement):
+                    await _upsert_settlement_from_chain(session, market, force=True)
+                continue
+
+            commit_deadline = snapshot.get("commit_deadline")
+            if commit_deadline is not None and int(commit_deadline) > int(time.time()):
+                continue
+
+            onchain_commitments = snapshot.get("commitments_count")
+            if onchain_commitments is not None and int(onchain_commitments) <= 0:
+                LOCK_BATCHES_COUNTER.labels(outcome="no_commitments").inc()
+                continue
+
+            oracle_address = snapshot.get("oracle")
+            if account is not None and oracle_address:
+                if account.address.lower() != str(oracle_address).lower():
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.lock_batches.oracle_mismatch",
+                        message="settlement signer does not match on-chain oracle",
+                        market_id=getattr(market, "event_id", None),
+                        oracle=oracle_address,
+                        signer=account.address,
+                    )
+                    LOCK_BATCHES_COUNTER.labels(outcome="oracle_mismatch").inc()
+                    continue
+
+            if use_relayer_for_market and relayer_address and oracle_address:
+                if relayer_address.lower() != str(oracle_address).lower():
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.lock_batches.relayer_mismatch",
+                        message="relayer address does not match on-chain oracle",
+                        market_id=getattr(market, "event_id", None),
+                        oracle=oracle_address,
+                        relayer=relayer_address,
+                    )
+                    LOCK_BATCHES_COUNTER.labels(outcome="relayer_mismatch").inc()
+                    if account is None:
+                        continue
+                    use_relayer_for_market = False
+
+            commitments = await shared_repository.list_commitments_by_market(session, market.id)
+            if not commitments:
+                LOCK_BATCHES_COUNTER.labels(outcome="no_commitments").inc()
+                continue
+            try:
+                batch_roots, batch_counts, total_count, _merkle_root = _build_batch_roots_from_commitments(commitments)
+            except LockBatchDataError as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.lock_batches.invalid_commitments",
+                    message="commitments incomplete for lock-batches",
+                    market_id=getattr(market, "event_id", None),
+                    error=str(exc),
+                )
+                LOCK_BATCHES_COUNTER.labels(outcome="invalid_commitments").inc()
+                continue
+
+            if onchain_commitments is not None and int(onchain_commitments) != total_count:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.lock_batches.commitment_mismatch",
+                    message="commitment count mismatch between DB and chain",
+                    market_id=getattr(market, "event_id", None),
+                    onchain=int(onchain_commitments),
+                    local=total_count,
+                )
+                LOCK_BATCHES_COUNTER.labels(outcome="commitment_mismatch").inc()
+                continue
+            if use_relayer_for_market:
+                missing_meta = [
+                    commitment.id
+                    for commitment in commitments
+                    if not commitment.user_address
+                    or not commitment.salt
+                    or not commitment.leaf
+                    or commitment.leaf_index is None
+                ]
+                if missing_meta:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.lock_batches.missing_metadata",
+                        message="commitments missing metadata required for relayer lock",
+                        market_id=getattr(market, "event_id", None),
+                        missing_commitment_ids=missing_meta,
+                    )
+                    LOCK_BATCHES_COUNTER.labels(outcome="missing_metadata").inc()
+                    if account is None:
+                        continue
+                    use_relayer_for_market = False
+
+            try:
+                tx_hash = None
+                block_number = None
+                if use_relayer_for_market and runtime.settings.relayer_base_url:
+                    headers = {}
+                    if runtime.settings.relayer_bearer_token:
+                        headers["Authorization"] = f"Bearer {runtime.settings.relayer_bearer_token}"
+                    ticket_payloads = []
+                    for commitment in commitments:
+                        if not commitment.user_address or not commitment.salt:
+                            raise LockBatchDataError("missing_ticket_metadata")
+                        if commitment.leaf_index is None:
+                            raise LockBatchDataError("missing_leaf_index")
+                        ticket_payloads.append(
+                            {
+                                "ticket_id": int(commitment.leaf_index),
+                                "outcome_id": int(commitment.outcome_id),
+                                "amount": int(commitment.amount_wei),
+                                "user": commitment.user_address,
+                                "salt": commitment.salt,
+                                "leaf": commitment.leaf,
+                            }
+                        )
+                    payload = {
+                        "market": market.market_address,
+                        "event_id": market.event_id,
+                        "market_id": market.event_id,
+                        "tickets": ticket_payloads,
+                    }
+                    result = await _call_relayer_lock_batches(
+                        relayer_base_url=str(runtime.settings.relayer_base_url),
+                        payload=payload,
+                        headers=headers,
+                        poll_seconds=runtime.settings.lock_batches_relayer_poll_seconds,
+                        max_attempts=runtime.settings.lock_batches_relayer_max_attempts,
+                    )
+                    if result is None:
+                        raise RuntimeError("relayer_lock_batches_timeout")
+                    status_value = str(result.get("status") or "").lower()
+                    if status_value in {"failed", "deadletter"}:
+                        raise RuntimeError(f"relayer_lock_batches_{status_value}")
+                    tx_hash = result.get("txHash") or result.get("tx_hash")
+                    if not tx_hash:
+                        raise RuntimeError("relayer_lock_batches_missing_tx")
+                else:
+                    if account is None:
+                        continue
+                    tx_hash, block_number = await _submit_lock_batches(
+                        web3, account, market.market_address, batch_roots, batch_counts
+                    )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.lock_batches.submitted",
+                    message="submitted lockBatches",
+                    market_id=getattr(market, "event_id", None),
+                    tx_hash=tx_hash,
+                    block_number=block_number,
+                    batch_count=len(batch_roots),
+                )
+                settlement = await _upsert_settlement_from_chain(session, market, force=True)
+                if settlement is None:
+                    settlement = await shared_repository.upsert_settlement_snapshot(
+                        session,
+                        market.id,
+                        {
+                            "batch_roots": batch_roots,
+                            "batch_counts": batch_counts,
+                            "commitments_count": total_count,
+                            "circuit_hash": snapshot.get("circuit_hash"),
+                            "merkle_root": batch_roots[0] if len(batch_roots) == 1 else None,
+                        },
+                    )
+                if market.status == shared_models.MarketStatusEnum.COMMIT.value:
+                    market.status = shared_models.MarketStatusEnum.LOCKED.value
+                if market.commits_blocked_at is None:
+                    market.commits_blocked_at = now
+                session.add(market)
+                submitted += 1
+                if getattr(market, "event_id", None):
+                    summary.changed_events.add(market.event_id)
+                LOCK_BATCHES_COUNTER.labels(outcome="submitted").inc()
+            except Exception as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.lock_batches.failed",
+                    message="lockBatches submission failed",
+                    market_id=getattr(market, "event_id", None),
+                    error=str(exc),
+                )
+                LOCK_BATCHES_COUNTER.labels(outcome="failed").inc()
+                continue
+        await session.flush()
+    summary.lock_batches_submitted += submitted
+    return submitted
 
 
 async def _build_merkle_proof_for_commitment(
@@ -617,6 +1072,34 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             winning_outcome_id = settlement.winning_outcome_id or await _resolve_winning_outcome(session, market)
             if winning_outcome_id is None:
                 continue
+            if account is not None and web3 is not None:
+                try:
+                    oracle_addr = await _build_market_contract(web3, market.market_address).functions.oracle().call()
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.oracle_check_failed",
+                        message="failed to check oracle address",
+                        market_id=getattr(market, "event_id", None),
+                        error=str(exc),
+                    )
+                    oracle_addr = None
+                if oracle_addr and account.address.lower() != str(oracle_addr).lower():
+                    settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                    settlement.submission_error = "oracle_mismatch"
+                    _mark_dirty()
+                    session.add(settlement)
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.oracle_mismatch",
+                        message="settlement signer does not match oracle",
+                        market_id=getattr(market, "event_id", None),
+                        oracle=oracle_addr,
+                        signer=account.address,
+                    )
+                    continue
             batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
             if not batch_roots and _is_empty_hex(settlement.merkle_root):
                 # hydrate from chain if possible

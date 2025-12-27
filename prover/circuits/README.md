@@ -17,6 +17,10 @@ This directory hosts the reference circuit and helper scripts needed to generate
 | `settlement.circom` | Batch settlement circuit: consumes 256-ticket Poseidon leaves, computes the depth-8 Merkle root + pool totals/liability, and exposes ten public signals (merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding=0). |
 | `generate_keys.sh` | Bash script that compiles the circuit, downloads the PTAU file, runs Groth16 setup, computes proving/verification key hashes + circuitHash, and emits deploy-ready JSON. |
 
+Constants and hash alignment:
+- `BATCH_SIZE = 256`, `MERKLE_DEPTH = 8` (one batch = one depth-8 Poseidon tree).
+- Poseidon parameters must match BN254 circomlib and the Solidity `PoseidonT3`/`PoseidonT4` libraries.
+
 ## Usage
 
 ```bash

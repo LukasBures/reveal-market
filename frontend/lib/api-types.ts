@@ -137,6 +137,7 @@ export type PositionRecord = {
   status: string;
   ticket_id?: number | null;
   created_at?: string | null;
+  claimed_at?: string | null;
   claimable?: boolean | null;
   closes_at?: string | null;
   resolved_at?: string | null;
@@ -155,9 +156,9 @@ export type ClaimBundle = {
   marketId: string;
   marketAddress: string;
   commitmentsRoot: string;
-  ticketId: number;
-  outcomeId: number;
-  amountWei: number;
+  ticketId: number | string;
+  outcomeId: number | string;
+  amountWei: number | string;
   quoteId?: string | null;
   salt?: string | null;
   merkleProof: string[];

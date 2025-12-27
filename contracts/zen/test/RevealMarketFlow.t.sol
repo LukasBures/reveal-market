@@ -121,7 +121,6 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         assertEq(market.totalEscrow(), netTicket, "escrow matches net ticket");
 
         vm.warp(commitDeadline + 1);
-        vm.prank(oracle);
         bytes32[] memory leaves = new bytes32[](1);
         leaves[0] = leaf;
         bytes32 root = _buildBatchRoot(leaves, 1);
@@ -129,9 +128,8 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         roots[0] = root;
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        vm.startPrank(oracle);
         market.lockBatches(roots, counts, "");
-
-        vm.prank(oracle);
         market.postResult(outcome);
 
         uint256[10] memory signals = [
@@ -147,8 +145,8 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
             uint256(0)
         ];
 
-        vm.prank(oracle);
         market.verifyAndSettle("", signals);
+        vm.stopPrank();
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
         assertEq(protocolPool.consumedLiability(address(market)), 0, "no top-up required");
@@ -169,5 +167,92 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
         assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether + expectedRake, 2);
+    }
+
+    function testClaimDeadlineSweepUnclaimed() external {
+        uint256 depositAmount = 3 ether;
+        token.mint(user, depositAmount);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), depositAmount);
+        vm.prank(user);
+        relayerEscrow.deposit(depositAmount);
+
+        bytes32 salt = keccak256("sweep-salt");
+        uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
+        uint256 payoutAmount = ticketSize - rakePerTicket;
+        uint256 outcome = 1;
+        bytes32 leaf = _leaf(0, outcome, payoutAmount, salt, user);
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: leaf,
+            user: user,
+            nonce: 9,
+            expiry: block.timestamp + 12 hours,
+            ticketValue: ticketSize
+        });
+
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(
+                abi.encodePacked(
+                    address(market),
+                    uint256(1),
+                    auth.commitment,
+                    auth.user,
+                    auth.nonce,
+                    auth.expiry,
+                    auth.ticketValue,
+                    block.chainid
+                )
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.prank(relayer);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
+
+        vm.warp(commitDeadline + 1);
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = leaf;
+        bytes32 root = _buildBatchRoot(leaves, 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.startPrank(oracle);
+        market.lockBatches(roots, counts, "");
+        market.postResult(outcome);
+
+        uint256[10] memory signals = [
+            uint256(root),
+            uint256(1),
+            outcome,
+            ticketSize - (ticketSize * rakeBps) / 10_000,
+            payoutAmount,
+            rakeBps,
+            payoutAmount,
+            uint256(0),
+            uint256(circuitHash),
+            uint256(0)
+        ];
+
+        market.verifyAndSettle("", signals);
+        vm.stopPrank();
+
+        uint256 deadline = market.claimDeadline();
+        assertGt(deadline, 0, "claim deadline set");
+        vm.warp(deadline + 1);
+
+        vm.prank(relayer);
+        vm.expectRevert(RevealMarket.ClaimWindowClosed.selector);
+        market.claim(user, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+
+        uint256 marketBalance = token.balanceOf(address(market));
+        uint256 poolBefore = token.balanceOf(address(protocolPool));
+        factory.sweepUnclaimed(address(market), address(protocolPool));
+
+        assertTrue(market.claimsSwept(), "claims swept");
+        assertTrue(market.claimsPaused(), "claims paused");
+        assertEq(token.balanceOf(address(market)), 0, "market drained");
+        assertEq(token.balanceOf(address(protocolPool)), poolBefore + marketBalance, "sweep to pool");
     }
 }

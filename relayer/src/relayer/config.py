@@ -1,18 +1,13 @@
 import ipaddress
 import os
 from dataclasses import dataclass
-from typing import Union
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-IPAllowEntry = Union[
-    ipaddress.IPv4Address,
-    ipaddress.IPv6Address,
-    ipaddress.IPv4Network,
-    ipaddress.IPv6Network,
-]
+IPAllowEntry = ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Network | ipaddress.IPv6Network
+
 
 def _require_env(name: str) -> str:
     val = os.getenv(name)

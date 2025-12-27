@@ -25,6 +25,7 @@ forge test            # run all tests
 - Deflationary/fee-on-transfer assets are rejected via transfer-in amount checks.
 - Total assets are `idle + utilized`; withdrawals are limited to idle capital so hedger utilization cannot break redemptions.
 - `maxUtilizationBps` caps utilization (default 100%); owner can reduce this to limit hedger risk.
+- This workspace is independent of the Zen Poseidon batch settlement circuit; batching changes do not apply here.
 
 ## Deployment / Runbook (Polygon)
 

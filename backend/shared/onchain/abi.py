@@ -93,6 +93,17 @@ MARKET_FACTORY_EVENT_MAP: dict[str, dict] = {
     entry["name"]: entry for entry in MARKET_FACTORY_ABI if entry["type"] == "event"
 }
 
+# Minimal verifier ABI for circuit hash checks.
+VERIFIER_ABI: list[dict] = [
+    {
+        "inputs": [],
+        "name": "circuitHash",
+        "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
+
 # Minimal RevealMarket ABI surface used by the API (ticket id + state checks).
 REVEAL_MARKET_ABI: list[dict] = [
     {
@@ -106,6 +117,13 @@ REVEAL_MARKET_ABI: list[dict] = [
         "inputs": [],
         "name": "commitmentsRoot",
         "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "claimDeadline",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
         "stateMutability": "view",
         "type": "function",
     },
@@ -182,6 +200,20 @@ REVEAL_MARKET_ABI: list[dict] = [
         "inputs": [],
         "name": "circuitHash",
         "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "oracle",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "name": "claimedTickets",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "view",
         "type": "function",
     },

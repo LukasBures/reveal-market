@@ -13,7 +13,7 @@ Notes
 
 ## What’s implemented today
 
-- **Zen workspace** – Fixed-ticket commit/reveal flow with `RelayerEscrow`, `ProtocolPool`, `MarketFactory` (EIP-1167 clones), `RevealMarket`, and Groth16 `Verifier`. Commitments require backend-signed auth, rake is skimmed on commit, protocol liability caps protect solvency, and settlement enforces circuit hash + pool top-up limits. Tests cover authorization, deadlines, rake, surplus handling, cap enforcement, and verifier wiring.
+- **Zen workspace** – Fixed-ticket commit/reveal flow with `RelayerEscrow`, `ProtocolPool`, `MarketFactory` (EIP-1167 clones), `RevealMarket`, and Groth16 `Verifier`. Commitments use Poseidon leaves and are locked in depth-8 batch roots (BATCH_SIZE=256); settlement uses `verifyAndSettleBatched` to sum per-batch proofs and enforces circuit hash + pool top-up limits. Tests cover authorization, deadlines, rake, surplus handling, cap enforcement, batch roots, and verifier wiring.
 - **Polygon workspace** – LP vault and hedging contracts for Base/Polymarket integration (self-contained Foundry project) with its own scripts/tests; keep artifacts isolated from Zen to avoid address collisions.
 - **Artifacts & vk caches** – `cache/` holds generated verifier metadata (`settlement-vk.json`) synced with prover exports; `contracts/run_tests.sh` invokes `run_local.sh full` (build + tests + gas snapshot + fuzz) in CI.
 - **Error selector generation** – `scripts/generate_error_selectors.py` produces `contracts/cache/errors.json` so backend/frontend decoders stay aligned with Solidity custom errors. CI runs the generator before Forge tests.
@@ -40,6 +40,6 @@ Use `run_local.sh full` inside a workspace for the CI-equivalent pipeline (build
 
 ## Deploy/useful scripts
 
-- `zen/script/Deploy.s.sol` and friends read `.env` for RPC, chain id, signer, token, relayer, oracle, verifier, circuit hash, ticket size, max commitments, rake, and protocol cap. Keep envs per chain.
+- `zen/run_deploy.sh` reads `.env` for RPC, chain id, deployer key, collateral token, oracle, authorization signer, and verifier inputs; `zen/scripts/create_market.sh` reads `.env` for factory/verifier addresses plus circuit hash, ticket size, max commitments, protocol cap, and commit deadline. Keep envs per chain.
 - `run_local.sh` in each workspace wraps Forge commands with sensible defaults; CI uses the same scripts.
 - After regenerating proving keys, re-export `settlement-vk.json` and update the verifier address/circuit hash across backend/worker/prover envs.

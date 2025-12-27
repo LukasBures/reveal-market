@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import app.runtime as runtime
+import pytest
 from app import models
+from app.routes import trade as trade_routes
 from app.schemas import FxQuoteResponse
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from fastapi import HTTPException
 from pydantic import SecretStr
 from shared.merkle import build_merkle_root_and_paths
 
@@ -145,6 +149,11 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
 
     monkeypatch.setattr("app.routes.trade._ensure_market", _ensure_market)
     monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market)
+
+    async def _sync_factory(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr("app.routes.trade._sync_market_factory_params", _sync_factory)
 
     async def _next_ticket_id(*_args, **_kwargs):
         return 0
@@ -297,6 +306,88 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert bundle["user"].lower() == user.address.lower()
 
 
+def test_claim_bundles_skip_claimed_commitment(client, db_session):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="bundle-claimed", address="0x7777777777777777777777777777777777777777")
+    commitment_hex = "0x" + "44" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+            claimed_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=3,
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.NONE.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    signature = Account.sign_message(
+        encode_defunct(text=f"claim-bundles:{user.address.lower()}"),
+        private_key=user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert resp.status_code == 200
+    assert resp.json()["bundles"] == []
+
+
+def test_positions_marks_claimed(client, db_session):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="pos-claimed", address="0x8888888888888888888888888888888888888888")
+    commitment_hex = "0x" + "55" * 32
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+            claimed_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=4,
+            market_id=market.id,
+            merkle_root="0x" + "11" * 32,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.NONE.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/positions?wallet={user.address}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["positions"]) == 1
+    pos = body["positions"][0]
+    assert pos["status"] == "claimed"
+    assert pos["claimable"] is False
+
+
 def test_sync_commitments_endpoint(client, db_session):
     market = _seed_market(db_session, event_id="sync-mkt", address="0x5555555555555555555555555555555555555555")
     payload = {
@@ -377,3 +468,230 @@ def test_relayer_hooks_require_secret(client, db_session, monkeypatch):
         json={"event_id": market.event_id, "tickets": []},
     )
     assert resp_ok.status_code == 200
+
+
+class _DummyAsyncCall:
+    def __init__(self, value):
+        self._value = value
+
+    async def call(self):
+        return self._value
+
+
+class _DummyFactoryContract:
+    def __init__(self, params):
+        self._params = params
+        self.functions = self
+
+    def getMarketParams(self, _market_id):  # noqa: N802 - mirrors on-chain method
+        return _DummyAsyncCall(self._params)
+
+
+class _DummyMarketContract:
+    def __init__(self, market_id):
+        self._market_id = market_id
+        self.functions = self
+
+    def marketId(self):  # noqa: N802 - mirrors on-chain method
+        return _DummyAsyncCall(self._market_id)
+
+
+class _DummyEth:
+    def __init__(self, factory_contract, market_contract):
+        self._factory_contract = factory_contract
+        self._market_contract = market_contract
+
+    def contract(self, address=None, abi=None):
+        if abi == trade_routes.MARKET_FACTORY_ABI:
+            return self._factory_contract
+        return self._market_contract
+
+
+class _DummyWeb3:
+    def __init__(self, factory_contract, market_contract):
+        self.eth = _DummyEth(factory_contract, market_contract)
+
+
+def _build_factory_params(
+    *,
+    market_address: str,
+    ticket_size: int,
+    auth_signer: str,
+    rake_bps: int,
+    market_id: int,
+    circuit_hash: str,
+):
+    return (
+        market_address,
+        "0x" + "11" * 20,
+        "0x" + "22" * 20,
+        circuit_hash,
+        int(time.time()) + 1000,
+        ticket_size,
+        1000,
+        auth_signer,
+        0,
+        rake_bps,
+        "0x" + "44" * 20,
+        "0x" + "55" * 20,
+        market_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_market_factory_params_updates_market(test_database, monkeypatch):
+    _, async_session, _ = test_database
+    auth_signer = Account.create()
+    market_address = "0x" + "ab" * 20
+    params = _build_factory_params(
+        market_address=market_address,
+        ticket_size=100,
+        auth_signer=auth_signer.address,
+        rake_bps=200,
+        market_id=42,
+        circuit_hash=trade_routes.settings.circuit_hash,
+    )
+    dummy_web3 = _DummyWeb3(_DummyFactoryContract(params), _DummyMarketContract(42))
+    monkeypatch.setattr(trade_routes, "get_async_web3", lambda *_args, **_kwargs: dummy_web3)
+    monkeypatch.setattr(trade_routes.settings, "factory_address", "0x" + "99" * 20, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rpc_url", "http://localhost", raising=False)
+    monkeypatch.setattr(trade_routes.settings, "ticket_size_wei", 100, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rake_percent", 0.02, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "authorization_signer", auth_signer.address, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "circuit_hash", trade_routes.settings.circuit_hash, raising=False)
+
+    async with async_session() as session:
+        market = models.Market(event_id="evt-sync", title="Sync", oracle="0x1", market_address=market_address)
+        session.add(market)
+        await session.flush()
+        rake = await trade_routes._sync_market_factory_params(
+            session,
+            market_record=market,
+            market_address=market_address,
+            market_onchain_id=None,
+            auth_signer_key=auth_signer._private_key.hex(),
+        )
+        await session.refresh(market)
+
+    assert rake == 200
+    assert market.onchain_market_id == 42
+    assert market.factory == trade_routes.settings.factory_address
+    assert market.rake_bps == 200
+
+
+@pytest.mark.asyncio
+async def test_sync_market_factory_params_rejects_ticket_size(monkeypatch, test_database):
+    _, async_session, _ = test_database
+    auth_signer = Account.create()
+    market_address = "0x" + "cd" * 20
+    params = _build_factory_params(
+        market_address=market_address,
+        ticket_size=101,
+        auth_signer=auth_signer.address,
+        rake_bps=200,
+        market_id=1,
+        circuit_hash=trade_routes.settings.circuit_hash,
+    )
+    dummy_web3 = _DummyWeb3(_DummyFactoryContract(params), _DummyMarketContract(1))
+    monkeypatch.setattr(trade_routes, "get_async_web3", lambda *_args, **_kwargs: dummy_web3)
+    monkeypatch.setattr(trade_routes.settings, "factory_address", "0x" + "99" * 20, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rpc_url", "http://localhost", raising=False)
+    monkeypatch.setattr(trade_routes.settings, "ticket_size_wei", 100, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rake_percent", 0.02, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "authorization_signer", auth_signer.address, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "circuit_hash", trade_routes.settings.circuit_hash, raising=False)
+
+    async with async_session() as session:
+        market = models.Market(event_id="evt-mismatch", title="Mismatch", oracle="0x1", market_address=market_address)
+        session.add(market)
+        await session.flush()
+        with pytest.raises(HTTPException) as exc:
+            await trade_routes._sync_market_factory_params(
+                session,
+                market_record=market,
+                market_address=market_address,
+                market_onchain_id=None,
+                auth_signer_key=auth_signer._private_key.hex(),
+            )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "ticket_size_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_sync_market_factory_params_rejects_signer_mismatch(monkeypatch, test_database):
+    _, async_session, _ = test_database
+    auth_signer = Account.create()
+    other_signer = Account.create()
+    market_address = "0x" + "ef" * 20
+    params = _build_factory_params(
+        market_address=market_address,
+        ticket_size=100,
+        auth_signer=other_signer.address,
+        rake_bps=200,
+        market_id=2,
+        circuit_hash=trade_routes.settings.circuit_hash,
+    )
+    dummy_web3 = _DummyWeb3(_DummyFactoryContract(params), _DummyMarketContract(2))
+    monkeypatch.setattr(trade_routes, "get_async_web3", lambda *_args, **_kwargs: dummy_web3)
+    monkeypatch.setattr(trade_routes.settings, "factory_address", "0x" + "99" * 20, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rpc_url", "http://localhost", raising=False)
+    monkeypatch.setattr(trade_routes.settings, "ticket_size_wei", 100, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rake_percent", 0.02, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "authorization_signer", auth_signer.address, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "circuit_hash", trade_routes.settings.circuit_hash, raising=False)
+
+    async with async_session() as session:
+        market = models.Market(event_id="evt-signer", title="Signer", oracle="0x1", market_address=market_address)
+        session.add(market)
+        await session.flush()
+        with pytest.raises(HTTPException) as exc:
+            await trade_routes._sync_market_factory_params(
+                session,
+                market_record=market,
+                market_address=market_address,
+                market_onchain_id=None,
+                auth_signer_key=auth_signer._private_key.hex(),
+            )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "authorization_signer_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_sync_market_factory_params_rejects_circuit_hash(monkeypatch, test_database):
+    _, async_session, _ = test_database
+    auth_signer = Account.create()
+    market_address = "0x" + "aa" * 20
+    params = _build_factory_params(
+        market_address=market_address,
+        ticket_size=100,
+        auth_signer=auth_signer.address,
+        rake_bps=200,
+        market_id=3,
+        circuit_hash="0x" + "11" * 32,
+    )
+    dummy_web3 = _DummyWeb3(_DummyFactoryContract(params), _DummyMarketContract(3))
+    monkeypatch.setattr(trade_routes, "get_async_web3", lambda *_args, **_kwargs: dummy_web3)
+    monkeypatch.setattr(trade_routes.settings, "factory_address", "0x" + "99" * 20, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rpc_url", "http://localhost", raising=False)
+    monkeypatch.setattr(trade_routes.settings, "ticket_size_wei", 100, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "rake_percent", 0.02, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "authorization_signer", auth_signer.address, raising=False)
+    monkeypatch.setattr(trade_routes.settings, "circuit_hash", "0x" + "22" * 32, raising=False)
+
+    async with async_session() as session:
+        market = models.Market(event_id="evt-circuit", title="Circuit", oracle="0x1", market_address=market_address)
+        session.add(market)
+        await session.flush()
+        with pytest.raises(HTTPException) as exc:
+            await trade_routes._sync_market_factory_params(
+                session,
+                market_record=market,
+                market_address=market_address,
+                market_onchain_id=None,
+                auth_signer_key=auth_signer._private_key.hex(),
+            )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "circuit_hash_mismatch"

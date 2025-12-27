@@ -20,6 +20,8 @@ const sampleMarket = {
 };
 
 describe("FeaturedMarketsClient", () => {
+  let queryClient: QueryClient | null = null;
+
   beforeEach(() => {
     vi.mocked(fetchFeaturedMarkets).mockReset();
     delete (globalThis as any).IntersectionObserver;
@@ -27,11 +29,18 @@ describe("FeaturedMarketsClient", () => {
 
   afterEach(() => {
     delete (globalThis as any).IntersectionObserver;
+    queryClient?.clear();
+    queryClient = null;
   });
 
   const renderWithClient = (ui: ReactElement) => {
-    const client = new QueryClient();
-    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { gcTime: 0 },
+        mutations: { gcTime: 0 },
+      },
+    });
+    return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
   };
 
   it("renders skeletons when no markets exist yet", () => {

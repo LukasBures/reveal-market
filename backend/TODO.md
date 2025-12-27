@@ -14,4 +14,5 @@ This list tracks the remaining backend work needed to ship the MVP. Items are or
 - Quote audit endpoints (list/search) behind admin auth.
 - Summary provenance history and DLQ metrics for the enrichment worker.
 - Circuit hash/verifier alignment checks in proof receipts.
+- Surface `batch_roots`/`batch_counts` and per-batch receipts in `/proofs` responses for multi-batch markets.
 - On-chain mirroring/automation for factory events and settlement.

@@ -50,6 +50,23 @@ def _cached_public_signals(cached: dict[str, Any] | None) -> list[str] | None:
     return None
 
 
+def _normalize_root_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return int.from_bytes(value, "big") if value else None
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned.startswith("0x"):
+                cleaned = cleaned[2:]
+                return int(cleaned or "0", 16)
+            return int(cleaned)
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_public_signals(signals: list[Any] | None) -> dict[str, str | None]:
     """Map public signals to named fields we expose in API responses."""
 
@@ -138,6 +155,13 @@ def build_proof_receipt_model(
         parsed_signals.get("merkle_root"),
         settlement_root,
     )
+    batch_index = None
+    batch_index_raw = getattr(receipt, "batch_index", None)
+    if batch_index_raw is not None:
+        try:
+            batch_index = int(str(batch_index_raw))
+        except (TypeError, ValueError):
+            batch_index = None
     pool_total_yes = _normalize_bigint(
         _coalesce(
             getattr(settlement, "pool_total_yes", None) if settlement is not None else None,
@@ -202,6 +226,27 @@ def build_proof_receipt_model(
     )
     if isinstance(condition_id, str):
         condition_id = condition_id.lower()
+    if batch_index is None and settlement is not None:
+        batch_roots = getattr(settlement, "batch_roots", None)
+        if isinstance(batch_roots, (list, tuple)) and merkle_root is not None and not _is_empty_hex(merkle_root):
+            merkle_root_int = _normalize_root_int(merkle_root)
+            if merkle_root_int is not None:
+                for index, root_value in enumerate(batch_roots):
+                    root_int = _normalize_root_int(root_value)
+                    if root_int is not None and root_int == merkle_root_int:
+                        batch_index = index
+                        break
+    if batch_index is None and not _is_empty_hex(merkle_root) and settlement is not None:
+        batch_roots = getattr(settlement, "batch_roots", None)
+        if not batch_roots:
+            batch_index = 0
+    if batch_index is None:
+        cached_batch_index = _cached_value(cached, "batchIndex", "batch_index")
+        if cached_batch_index is not None:
+            try:
+                batch_index = int(cached_batch_index)
+            except (TypeError, ValueError):
+                batch_index = None
     market_address = _coalesce(
         receipt.market_address, getattr(market, "market_address", None) if market is not None else None
     ) or _cached_value(cached, "marketAddress")
@@ -247,6 +292,7 @@ def build_proof_receipt_model(
         "proof": proof_value,
         "public_signals": [str(value) for value in (signals or [])],
         "merkle_root": merkle_root,
+        "batch_index": batch_index,
         "total_escrow": total_escrow,
         "total_liability": total_liability,
         "rake_bps": rake_bps,

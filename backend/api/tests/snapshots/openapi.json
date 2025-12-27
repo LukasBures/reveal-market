@@ -2898,6 +2898,18 @@
             ],
             "title": "Created At"
           },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
           "claimable": {
             "anyOf": [
               {

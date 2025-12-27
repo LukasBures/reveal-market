@@ -69,6 +69,8 @@ contract MarketFactory is Ownable2Step {
     event OracleUpdated(address indexed market, address indexed oracle);
     event MarketRelayerUpdated(address indexed market, address indexed relayer);
     event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
+    event MarketClaimDeadlineExtended(address indexed market, uint256 newDeadline);
+    event MarketClaimsSwept(address indexed market, address indexed recipient);
 
     error InvalidImplementation();
     error InvalidRelayer();
@@ -185,6 +187,20 @@ contract MarketFactory is Ownable2Step {
     function extendMarketCommitDeadline(address market, uint256 newDeadline) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
         RevealMarket(payable(market)).extendCommitDeadline(newDeadline);
+    }
+
+    /// @notice Extend a market's claim deadline (factory-only guard).
+    function extendMarketClaimDeadline(address market, uint256 newDeadline) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).extendClaimDeadline(newDeadline);
+        emit MarketClaimDeadlineExtended(market, newDeadline);
+    }
+
+    /// @notice Sweep unclaimed payouts after the claim deadline (factory-only guard).
+    function sweepUnclaimed(address market, address recipient) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).sweepUnclaimed(recipient);
+        emit MarketClaimsSwept(market, recipient);
     }
 
     /// @notice Deploys a new minimal market clone with the given parameters.

@@ -20,7 +20,7 @@ from shared.logging import log_event, start_heartbeat_logger
 from sqlalchemy import func, select
 
 from . import runtime
-from .backfill import backfill_market_addresses
+from .backfill import backfill_market_addresses, backfill_market_params
 from .cache_ops import invalidate_cache_tags, persist_resolution_cache_updates
 from .database import session_scope
 from .market_sync import (
@@ -35,7 +35,7 @@ from .polymarket import build_filters_from_settings
 from .prime import prime_featured_views, prime_markets_cache
 from .proofs import enqueue_proof_jobs, run_proof_queue_worker, run_prover_jobs, run_settlement_queue_worker
 from .schema import SchemaSyncResult, ensure_schema, propagate_schema_revision
-from .settlement import run_settlement_jobs
+from .settlement import run_lock_batches_jobs, run_settlement_jobs
 
 logger = runtime.logger
 
@@ -67,6 +67,7 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | 
         "markets_deleted": 0,
         "summaries_enqueued": 0,
         "proofs_generated": 0,
+        "lock_batches_submitted": 0,
         "cache_invalidations": 0,
         "resolution_gaps": 0,
         "resolutions_backfilled": 0,
@@ -123,6 +124,7 @@ async def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -
         "markets_deleted": stats.get("markets_deleted"),
         "summaries_enqueued": stats.get("summaries_enqueued"),
         "proofs_generated": stats.get("proofs_generated"),
+        "lock_batches_submitted": stats.get("lock_batches_submitted"),
         "cache_invalidations": stats.get("cache_invalidations"),
         "resolution_gaps": stats.get("resolution_gaps"),
         "market_errors": stats.get("market_errors"),
@@ -345,6 +347,20 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             message="backfilled market addresses",
                             count=updated,
                         )
+                    params_updated = await backfill_market_params(
+                        session,
+                        rpc_url=str(runtime.settings.rpc_url),
+                        factory_address=str(runtime.settings.factory_address),
+                        get_markets_for_sync=repository_async.list_markets_for_factory_sync,
+                    )
+                    if params_updated:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.market_params.backfill",
+                            message="backfilled market factory params",
+                            count=params_updated,
+                        )
                 if backfilled:
                     log_event(
                         logger,
@@ -429,6 +445,17 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     except Exception as exc:  # pragma: no cover - defensive
         return await _handle_sync_failure(exc, tick_start, redis_client, schema_state)
 
+    try:
+        await run_lock_batches_jobs(summary, redis_client)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.lock_batches.failed",
+            message="lock-batches run failed",
+            error=str(exc),
+        )
+
     async def _run_proofs_and_settlements(summary_obj: SyncSummary) -> None:
         try:
             proofs_generated = await run_prover_jobs(summary_obj, redis_client)
@@ -482,6 +509,7 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         resolutions_backfilled=summary.resolutions_backfilled,
         summaries=summary.summaries_enqueued,
         proofs=summary.proofs_generated,
+        lock_batches=summary.lock_batches_submitted,
         gamma_metadata_updates=summary.gamma_metadata_updates,
         gamma_events_written=summary.gamma_events_written,
         latency_ms=round(latency_ms, 2),

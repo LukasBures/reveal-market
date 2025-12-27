@@ -45,6 +45,7 @@
 - Prefer existing helpers (e.g., `shared/onchain/`, `lib/seo.ts`) over introducing new frameworks.
 - Maintain the unified logging format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
+- Batch settlement is Poseidon-based (BN254): keep `BATCH_SIZE=256` and `MERKLE_DEPTH=8` aligned across contracts, prover, backend, and relayer helpers.
 - Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
 - `frontend/run_tests.sh` no longer offers an offline mode—start the backend stack (or point `NEXT_PUBLIC_API_BASE_URL` at staging) before invoking it locally or through automation.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
@@ -58,9 +59,10 @@
 - **API pricing & caps** – `/pricing/quote` ignores client FX and now always pulls FX from the streamer endpoint (`http://streamer:8100/fx/zen-usd`), enforcing per-user/per-market caps via the quote ledger, building and signing the QUOTE_V1 digest (`chain id`, `market address`, `wallet`, `outcome id`, `stake_wei`, `fx_scaled 1e8`, `expiry`, `quoteId`) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and storing issued quotes. `/pricing/submit` revalidates signature, expiry, optional FX drift, and marks quotes consumed.
 - **Health checks** – `app/health.py` now delegates each dependency check (DB, Redis ping, worker heartbeat, Polymarket reachability) to helper functions so flake8 stays green. Keep that structure when adding new dependencies.
 - **Worker** – `backend/worker/app/main.py` pulls Polymarket feeds (optionally enriches with CLOB), persists markets + Goldsky/ConditionalTokens resolution snapshots, propagates schema tags, primes category/suggest caches, emits Redis heartbeats/batch stats, and can enqueue AI summaries + prover jobs when enabled. On-chain helpers (`maybe_create_onchain_market`) remain manual-only. Retention currently reports metrics only (no deletions). `worker/app/healthcheck.py` verifies Postgres connectivity for Docker. Logs mirror the API format.
+- **Commitments + settlement** – Commitments hash with Poseidon and are locked via `lockBatches` into depth-8 batch roots; settlement proofs are generated per batch and submitted via `verifyAndSettleBatched` (single-batch markets still use `verifyAndSettle`).
 - **Worker complexity hotspots** – `_apply_resolution`, `cleanup_resolved_markets`, and `process_once` are intentionally large and currently silenced with `# noqa: C901`. Prefer incremental refactors over new mega-functions when touching them.
 - **Polymarket client** – `backend/worker/app/polymarket.py` normalizes Gamma payloads, has rate limiting/empty-page tolerance, and uses tenacity-backed retries for pagination; keep metrics wiring (empty/rate-limit/retry counters) intact when extending it. Default ingest now calls Gamma `/events`, flattening embedded markets and assigning `group_slug` to the event slug for multi-market events.
-- **Prover reality** – `prover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `prover/circuits/build`). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
+- **Prover reality** – `prover` strictly runs Groth16 generation (`rapidsnark` + the Circom artifacts under `prover/circuits/build`) using the batch settlement circuit (Poseidon depth-8, 256 leaves). The Docker image installs rapidsnark ahead of time, exposes `/healthz`, `/metrics`, and `/debug/pprof/*`, and the service exits with a fatal error if artifacts are missing or invalid. Keep the keys fresh and mount them into the container before shipping claims about zk attestations.
 - **Testing defaults** – Pytest fan-out is pinned to four workers (API, shared modules, worker) unless `PYTEST_WORKER_COUNT` overrides; expect this concurrency when validating suites locally or in CI.
 
 ### Frontend (Next.js)
@@ -81,6 +83,7 @@
 - `src/` houses RevealMarket, MarketFactory, RakeManager, Verifier. `test/` contains Forge suites (unit + fuzz). `run_local.sh full` builds/tests/gas-checks/fuzzes; CI runs this via GitHub Actions.
 - Events like `MarketResolved` + `resolutionSummary()` emit settlement metadata for downstream services.
 - MarketFactory/RakeManager use `Ownable2Step`; follow the new TODO guidance to script/t-test ownership transfers when modifying admin logic.
+- RevealMarket commitments use Poseidon leaf hashing and batch roots (`BATCH_SIZE=256`, `MERKLE_DEPTH=8`); use `lockBatches` + `verifyAndSettleBatched` when multiple batches are present.
 
 ### CI / Automation
 - `.github/workflows/ci.yml` runs three jobs in parallel:

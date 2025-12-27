@@ -50,7 +50,7 @@ Tech stack callouts:
 - **Live pricing** – `usePriceStream`/`useLiveOutcomePrices` tie WS/SSE `/stream` to market detail; history hydrates from the streamer and merges live ticks. FX uses WS-first `/fx/zen-usd` with HTTP fallback + stale warnings that block trades.
 - **Trading flow** – Stake panels enforce the 0.1 ZEN ticket size + caps, request previews from `/pricing/preview`, fetch signed quotes from `/pricing/quote`, submit `/trade/commit`, and poll `/trade/status` for relayer/tx updates.
 - **Positions + escrow** – `/dashboard` shows escrow balances, approve/deposit/withdraw, positions, and per-ticket claims after a bundle signature.
-- **Proof receipts** – `/proofs` streams receipts with infinite scroll and supports deep links via query params.
+- **Proof receipts** – `/proofs` streams receipts with infinite scroll and supports deep links via query params; multi-batch settlements surface one receipt per batch (the `merkle_root` in the payload is the batch root).
 - **Security + observability** – `next.config.mjs` ships CSP/HSTS/COOP/Permissions-Policy; GA/gtag only allowed in production. Structured logs and a client heartbeat run from `RootLayout`, plus Vitest coverage across navs, markets, streaming hooks, dashboards, and proofs.
 
 ---

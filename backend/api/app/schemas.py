@@ -246,6 +246,7 @@ class ProofReceipt(BaseModel):
     proof: str | None = None
     public_signals: list[str] = Field(default_factory=list, alias="publicSignals")
     merkle_root: str | None = Field(default=None, alias="merkleRoot")
+    batch_index: int | None = Field(default=None, alias="batchIndex")
     total_escrow: str | None = Field(default=None, alias="totalEscrow")
     total_liability: str | None = Field(default=None, alias="totalLiability")
     rake_bps: int | None = Field(default=None, alias="rakeBps")
@@ -386,6 +387,7 @@ class PositionRecord(BaseModel):
     status: str = "committed"
     ticket_id: int | None = None
     created_at: datetime | None = None
+    claimed_at: datetime | None = None
     claimable: bool | None = None
     closes_at: datetime | None = None
     resolved_at: datetime | None = None

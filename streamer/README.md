@@ -167,6 +167,7 @@ The bundled `docker-compose.yml` includes Redis and exposes `8100`; healthcheck 
 - Market publishes continue when FX is stale and payloads include `fx_stale=true`. Set `STREAMER_PUBLISH_WHEN_FX_STALE=false` to pause publishes until FX recovers. Cached payloads remain available via `/clob/*` and `/history`.
 - Container healthcheck uses `python -m app.healthcheck` to hit `/healthz`.
 - Frontend consumers default to Horizen Testnet (chain id `2651420`); align CORS origins/hosts and pricing chain envs when pointing at a different network.
+- Streamer is independent of the Poseidon batch settlement flow; no streamer changes are required when rotating circuits or batch sizes.
 - Prometheus: gauges/counters expose FX source/staleness, WS health, stream deliveries/dropped events, ingest drops, tick totals, and per-market staleness (`/metrics`). Watch for `streamer.host.mismatch`/`streamer.cors.mismatch` logs when hosts or CORS config diverge from frontend/API origins.
 - History is bounded by `STREAMER_HISTORY_LIMIT` (entries) and `STREAMER_HISTORY_TTL_SECONDS` (expiration). Set `STREAMER_HISTORY_DEBOUNCE_SECONDS` to avoid storing duplicate history entries too frequently; cache/publish still occurs even when history is debounced.
 - Subscriptions respect `STREAMER_MAX_SUBSCRIPTIONS`; when the cap is hit, new assets are rejected with a `stream.assets.cap` warning so upstream WS connections stay bounded.

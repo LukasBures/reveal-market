@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from shared.poseidon import BATCH_SIZE, MERKLE_DEPTH, int_to_bytes32, poseidon_t3
 

@@ -10,3 +10,4 @@
 - Emit artifact hash/mtime metrics and alert on verification failures or readiness flaps.
 - Harden timeout/backoff defaults for rapidsnark/Node subprocesses and surface command output in structured logs for faster debugging.
 - Add load/concurrency benchmarking harness with configurable temp dir and binary paths; document recommended `PROVER_MAX_CONCURRENCY` vs memory usage.
+- Add an integration test path for `PROVER_WITNESS_BINARY` (C++ witnesscalc) to catch parity regressions with the Node witness generator.

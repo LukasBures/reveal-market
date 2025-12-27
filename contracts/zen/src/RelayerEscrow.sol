@@ -97,7 +97,7 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         emit CommitForwarded(market, auth.commitment, ticket);
     }
 
-    /// @notice Markets pay winnings back into escrow, crediting the target user without exposing them on-market.
+    /// @notice Optional hook for escrow-style payouts when markets do not pay users directly.
     function creditFromMarket(address user, uint256 amount) external {
         if (!allowedMarket[msg.sender]) revert UnknownMarket();
         balances[user] += amount;

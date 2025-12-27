@@ -111,7 +111,7 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 Streaming responses are supported by passing `?stream=1` or an `Accept: text/event-stream` header. Events include `accepted`, `proof`, `error`, and `cancelled`.
 If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on requests or the service will return HTTP 401.
 
-**Request body** mirrors `settlementProofRequest`:
+**Request body** mirrors `settlementProofRequest` (one payload per batch root):
 
 ```jsonc
 {
@@ -132,6 +132,8 @@ If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on requests or the s
   ]
 }
 ```
+
+`merkleRoot` must match the batch root stored on-chain for the provided `batchIndex`. `tickets` must be length 256; pad inactive entries with zeros and set `commitmentsCount` to the active count.
 
 Public signals emitted by the circuit are fixed at ten slots in this order:
 `[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding(0)]`.

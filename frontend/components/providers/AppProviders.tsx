@@ -6,7 +6,16 @@ import { WagmiProvider } from "wagmi";
 import { wagmiConfig } from "@/lib/wagmi";
 
 export function AppProviders({ children }: PropsWithChildren) {
-  const [queryClient] = useState(() => new QueryClient());
+  const queryClientConfig =
+    process.env.NODE_ENV === "test"
+      ? {
+          defaultOptions: {
+            queries: { gcTime: 0 },
+            mutations: { gcTime: 0 },
+          },
+        }
+      : undefined;
+  const [queryClient] = useState(() => new QueryClient(queryClientConfig));
 
   return (
     <WagmiProvider config={wagmiConfig}>

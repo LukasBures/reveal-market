@@ -15,9 +15,7 @@ def test_prover_client_success():
         assert payload["marketId"] == "0x123"
         assert payload["batchIndex"] == "0"
         assert payload["commitmentsCount"] == "1"
-        assert payload["tickets"] == [
-            {"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}
-        ]
+        assert payload["tickets"] == [{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}]
         assert "payoutMultiplierWad" not in payload
         assert request.headers.get("X-Prover-Secret") == "secret"
         return httpx.Response(
@@ -33,7 +31,13 @@ def test_prover_client_success():
         )
 
     transport = httpx.MockTransport(handler)
-    client = ProverClient("http://prover", timeout_seconds=2.0, shared_secret="secret", transport=transport)
+    shared_secret = "secret"  # noqa: S105 - test-only secret
+    client = ProverClient(
+        "http://prover",
+        timeout_seconds=2.0,
+        shared_secret=shared_secret,
+        transport=transport,
+    )
     request = SettlementProofRequest(
         market_id="0x123",
         merkle_root="0xroot",

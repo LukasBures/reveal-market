@@ -300,3 +300,168 @@ Why addresses are missing
   3. Re-check the DB after a successful commit: select event_id, market_address, onchain_market_id from markets where market_address is not null; should show the new address.
 
   No duplicate/unused paths beyond the relayer/prover hooks noted above; the core flow is strictly preview → quote → commit.
+
+
+
+## FLOW:
+─ Worked for 2m 20s ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Here’s the end‑to‑end user flow you described, from escrow funding to payout, mapped to what’s actually wired today.
+
+  - Fund escrow on /dashboard: user connects wallet on Horizen Testnet, approves ZEN to RelayerEscrow, then deposit(amount) is sent from their wallet. This is a normal on‑chain tx, so the user pays gas. (frontend/components/dashboard/DashboardClient.tsx, contracts/zen/src/RelayerEscrow.sol)
+  - Open a market + click Buy YES/NO (0.1 ZEN):
+      - The trade panel streams FX (/fx/zen-usd) and fetches a preview quote from /pricing/preview.
+      - On CTA, it fetches a signed quote from /pricing/quote and submits /trade/commit.
+      - Backend validates the quote, checks escrow balance, builds a CommitAuth, and calls the relayer.
+      - Relayer calls RelayerEscrow.commitOnBehalf → transfers 0.1 ZEN from escrow to the market and calls RevealMarket.commitWithAuthorization. (frontend/components/markets/StakeQuoteCard.tsx, backend/api/app/routes/trade.py, contracts/zen/src/RelayerEscrow.sol, contracts/zen/src/RevealMarket.sol)
+      - UI polls /trade/status and shows “Committed” once the relayer tx confirms.
+  - Market ends (commit deadline passes):
+      - Trading is blocked (commits_blocked_at, market status shows locked).
+      - Worker/oracle ingests the resolved outcome off‑chain (Polymarket/Goldsky etc.) and marks the market resolved in DB.
+  - Settlement + proofs (the critical bridge to claims):
+      - Oracle/relayer locks commitments on‑chain with lockBatches (merkle roots + counts).
+      - Oracle posts the winning outcome with postResult.
+      - Prover generates Groth16 proofs (per batch).
+      - Oracle submits verifyAndSettleBatched (or verifyAndSettle for 1 batch). Market phase becomes Settled on‑chain and roots/outcomes are fixed. (contracts/zen/src/RevealMarket.sol)
+      - Relayer/prover pushes settlement snapshot to the API via /relayer/settlements or /settlements/ingest so the backend can build claim bundles.
+  - Claim (user side):
+      - On /dashboard, user clicks “Load payout data” → signs a message claim-bundles:<wallet>; frontend calls /claim/bundles with X-Wallet-Signature.
+      - Backend returns per‑ticket bundles (root + proof + salt + amount).
+      - UI verifies leaf/root locally, then sends RevealMarket.claim(...) from the wallet. User pays gas.
+      - Payout transfers directly to the user wallet (not escrow). Positions update to claimed. (frontend/components/dashboard/DashboardClient.tsx, backend/api/app/routes/trade.py, contracts/zen/src/RevealMarket.sol)
+
+  If any of these post‑market steps are missing (lock/settle/proof/settlement ingestion), positions will sit in “pending_resolution” and /claim/bundles will return nothing.
+
+  If you want, I can diagram this as a sequence diagram or list the exact on‑chain txs + API calls in order.
+
+
+› yes do  If you want, I can diagram this as a sequence diagram or list the exact on‑chain txs + API calls in order.
+
+
+• I'll lay out a clear Mermaid sequence diagram showing how the user wallet, frontend, backend API, relayer, contracts, and oracle interact from deposit through trade, settlement, and claim. Then I’ll follow with an exact ordered list enumerating the API calls and on-chain transactions involved, highlighting gas
+  payers, status polling, and alternative refund paths. This should give a full picture of the lifecycle the user experiences.
+
+─ Worked for 1m 01s ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Here is the flow in both forms.
+
+  Sequence diagram (end-to-end):
+
+  sequenceDiagram
+    participant U as User Wallet
+    participant FE as Frontend
+    participant API as API
+    participant REL as Relayer
+    participant ZEN as ZEN ERC20
+    participant ESC as RelayerEscrow
+    participant MKT as RevealMarket
+    participant OPS as Oracle/Worker/Prover
+
+    U->>FE: Open /dashboard (connect wallet)
+    FE->>API: GET /positions?wallet=0x...
+    U->>ZEN: approve(escrow, max)
+    U->>ESC: deposit(amount)
+
+    U->>FE: Open market page
+    FE->>API: POST /pricing/preview
+    FE->>API: POST /pricing/quote
+    FE->>API: POST /trade/commit {quote_id}
+    API->>REL: POST /commit (relayer payload)
+    REL->>ESC: commitOnBehalf(user, market, auth, sig)
+    ESC->>MKT: commitWithAuthorization(auth, sig)
+    FE->>API: GET /trade/status?job_id=... (poll)
+    FE->>API: GET /positions?wallet=0x...
+
+    OPS->>MKT: lockBatches(roots, counts, relayerSig)
+    OPS->>MKT: postResult(outcomeId)
+    OPS->>MKT: verifyAndSettleBatched(proofs, signals)
+    OPS->>API: POST /relayer/settlements (or /settlements/ingest)
+
+    FE->>U: sign message "claim-bundles:0x..."
+    FE->>API: GET /claim/bundles?wallet=0x... (X-Wallet-Signature)
+    U->>MKT: claim(user, ticketId, outcomeId, amount, salt, proof)
+    FE->>API: GET /positions?wallet=0x...
+
+  Exact API calls + on-chain txs in order:
+
+  1. GET /positions?wallet=0x... (dashboard loads escrow + positions)
+  2. On-chain ZEN.approve(RelayerEscrow, max) (user pays gas)
+  3. On-chain RelayerEscrow.deposit(amount) (user pays gas)
+  4. POST /pricing/preview with {stake_zen, market_id, wallet_address, outcome_id, market_address}
+  5. POST /pricing/quote with the same payload (returns signed quote)
+  6. POST /trade/commit with {quote_id} (API builds CommitAuth, calls relayer)
+  7. Relayer on-chain RelayerEscrow.commitOnBehalf(...) (relayer pays gas)
+  8. Relayer on-chain RevealMarket.commitWithAuthorization(...) (relayer pays gas)
+  9. GET /trade/status?job_id=... (poll until tx hash + confirmed)
+  10. GET /positions?wallet=0x... (status shows committed/locked)
+  11. On-chain RevealMarket.lockBatches(roots, counts, relayerSig) (oracle/ops)
+  12. On-chain RevealMarket.postResult(outcomeId) (oracle/ops)
+  13. On-chain RevealMarket.verifyAndSettleBatched(proofs, signals) (oracle/ops)
+  14. POST /relayer/settlements or POST /settlements/ingest (ops push settlement snapshot so claims are possible)
+  15. GET /claim/bundles?wallet=0x... with X-Wallet-Signature: <sig>
+  16. On-chain RevealMarket.claim(user, ticketId, outcomeId, amount, salt, merkleProof) (user pays gas)
+  17. GET /positions?wallet=0x... (shows settled/claimed)
+
+  Optional after claim:
+
+  - On-chain RelayerEscrow.withdraw(amount) to pull any remaining escrow balance (user pays gas).
+
+  If you want, I can add a simplified “user-only” version that omits the relayer/settlement internals.
+
+
+________
+
+• Here’s a concise go‑live checklist for the full flow, grouped by component.
+
+  Contracts / Chain
+
+  - Deploy latest MarketFactory, RelayerEscrow, ProtocolPool, RevealMarket implementation, Verifier.
+  - Confirm factory config:
+      - globalRakeBps, authorizationSigner, protocolPool, relayerEscrow, verifier, circuitHash.
+  - Run contracts/zen/scripts/check_circuit_hash.sh to confirm verifier hash matches prover artifacts.
+  - Create markets via contracts/zen/scripts/create_market.sh and ingest into backend.
+
+  Backend (API + DB)
+
+  - Reset DB (fresh start), apply migrations (merged 0001).
+  - Verify API envs:
+      - RM_DATABASE_URL, RM_REDIS_URL, RM_RELAYER_BASE_URL, RM_RELAYER_WEBHOOK_SECRET
+      - RM_PRICING_SIGNER_PRIVATE_KEY, RM_PRICING_QUOTE_TTL_SECONDS
+      - RM_CORS_ALLOW_ORIGINS, RM_TRUSTED_HOSTS
+  - Bring up API + Postgres + Redis; confirm /health returns ok.
+
+  Worker / Oracle / Settlement
+
+  - Set worker envs:
+      - RM_RPC_URL, RM_AUTO_LOCK_BATCHES_ENABLED=true
+      - RM_LOCK_BATCHES_USE_RELAYER=true or set RM_SETTLEMENT_SIGNER_PRIVATE_KEY
+      - RM_PROVER_ENABLED=true, RM_AUTO_SETTLEMENT_ENABLED=true
+      - RM_AUTO_SETTLEMENT_TX_ENABLED=true, RM_SETTLEMENT_RPC_URL (or RM_RPC_URL)
+  - Confirm worker is ingesting resolutions and writing winning_outcome_id.
+
+  Relayer
+
+  - Configure:
+      - RELAYER_PRIVATE_KEY, RELAYER_RPC_URL
+      - RELAYER_API_BASE_URL (points to API), RELAYER_WEBHOOK_SECRET (matches API)
+  - Confirm relayer endpoints accept:
+      - /commit, /lock-batches, /claim, /settlements/ingest
+
+  Prover
+
+  - Ensure prover/circuits/build has current artifacts + keys.
+  - Start prover service and verify /healthz.
+
+  Frontend
+
+  - Set NEXT_PUBLIC_API_BASE_URL, NEXT_PUBLIC_PRICE_STREAMER_URL.
+  - Confirm /dashboard loads positions and escrow balance.
+  - Confirm market page streams FX + quotes and can commit.
+
+  End‑to‑End Validation (manual)
+
+  - Deposit ZEN to escrow.
+  - Buy YES/NO with 0.1 ZEN and confirm relayer tx.
+  - Wait for market close and resolution ingest.
+  - Confirm lockBatches + postResult + verifyAndSettleBatched txs appear.
+  - Call /claim/bundles, submit claim(...), verify payout and UI status “Claimed”.

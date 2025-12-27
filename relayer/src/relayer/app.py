@@ -12,8 +12,8 @@ from web3.exceptions import Web3Exception
 from .config import IPAllowEntry
 from .metrics import REQUEST_LATENCY
 from .queue import TxQueue
-from .security import RateLimiter, ip_allowed, resolve_client_ip
 from .schemas import ClaimRequest, CommitRequest, LockBatchesRequest
+from .security import RateLimiter, ip_allowed, resolve_client_ip
 from .service import RelayerService, TxSendError
 
 logger = get_logger()

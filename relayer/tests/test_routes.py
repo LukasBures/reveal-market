@@ -5,14 +5,15 @@ import pytest
 from fastapi.testclient import TestClient
 from relayer.app import create_app
 from relayer.queue import TxQueue
+from relayer.schemas import ClaimRequest, CommitRequest, LockBatchesRequest
 from relayer.security import RateLimiter
-from relayer.schemas import ClaimRequest, CommitRequest
 
 
 class FakeService:
     def __init__(self):
         self.commits = []
         self.claims = []
+        self.lock_batches_calls = []
         self.account = type("acct", (), {"address": "0xrelayer"})
         self.escrow = type("escrow", (), {"address": "0xescrow"})
         self.health_called = False
@@ -24,6 +25,10 @@ class FakeService:
     async def claim(self, payload):
         self.claims.append(payload)
         return {"txHash": "0xclaim", "status": 1}
+
+    async def lock_batches(self, payload):
+        self.lock_batches_calls.append(payload)
+        return {"txHash": "0xlock", "status": 1}
 
     async def health(self):
         self.health_called = True
@@ -45,6 +50,9 @@ class FakeService:
         return None
 
     def validate_claim_payload(self, _payload):
+        return None
+
+    def validate_lock_payload(self, _payload):
         return None
 
 
@@ -200,6 +208,52 @@ def test_claim_route(client):
     assert resp.json()["txHash"] == "0xclaim"
 
 
+def test_lock_batches_route(client):
+    payload = LockBatchesRequest(
+        market="0x0000000000000000000000000000000000000002",
+        event_id="evt-lock",
+        tickets=[
+            {
+                "ticket_id": 0,
+                "outcome_id": 0,
+                "amount": 10,
+                "user": "0x0000000000000000000000000000000000000001",
+                "salt": "0x" + "1" * 64,
+            }
+        ],
+    ).model_dump()
+    resp = client.post("/lock-batches", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["txHash"] == "0xlock"
+
+
+def test_lock_batches_route_with_queue(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    payload = LockBatchesRequest(
+        market="0x0000000000000000000000000000000000000002",
+        event_id="evt-lock",
+        tickets=[
+            {
+                "ticket_id": 0,
+                "outcome_id": 0,
+                "amount": 10,
+                "user": "0x0000000000000000000000000000000000000001",
+                "salt": "0x" + "1" * 64,
+            }
+        ],
+    ).model_dump()
+    resp = client.post("/lock-batches", json=payload)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert "jobId" in body
+    assert service.lock_batches_calls == []
+
+
 def test_commit_route_triggers_ingest():
     service = IngestService()
     app = create_app(service, 1, "http://localhost")
@@ -241,6 +295,47 @@ def test_claim_route_triggers_ingest():
     assert resp.status_code == 200
     assert service.settlement_ingests
     assert service.settlement_ingests[0]["tx_hash"] == "0xclaim"
+
+
+def test_lock_batches_route_triggers_ingest():
+    service = IngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = LockBatchesRequest(
+        market="0x0000000000000000000000000000000000000002",
+        event_id="evt-lock",
+        tickets=[
+            {
+                "ticket_id": 0,
+                "outcome_id": 0,
+                "amount": 10,
+                "user": "0x0000000000000000000000000000000000000001",
+                "salt": "0x" + "1" * 64,
+            }
+        ],
+    ).model_dump()
+    resp = client.post("/lock-batches", json=payload)
+    assert resp.status_code == 200
+    assert service.settlement_ingests
+    assert service.settlement_ingests[0]["tx_hash"] == "0xlock"
+
+
+def test_lock_batches_requires_market_identifier(client):
+    payload = {
+        "market": "0x0000000000000000000000000000000000000002",
+        "tickets": [
+            {
+                "ticket_id": 0,
+                "outcome_id": 0,
+                "amount": 10,
+                "user": "0x0000000000000000000000000000000000000001",
+                "salt": "0x" + "1" * 64,
+            }
+        ],
+    }
+    resp = client.post("/lock-batches", json=payload)
+    assert resp.status_code == 422
 
 
 def test_commit_requires_auth_when_enabled():
@@ -367,7 +462,7 @@ def test_metrics_use_route_template_for_params(tmp_path):
 def test_rate_limit_blocks_commit_requests():
     service = FakeService()
     limiter = RateLimiter(1, 60)
-    app = create_app(service, 1, "http://localhost", bearer_token="secret", rate_limiter=limiter)
+    app = create_app(service, 1, "http://localhost", bearer_token="secret", rate_limiter=limiter)  # noqa: S106
     client = TestClient(app)
 
     payload = CommitRequest(

@@ -4,8 +4,8 @@ import json
 import logging
 from typing import Any, cast
 
-from shared.models import Commitment, Settlement
 from shared.merkle import build_merkle_root_and_paths
+from shared.models import Commitment, Settlement
 from shared.poseidon import BATCH_SIZE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

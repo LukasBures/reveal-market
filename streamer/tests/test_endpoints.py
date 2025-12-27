@@ -199,6 +199,41 @@ def test_fx_endpoint(monkeypatch):
         assert alias.status_code == 200
 
 
+def test_fx_endpoint_reports_stale_and_age(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    now = datetime.now(UTC) - timedelta(seconds=5)
+    state.fx_quote = FxQuote(
+        zen_usd=Decimal("1.5"),
+        raw_zen_usd=Decimal("1.5"),
+        fetched_at=now,
+        stale=True,
+        source="binance_rest",
+    )
+    state.fx_last_update = now
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        def __init__(self, *_args, **_kwargs): ...
+
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        payload = client.get("/fx/zen-usd").json()
+        assert payload["stale"] is True
+        assert payload["age_seconds"] >= 0
+
+
 def test_subscriptions_endpoint(monkeypatch):
     settings = Settings()
     state = StreamState(settings)
@@ -279,8 +314,12 @@ def test_stream_sse_bootstrap_payloads(test_app):
         for line in resp.iter_lines():
             if not line:
                 continue
-            if line.startswith(b"data: "):
-                payload = line.replace(b"data: ", b"").decode()
+            if isinstance(line, bytes):
+                text = line.decode()
+            else:
+                text = line
+            if text.startswith("data: "):
+                payload = text.replace("data: ", "")
                 assert '"price":"0.42"' in payload
                 break
 

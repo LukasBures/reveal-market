@@ -3,12 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useChainId, useConnection, usePublicClient, useReadContract, useSignMessage, useWriteContract } from "wagmi";
 import type { Address, Hex } from "viem";
-import { bytesToHex, encodePacked, erc20Abi, hexToBytes, keccak256, maxUint256 } from "viem";
+import { erc20Abi, maxUint256 } from "viem";
 import { fetchPositions, fetchClaimBundles, fetchMarketByEventId } from "@/lib/api";
 import type { ClaimBundle, MarketDetail, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { formatDateTime } from "@/lib/formatters";
+import { computePoseidonLeaf, parseBigInt, poseidonHashPair } from "@/lib/poseidon";
 import Link from "next/link";
 import { useClaimTicket } from "@/lib/marketContract";
 import clsx from "clsx";
@@ -18,6 +19,7 @@ const POSITION_LIFECYCLE_STAGES = [
   { key: "locked", label: "Locked", description: "Market closed" },
   { key: "pending_resolution", label: "Resolved", description: "Oracle & Proof" },
   { key: "settled", label: "Settled", description: "Payout path ready" },
+  { key: "claimed", label: "Claimed", description: "Payout received" },
 ] as const;
 
 type PositionLifecycleKey = (typeof POSITION_LIFECYCLE_STAGES)[number]["key"] | "cancelled";
@@ -27,6 +29,7 @@ const normalizePositionStatus = (status: string | null | undefined): PositionLif
   if (normalized === "locked") return "locked";
   if (normalized === "pending_resolution" || normalized === "pending") return "pending_resolution";
   if (normalized === "settled") return "settled";
+  if (normalized === "claimed") return "claimed";
   if (normalized === "cancelled") return "cancelled";
   return "committed";
 };
@@ -51,7 +54,7 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
     stages.findIndex((stage) => stage.key === normalized),
   );
   const isCancelled = normalized === "cancelled";
-  const isFinal = normalized === "settled" || isCancelled;
+  const isFinal = normalized === "settled" || normalized === "claimed" || isCancelled;
   const connectorActiveClass = isCancelled
     ? "from-rose-400/80 via-rose-400/40 to-rose-500/70"
     : "from-emerald-400/80 via-emerald-300/40 to-emerald-400/70";
@@ -496,36 +499,35 @@ export function DashboardClient() {
       setClaimMessage("Claim data missing salt.");
       return;
     }
+    let ticketIdValue = 0n;
+    let outcomeIdValue = 0n;
+    let amountValue = 0n;
     try {
-      const userSalt = keccak256(encodePacked(["address", "bytes32"], [bundle.user as Address, bundle.salt as Hex]));
-      const leafHex = keccak256(
-        encodePacked(
-          ["uint256", "uint256", "uint256", "bytes32"],
-          [BigInt(bundle.ticketId), BigInt(bundle.outcomeId), BigInt(bundle.amountWei), userSalt as Hex],
-        ),
-      );
-      const storedLeaf = bundle.leaf.startsWith("0x") ? bundle.leaf.toLowerCase() : `0x${bundle.leaf.toLowerCase()}`;
-      if (leafHex.toLowerCase() !== storedLeaf) {
+      ticketIdValue = parseBigInt(bundle.ticketId);
+      outcomeIdValue = parseBigInt(bundle.outcomeId);
+      amountValue = parseBigInt(bundle.amountWei);
+      const userValue = parseBigInt(bundle.user);
+      const saltValue = parseBigInt(bundle.salt);
+      const leafValue = computePoseidonLeaf(ticketIdValue, outcomeIdValue, amountValue, userValue, saltValue);
+      const storedLeaf = parseBigInt(bundle.leaf);
+      if (leafValue !== storedLeaf) {
         setClaimMessage("Bundle integrity check failed (leaf mismatch).");
         return;
       }
-      let computed = hexToBytes(leafHex as Hex);
-      let idx = bundle.ticketId;
+      let computed = leafValue;
+      let idx = ticketIdValue;
       for (const sibling of bundle.merkleProof || []) {
-        const siblingBytes = hexToBytes(sibling as Hex);
-        const combined =
-          idx & 1
-            ? new Uint8Array([...siblingBytes, ...computed])
-            : new Uint8Array([...computed, ...siblingBytes]);
-        computed = hexToBytes(keccak256(combined));
-        idx = Math.floor(idx / 2);
+        const siblingValue = parseBigInt(sibling);
+        computed = idx & 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
+        idx >>= 1n;
       }
-      const computedRoot = bytesToHex(computed).toLowerCase();
-      const providedRoot = (bundle.commitmentsRoot ?? "").toLowerCase();
-      const normalizedRoot = providedRoot.startsWith("0x") ? providedRoot : `0x${providedRoot}`;
-      if (providedRoot && computedRoot !== normalizedRoot) {
-        setClaimMessage("Bundle integrity check failed (root mismatch).");
-        return;
+      const providedRoot = (bundle.commitmentsRoot ?? "").trim();
+      if (providedRoot) {
+        const rootValue = parseBigInt(providedRoot);
+        if (computed !== rootValue) {
+          setClaimMessage("Bundle integrity check failed (root mismatch).");
+          return;
+        }
       }
     } catch (err) {
       setClaimMessage(err instanceof Error ? `Bundle validation failed: ${err.message}` : "Bundle validation failed");
@@ -537,9 +539,9 @@ export function DashboardClient() {
       const txHash = await claimTicket({
         marketAddress: bundle.marketAddress as Address,
         user: bundle.user as Address,
-        ticketId: BigInt(bundle.ticketId),
-        outcomeId: BigInt(bundle.outcomeId),
-        amountWei: BigInt(bundle.amountWei),
+        ticketId: ticketIdValue,
+        outcomeId: outcomeIdValue,
+        amountWei: amountValue,
         salt: (bundle.salt ?? "0x") as Hex,
         merkleProof: (bundle.merkleProof ?? []) as Hex[],
       });
@@ -867,6 +869,10 @@ export function DashboardClient() {
                         {p.claimable ? (
                           <span className="mt-1 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
                             Claimable
+                          </span>
+                        ) : p.status === "claimed" ? (
+                          <span className="mt-1 inline-flex rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100">
+                            Claimed
                           </span>
                         ) : null}
                       </div>

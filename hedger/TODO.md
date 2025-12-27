@@ -17,6 +17,7 @@ Short list of items to reach a functional hedger MVP.
 
 ## Settlement
 - Finalize prover payload assembly from stored commits + oracle outcome; handle disputed/late oracles and publish warnings when payload does not match DB expectations.
+- Split settlement payloads into 256-ticket Poseidon batches and support `verifyAndSettleBatched` (one proof per batch root).
 - Submit proofs on-chain and confirm state transitions; unwind hedges post-resolution and repay vault; retries/backoff + idempotency keys for prover + chain txs.
 - Persist settlement receipts, rake distribution, hedger PnL for the market, and float adjustments; expose in admin API.
 - Validate prover payload schema, add request_id tracing end-to-end, and alert on hash/verifier mismatches.

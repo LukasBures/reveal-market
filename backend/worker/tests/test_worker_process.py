@@ -649,6 +649,7 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
@@ -707,6 +708,7 @@ async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
@@ -776,6 +778,7 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
@@ -1015,6 +1018,128 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
         )
         assert fake_prover.called_with is not None
         assert redis_client.last_set is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_maybe_generate_settlement_proof_rejects_circuit_hash_mismatch(monkeypatch):
+    class FakeProver:
+        def __init__(self):
+            self.called_with = None
+            self.health_calls = 0
+
+        async def fetch_health(self):
+            self.health_calls += 1
+            return {"circuit_hash": "0xdef"}
+
+        async def generate_settlement_proof(self, request):
+            self.called_with = request
+            return SettlementProofResponse(
+                proof="0xdead",
+                public_signals=["1"],
+                circuit_hash="0xdef",
+                generated_at=datetime.now(UTC),
+                prover_version="test",
+                request_id="req-1",
+            )
+
+    fake_prover = FakeProver()
+    monkeypatch.setattr(runtime_module, "PROVER_CLIENT", fake_prover, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
+    proofs._PROVER_CIRCUIT_CACHE["value"] = None
+    proofs._PROVER_CIRCUIT_CACHE["expires_at"] = 0.0
+
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    leaf_hex = "0x" + "02" * 32
+    root_bytes, _ = build_merkle_root_and_paths([bytes.fromhex(leaf_hex[2:])])
+
+    async with session_factory() as session:
+        market_row = Market(id=2, event_id="evt-proof-mismatch", title="Proof Market", oracle="polymarket")
+        session.add(market_row)
+        await session.flush()
+        session.add(
+            shared_models.Commitment(
+                id=2,
+                market_id=market_row.id,
+                user_address="0x1",
+                outcome_id=0,
+                amount_wei=1,
+                salt="0x1",
+                ticket_hash=leaf_hex,
+                leaf=leaf_hex,
+                leaf_index=0,
+            )
+        )
+        session.add(
+            Settlement(
+                id=2,
+                market_id=market_row.id,
+                merkle_root="0x" + root_bytes.hex(),
+                commitments_count=1,
+                pool_total_yes=1,
+                pool_total_no=0,
+                total_escrow=1,
+                total_liability=1,
+                rake_bps=0,
+                winning_outcome_id=0,
+                circuit_hash="0xabc",
+            )
+        )
+        await session.commit()
+
+    redis_client = DummyRedis()
+    market_payload = MarketPayload(
+        event_id="evt-proof-mismatch",
+        title="Proof Market",
+        outcomes=["Yes", "No"],
+        outcome_prices=[0.6, 0.4],
+    )
+    market_snapshot = {
+        "market_id": 2,
+        "event_id": "evt-proof-mismatch",
+        "market_address": "0xabc",
+        "condition_id": "0xabc",
+        "commitments_root": "0x" + root_bytes.hex(),
+        "tickets": [
+            {
+                "user": "0x1",
+                "outcomeId": "0",
+                "amount": "1",
+                "salt": "0x1",
+                "ticketHash": leaf_hex,
+                "leaf": leaf_hex,
+                "merklePath": [],
+                "merkleIndex": 0,
+            }
+        ],
+        "pool_totals": ["1", "0"],
+        "total_escrow": "1",
+        "total_liability": "1",
+        "rake_bps": 0,
+        "winning_outcome_id": 0,
+        "circuit_hash": "0xabc",
+    }
+    try:
+        assert (
+            await proofs.maybe_generate_settlement_proof(
+                redis_client,
+                market_snapshot=market_snapshot,
+                market_payload=market_payload,
+                condition_id="0xabc",
+            )
+            is False
+        )
+        assert fake_prover.called_with is None
+        async with session_factory() as session:
+            settlement = (
+                await session.execute(select(shared_models.Settlement).where(shared_models.Settlement.id == 2))
+            ).scalar_one()
+            assert settlement.proof_status == shared_models.SettlementProofStatus.FAILED.value
     finally:
         await engine.dispose()
 

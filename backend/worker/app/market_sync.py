@@ -99,6 +99,7 @@ class SyncSummary:
     gamma_events_written: int = 0
     summaries_enqueued: int = 0
     proofs_generated: int = 0
+    lock_batches_submitted: int = 0
     resolutions_backfilled: int = 0
     failed_markets: int = 0
     cache_invalidations: int = 0
@@ -122,6 +123,7 @@ class SyncSummary:
             "proofs_generated": self.proofs_generated,
             "cache_invalidations": cache_invalidations,
             "settlement_txs": self.settlement_txs,
+            "lock_batches_submitted": self.lock_batches_submitted,
             "resolutions_backfilled": self.resolutions_backfilled,
             "market_errors": self.failed_markets,
             "gamma_metadata_updates": self.gamma_metadata_updates,

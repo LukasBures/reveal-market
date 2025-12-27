@@ -110,6 +110,14 @@ contract DummyMarket is IRevealMarket {
         return 0;
     }
 
+    function claimDeadline() external pure returns (uint256) {
+        return 0;
+    }
+
+    function extendClaimDeadline(uint256) external pure {}
+
+    function sweepUnclaimed(address) external pure {}
+
     function marketState()
         external
         pure
@@ -123,4 +131,16 @@ contract DummyMarket is IRevealMarket {
     {
         return (bytes32(0), 0, Phase.Commit, 0, 0);
     }
+
+    function batchRoots(uint256) external pure returns (bytes32) {
+        return bytes32(0);
+    }
+
+    function batchCounts(uint256) external pure returns (uint16) {
+        return 0;
+    }
+
+    function lockBatches(bytes32[] calldata, uint16[] calldata, bytes calldata) external {}
+
+    function verifyAndSettleBatched(bytes[] calldata, uint256[10][] calldata, uint16[] calldata) external {}
 }

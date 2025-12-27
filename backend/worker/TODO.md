@@ -1,7 +1,7 @@
 # Worker TODO (MVP)
 
 ## MVP blockers
-- [ ] Proof pipeline prerequisites: ensure commitments + settlements are ingested and refreshed so proof jobs can enqueue; wire relayer/prover ingestion or periodic on-chain refresh and emit metrics for missing data. (backend/worker/app/market_sync.py, backend/worker/app/proofs.py, backend/worker/app/settlement.py)
+- [ ] Proof pipeline prerequisites: ensure commitments + settlements (including `batch_roots`/`batch_counts`) are ingested and refreshed so proof jobs can enqueue; wire relayer/prover ingestion or periodic on-chain refresh and emit metrics for missing data. (backend/worker/app/market_sync.py, backend/worker/app/proofs.py, backend/worker/app/settlement.py)
 - [ ] MarketFactory mirroring: consume on-chain events (MarketCreated, RakeConfigured, guardian updates) or a Goldsky fallback to keep DB/cache in sync. (new sync helper + shared cache/model updates)
 
 ## MVP recommended

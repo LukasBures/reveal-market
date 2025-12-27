@@ -37,6 +37,8 @@ describe("wagmi chain defaults", () => {
     vi.resetModules();
     vi.clearAllMocks();
     resetEnv();
+    process.env.NODE_ENV = "production";
+    delete process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
   });
 
   afterEach(() => {

@@ -140,6 +140,12 @@ RELAYER_QUEUE_COUNTER = _safe_counter(
     ["outcome"],
 )
 
+LOCK_BATCHES_COUNTER = _safe_counter(
+    "worker_lock_batches_total",
+    "Lock-batches submission outcomes",
+    ["outcome"],
+)
+
 LEASE_SKIP_COUNTER = _safe_counter(
     "worker_polymarket_lease_skipped_total",
     "Polymarket ingest skips due to lease already held",

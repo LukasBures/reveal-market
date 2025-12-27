@@ -35,9 +35,16 @@ type FxConnection = {
   fallbackTimer: ReturnType<typeof setInterval> | null;
   cancelled: boolean;
   idleCloseTimer: ReturnType<typeof setTimeout> | null;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  cleanup?: () => void;
 };
 
 const connections = new Map<string, FxConnection>();
+const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+const unrefTimer = <T extends ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>>(timer: T) => {
+  (timer as unknown as { unref?: () => void }).unref?.();
+  return timer;
+};
 
 const initialState: FxConnectionState = {
   fx: null,
@@ -104,13 +111,13 @@ function startFallback(path: string, conn: FxConnection, connect: () => void) {
       if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
         conn.ws.close(1000, "refresh");
       }
-      setTimeout(connect, 250);
+      unrefTimer(setTimeout(connect, 250));
     }
   };
   if (conn.fallbackTimer) return;
   // First fetch immediately to avoid blank UI if WS is unavailable.
   runFetch().catch(() => {});
-  conn.fallbackTimer = setInterval(runFetch, 5_000);
+  conn.fallbackTimer = unrefTimer(setInterval(runFetch, 5_000));
 }
 
 function startConnection(path: string) {
@@ -129,6 +136,45 @@ function startConnection(path: string) {
     fallbackTimer: null,
     cancelled: false,
     idleCloseTimer: null,
+    reconnectTimer: null,
+  };
+
+  const cleanup = () => {
+    conn.cancelled = true;
+    if (conn.idleCloseTimer) {
+      clearTimeout(conn.idleCloseTimer);
+      conn.idleCloseTimer = null;
+    }
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+      conn.reconnectTimer = null;
+    }
+    if (conn.fallbackTimer) {
+      clearInterval(conn.fallbackTimer);
+      conn.fallbackTimer = null;
+    }
+    if (conn.ws) {
+      try {
+        conn.ws.close(1000, "idle");
+      } catch {
+        // ignore
+      }
+      conn.ws = null;
+    }
+    connections.delete(normalizedPath);
+  };
+  conn.cleanup = cleanup;
+
+  const scheduleReconnect = (delay: number) => {
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+    }
+    conn.reconnectTimer = unrefTimer(
+      setTimeout(() => {
+        conn.reconnectTimer = null;
+        connect();
+      }, delay),
+    );
   };
 
   const connect = () => {
@@ -213,11 +259,11 @@ function startConnection(path: string) {
           conn.wsDisabledUntil = Date.now() + 60_000;
           conn.wsFailures = 0;
           conn.backoff = 1_000;
-          setTimeout(connect, 60_000);
+          scheduleReconnect(60_000);
           return;
         }
         conn.backoff = Math.min(delay * 2, 30_000);
-        setTimeout(connect, delay);
+        scheduleReconnect(delay);
       };
     } catch (err) {
       setState(conn, { wsConnected: false, error: (err as Error).message, status: "stale" });
@@ -234,10 +280,25 @@ function startConnection(path: string) {
 
 function subscribeToConnection(path: string, onChange: () => void) {
   const conn = startConnection(path);
+  if (conn.idleCloseTimer) {
+    clearTimeout(conn.idleCloseTimer);
+    conn.idleCloseTimer = null;
+  }
   conn.subscribers.add(onChange);
   return () => {
     conn.subscribers.delete(onChange);
     // Keep the connection warm for reuse across pages/routes; we intentionally do not close the socket on unsubscribe.
+    if (conn.subscribers.size === 0 && isTestEnv) {
+      if (conn.idleCloseTimer) {
+        clearTimeout(conn.idleCloseTimer);
+      }
+      conn.idleCloseTimer = unrefTimer(
+        setTimeout(() => {
+          if (conn.subscribers.size > 0) return;
+          conn.cleanup?.();
+        }, 50),
+      );
+    }
   };
 }
 

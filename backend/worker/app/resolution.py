@@ -360,6 +360,12 @@ async def apply_resolution(
     checked_at_dt = _parse_checked_at(summary.get("checkedAt"), now)
     record_payload = _build_resolution_record(summary, market, checked_at_dt, db_market=db_market)
     record_payload["condition_id"] = normalized_condition_id
+    winning_outcome_id = None
+    try:
+        if record_payload.get("winning_outcome_id") is not None:
+            winning_outcome_id = int(record_payload["winning_outcome_id"])
+    except (TypeError, ValueError):
+        winning_outcome_id = None
 
     if record_payload["resolved"] and (
         record_payload.get("transaction_hash") is None or record_payload.get("block_number") is None
@@ -401,6 +407,12 @@ async def apply_resolution(
         if getattr(db_market, "closed", None) is not True:
             db_market.closed = True
         db_market.resolved_at = checked_at_dt
+        if db_market.id is not None and winning_outcome_id is not None:
+            await shared_repository.upsert_settlement_snapshot(
+                session,
+                db_market.id,
+                {"winning_outcome_id": winning_outcome_id},
+            )
         if market_state and market_state.detached:
             session.add(db_market)
         if newly_resolved:

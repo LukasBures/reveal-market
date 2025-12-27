@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { encodePacked, keccak256 } from "viem";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
+import { bigIntToHex32, computePoseidonLeaf, parseBigInt, poseidonHashPair } from "@/lib/poseidon";
 
 const mockDefaultChain = vi.hoisted(() => ({
   id: 2651420,
@@ -27,19 +27,14 @@ const hoisted = vi.hoisted(() => ({
   useSignMessage: vi.fn(),
 }));
 
-vi.mock("wagmi", async () => {
-  const actual = await vi.importActual<typeof import("wagmi")>("wagmi");
-  return {
-    ...actual,
-    defaultChain: mockDefaultChain,
-    useConnection: hoisted.useConnection,
-    useChainId: hoisted.useChainId,
-    useWriteContract: hoisted.useWriteContract,
-    useReadContract: hoisted.useReadContract,
-    usePublicClient: hoisted.usePublicClient,
-    useSignMessage: hoisted.useSignMessage,
-  };
-});
+vi.mock("wagmi", () => ({
+  useConnection: hoisted.useConnection,
+  useChainId: hoisted.useChainId,
+  useWriteContract: hoisted.useWriteContract,
+  useReadContract: hoisted.useReadContract,
+  usePublicClient: hoisted.usePublicClient,
+  useSignMessage: hoisted.useSignMessage,
+}));
 
 vi.mock("@/lib/wagmi", () => ({
   defaultChain: mockDefaultChain,
@@ -119,26 +114,34 @@ describe("DashboardClient", () => {
     });
     const salt = "0x" + "00".repeat(32);
     const user = "0x9999999999999999999999999999999999999999";
-    const userSalt = keccak256(
-      encodePacked(["address", "bytes32"], [user as `0x${string}`, salt as `0x${string}`]),
+    const leafValue = computePoseidonLeaf(
+      0n,
+      0n,
+      100000000000000000n,
+      parseBigInt(user),
+      parseBigInt(salt),
     );
-    const leaf = keccak256(
-      encodePacked(
-        ["uint256", "uint256", "uint256", "bytes32"],
-        [0n, 0n, 100000000000000000n, userSalt as `0x${string}`],
-      ),
-    );
+    const leaf = bigIntToHex32(leafValue);
+    const merkleProof = Array.from({ length: 8 }, () => bigIntToHex32(0n));
+    let computed = leafValue;
+    let idx = 0n;
+    for (const sibling of merkleProof) {
+      const siblingValue = parseBigInt(sibling);
+      computed = idx & 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
+      idx >>= 1n;
+    }
+    const commitmentsRoot = bigIntToHex32(computed);
     hoisted.fetchClaimBundles.mockResolvedValue({
       bundles: [
         {
           marketId: "m-1",
           marketAddress: "0x1111111111111111111111111111111111111111",
-          commitmentsRoot: leaf,
-          ticketId: 0,
-          outcomeId: 0,
+          commitmentsRoot,
+          ticketId: "0",
+          outcomeId: "0",
           amountWei: "100000000000000000",
           salt,
-          merkleProof: [],
+          merkleProof,
           leaf,
           user,
         },

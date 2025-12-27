@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MarketSummary } from "@/lib/api-types";
 import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
@@ -37,10 +38,13 @@ const STATUS_FILTERS = [
 
 type StatusFilter = (typeof STATUS_FILTERS)[number]["value"];
 
+const isStatusFilter = (value: string): value is StatusFilter =>
+  STATUS_FILTERS.some((status) => status.value === value);
+
 const normalizeStatusFilter = (value?: string, fallback?: StatusFilter): StatusFilter => {
   const normalized = (value ?? "").toLowerCase();
-  if ((STATUS_FILTERS as Array<{ value: string }>).some((status) => status.value === normalized)) {
-    return normalized as StatusFilter;
+  if (isStatusFilter(normalized)) {
+    return normalized;
   }
   return fallback ?? "active";
 };
@@ -110,7 +114,7 @@ export function SearchMarketsClient({
         params.delete("status");
       }
       const queryString = params.toString();
-      const nextUrl = queryString ? `/markets/search?${queryString}` : "/markets/search";
+      const nextUrl = (queryString ? `/markets/search?${queryString}` : "/markets/search") as Route;
       if (mode === "push") {
         router.push(nextUrl);
       } else {

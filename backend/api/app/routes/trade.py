@@ -113,6 +113,104 @@ def _parse_json_list(value: Any) -> list[Any]:
     return []
 
 
+async def _fetch_claimed_tickets(market_address: str, ticket_ids: list[int]) -> dict[int, bool]:
+    if not settings.rpc_url or not ticket_ids:
+        return {}
+    try:
+        web3 = get_async_web3(str(settings.rpc_url))
+        contract = web3.eth.contract(address=to_checksum(market_address), abi=REVEAL_MARKET_ABI)
+        calls = [contract.functions.claimedTickets(int(ticket_id)).call() for ticket_id in ticket_ids]
+        results = await asyncio.gather(*calls, return_exceptions=True)
+    except Exception as exc:  # pragma: no cover - best-effort chain checks
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.claimed_tickets.fetch_failed",
+            message="failed to fetch claimed tickets from chain",
+            market_address=market_address,
+            error=str(exc),
+        )
+        return {}
+    claimed: dict[int, bool] = {}
+    for ticket_id, result in zip(ticket_ids, results, strict=False):
+        if isinstance(result, BaseException):
+            continue
+        claimed[int(ticket_id)] = bool(result)
+    return claimed
+
+
+async def _sync_claimed_commitments(
+    session: AsyncSession,
+    rows: list[tuple[models.Commitment, models.Market, models.Settlement | None]],
+) -> None:
+    if not settings.rpc_url:
+        return
+    markets_to_check: dict[str, list[models.Commitment]] = {}
+    for commitment, market, settlement in rows:
+        if commitment.claimed_at is not None:
+            continue
+        if commitment.leaf_index is None or not market.market_address:
+            continue
+        if settlement is None or settlement.winning_outcome_id is None:
+            continue
+        if settlement.winning_outcome_id != commitment.outcome_id:
+            continue
+        if not _has_valid_roots(settlement):
+            continue
+        markets_to_check.setdefault(market.market_address, []).append(commitment)
+
+    if not markets_to_check:
+        return
+    now = datetime.now(tz=UTC)
+    for market_address, commitments in markets_to_check.items():
+        ticket_ids = [int(commitment.leaf_index) for commitment in commitments if commitment.leaf_index is not None]
+        claimed_map = await _fetch_claimed_tickets(market_address, ticket_ids)
+        if not claimed_map:
+            continue
+        for commitment in commitments:
+            if commitment.leaf_index is None:
+                continue
+            if claimed_map.get(int(commitment.leaf_index)):
+                commitment.claimed_at = now
+                session.add(commitment)
+    await session.flush()
+
+
+async def _fetch_claim_deadlines(market_addresses: list[str]) -> dict[str, int]:
+    if not settings.rpc_url or not market_addresses:
+        return {}
+    web3 = get_async_web3(str(settings.rpc_url))
+    tasks = []
+    addresses: list[str] = []
+    for address in market_addresses:
+        try:
+            contract = web3.eth.contract(address=to_checksum(address), abi=REVEAL_MARKET_ABI)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.claim_deadline.contract_failed",
+                message="failed to init market contract for claim deadline",
+                market_address=address,
+                error=str(exc),
+            )
+            continue
+        addresses.append(address)
+        tasks.append(contract.functions.claimDeadline().call())
+    if not tasks:
+        return {}
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    deadlines: dict[str, int] = {}
+    for address, result in zip(addresses, results, strict=False):
+        if isinstance(result, BaseException):
+            continue
+        try:
+            deadlines[address] = int(result)
+        except (TypeError, ValueError):
+            continue
+    return deadlines
+
+
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
     raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
@@ -279,6 +377,162 @@ async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_a
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "protocol_pool_balance", "message": "Protocol pool lacks collateral for this trade"},
         )
+
+
+async def _sync_market_factory_params(
+    session: AsyncSession,
+    *,
+    market_record: models.Market | None,
+    market_address: str,
+    market_onchain_id: int | None,
+    auth_signer_key: str,
+) -> int | None:
+    """Fetch factory params to guard commit configuration and sync rake/factory metadata."""
+
+    if not settings.factory_address or not settings.rpc_url:
+        return None
+
+    web3 = get_async_web3(str(settings.rpc_url))
+    resolved_market_id = market_onchain_id
+    if resolved_market_id is None:
+        try:
+            contract = web3.eth.contract(address=to_checksum(market_address), abi=REVEAL_MARKET_ABI)
+            resolved_market_id = int(await contract.functions.marketId().call())
+            if market_record and market_record.onchain_market_id is None:
+                market_record.onchain_market_id = resolved_market_id
+                session.add(market_record)
+                await session.flush()
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="trade.market_id_fetch_failed",
+                message="failed to resolve market id for factory sync",
+                market_address=market_address,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="market_id_unavailable",
+            ) from exc
+
+    if resolved_market_id is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="market_id_unavailable")
+
+    try:
+        factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
+        params = await factory.functions.getMarketParams(int(resolved_market_id)).call()
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.market_params_fetch_failed",
+            message="failed to fetch market params from factory",
+            market_onchain_id=resolved_market_id,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="market_params_unavailable",
+        ) from exc
+
+    onchain_market = params[0]
+    ticket_size = int(params[5])
+    auth_signer = params[7]
+    rake_bps = int(params[9])
+    circuit_hash = _normalize_bytes32(params[3]) or str(params[3])
+    params_market_id = int(params[12]) if params[12] is not None else resolved_market_id
+
+    if _is_empty_hex(onchain_market):
+        onchain_market = None
+    if _is_empty_hex(auth_signer):
+        auth_signer = None
+
+    if onchain_market is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_unregistered")
+
+    if market_address and str(onchain_market).lower() != str(market_address).lower():
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.market_address_mismatch",
+            message="factory market address mismatch",
+            market_address=market_address,
+            factory_address=onchain_market,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_address_mismatch")
+
+    expected_ticket_size = int(settings.ticket_size_wei)
+    if ticket_size != expected_ticket_size:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.ticket_size_mismatch",
+            message="factory ticket size mismatch",
+            expected=expected_ticket_size,
+            actual=ticket_size,
+            market_id=resolved_market_id,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_size_mismatch")
+
+    expected_circuit = settings.circuit_hash
+    if expected_circuit and circuit_hash.lower() != expected_circuit.lower():
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.circuit_hash_mismatch",
+            message="factory circuit hash mismatch",
+            expected=expected_circuit,
+            actual=circuit_hash,
+            market_id=resolved_market_id,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="circuit_hash_mismatch")
+
+    expected_signer = settings.authorization_signer or Account.from_key(auth_signer_key).address
+    if auth_signer is None or expected_signer.lower() != str(auth_signer).lower():
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.authorization_signer_mismatch",
+            message="factory authorization signer mismatch",
+            expected=expected_signer,
+            actual=auth_signer,
+            market_id=resolved_market_id,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="authorization_signer_mismatch")
+
+    expected_rake_bps = int(round(float(settings.rake_percent) * 10_000)) if settings.rake_percent is not None else None
+    if expected_rake_bps is not None and rake_bps != expected_rake_bps:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.rake_bps_mismatch",
+            message="factory rake mismatch",
+            expected=expected_rake_bps,
+            actual=rake_bps,
+            market_id=resolved_market_id,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="rake_bps_mismatch")
+
+    if market_record:
+        updated = False
+        if market_record.market_address is None:
+            market_record.market_address = str(onchain_market)
+            updated = True
+        if market_record.onchain_market_id is None:
+            market_record.onchain_market_id = params_market_id
+            updated = True
+        if market_record.factory is None or str(market_record.factory).lower() != str(settings.factory_address).lower():
+            market_record.factory = str(settings.factory_address)
+            updated = True
+        if market_record.rake_bps != rake_bps:
+            market_record.rake_bps = rake_bps
+            updated = True
+        if updated:
+            session.add(market_record)
+            await session.flush()
+
+    return rake_bps
 
 
 async def _enqueue_relayer_job(kind: str, endpoint: str, payload: dict[str, Any]) -> str:
@@ -1229,6 +1483,14 @@ async def trade_commit(
     if market_record:
         pricing_routes._assert_commits_allowed(market_record, now, session)
 
+    onchain_rake_bps = await _sync_market_factory_params(
+        session,
+        market_record=market_record,
+        market_address=market_address,
+        market_onchain_id=market_onchain_id,
+        auth_signer_key=auth_signer_key,
+    )
+
     # Validate and consume the quote using the existing submit logic (signature + drift checks).
     await pricing_routes.pricing_submit(
         schemas.PricingSubmitRequest(quote=quote, max_fx_diff_percent=payload.max_fx_diff_percent),
@@ -1272,10 +1534,10 @@ async def trade_commit(
     if not quote.wallet_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
     user_address = Web3.to_checksum_address(str(quote.wallet_address))
-    rake_bps = None
-    if market_record and market_record.rake_bps is not None:
+    rake_bps = onchain_rake_bps
+    if rake_bps is None and market_record and market_record.rake_bps is not None:
         rake_bps = int(market_record.rake_bps)
-    elif settings.rake_percent is not None:
+    if rake_bps is None and settings.rake_percent is not None:
         rake_bps = int(round(float(settings.rake_percent) * 10_000))
     rake_bps = rake_bps or 0
     rake_wei = (ticket_size_wei * rake_bps) // 10_000
@@ -1389,6 +1651,22 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
     if not wallet:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
+    await _sync_claimed_commitments(session, rows)
+    claim_deadline_candidates: set[str] = set()
+    for commitment, market, settlement in rows:
+        if commitment.claimed_at is not None:
+            continue
+        if not market.market_address or commitment.leaf_index is None:
+            continue
+        if settlement is None or settlement.winning_outcome_id is None:
+            continue
+        if settlement.winning_outcome_id != commitment.outcome_id:
+            continue
+        if not _has_valid_roots(settlement):
+            continue
+        claim_deadline_candidates.add(market.market_address)
+    claim_deadlines = await _fetch_claim_deadlines(list(claim_deadline_candidates))
+    now_ts = int(time.time())
     positions: list[schemas.PositionRecord] = []
     for commitment, market, settlement in rows:
         tx_hash_value = getattr(commitment, "tx_hash", None)
@@ -1400,6 +1678,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             tx_hash_value = None
         stake_wei = int(commitment.amount_wei)
         stake_zen = stake_wei / 1e18
+        claimed = commitment.claimed_at is not None
         claimable = False
         status = "committed"
         # Surface market status transitions for UI (committed/locked/settled/cancelled/pending).
@@ -1411,6 +1690,10 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             status = "settled"
             if settlement.winning_outcome_id == commitment.outcome_id:
                 claimable = True
+        if claimable and market.market_address:
+            claim_deadline = claim_deadlines.get(market.market_address)
+            if claim_deadline and now_ts > int(claim_deadline):
+                claimable = False
         if market.resolved_at:
             status = "settled"
         if (
@@ -1418,6 +1701,9 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
             status = "pending_resolution"
+        if claimed:
+            status = "claimed"
+            claimable = False
         positions.append(
             schemas.PositionRecord(
                 market_id=market.event_id,
@@ -1430,6 +1716,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 status=status,
                 ticket_id=commitment.leaf_index,
                 created_at=getattr(commitment, "created_at", None),
+                claimed_at=getattr(commitment, "claimed_at", None),
                 claimable=claimable,
                 closes_at=getattr(market, "closes_at", None),
                 resolved_at=getattr(market, "resolved_at", None),
@@ -1476,8 +1763,30 @@ async def list_claim_bundles(
                 needs_refresh = True
     if needs_refresh:
         rows = await repository_async.list_commitments_with_settlement(session, wallet)
+    await _sync_claimed_commitments(session, rows)
+    claim_deadline_candidates: set[str] = set()
+    for commitment, market, settlement in rows:
+        if commitment.claimed_at is not None:
+            continue
+        if not market.market_address or commitment.leaf_index is None:
+            continue
+        if settlement is None or settlement.winning_outcome_id is None:
+            continue
+        if settlement.winning_outcome_id != commitment.outcome_id:
+            continue
+        if not _has_valid_roots(settlement):
+            continue
+        claim_deadline_candidates.add(market.market_address)
+    claim_deadlines = await _fetch_claim_deadlines(list(claim_deadline_candidates))
+    now_ts = int(time.time())
     bundles: list[schemas.ClaimBundle] = []
     for commitment, market, settlement in rows:
+        if commitment.claimed_at is not None:
+            continue
+        if market.market_address:
+            claim_deadline = claim_deadlines.get(market.market_address)
+            if claim_deadline and now_ts > int(claim_deadline):
+                continue
         if (
             settlement is None
             or settlement.winning_outcome_id is None

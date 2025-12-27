@@ -10,17 +10,12 @@ set -euo pipefail
 #   RPC_URL                      Target RPC URL
 #   ORACLE_ADDRESS               Oracle address to wire into the factory
 #   AUTHORIZATION_SIGNER         Backend commit auth signer (EOA)
-#   ZEN_TOKEN_ADDRESS            ERC20 collateral token address
-#   RELAYER_ADDRESS              Relayer EOA for escrow
-#   TICKET_SIZE_WEI              Fixed ticket size (wei)
-#   MAX_COMMITMENTS              Max tickets per market
-#   RAKE_BPS                     Rake in basis points (e.g., 200 = 2%)
-#   PROTOCOL_LIABILITY_CAP_WEI   Per-market liability cap from protocol pool (wei)
-#   CIRCUIT_HASH                 Settlement circuit hash to enforce
+#   ZEN_TOKEN_ADDRESS            ERC20 collateral token address (or COLLATERAL_TOKEN)
 # Optional:
 #   USE_STUB_VERIFIER=1    Use stub verifier (skips SETTLEMENT_VK_JSON/SETTLEMENT_VK_PATH)
 #   SETTLEMENT_VK_JSON     Full verifying key JSON when USE_STUB_VERIFIER=0
-#   SETTLEMENT_VK_PATH     Path to verifying key JSON (default: cache/settlement-vk.json)
+#   SETTLEMENT_VK_PATH     Path to verifying key JSON (default: ../cache/settlement-vk.json)
+#   COLLATERAL_TOKEN       ERC20 collateral token address (fallback if ZEN_TOKEN_ADDRESS unset)
 #   CHAIN_ID               Chain id for broadcasting (passed to forge)
 #   FORGE_BROADCAST_ARGS   Extra args to append to forge script (e.g., --legacy)
 # ----------------------------------------------------------------------
@@ -56,20 +51,24 @@ require_env "PRIVATE_KEY"
 require_env "RPC_URL"
 require_env "ORACLE_ADDRESS"
 require_env "AUTHORIZATION_SIGNER"
-require_env "ZEN_TOKEN_ADDRESS"
-require_env "RELAYER_ADDRESS"
-require_env "TICKET_SIZE_WEI"
-require_env "MAX_COMMITMENTS"
-require_env "RAKE_BPS"
-require_env "PROTOCOL_LIABILITY_CAP_WEI"
-require_env "CIRCUIT_HASH"
+if [[ -z "${ZEN_TOKEN_ADDRESS:-}" && -z "${COLLATERAL_TOKEN:-}" ]]; then
+  echo "Missing required env var: ZEN_TOKEN_ADDRESS (or COLLATERAL_TOKEN)" >&2
+  exit 1
+fi
 
 USE_STUB_VERIFIER="${USE_STUB_VERIFIER:-0}"
 if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
   if [[ -z "${SETTLEMENT_VK_JSON:-}" ]]; then
-    DEFAULT_VK_PATH="${ROOT_DIR}/cache/settlement-vk.json"
-    echo "$DEFAULT_VK_PATH"
-    VK_PATH="${SETTLEMENT_VK_PATH:-${DEFAULT_VK_PATH}}"
+    DEFAULT_VK_PATH="${ROOT_DIR}/../cache/settlement-vk.json"
+    FALLBACK_VK_PATH="${ROOT_DIR}/cache/settlement-vk.json"
+    VK_PATH="${SETTLEMENT_VK_PATH:-}"
+    if [[ -z "${VK_PATH}" ]]; then
+      if [[ -f "${DEFAULT_VK_PATH}" ]]; then
+        VK_PATH="${DEFAULT_VK_PATH}"
+      elif [[ -f "${FALLBACK_VK_PATH}" ]]; then
+        VK_PATH="${FALLBACK_VK_PATH}"
+      fi
+    fi
     if [[ -f "${VK_PATH}" ]]; then
       echo "SETTLEMENT_VK_JSON not set; loading from ${VK_PATH}"
       SETTLEMENT_VK_JSON="$(cat "${VK_PATH}")"
@@ -85,12 +84,7 @@ export RPC_URL
 export ORACLE_ADDRESS
 export AUTHORIZATION_SIGNER
 export ZEN_TOKEN_ADDRESS
-export RELAYER_ADDRESS
-export TICKET_SIZE_WEI
-export MAX_COMMITMENTS
-export RAKE_BPS
-export PROTOCOL_LIABILITY_CAP_WEI
-export CIRCUIT_HASH
+export COLLATERAL_TOKEN
 export USE_STUB_VERIFIER
 export SETTLEMENT_VK_JSON
 export CHAIN_ID

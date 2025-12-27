@@ -13,7 +13,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, Prometheus counters (`worker.*`), plus proof queue depth gauge and DLQ counter. |
 | Retention | Track retention candidates and emit metrics; deletion is currently disabled (dry-run forced). |
-| Commitments & Merkle | Consume commitments/settlements recorded by the API/relayer (no direct ingestion), rebuild Keccak Merkle roots/paths for claims/proofs, and keep prover payloads aligned with on-chain roots. |
+| Commitments & Merkle | Consume commitments/settlements recorded by the API/relayer (no direct ingestion), rebuild Poseidon Merkle roots/paths for 256-ticket batches (depth 8), submit `lockBatches` when enabled, and keep prover payloads aligned with on-chain batch roots. |
 | On-chain backfills | Backfill missing `market_address` via MarketFactory and hydrate settlement snapshots from chain when RPC/factory settings are present. |
 | AI enrichment | Queue summary jobs whenever a market lacks a narrative and process them via `app.summary_worker`. |
 | Proof receipts | When enabled, call the `prover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
@@ -79,9 +79,9 @@ backend/worker/
 │   ├── market_sync.py     # Market persistence, retention, resolution backfill
 │   ├── resolution.py      # Resolution fetch/refresh and ledger upserts
 │   ├── proofs.py          # Settlement proof orchestration + persistence
-│   ├── proof_builder.py   # Build prover payloads from commitments/settlements
+│   ├── proof_builder.py   # Build per-batch prover payloads from commitments/settlements
 │   ├── settlement.py      # Settlement snapshots, claim payloads, tx submission
-│   ├── merkle.py          # Keccak Merkle root/path helpers
+│   ├── merkle.py          # Poseidon Merkle root/path helpers (depth 8, batch size 256)
 │   ├── cache_ops.py       # Cache invalidation + resolution cache writes
 │   ├── prime.py           # Cache priming for homepage/categories/suggestions
 │   ├── summary_jobs.py    # Summary queue enqueue helpers
@@ -161,12 +161,22 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_RPC_URL` | RPC endpoint used for MarketFactory address backfills and settlement snapshot hydration. |
 | `RM_FACTORY_ADDRESS` | MarketFactory address used to backfill `market_address` when missing. |
 
+### Lock-batches automation (optional)
+
+| Variable | Description |
+| --- | --- |
+| `RM_AUTO_LOCK_BATCHES_ENABLED` | Submit `lockBatches` once commit deadlines pass and commitments exist. |
+| `RM_LOCK_BATCHES_USE_RELAYER` | Route lock submissions through the relayer API instead of direct RPC. |
+| `RM_LOCK_BATCHES_MAX_PER_TICK` | Maximum markets to attempt locking per sync tick. |
+| `RM_LOCK_BATCHES_RELAYER_POLL_SECONDS`, `RM_LOCK_BATCHES_RELAYER_MAX_ATTEMPTS` | Polling settings when the relayer queue returns a job id. |
+| `RM_LOCK_BATCHES_GAS_LIMIT`, `RM_LOCK_BATCHES_GAS_PRICE_GWEI`, `RM_LOCK_BATCHES_MAX_PRIORITY_FEE_GWEI` | Gas overrides for lock-batches transactions (direct RPC mode). |
+
 ### Settlement automation (optional)
 
 | Variable | Description |
 | --- | --- |
 | `RM_AUTO_SETTLEMENT_ENABLED` | Enable proof generation once commitments/settlements exist (requires prover settings). |
-| `RM_AUTO_SETTLEMENT_TX_ENABLED` | Submit `verifyAndSettle` transactions when proofs are ready. |
+| `RM_AUTO_SETTLEMENT_TX_ENABLED` | Submit `verifyAndSettleBatched` transactions when proofs are ready (single-batch markets use `verifyAndSettle`). |
 | `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` | Signer key for settlement transactions. |
 | `RM_SETTLEMENT_RPC_URL` | Optional RPC override for settlement submission (defaults to `RM_RPC_URL`). |
 | `RM_SETTLEMENT_GAS_PRICE_GWEI`, `RM_SETTLEMENT_MAX_PRIORITY_FEE_GWEI` | Gas overrides for settlement submission. |
@@ -177,6 +187,7 @@ All environment variables begin with `RM_`. Notable groups:
 | Variable | Description |
 | --- | --- |
 | `RM_RELAYER_BASE_URL` | Relayer base URL used to build `/claim` payload targets. |
+| `RM_RELAYER_HTTP_TIMEOUT_SECONDS` | HTTP timeout for relayer requests. |
 | `RM_RELAYER_QUEUE_ENABLED` | Enable Redis-backed claim queue for relayer handoff. |
 | `RM_RELAYER_QUEUE_KEY` | Redis key for relayer claim jobs. |
 
@@ -265,7 +276,7 @@ The shared `./backend/run_tests.sh` wrapper enables four pytest workers per suit
 Coverage highlights:
 - `tests/test_polymarket_client.py`: payload normalization, pagination filters, retry/backoff behaviour.
 - `tests/test_worker_process.py`: cache priming, retention metrics, heartbeats, schema propagation.
-- `tests/test_merkle_and_payload.py`: Merkle root/path construction + prover payload validation.
+- `tests/test_merkle_and_payload.py`: Poseidon Merkle root/path construction + per-batch prover payload validation.
 - `tests/test_summary_jobs.py`: summary enqueueing, refresh windows, queue metadata.
 
 Pre-commit helpers:
@@ -309,9 +320,9 @@ uv run --project . --extra dev ruff check backend/worker
 
 ## 9. Runbooks (Prod)
 
-- **Required env vars (prod)**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_POLYMARKET_API_BASE`, `RM_HEARTBEAT_KEY`, `RM_SCHEMA_VERSION_KEY`. Feature flags: proofs (`RM_PROVER_ENABLED` + `RM_AUTO_SETTLEMENT_ENABLED`), settlement tx (`RM_AUTO_SETTLEMENT_TX_ENABLED` + `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` + `RM_SETTLEMENT_RPC_URL`), summaries (`RM_SUMMARY_ENABLED` + `RM_SUMMARY_API_KEY`), relayer claims (`RM_RELAYER_QUEUE_ENABLED` + `RM_RELAYER_BASE_URL`). Tuning: `RM_POLYMARKET_*` (fetch/retry/rate limit), `RM_RESOLUTION_FETCH_*`, `RM_MARKETS_CACHE_*`, `RM_HEARTBEAT_*`, DB pool knobs `RM_DATABASE_POOL_SIZE`/`RM_DATABASE_MAX_OVERFLOW`/`RM_DATABASE_POOL_TIMEOUT`.
+- **Required env vars (prod)**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_POLYMARKET_API_BASE`, `RM_HEARTBEAT_KEY`, `RM_SCHEMA_VERSION_KEY`. Feature flags: lock-batches (`RM_AUTO_LOCK_BATCHES_ENABLED` + `RM_RPC_URL` + oracle signer or `RM_LOCK_BATCHES_USE_RELAYER` + `RM_RELAYER_BASE_URL`), proofs (`RM_PROVER_ENABLED` + `RM_AUTO_SETTLEMENT_ENABLED`), settlement tx (`RM_AUTO_SETTLEMENT_TX_ENABLED` + `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` + `RM_SETTLEMENT_RPC_URL`), summaries (`RM_SUMMARY_ENABLED` + `RM_SUMMARY_API_KEY`), relayer claims (`RM_RELAYER_QUEUE_ENABLED` + `RM_RELAYER_BASE_URL`). Tuning: `RM_POLYMARKET_*` (fetch/retry/rate limit), `RM_RESOLUTION_FETCH_*`, `RM_MARKETS_CACHE_*`, `RM_HEARTBEAT_*`, relayer timeouts (`RM_RELAYER_HTTP_TIMEOUT_SECONDS`), DB pool knobs `RM_DATABASE_POOL_SIZE`/`RM_DATABASE_MAX_OVERFLOW`/`RM_DATABASE_POOL_TIMEOUT`.
 - **Startup (local)**: `cd backend/worker && uv sync --extra dev --no-install-project`; set `SETTINGS_FILE=.env.worker`; `LOG_LEVEL=DEBUG uv run --project . python run.py`; summaries: `uv run --project . python -m app.summary_worker`. In Docker: `docker compose up worker` (or full stack via `./run_local.sh`).
-- **Feature flags**: Proofs (`RM_PROVER_ENABLED=true` + `RM_AUTO_SETTLEMENT_ENABLED=true`), settlement tx (`RM_AUTO_SETTLEMENT_TX_ENABLED=true` + signer/RPC), relayer claims (`RM_RELAYER_QUEUE_ENABLED=true` + `RM_RELAYER_BASE_URL`), summaries (`RM_SUMMARY_ENABLED=true` + `RM_SUMMARY_API_KEY` or fallback), cache priming (`RM_PRIME_MARKETS_CACHE_ENABLED=true`, featured categories/queries lists).
+- **Feature flags**: Lock batches (`RM_AUTO_LOCK_BATCHES_ENABLED=true` + RPC + oracle signer or relayer), proofs (`RM_PROVER_ENABLED=true` + `RM_AUTO_SETTLEMENT_ENABLED=true`), settlement tx (`RM_AUTO_SETTLEMENT_TX_ENABLED=true` + signer/RPC), relayer claims (`RM_RELAYER_QUEUE_ENABLED=true` + `RM_RELAYER_BASE_URL`), summaries (`RM_SUMMARY_ENABLED=true` + `RM_SUMMARY_API_KEY` or fallback), cache priming (`RM_PRIME_MARKETS_CACHE_ENABLED=true`, featured categories/queries lists).
 - **Release strategy**: Prefer canary/blue-green. Ensure migrations are backward-compatible; keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker applies them once then publishes schema tags. Rollback by redeploying prior image; migrations should have downgrade paths if reversal is needed.
 - **Rollback**: Redeploy previous image/config; clear schema tag cache if needed (`DEL RM_SCHEMA_VERSION_KEY`); invalidate schema-tagged caches (`schema:*`) if you reverted a migration.
 - **Health/alerts**: Alert on heartbeat staleness (`RM_HEARTBEAT_KEY` TTL), `worker.fetch.error`, `worker.cache.prime_failed/featured_failed`, `worker.resolution.gaps`, `worker.proof.failed`, summary DLQ growth (`worker.summary.dead_letter`). Heartbeat payload contains `polymarket_ok`, `redis_available`, `markets_changed`, `resolutions_changed`, `latency_ms`, `market_errors`.

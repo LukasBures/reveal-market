@@ -59,19 +59,14 @@ let currentDisconnectState: WagmiDisconnectState;
 let currentSignMessageState: WagmiSignMessageState;
 let currentSwitchChainState: WagmiSwitchChainState;
 
-vi.mock("wagmi", async () => {
-  const actual = await vi.importActual<typeof import("wagmi")>("wagmi");
-  return {
-    ...actual,
-    defaultChain: hoistedDefaults.defaultChain,
-    useConnection: () => currentAccountState,
-    useConnect: () => currentConnectState,
-    useConnectors: () => currentConnectorsState,
-    useDisconnect: () => currentDisconnectState,
-    useSignMessage: () => currentSignMessageState,
-    useSwitchChain: () => currentSwitchChainState,
-  };
-});
+vi.mock("wagmi", () => ({
+  useConnection: () => currentAccountState,
+  useConnect: () => currentConnectState,
+  useConnectors: () => currentConnectorsState,
+  useDisconnect: () => currentDisconnectState,
+  useSignMessage: () => currentSignMessageState,
+  useSwitchChain: () => currentSwitchChainState,
+}));
 
 vi.mock("@/lib/wagmi", () => ({
   defaultChain: hoistedDefaults.defaultChain,

@@ -4,6 +4,7 @@ Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to t
 
 ## What it does today
 - Accepts `/commit` and `/claim` payloads and enqueues them in a durable queue (Postgres via `RM_DATABASE_URL`, SQLite fallback) that retries with backoff + fee bumps before submitting transactions. The default entrypoint runs in queue mode.
+- Accepts `/lock-batches` payloads, computes Poseidon batch roots (BATCH_SIZE=256, depth 8), and submits `lockBatches` for commit locks; optional ingest pushes `batch_roots`/`batch_counts` to the backend for proof generation.
 - Healthcheck `/healthz` reports RPC connectivity, latest block age, relayer/escrow addresses, balances/allowances, and owner checks; `/metrics` exports HTTP latency, tx outcomes/latency, and queue depth/outcomes; `/status` returns job state.
 - Optional ingest hooks push commitment/settlement metadata to the backend when `RELAYER_API_BASE_URL` is set. Admin endpoints list/replay/purge dead-lettered jobs when auth is enabled.
 
@@ -55,6 +56,7 @@ docker run --rm -p 8088:8088 \
 - `POST /status` — body: `{jobId}`; returns queue state, attempts, and tx hash when available.
 - `POST /commit` — body: `user, market, commitment, nonce, expiry, chain_id, ticket_value_wei, signature` plus optional ingest fields; queue mode returns `202 Accepted` with `{jobId, status: queued}`.
 - `POST /claim` — body: `market, user, ticket_id, outcome_id, amount, salt, merkle_proof[]` plus optional ingest fields; queue mode returns `202 Accepted` with `{jobId, status: queued}`.
+- `POST /lock-batches` — body: `market, tickets[]` plus optional `relayer_sig`; each ticket includes `ticket_id, outcome_id, amount, user, salt` (or precomputed `leaf`). Requires `event_id` or `market_id` for ingest; queue mode returns `202 Accepted` with `{jobId, status: queued}`. Batches must be contiguous (no ticket gaps); roots are Poseidon-based.
 - Admin (auth if bearer set): `GET /admin/queue/deadletter` lists dead-lettered jobs; `POST /admin/queue/deadletter/{id}/replay` resets to pending; `DELETE /admin/queue/deadletter/{id}` purges.
 
 ## Tests

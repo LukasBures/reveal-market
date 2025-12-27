@@ -66,3 +66,44 @@ func TestGroth16ProverIntegration(t *testing.T) {
 		t.Fatalf("expected %d public signals in calldata, got %d", len(expectedSignals), len(result.ProofCalldata[1]))
 	}
 }
+
+func TestGroth16ProverIntegrationWithWitnessBinary(t *testing.T) {
+	stubDir := filepath.Join("testdata", "integration")
+	witnessBin := filepath.Join(stubDir, "stub_witness.sh")
+	rapidBin := filepath.Join(stubDir, "stub_rapidsnark.sh")
+
+	tempArtifacts := t.TempDir()
+	zkeyPath := filepath.Join(tempArtifacts, "settlement_final.zkey")
+	if err := os.WriteFile(zkeyPath, []byte("stub"), 0o644); err != nil {
+		t.Fatalf("failed to seed zkey: %v", err)
+	}
+
+	settings := groth16Settings{
+		NodeBinary:       "node",
+		RapidSnarkBinary: rapidBin,
+		WitnessBinary:    witnessBin,
+		ZKeyPath:         zkeyPath,
+		TempDir:          t.TempDir(),
+		Timeout:          2 * time.Second,
+		MaxConcurrency:   1,
+	}
+
+	prover, err := newGroth16Prover(settings)
+	if err != nil {
+		t.Fatalf("failed to initialize prover: %v", err)
+	}
+
+	req := buildTestRequest()
+	req.MarketID = "0x3"
+
+	result, err := prover.Generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	if result.Proof == "" {
+		t.Fatalf("expected proof to be populated")
+	}
+	if len(result.PublicSignals) != 10 {
+		t.Fatalf("expected 10 public signals, got %d", len(result.PublicSignals))
+	}
+}

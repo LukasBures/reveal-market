@@ -386,6 +386,8 @@ def upgrade() -> None:
         sa.Column("leaf", sa.String(length=66), nullable=False),
         sa.Column("leaf_index", sa.Integer(), nullable=True),
         sa.Column("tx_hash", sa.String(length=66), nullable=True),
+        sa.Column("claim_tx_hash", sa.String(length=66), nullable=True),
+        sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("market_id", "ticket_hash", name="ux_commitments_market_ticket_hash"),
     )
@@ -393,6 +395,7 @@ def upgrade() -> None:
     op.create_index("ix_commitments_market_user", "commitments", ["market_id", "user_address"])
     op.create_index("ix_commitments_user_address", "commitments", ["user_address"])
     op.create_index("ix_commitments_tx_hash", "commitments", ["tx_hash"])
+    op.create_index("ix_commitments_claim_tx_hash", "commitments", ["claim_tx_hash"])
 
     op.create_table(
         "commitment_merkle_paths",
@@ -647,6 +650,7 @@ def upgrade() -> None:
         ),
         sa.Column("request_id", sa.String(length=128), nullable=False),
         sa.Column("proof_hash", sa.String(length=66), nullable=True),
+        sa.Column("batch_index", sa.Integer(), nullable=True),
         sa.Column("proof", sa.Text(), nullable=True),
         sa.Column("public_signals", sa.JSON(), nullable=True),
         sa.Column("prover_version", sa.String(length=64), nullable=True),
@@ -759,6 +763,7 @@ def downgrade() -> None:
     op.drop_index("ix_commitment_merkle_paths_commitment_level", table_name="commitment_merkle_paths")
     op.drop_table("commitment_merkle_paths")
     op.drop_index("ix_commitments_tx_hash", table_name="commitments")
+    op.drop_index("ix_commitments_claim_tx_hash", table_name="commitments")
     op.drop_index("ix_commitments_market_user", table_name="commitments")
     op.drop_index("ix_commitments_user_address", table_name="commitments")
     op.drop_index("ix_commitments_market_id", table_name="commitments")

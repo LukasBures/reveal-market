@@ -23,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import repository_async
 from app.database import run_migrations, session_scope
 from app.metrics_registry import PRICING_COUNTER
+from app.onchain import validate_verifier_circuit_hash
 from app.routes.trade import _call_relayer
 from app.runtime import logger, request_metrics
 from app.runtime import settings as runtime_settings
@@ -478,6 +479,17 @@ async def run_startup_tasks() -> None:
             logging.ERROR,
             event="service.startup.migrations_failed",
             message="startup failed during migrations",
+            error=str(exc),
+        )
+        raise
+    try:
+        await validate_verifier_circuit_hash(settings)
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="service.startup.circuit_hash_mismatch",
+            message="verifier circuit hash mismatch detected; aborting startup",
             error=str(exc),
         )
         raise

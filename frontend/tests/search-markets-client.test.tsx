@@ -6,13 +6,12 @@ import { loadFeaturedMarketsAction } from "@/app/actions/markets";
 
 const pushMock = vi.fn();
 const replaceMock = vi.fn();
+const routerMock = { push: pushMock, replace: replaceMock };
+const searchParamsMock = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: pushMock,
-    replace: replaceMock,
-  }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => routerMock,
+  useSearchParams: () => searchParamsMock,
 }));
 
 vi.mock("@/app/actions/markets", () => ({
@@ -119,7 +118,7 @@ describe("SearchMarketsClient", () => {
     fireEvent.click(recentButton);
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(2);
+      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(1);
     });
   });
 

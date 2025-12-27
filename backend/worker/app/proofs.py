@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 from collections.abc import Awaitable
 from typing import Any, TypeVar, cast
 
@@ -36,6 +37,8 @@ from .settlement import _upsert_settlement_from_chain, run_settlement_jobs
 
 logger = runtime.logger
 T = TypeVar("T")
+_PROVER_HEALTH_CACHE_SECONDS = 60.0
+_PROVER_CIRCUIT_CACHE: dict[str, Any] = {"value": None, "expires_at": 0.0}
 
 
 async def _resolve_awaitable(value: Awaitable[T] | T) -> T:
@@ -44,6 +47,50 @@ async def _resolve_awaitable(value: Awaitable[T] | T) -> T:
     if inspect.isawaitable(value):
         return cast(T, await value)
     return cast(T, value)
+
+
+def _normalize_hex(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        cleaned = value.hex()
+    else:
+        cleaned = str(value).strip().lower()
+        if cleaned.startswith("0x"):
+            cleaned = cleaned[2:]
+    if not cleaned:
+        return None
+    return cleaned
+
+
+async def _get_prover_circuit_hash() -> str | None:
+    client = runtime.PROVER_CLIENT
+    if client is None:
+        return None
+    fetch_health = getattr(client, "fetch_health", None)
+    if fetch_health is None:
+        return None
+    now = time.monotonic()
+    cached = _PROVER_CIRCUIT_CACHE.get("value")
+    if cached and now < float(_PROVER_CIRCUIT_CACHE.get("expires_at", 0.0) or 0.0):
+        return str(cached)
+    try:
+        payload = await fetch_health()
+    except Exception as exc:  # pragma: no cover - best-effort guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.proof.health_failed",
+            message="failed to fetch prover health payload",
+            error=str(exc),
+        )
+        return None
+    circuit_hash = payload.get("circuit_hash") or payload.get("circuitHash") or payload.get("circuit")
+    if circuit_hash:
+        _PROVER_CIRCUIT_CACHE["value"] = str(circuit_hash)
+        _PROVER_CIRCUIT_CACHE["expires_at"] = now + _PROVER_HEALTH_CACHE_SECONDS
+        return str(circuit_hash)
+    return None
 
 
 def _queue_keys() -> tuple[str, str]:
@@ -386,8 +433,15 @@ async def maybe_generate_settlement_proof(
             try:
                 async with session_scope() as session:
                     await _persist_settlement_snapshot(session, numeric_market_id, fallback)
-            except Exception:
-                pass
+            except Exception as persist_exc:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.snapshot_persist_failed",
+                    message="failed to persist settlement snapshot",
+                    error=str(persist_exc),
+                    market_id=market_identifier,
+                )
         # If a chain snapshot is available, try to hydrate settlement data before giving up.
         if payloads is None and numeric_market_id is not None and runtime.settings.rpc_url:
             try:
@@ -438,6 +492,45 @@ async def maybe_generate_settlement_proof(
         )
         return False
     first_payload = payloads[0]
+    expected_circuit = await _get_prover_circuit_hash()
+    if expected_circuit:
+        expected_norm = _normalize_hex(expected_circuit)
+        payload_norm = _normalize_hex(first_payload.get("circuitHash"))
+        if not payload_norm or (expected_norm and payload_norm != expected_norm):
+            if numeric_market_id is not None:
+                try:
+                    async with session_scope() as session:
+                        settlement_row = (
+                            await session.execute(
+                                select(shared_models.Settlement).where(
+                                    shared_models.Settlement.market_id == numeric_market_id
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if settlement_row:
+                            settlement_row.proof_status = shared_models.SettlementProofStatus.FAILED.value
+                            session.add(settlement_row)
+                            await session.flush()
+                except Exception as status_exc:  # pragma: no cover - defensive status update
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.proof.status_update_failed",
+                        message="failed to mark settlement proof as failed",
+                        error=str(status_exc),
+                        market_id=numeric_market_id,
+                    )
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.circuit_hash_mismatch",
+                message="prover circuit hash does not match settlement payload",
+                expected=expected_circuit,
+                actual=first_payload.get("circuitHash"),
+                market_id=market_identifier,
+            )
+            await _notify_status_change()
+            return False
     log_event(
         logger,
         logging.DEBUG,
@@ -518,13 +611,17 @@ async def maybe_generate_settlement_proof(
                 root_signal = str(response.public_signals[0])
             except Exception:
                 root_signal = None
-        cache_key_target = f"root:{root_signal}" if root_signal else (
-            normalized_condition
-            or payload.get("conditionId")
-            or payload.get("marketId")
-            or market_event_id
-            or market_identifier
-            or ""
+        cache_key_target = (
+            f"root:{root_signal}"
+            if root_signal
+            else (
+                normalized_condition
+                or payload.get("conditionId")
+                or payload.get("marketId")
+                or market_event_id
+                or market_identifier
+                or ""
+            )
         )
         cache_key = proof_receipt_cache_key(str(cache_key_target))
         if redis_client is not None:
@@ -567,7 +664,14 @@ async def maybe_generate_settlement_proof(
                     settlement.proof_hash = None
                 session.add(settlement)
             if numeric_market_id is not None:
-                for payload, response, proof_hash in results:
+                for _payload, response, proof_hash in results:
+                    batch_index = None
+                    try:
+                        batch_index_raw = _payload.get("batchIndex")
+                        if batch_index_raw is not None:
+                            batch_index = int(str(batch_index_raw))
+                    except (TypeError, ValueError):
+                        batch_index = None
                     await shared_repository.record_settlement_receipt(
                         session,
                         market_id=numeric_market_id,
@@ -575,6 +679,7 @@ async def maybe_generate_settlement_proof(
                         request_id=response.request_id,
                         proof_hash=f"0x{proof_hash}" if proof_hash else None,
                         proof=response.proof,
+                        batch_index=batch_index,
                         public_signals=response.public_signals,
                         prover_version=response.prover_version,
                         circuit_hash=response.circuit_hash,

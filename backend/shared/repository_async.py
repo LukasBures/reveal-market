@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models
@@ -440,6 +440,25 @@ async def list_markets_missing_address(session: AsyncSession) -> list[models.Mar
     return list((await session.scalars(stmt)).all())
 
 
+async def list_markets_for_factory_sync(session: AsyncSession) -> list[models.Market]:
+    """Return markets that should be mirrored against on-chain factory params."""
+
+    stmt = (
+        select(models.Market)
+        .where(models.Market.market_address.is_not(None))
+        .where(models.Market.market_address != "")
+        .where(
+            or_(
+                models.Market.factory.is_(None),
+                models.Market.factory == "",
+                models.Market.rake_bps.is_(None),
+                models.Market.onchain_market_id.is_(None),
+            )
+        )
+    )
+    return list((await session.scalars(stmt)).all())
+
+
 async def get_settlement_by_market_id(session: AsyncSession, market_id: int) -> models.Settlement | None:
     """Return the settlement snapshot for a market when it exists."""
 
@@ -534,6 +553,7 @@ async def record_settlement_receipt(
     request_id: str,
     proof_hash: str | None,
     proof: str | None,
+    batch_index: int | None,
     public_signals: list[str] | None,
     prover_version: str | None,
     circuit_hash: str | None,
@@ -557,6 +577,7 @@ async def record_settlement_receipt(
         request_id=request_id,
         proof_hash=proof_hash,
         proof=proof,
+        batch_index=batch_index,
         public_signals=public_signals or [],
         prover_version=prover_version,
         circuit_hash=circuit_hash,

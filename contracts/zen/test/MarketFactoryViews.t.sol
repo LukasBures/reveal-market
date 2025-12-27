@@ -52,13 +52,13 @@ contract MarketFactoryViewsTest is Test {
         factory.createMarket(params);
     }
 
-    function testPredictMarketAddressMatchesDeployed() external {
+    function testPredictMarketAddressMatchesDeployed() external view {
         address deployed = factory.marketForId(1);
         address predicted = factory.predictMarketAddress(1);
         assertEq(deployed, predicted, "predict matches deployment");
     }
 
-    function testGetMarketParamsReturnsInitState() external {
+    function testGetMarketParamsReturnsInitState() external view {
         MarketFactory.MarketParams memory params = factory.getMarketParams(1);
         assertEq(params.marketId, 1);
         assertEq(params.market, factory.marketForId(1));

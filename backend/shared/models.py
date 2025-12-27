@@ -371,6 +371,8 @@ class Commitment(Base):
     leaf: Mapped[str] = mapped_column(String(66), nullable=False)
     leaf_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    claim_tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -541,6 +543,7 @@ class SettlementReceipt(Base):
     )
     request_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     proof_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     public_signals: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     prover_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     circuit_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
@@ -558,6 +561,7 @@ Index("ix_markets_slug", Market.slug)
 Index("ix_markets_condition_id", Market.condition_id)
 Index("ix_markets_resolution_status", Market.resolution_status)
 Index("ix_commitments_user_address", Commitment.user_address)
+Index("ix_commitments_claim_tx_hash", Commitment.claim_tx_hash)
 Index(
     "ix_quotes_expires_at_issued",
     Quote.expires_at,
