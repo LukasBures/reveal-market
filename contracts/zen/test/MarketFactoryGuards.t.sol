@@ -31,6 +31,11 @@ contract MarketFactoryGuardsTest is Test {
         implementation = new RevealMarket();
         verifier = new MockVerifier(circuitHash);
         factory = new MarketFactory(address(implementation), pool, relayer, address(token), owner);
+
+        vm.prank(owner);
+        pool.setMarketFactory(address(factory));
+        vm.prank(owner);
+        relayer.setMarketFactory(address(factory));
     }
 
     function testCreateMarketRevertsWhenPaused() external {
@@ -99,6 +104,11 @@ contract MarketFactoryGuardsTest is Test {
         vm.prank(owner);
         vm.expectRevert(MarketFactory.UnknownMarket.selector);
         factory.setMarketClaimsPaused(makeAddr("unknown"), true);
+    }
+
+    function testSetRelayerCommitsPausedFromFactory() external {
+        vm.prank(owner);
+        factory.setRelayerCommitsPaused(true);
     }
 
     function _params(uint256 deadline) private view returns (MarketFactory.CreateMarketParams memory) {

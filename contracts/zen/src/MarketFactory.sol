@@ -71,6 +71,7 @@ contract MarketFactory is Ownable2Step {
     event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
     event MarketClaimDeadlineExtended(address indexed market, uint256 newDeadline);
     event MarketClaimsSwept(address indexed market, address indexed recipient);
+    event RelayerCommitsPaused(bool paused);
     event MarketCommitsPaused(address indexed market, bool paused);
     event MarketClaimsPaused(address indexed market, bool paused);
 
@@ -217,6 +218,12 @@ contract MarketFactory is Ownable2Step {
         if (!isMarket[market]) revert UnknownMarket();
         RevealMarket(payable(market)).setClaimsPaused(paused);
         emit MarketClaimsPaused(market, paused);
+    }
+
+    /// @notice Emergency pause for relayer escrow commits (guardian stop).
+    function setRelayerCommitsPaused(bool paused) external onlyOwner {
+        relayerEscrow.setCommitsPaused(paused);
+        emit RelayerCommitsPaused(paused);
     }
 
     /// @notice Deploys a new minimal market clone with the given parameters.

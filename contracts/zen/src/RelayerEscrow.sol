@@ -40,6 +40,7 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     error InvalidRelayerOwner();
     error UserMismatch();
     error CommitsPaused();
+    error NotAuthorized();
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -102,7 +103,8 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice Emergency pause for relayer commits.
-    function setCommitsPaused(bool paused) external onlyOwner {
+    function setCommitsPaused(bool paused) external {
+        if (msg.sender != owner() && msg.sender != marketFactory) revert NotAuthorized();
         commitsPaused = paused;
         emit CommitsPausedSet(paused);
     }

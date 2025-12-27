@@ -103,6 +103,19 @@ contract RelayerEscrowGuardsTest is Test {
         escrow.commitOnBehalf(user, address(market), auth, hex"");
     }
 
+    function testCommitPauseAllowsFactory() external {
+        vm.prank(owner);
+        escrow.setMarketFactory(factory);
+
+        vm.prank(factory);
+        escrow.setCommitsPaused(true);
+        assertTrue(escrow.commitsPaused());
+
+        vm.prank(stranger);
+        vm.expectRevert(RelayerEscrow.NotAuthorized.selector);
+        escrow.setCommitsPaused(false);
+    }
+
     function testCreditFromMarketRequiresAllowed() external {
         vm.prank(owner);
         escrow.setMarketFactory(address(this));

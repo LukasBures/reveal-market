@@ -224,8 +224,9 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     function testClaimRevertsWrongOutcome() external {
         (bytes32 leaf, bytes32[] memory leaves, uint256 payout) = _commitTicket(1, bytes32("claim-outcome"));
         bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, payout, payout);
         vm.prank(oracle);
-        market.verifyAndSettle("", _signals(root, 1, payout, payout));
+        market.verifyAndSettle("", signals);
 
         vm.expectRevert(RevealMarket.WrongOutcome.selector);
         vm.prank(relayerOwner);
@@ -235,8 +236,9 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     function testClaimRevertsWhenPaused() external {
         (bytes32 leaf, bytes32[] memory leaves, uint256 payout) = _commitTicket(1, bytes32("claim-pause"));
         bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, payout, payout);
         vm.prank(oracle);
-        market.verifyAndSettle("", _signals(root, 1, payout, payout));
+        market.verifyAndSettle("", signals);
 
         vm.prank(address(factory));
         market.setClaimsPaused(true);
@@ -249,8 +251,9 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     function testEnableRefundsRejectsAfterSettlement() external {
         (bytes32 leaf,, uint256 payout) = _commitTicket(1, bytes32("refund-after"));
         bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, payout, payout);
         vm.prank(oracle);
-        market.verifyAndSettle("", _signals(root, 1, payout, payout));
+        market.verifyAndSettle("", signals);
 
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
         vm.prank(relayerOwner);
