@@ -141,7 +141,12 @@ template SettlementCircuit() {
     winNo.in[1] <== 1;
     winYes.out + winNo.out === 1;
 
-    totalLiabilityComputed <== poolYesComputed * winYes.out + poolNoComputed * winNo.out;
+    signal poolYesLiability;
+    signal poolNoLiability;
+
+    poolYesLiability <== poolYesComputed * winYes.out;
+    poolNoLiability <== poolNoComputed * winNo.out;
+    totalLiabilityComputed <== poolYesLiability + poolNoLiability;
 
     // Fixed depth-8 Poseidon Merkle root over 256 leaves.
     signal tree[9][256];

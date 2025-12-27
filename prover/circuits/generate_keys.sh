@@ -4,9 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export ROOT_DIR
 BUILD_DIR="$ROOT_DIR/build"
-PTAU_FILE="$BUILD_DIR/powersOfTau28_hez_final_12.ptau"
+PTAU_POWER="${PTAU_POWER:-21}"
+PTAU_FILE="${PTAU_FILE:-$BUILD_DIR/powersOfTau28_hez_final_${PTAU_POWER}.ptau}"
 PTAU_MIN_BYTES=1000000
-PTAU_URL="${PTAU_URL:-https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_12.ptau}"
+PTAU_URL="${PTAU_URL:-https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${PTAU_POWER}.ptau}"
 CIRCUIT_FILE="$ROOT_DIR/settlement.circom"
 CIRCOM_TAG="${CIRCOM_TAG:-v2.2.3}"
 CIRCOM_CACHE_DIR="$BUILD_DIR/.circom-bin"
@@ -104,8 +105,14 @@ echo "Compiling circuit..."
 run_circom "$CIRCUIT_FILE" --r1cs --wasm --sym --c -l "$BUILD_DIR" -o "$BUILD_DIR"
 
 if [[ -d "$BUILD_DIR/settlement_cpp" ]]; then
-  echo "Building C++ witness generator..."
-  make -C "$BUILD_DIR/settlement_cpp"
+  if [[ "${SKIP_CPP_WITNESS:-0}" == "1" ]]; then
+    echo "Skipping C++ witness generator build (SKIP_CPP_WITNESS=1)."
+  else
+    echo "Building C++ witness generator..."
+    if ! make -C "$BUILD_DIR/settlement_cpp"; then
+      echo "WARNING: C++ witness build failed. Install nlohmann-json or rerun with SKIP_CPP_WITNESS=1."
+    fi
+  fi
 fi
 
 echo "Running Groth16 setup..."
@@ -123,7 +130,18 @@ export VK_PATH="$BUILD_DIR/settlement_vk.json"
 export CIRCUIT_NAME="reveal_settlement_v1"
 export CIRCUIT_VERSION="1.0.0"
 export HASH_OUT="$BUILD_DIR/settlement_hashes.json"
+
+use_cast=0
 if command -v cast >/dev/null 2>&1; then
+  pk_size="$(wc -c < "${ZKEY_PATH}" | tr -d ' ')"
+  vk_size="$(wc -c < "${VK_PATH}" | tr -d ' ')"
+  # cast keccak only supports small payloads; large zkeys overflow arg limits.
+  if [[ "${pk_size}" -le 65536 && "${vk_size}" -le 65536 ]]; then
+    use_cast=1
+  fi
+fi
+
+if [[ "${use_cast}" -eq 1 ]]; then
   pk_hex="$(xxd -p "${ZKEY_PATH}" | tr -d '\n')"
   vk_hex="$(xxd -p "${VK_PATH}" | tr -d '\n')"
   pk_hash="$(cast keccak "0x${pk_hex}")"
