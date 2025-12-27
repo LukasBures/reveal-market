@@ -17,6 +17,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     mapping(address => bool) public allowedMarket;
     mapping(address => uint256) public liabilityCap;
     mapping(address => uint256) public consumedLiability;
+    mapping(address => bool) public marketDrawPaused;
 
     event MarketRegistered(address indexed market, uint256 cap);
     event CapUpdated(address indexed market, uint256 oldCap, uint256 newCap);
@@ -25,14 +26,18 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     event Withdrawn(address indexed to, uint256 amount);
     event MarketFactoryUpdated(address indexed factory);
     event CapacityUpdated(uint256 capacity);
+    event DrawsPausedSet(bool paused);
+    event MarketDrawPausedSet(address indexed market, bool paused);
 
     error Unauthorized();
     error InvalidFactory();
     error CapExceeded();
     error InsufficientPool();
     error CapacityExceeded();
+    error DrawsPaused();
 
     uint256 public capacity; // optional global risk budget across markets
+    bool public drawsPaused;
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -59,6 +64,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         allowedMarket[market] = true;
         liabilityCap[market] = cap;
         consumedLiability[market] = 0;
+        marketDrawPaused[market] = false;
         emit MarketRegistered(market, cap);
     }
 
@@ -72,6 +78,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     /// @notice Called by markets to draw protocol coverage up to their configured cap.
     function draw(address market, uint256 amount) external nonReentrant {
         if (!allowedMarket[msg.sender] || msg.sender != market) revert Unauthorized();
+        if (drawsPaused || marketDrawPaused[market]) revert DrawsPaused();
         uint256 newConsumed = consumedLiability[market] + amount;
         if (newConsumed > liabilityCap[market]) revert CapExceeded();
         if (capacity != 0 && amount > capacity) revert CapacityExceeded();
@@ -98,6 +105,18 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     function setCapacity(uint256 newCapacity) external onlyOwner {
         capacity = newCapacity;
         emit CapacityUpdated(newCapacity);
+    }
+
+    /// @notice Emergency pause for all market draws.
+    function setDrawsPaused(bool paused) external onlyOwner {
+        drawsPaused = paused;
+        emit DrawsPausedSet(paused);
+    }
+
+    /// @notice Emergency pause for a single market draw.
+    function setMarketDrawPaused(address market, bool paused) external onlyOwner {
+        marketDrawPaused[market] = paused;
+        emit MarketDrawPausedSet(market, paused);
     }
 
     function deposit(uint256 amount) external nonReentrant {

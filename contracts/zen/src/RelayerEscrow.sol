@@ -18,11 +18,13 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     mapping(address => bool) public allowedMarket;
 
     address public marketFactory;
+    bool public commitsPaused;
 
     event Deposited(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
     event MarketRegistered(address indexed market);
     event MarketFactoryUpdated(address indexed factory);
+    event CommitsPausedSet(bool paused);
     event CommitForwarded(address indexed market, bytes32 commitment, uint256 debitedFromUser);
     event CreditReceived(address indexed market, address indexed user, uint256 amount);
 
@@ -37,6 +39,7 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     error CommitFailed();
     error InvalidRelayerOwner();
     error UserMismatch();
+    error CommitsPaused();
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -85,6 +88,7 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         IRevealMarket.CommitAuth calldata auth,
         bytes calldata signature
     ) external nonReentrant onlyOwner {
+        if (commitsPaused) revert CommitsPaused();
         if (!allowedMarket[market]) revert UnknownMarket();
         if (auth.user != user || user == address(0)) revert UserMismatch();
         uint256 ticket = IRevealMarket(market).ticketSize();
@@ -95,6 +99,12 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         IRevealMarket(market).commitWithAuthorization(auth, signature);
 
         emit CommitForwarded(market, auth.commitment, ticket);
+    }
+
+    /// @notice Emergency pause for relayer commits.
+    function setCommitsPaused(bool paused) external onlyOwner {
+        commitsPaused = paused;
+        emit CommitsPausedSet(paused);
     }
 
     /// @notice Optional hook for escrow-style payouts when markets do not pay users directly.

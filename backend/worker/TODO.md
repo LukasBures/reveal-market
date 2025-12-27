@@ -10,5 +10,5 @@
 - [ ] Summary worker resiliency: retry/backoff on Redis outages instead of crashing at startup. (backend/worker/app/summary_worker.py)
 
 ## Notes
-- Proof generation is gated by `RM_PROVER_ENABLED` + `RM_AUTO_SETTLEMENT_ENABLED` and existing commitments.
+- Proof generation requires `RM_PROVER_BASE_URL` and existing commitments.
 - Retention cleanup currently forces dry-run metrics regardless of `RM_RESOLVED_RETENTION_DRY_RUN`.

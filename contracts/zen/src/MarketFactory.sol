@@ -71,6 +71,8 @@ contract MarketFactory is Ownable2Step {
     event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
     event MarketClaimDeadlineExtended(address indexed market, uint256 newDeadline);
     event MarketClaimsSwept(address indexed market, address indexed recipient);
+    event MarketCommitsPaused(address indexed market, bool paused);
+    event MarketClaimsPaused(address indexed market, bool paused);
 
     error InvalidImplementation();
     error InvalidRelayer();
@@ -201,6 +203,20 @@ contract MarketFactory is Ownable2Step {
         if (!isMarket[market]) revert UnknownMarket();
         RevealMarket(payable(market)).sweepUnclaimed(recipient);
         emit MarketClaimsSwept(market, recipient);
+    }
+
+    /// @notice Pause or unpause commits on a market (emergency stop).
+    function setMarketCommitsPaused(address market, bool paused) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).setCommitsPaused(paused);
+        emit MarketCommitsPaused(market, paused);
+    }
+
+    /// @notice Pause or unpause claims on a market (emergency stop).
+    function setMarketClaimsPaused(address market, bool paused) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).setClaimsPaused(paused);
+        emit MarketClaimsPaused(market, paused);
     }
 
     /// @notice Deploys a new minimal market clone with the given parameters.

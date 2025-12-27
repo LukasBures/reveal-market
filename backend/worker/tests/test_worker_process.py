@@ -21,6 +21,7 @@ from app.polymarket import MarketPayload, build_filters_from_settings
 from app.prover_client import SettlementProofResponse
 from app.schema import SchemaSyncResult
 from prometheus_client import REGISTRY
+from pydantic import SecretStr
 from shared import cache_async as shared_cache
 from shared import models as shared_models
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
@@ -933,8 +934,6 @@ async def test_maybe_generate_settlement_proof(monkeypatch):
 
     fake_prover = FakeProver()
     monkeypatch.setattr(runtime_module, "PROVER_CLIENT", fake_prover, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
 
     engine, session_factory = await create_async_in_memory_db()
     monkeypatch.setattr(db, "engine", engine, raising=False)
@@ -1046,8 +1045,6 @@ async def test_maybe_generate_settlement_proof_rejects_circuit_hash_mismatch(mon
 
     fake_prover = FakeProver()
     monkeypatch.setattr(runtime_module, "PROVER_CLIENT", fake_prover, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
     proofs._PROVER_CIRCUIT_CACHE["value"] = None
     proofs._PROVER_CIRCUIT_CACHE["expires_at"] = 0.0
 
@@ -1200,9 +1197,7 @@ async def test_sync_polymarket_feed_skips_when_lease_held(monkeypatch):
 async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, caplog):
     # Set up runtime settings
     monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
+    monkeypatch.setattr(runtime_module, "PROVER_CLIENT", object(), raising=False)
     monkeypatch.setattr(runtime_module.settings, "proof_queue_poll_seconds", 0.01, raising=False)
     monkeypatch.setattr(runtime_module.settings, "settlement_queue_poll_seconds", 0.01, raising=False)
 
@@ -1310,8 +1305,7 @@ async def test_events_ingest_persists_gamma_events_and_enqueues_proof(monkeypatc
     monkeypatch.setattr(db, "engine", engine, raising=False)
     monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
     monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "prover_enabled", True, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module, "PROVER_CLIENT", object(), raising=False)
 
     events_payload = [
         {
@@ -1387,12 +1381,11 @@ async def test_events_ingest_persists_gamma_events_and_enqueues_proof(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_settlement_queue_enqueues_relayer_claims(monkeypatch):
+async def test_settlement_queue_skips_without_signer(monkeypatch):
     redis_client = DummyRedis()
     monkeypatch.setattr(runtime_module.settings, "relayer_queue_enabled", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "relayer_base_url", "http://relayer:8088", raising=False)
     monkeypatch.setattr(runtime_module.settings, "relayer_queue_key", "relayer:queue", raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
 
     engine, session_factory = await create_async_in_memory_db()
     monkeypatch.setattr(db, "engine", engine, raising=False)
@@ -1443,14 +1436,11 @@ async def test_settlement_queue_enqueues_relayer_claims(monkeypatch):
         await session.commit()
 
     temp_summary = SyncSummary()
-    await worker_service.run_settlement_jobs(temp_summary, redis_client)
+    submitted = await worker_service.run_settlement_jobs(temp_summary, redis_client)
 
     queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)
-    assert queue_items, "relayer queue should have jobs"
-    job_body = json.loads(queue_items[0])
-    assert job_body["kind"] == "claim"
-    assert job_body["payload"]["market"] == "0x0000000000000000000000000000000000000001"
-    assert job_body["payload"]["outcome_id"] == 1
+    assert not queue_items, "relayer queue should remain empty without settlement signer"
+    assert submitted == 0
 
     async with session_factory() as session:
         db_settlement = (
@@ -1458,16 +1448,23 @@ async def test_settlement_queue_enqueues_relayer_claims(monkeypatch):
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == market.id)
             )
         ).scalar_one()
-        assert db_settlement.submission_status == shared_models.SettlementSubmissionStatus.QUEUED.value
+        assert db_settlement.submission_status == shared_models.SettlementSubmissionStatus.NONE.value
 
 
 @pytest.mark.asyncio
-async def test_settlement_queue_skips_missing_merkle_metadata(monkeypatch):
+async def test_settlement_queue_skips_without_rpc(monkeypatch):
     redis_client = DummyRedis()
     monkeypatch.setattr(runtime_module.settings, "relayer_queue_enabled", True, raising=False)
     monkeypatch.setattr(runtime_module.settings, "relayer_base_url", "http://relayer:8088", raising=False)
     monkeypatch.setattr(runtime_module.settings, "relayer_queue_key", "relayer:queue", raising=False)
-    monkeypatch.setattr(runtime_module.settings, "auto_settlement_tx_enabled", False, raising=False)
+    monkeypatch.setattr(
+        runtime_module.settings,
+        "settlement_signer_private_key",
+        SecretStr("0x" + "1" * 64),
+        raising=False,
+    )
+    monkeypatch.setattr(runtime_module.settings, "rpc_url", None, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "settlement_rpc_url", None, raising=False)
 
     engine, session_factory = await create_async_in_memory_db()
     monkeypatch.setattr(db, "engine", engine, raising=False)
@@ -1510,10 +1507,11 @@ async def test_settlement_queue_skips_missing_merkle_metadata(monkeypatch):
         await session.commit()
 
     temp_summary = SyncSummary()
-    await worker_service.run_settlement_jobs(temp_summary, redis_client)
+    submitted = await worker_service.run_settlement_jobs(temp_summary, redis_client)
 
     queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)
-    assert not queue_items, "relayer queue should be empty when commitments are incomplete"
+    assert not queue_items, "relayer queue should remain empty without RPC"
+    assert submitted == 0
 
 
 @pytest.mark.asyncio

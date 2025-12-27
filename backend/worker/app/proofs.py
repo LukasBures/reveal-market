@@ -298,18 +298,12 @@ def _build_snapshot_payload(
 
 async def run_prover_jobs(summary: SyncSummary, redis_client: Redis | None) -> int:
     """Iterate queued proof jobs and return how many proofs were generated."""
-    if (
-        not runtime.settings.prover_enabled
-        or not runtime.settings.auto_settlement_enabled
-        or runtime.PROVER_CLIENT is None
-    ):
+    if runtime.PROVER_CLIENT is None:
         log_event(
             logger,
             logging.DEBUG,
             event="worker.proof.disabled",
-            message="skipping proof generation (disabled or client unavailable)",
-            prover_enabled=runtime.settings.prover_enabled,
-            auto_settlement_enabled=runtime.settings.auto_settlement_enabled,
+            message="skipping proof generation (prover client unavailable)",
         )
         return 0
     proofs_generated = 0
@@ -333,18 +327,12 @@ async def maybe_generate_settlement_proof(
 ) -> bool:
     """Call the prover service when settlements change so downstream services can audit proofs."""
 
-    if (
-        not runtime.settings.prover_enabled
-        or not runtime.settings.auto_settlement_enabled
-        or runtime.PROVER_CLIENT is None
-    ):
+    if runtime.PROVER_CLIENT is None:
         log_event(
             logger,
             logging.DEBUG,
             event="worker.proof.disabled",
-            message="settlement proof generation is disabled or client unavailable",
-            prover_enabled=runtime.settings.prover_enabled,
-            auto_settlement_enabled=runtime.settings.auto_settlement_enabled,
+            message="settlement proof generation skipped (prover client unavailable)",
         )
         return False
 

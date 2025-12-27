@@ -564,14 +564,12 @@ async def _list_lock_candidates(
 async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
     """Submit lockBatches for markets that have passed their commit deadline."""
 
-    if not runtime.settings.auto_lock_batches_enabled:
-        return 0
     if not runtime.settings.rpc_url:
         log_event(
             logger,
             logging.DEBUG,
             event="worker.lock_batches.disabled",
-            message="auto lock-batches disabled (missing RPC URL)",
+            message="lock-batches skipped (missing RPC URL)",
         )
         return 0
 
@@ -590,7 +588,7 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
             logger,
             logging.DEBUG,
             event="worker.lock_batches.disabled",
-            message="auto lock-batches disabled (missing signer)",
+            message="lock-batches skipped (missing signer)",
         )
         return 0
 
@@ -1018,36 +1016,30 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
     """Submit settlement proofs on-chain for markets with generated proofs and no tx hash."""
 
     relayer_enabled = bool(runtime.settings.relayer_queue_enabled and runtime.settings.relayer_base_url)
-    if not runtime.settings.auto_settlement_tx_enabled and not relayer_enabled:
-        return 0
     signer_secret = runtime.settings.settlement_signer_private_key
     rpc_url = str(runtime.settings.settlement_rpc_url or runtime.settings.rpc_url or "")
+    if signer_secret is None or not rpc_url:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.tx.unavailable",
+            message="settlement tx unavailable (missing signer or rpc)",
+        )
+        return 0
     account = None
     web3: AsyncWeb3 | None = None
-    if runtime.settings.auto_settlement_tx_enabled:
-        if signer_secret is None or not rpc_url:
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.settlement.tx.disabled",
-                message="auto-settlement tx disabled (missing signer or rpc)",
-            )
-            if not relayer_enabled:
-                return 0
-        else:
-            try:
-                account = Account.from_key(signer_secret.get_secret_value())
-                web3 = get_async_web3(rpc_url)
-            except Exception as exc:  # pragma: no cover - config error
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="worker.settlement.tx.signer_error",
-                    message="failed to load settlement signer",
-                    error=str(exc),
-                )
-                if not relayer_enabled:
-                    return 0
+    try:
+        account = Account.from_key(signer_secret.get_secret_value())
+        web3 = get_async_web3(rpc_url)
+    except Exception as exc:  # pragma: no cover - config error
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.tx.signer_error",
+            message="failed to load settlement signer",
+            error=str(exc),
+        )
+        return 0
 
     submitted = 0
     dirty_events: set[str] = set()
@@ -1105,17 +1097,6 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
                 batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not runtime.settings.auto_settlement_tx_enabled:
-                if relayer_enabled:
-                    enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
-                    if enqueued:
-                        settlement.submission_status = shared_models.SettlementSubmissionStatus.QUEUED.value
-                        settlement.submission_error = None
-                        _mark_dirty()
-                        session.add(settlement)
-                        submitted += enqueued
-                continue
-
             if web3 is None or account is None:
                 settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
                 settlement.submission_error = "settlement_tx_unavailable"

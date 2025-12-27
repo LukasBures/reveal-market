@@ -77,7 +77,7 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 - Runtime pinning: document `PROVER_RAPIDSNARK_BINARY` and Node versions for deployment manifests.
 
 ## 13) Test/QA plan (prove the zk flow)
-- End-to-end script: start stack, ensure backend `/health` passes signer/FX checks, regenerate artifacts, deploy verifier, set `RM_PROVER_ENABLED=true` and automation flag as needed.
+- End-to-end script: start stack, ensure backend `/health` passes signer/FX checks, regenerate artifacts, deploy verifier, set `RM_PROVER_BASE_URL` and required signer/RPC envs.
 - Happy-path demo: (1) user connects wallet on Horizen testnet; (2) requests quote, submits `commitWithQuote`; (3) worker ingests commitment; (4) resolve market (manual trigger acceptable); (5) worker stores resolution ledger and requests proof; (6) prover generates proof; (7) API exposes proof on `/proofs`; (8) frontend shows proof and allows claim; (9) claim tx succeeds and ledger updates.
 - Failure tests: stale FX blocks trade; expired quote rejected; wrong chain/address blocked; missing artifacts causes prover startup failure; CORS/connect-src misconfig surfaces dev warning.
 - Coverage: backend tests for caps, quote persistence, resolution ledger, proof exposure; frontend tests for trading flow guards, proofs filters/CSV, positions dashboard, chart wiring; contracts/prover tests for updated circuit and verifier hash.
@@ -433,10 +433,11 @@ ________
   Worker / Oracle / Settlement
 
   - Set worker envs:
-      - RM_RPC_URL, RM_AUTO_LOCK_BATCHES_ENABLED=true
-      - RM_LOCK_BATCHES_USE_RELAYER=true or set RM_SETTLEMENT_SIGNER_PRIVATE_KEY
-      - RM_PROVER_ENABLED=true, RM_AUTO_SETTLEMENT_ENABLED=true
-      - RM_AUTO_SETTLEMENT_TX_ENABLED=true, RM_SETTLEMENT_RPC_URL (or RM_RPC_URL)
+      - RM_RPC_URL
+      - RM_LOCK_BATCHES_USE_RELAYER=true (or set RM_SETTLEMENT_SIGNER_PRIVATE_KEY for direct RPC)
+      - RM_PROVER_BASE_URL
+      - RM_SETTLEMENT_SIGNER_PRIVATE_KEY
+      - RM_SETTLEMENT_RPC_URL (or RM_RPC_URL)
   - Confirm worker is ingesting resolutions and writing winning_outcome_id.
 
   Relayer
@@ -465,3 +466,11 @@ ________
   - Wait for market close and resolution ingest.
   - Confirm lockBatches + postResult + verifyAndSettleBatched txs appear.
   - Call /claim/bundles, submit claim(...), verify payout and UI status “Claimed”.
+________
+
+  - High: setRakeBps can change rake after commits, which can desync proofs and refund math; freeze rake after first commit or after phase != Commit. contracts/zen/src/RevealMarket.sol
+  - Medium: enableRefunds is only usable after commitDeadline, so you can’t cancel during the commit window; funds stay locked until deadline. contracts/zen/src/RevealMarket.sol
+  - Medium: Refunds are admin/relayer‑only; users cannot self‑refund if ops is down. contracts/zen/src/RevealMarket.sol
+  - Medium: No pause/circuit breaker on RelayerEscrow commits or ProtocolPool.draw; a compromised relayer/oracle can still move funds until rotated. contracts/zen/src/RelayerEscrow.sol, contracts/zen/src/ProtocolPool.sol
+  - Low: setCommitsPaused / setClaimsPaused have no events for auditing/monitoring. contracts/zen/src/RevealMarket.sol
+  - Low: Commit nonces are global per market (not per user), so the signer must guarantee global uniqueness or users can be blocked. contracts/zen/src/RevealMarket.sol

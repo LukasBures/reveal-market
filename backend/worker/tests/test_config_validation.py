@@ -18,6 +18,10 @@ def test_validate_required_settings_requires_db_and_redis_in_prod(monkeypatch):
 def test_validate_required_settings_requires_summary_api_key_when_no_fallback(monkeypatch):
     monkeypatch.setenv("RM_DATABASE_URL", "postgresql://user:<REDACTED>@db/reveal")
     monkeypatch.setenv("RM_REDIS_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("RM_POLYMARKET_API_BASE", "https://gamma-api.polymarket.com")
+    monkeypatch.setenv("RM_PROVER_BASE_URL", "http://prover:8085")
+    monkeypatch.setenv("RM_RPC_URL", "https://rpc.example")
+    monkeypatch.setenv("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
     monkeypatch.delenv("RM_SUMMARY_API_KEY", raising=False)
     settings = Settings(
         environment="production",
@@ -34,11 +38,9 @@ def test_validate_required_settings_allows_prover_when_env_present(monkeypatch):
     monkeypatch.setenv("RM_REDIS_URL", "redis://redis:6379/0")
     monkeypatch.setenv("RM_PROVER_BASE_URL", "http://prover:8085")
     monkeypatch.setenv("RM_POLYMARKET_API_BASE", "https://gamma-api.polymarket.com")
-    settings = Settings(
-        environment="production",
-        prover_enabled=True,
-        auto_settlement_enabled=True,
-    )
+    monkeypatch.setenv("RM_RPC_URL", "https://rpc.example")
+    monkeypatch.setenv("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
+    settings = Settings(environment="production")
     # should not raise because required envs are set
     validate_required_settings(settings)
 
@@ -47,9 +49,10 @@ def test_validate_required_settings_requires_lock_batches_signer(monkeypatch):
     monkeypatch.setenv("RM_DATABASE_URL", "postgresql://user:<REDACTED>@db/reveal")
     monkeypatch.setenv("RM_REDIS_URL", "redis://redis:6379/0")
     monkeypatch.setenv("RM_RPC_URL", "https://rpc.example")
+    monkeypatch.setenv("RM_PROVER_BASE_URL", "http://prover:8085")
     monkeypatch.setenv("RM_POLYMARKET_API_BASE", "https://gamma-api.polymarket.com")
     monkeypatch.delenv("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", raising=False)
-    settings = Settings(environment="production", auto_lock_batches_enabled=True)
+    settings = Settings(environment="production")
     with pytest.raises(MissingSettingsError) as excinfo:
         validate_required_settings(settings)
     assert "RM_SETTLEMENT_SIGNER_PRIVATE_KEY" in str(excinfo.value)
@@ -59,11 +62,12 @@ def test_validate_required_settings_requires_relayer_for_lock_batches(monkeypatc
     monkeypatch.setenv("RM_DATABASE_URL", "postgresql://user:<REDACTED>@db/reveal")
     monkeypatch.setenv("RM_REDIS_URL", "redis://redis:6379/0")
     monkeypatch.setenv("RM_RPC_URL", "https://rpc.example")
+    monkeypatch.setenv("RM_PROVER_BASE_URL", "http://prover:8085")
     monkeypatch.setenv("RM_POLYMARKET_API_BASE", "https://gamma-api.polymarket.com")
+    monkeypatch.setenv("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
     monkeypatch.delenv("RM_RELAYER_BASE_URL", raising=False)
     settings = Settings(
         environment="production",
-        auto_lock_batches_enabled=True,
         lock_batches_use_relayer=True,
     )
     with pytest.raises(MissingSettingsError) as excinfo:

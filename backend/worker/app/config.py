@@ -208,7 +208,6 @@ class Settings(BaseSettings):
     summary_retry_max_attempts: int = Field(default=3, ge=1)
     summary_fallback_enabled: bool = Field(default=True)
     container_heartbeat_seconds: int = Field(default=60, ge=10)
-    prover_enabled: bool = Field(default=False)
     prover_base_url: AnyHttpUrl | None = Field(default=None)
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
     prover_shared_secret: SecretStr | None = Field(default=None)
@@ -229,10 +228,6 @@ class Settings(BaseSettings):
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
-    auto_lock_batches_enabled: bool = Field(
-        default=False,
-        description="Automatically submit lockBatches once commit deadlines pass and commitments exist",
-    )
     lock_batches_use_relayer: bool = Field(
         default=False,
         description="Route lockBatches submissions through the relayer API instead of direct RPC",
@@ -243,13 +238,6 @@ class Settings(BaseSettings):
     lock_batches_gas_limit: int = Field(default=800_000, ge=100_000)
     lock_batches_gas_price_gwei: float | None = Field(default=None, ge=0)
     lock_batches_max_priority_fee_gwei: float | None = Field(default=None, ge=0)
-    auto_settlement_enabled: bool = Field(
-        default=False, description="Automatically request settlement proofs when data is present"
-    )
-    auto_settlement_tx_enabled: bool = Field(
-        default=False,
-        description="Automatically submit verifyAndSettle transactions once proofs are ready",
-    )
     settlement_signer_private_key: SecretStr | None = Field(
         default=None, description="Private key for the oracle account that submits settlement transactions"
     )
@@ -369,24 +357,12 @@ def validate_required_settings(settings: Settings) -> None:
 
     # Feature-gated requirements
     require("RM_SUMMARY_API_KEY", when=settings.summary_enabled and not settings.summary_fallback_enabled)
-    require(
-        "RM_PROVER_BASE_URL",
-        when=settings.prover_enabled and (settings.auto_settlement_enabled or settings.prover_enabled),
-    )
-    require("RM_RPC_URL", when=settings.auto_lock_batches_enabled)
-    if settings.auto_lock_batches_enabled:
-        if settings.lock_batches_use_relayer:
-            require("RM_RELAYER_BASE_URL")
-        else:
-            require("RM_SETTLEMENT_SIGNER_PRIVATE_KEY")
-    require(
-        "RM_SETTLEMENT_SIGNER_PRIVATE_KEY",
-        when=settings.auto_settlement_tx_enabled,
-    )
-    require(
-        "RM_SETTLEMENT_RPC_URL",
-        when=settings.auto_settlement_tx_enabled and not _env_present("RM_RPC_URL"),
-    )
+    require("RM_PROVER_BASE_URL", when=prod_like)
+    require("RM_RPC_URL", when=prod_like)
+    if settings.lock_batches_use_relayer:
+        require("RM_RELAYER_BASE_URL")
+    require("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", when=prod_like)
+    require("RM_SETTLEMENT_RPC_URL", when=prod_like and not _env_present("RM_RPC_URL"))
     if missing:
         unique = sorted(set(missing))
         raise MissingSettingsError(f"Missing required environment variables: {', '.join(unique)}")

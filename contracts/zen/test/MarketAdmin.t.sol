@@ -264,6 +264,28 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         assertEq(market.rakeBps(), 500);
     }
 
+    function testRakeLockedAfterFirstCommit() external {
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: _leaf(0, 0, ticketSize, bytes32("rake-lock"), user),
+            user: user,
+            nonce: 88,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(relayerOwner);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+
+        vm.prank(address(this));
+        vm.expectRevert(RevealMarket.RakeLocked.selector);
+        factory.setMarketRake(address(market), 300);
+    }
+
     function testExtendDeadlinesAndGuards() external {
         uint256 newCommit = commitDeadline + 1 hours;
         vm.prank(address(this));

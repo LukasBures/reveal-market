@@ -69,6 +69,15 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         market.enableRefunds();
     }
 
+    function testEnableRefundsAllowsEarlyCancelWhenPaused() external {
+        factory.setMarketCommitsPaused(address(market), true);
+        vm.prank(relayerOwner);
+        market.enableRefunds();
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
+        assertTrue(market.commitsPaused(), "commits paused");
+        assertTrue(market.claimsPaused(), "claims paused");
+    }
+
     function testRefundFlowAfterEnable() external {
         bytes32 salt = keccak256("refund-salt");
         bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
@@ -113,6 +122,35 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         vm.prank(user);
         vm.expectRevert(RevealMarket.NotAuthorized.selector);
         market.refund(user, 0, 1, ticketSize, salt, new bytes32[](0));
+    }
+
+    function testRefundSelfAfterEnable() external {
+        bytes32 salt = keccak256("refund-self");
+        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        _depositAndCommit(leaf, 1);
+
+        vm.warp(commitDeadline + 1);
+        vm.prank(relayerOwner);
+        market.enableRefunds();
+
+        uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
+        vm.prank(user);
+        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
+        assertEq(token.balanceOf(user), netTicket, "self refund credited");
+
+        vm.prank(user);
+        vm.expectRevert(RevealMarket.TicketAlreadyClaimed.selector);
+        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
+    }
+
+    function testRefundSelfRequiresEnable() external {
+        bytes32 salt = keccak256("refund-self-disabled");
+        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        _depositAndCommit(leaf, 1);
+
+        vm.prank(user);
+        vm.expectRevert(RevealMarket.RefundsNotEnabled.selector);
+        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
     }
 
     function _depositAndCommit(bytes32 commitment, uint256 nonce) internal {

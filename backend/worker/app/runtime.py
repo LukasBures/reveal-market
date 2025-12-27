@@ -74,8 +74,8 @@ def _build_clob_client() -> ClobClient | None:
 
 
 def _build_prover_client() -> AsyncProverClient | None:
-    """Instantiate the prover client when auto-settlement is enabled."""
-    if settings.prover_enabled and settings.prover_base_url:
+    """Instantiate the prover client when configured."""
+    if settings.prover_base_url:
         secret = settings.prover_shared_secret.get_secret_value() if settings.prover_shared_secret else None
         return AsyncProverClient(
             base_url=str(settings.prover_base_url),

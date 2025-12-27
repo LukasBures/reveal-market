@@ -79,7 +79,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     bool private initialized;
 
     bytes32[] private commitments;
-    mapping(uint256 => bool) public usedCommitNonces;
+    mapping(address => mapping(uint256 => bool)) public usedCommitNonces;
     mapping(uint256 => bool) public claimedTickets;
 
     event Committed(uint256 indexed ticketId, bytes32 commitment, uint256 totalEscrow);
@@ -89,6 +89,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
     event ClaimDeadlineExtended(uint256 newDeadline);
     event ClaimsSwept(address indexed recipient, uint256 amount);
+    event CommitsPausedSet(bool paused);
+    event ClaimsPausedSet(bool paused);
     event RefundsEnabled(address indexed caller);
     event Refunded(address indexed caller, address indexed user, uint256 indexed ticketId, uint256 amount);
     event AuthorizationSignerUpdated(address indexed signer);
@@ -130,6 +132,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error ClaimWindowClosed();
     error ClaimWindowOpen();
     error ClaimsAlreadySwept();
+    error RakeLocked();
     error InvalidAddress();
     error RefundsNotEnabled();
     error RefundsUnavailable();
@@ -225,7 +228,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize) revert InvalidPayment();
         if (maxCommitments != 0 && commitments.length >= maxCommitments) revert MaxCommitmentsReached();
         if (auth.expiry < block.timestamp) revert CommitExpired();
-        if (usedCommitNonces[auth.nonce]) revert CommitReplay();
+        if (usedCommitNonces[auth.user][auth.nonce]) revert CommitReplay();
 
         bytes32 commitDigest = keccak256(
             abi.encodePacked(
@@ -242,7 +245,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(commitDigest);
         if (digest.recover(signature) != authorizationSigner) revert InvalidSignature();
 
-        usedCommitNonces[auth.nonce] = true;
+        usedCommitNonces[auth.user][auth.nonce] = true;
         commitments.push(auth.commitment);
         uint256 rake = (ticketSize * rakeBps) / 10_000;
         uint256 net = ticketSize - rake;
@@ -407,7 +410,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     /// @notice Enables refunds after the commit window closes; cancels further settlement/claims.
     function enableRefunds() external onlyRelayerOrFactoryOwner {
         if (phase == Phase.Settled) revert InvalidPhase();
-        if (block.timestamp < commitDeadline) revert RefundsUnavailable();
+        if (block.timestamp < commitDeadline && !commitsPaused) revert RefundsUnavailable();
         if (phase == Phase.Cancelled) return;
         commitsPaused = true;
         claimsPaused = true;
@@ -437,6 +440,23 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit Refunded(msg.sender, user, ticketId, refundAmount);
     }
 
+    /// @notice Users may self-refund after refunds are enabled (caller must match the commitment leaf).
+    function refundSelf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, bytes32[] calldata merkleProof)
+        external
+        nonReentrant
+    {
+        if (phase != Phase.Cancelled) revert RefundsNotEnabled();
+        if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, msg.sender);
+        if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
+
+        claimedTickets[ticketId] = true;
+        uint256 rake = (ticketSize * rakeBps) / 10_000;
+        uint256 refundAmount = ticketSize - rake;
+        IERC20(collateralToken).safeTransfer(msg.sender, refundAmount);
+        emit Refunded(msg.sender, msg.sender, ticketId, refundAmount);
+    }
+
     /// @notice Returns the sealed commitment stored at an index (for off-chain auditing).
     function commitmentAt(uint256 index) external view returns (bytes32) {
         return commitments[index];
@@ -463,6 +483,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     /// @notice Factory hook to update rake for existing markets (keeps all markets aligned to global rake).
     function setRakeBps(uint256 newRakeBps) external onlyFactory {
+        if (phase != Phase.Commit) revert InvalidPhase();
+        if (commitments.length != 0) revert RakeLocked();
         if (newRakeBps > 10_000) revert InvalidInit();
         rakeBps = newRakeBps;
     }
@@ -500,10 +522,12 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     /// @notice Owner/factory controls to pause commits or claims in emergencies.
     function setCommitsPaused(bool paused) external onlyFactory {
         commitsPaused = paused;
+        emit CommitsPausedSet(paused);
     }
 
     function setClaimsPaused(bool paused) external onlyFactory {
         claimsPaused = paused;
+        emit ClaimsPausedSet(paused);
     }
 
     function _finalizeSettlement(

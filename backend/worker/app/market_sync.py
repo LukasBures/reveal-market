@@ -622,13 +622,7 @@ async def collect_market_changes_with_summary(
             summary.stats_dirty = True
         if await maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
             summary.summaries_enqueued += 1
-        if (
-            runtime.settings.prover_enabled
-            and runtime.settings.auto_settlement_enabled
-            and runtime.PROVER_CLIENT is not None
-            and db_market is not None
-            and db_market.id is not None
-        ):
+        if runtime.PROVER_CLIENT is not None and db_market is not None and db_market.id is not None:
             if getattr(db_market, "resolution_status", None) not in (
                 None,
                 shared_models.ResolutionStatusEnum.FINAL.value,

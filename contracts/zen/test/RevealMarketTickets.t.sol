@@ -211,6 +211,30 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }
 
+    function testCommitAllowsSameNonceDifferentUser() external {
+        address user2 = makeAddr("user2");
+        token.mint(user2, 1 ether);
+        vm.prank(user2);
+        token.approve(address(relayerEscrow), 1 ether);
+        vm.prank(user2);
+        relayerEscrow.deposit(1 ether);
+
+        uint256 expiry = block.timestamp + 12 hours;
+        bytes32 leaf0 = _leaf(0, 0, ticketSize, bytes32("salt-a"), user);
+        IRevealMarket.CommitAuth memory auth0 = _buildAuth(leaf0, 42, expiry, user);
+        bytes memory sig0 = _signAuth(auth0, user, block.chainid, authKey);
+        vm.prank(relayer);
+        relayerEscrow.commitOnBehalf(user, address(market), auth0, sig0);
+
+        bytes32 leaf1 = _leaf(1, 1, ticketSize, bytes32("salt-b"), user2);
+        IRevealMarket.CommitAuth memory auth1 = _buildAuth(leaf1, 42, expiry, user2);
+        bytes memory sig1 = _signAuth(auth1, user2, block.chainid, authKey);
+        vm.prank(relayer);
+        relayerEscrow.commitOnBehalf(user2, address(market), auth1, sig1);
+
+        assertEq(market.nextTicketId(), 2);
+    }
+
     function testCommitRevertsOnExpiry() external {
         bytes32 leaf = _leaf(0, 0, ticketSize, bytes32("salt"), user);
         uint256 pastExpiry = block.timestamp - 1;
