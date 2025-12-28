@@ -142,7 +142,19 @@ contract Deploy is Script {
     }
 
     function _readUintMatrix(string memory json, string memory key) private pure returns (uint256[][] memory matrix) {
-        matrix = abi.decode(vm.parseJson(json, key), (uint256[][]));
+        string memory firstRowKey = string.concat(key, "[0]");
+        try vm.parseJsonStringArray(json, firstRowKey) returns (string[] memory) {
+            string[][] memory text = abi.decode(vm.parseJson(json, key), (string[][]));
+            matrix = new uint256[][](text.length);
+            for (uint256 i = 0; i < text.length; ++i) {
+                matrix[i] = new uint256[](text[i].length);
+                for (uint256 j = 0; j < text[i].length; ++j) {
+                    matrix[i][j] = vm.parseUint(text[i][j]);
+                }
+            }
+        } catch {
+            matrix = abi.decode(vm.parseJson(json, key), (uint256[][]));
+        }
     }
 
     function _readG1(string memory json, string memory key) private pure returns (uint256[2] memory point) {

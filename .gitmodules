@@ -24,7 +24,7 @@
 	url = https://github.com/transmissions11/solmate
 [submodule "prover/artifacts"]
 	path = prover/artifacts
-	url = git@github.com:RevealMarket/artifacts.git
+	url = https://github.com/RevealMarket/artifacts.git
 [submodule "polymarket-subgraph"]
 	path = polymarket-subgraph
 	url = https://github.com/Polymarket/polymarket-subgraph
