@@ -638,12 +638,10 @@ async def collect_market_changes_with_summary(
                     )
                 continue
             # Only proceed if the market had Reveal activity (commitments exist).
-            commitments_count = (
-                await session.execute(
-                    select(shared_models.Commitment.id).where(shared_models.Commitment.market_id == db_market.id)
-                )
-            ).first()
-            if commitments_count is None:
+            commitment_count = 0
+            if db_market.id is not None:
+                commitment_count = commitment_counts.get(int(db_market.id), 0)
+            if commitment_count <= 0:
                 if logger.isEnabledFor(logging.DEBUG):
                     log_event(
                         logger,
@@ -654,10 +652,9 @@ async def collect_market_changes_with_summary(
                         market_id=db_market.id,
                     )
                 continue
-            settlement_result = await session.execute(
+            settlement = await session.scalar(
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == db_market.id)
             )
-            settlement = settlement_result.scalar_one_or_none()
             if settlement is None or settlement_needs_refresh(settlement):
                 # Best-effort hydrate settlement from chain once when we have a final resolution and commitments.
                 hydrated = None
@@ -668,13 +665,11 @@ async def collect_market_changes_with_summary(
                             settlement = hydrated
                         else:
                             # Refresh local view if a new row was inserted.
-                            settlement = (
-                                await session.execute(
-                                    select(shared_models.Settlement).where(
-                                        shared_models.Settlement.market_id == db_market.id
-                                    )
+                            settlement = await session.scalar(
+                                select(shared_models.Settlement).where(
+                                    shared_models.Settlement.market_id == db_market.id
                                 )
-                            ).scalar_one_or_none()
+                            )
                 except Exception as exc:
                     if logger.isEnabledFor(logging.DEBUG):
                         log_event(
@@ -1314,8 +1309,8 @@ async def _backfill_missing_resolutions(session: AsyncSession, summary: SyncSumm
         .limit(limit)
     )
     backfilled = 0
-    result = await session.scalars(stmt)
-    for record in result:
+    records = (await session.scalars(stmt)).all()
+    for record in records:
         if not record.condition_id or not record.event_id:
             continue
         try:

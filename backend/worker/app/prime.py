@@ -18,6 +18,21 @@ from . import runtime
 logger = runtime.logger
 
 
+def _format_prime_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
+
+
+def _is_transient_prime_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code in {502, 503, 504}:
+            return True
+    return False
+
+
 async def prime_markets_cache(
     redis_client: Redis | None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -92,6 +107,27 @@ async def prime_markets_cache(
                     break
     except Exception as exc:  # pragma: no cover - defensive
         duration_ms = (time.perf_counter() - start) * 1000
+        error_detail = _format_prime_error(exc)
+        if isinstance(exc, httpx.HTTPError) and _is_transient_prime_error(exc):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.cache.prime_skipped",
+                message="skipping cache prime because API is not ready",
+                limit=limit,
+                offset=base_offset,
+                cache_key=cache_key,
+                error=error_detail,
+            )
+            summary.update(
+                {
+                    "status": "skipped",
+                    "reason": "api_not_ready",
+                    "error": error_detail,
+                    "duration_ms": round(duration_ms, 2),
+                }
+            )
+            return summary
         log_event(
             logger,
             logging.WARNING,
@@ -100,12 +136,12 @@ async def prime_markets_cache(
             limit=limit,
             offset=base_offset,
             cache_key=cache_key,
-            error=str(exc),
+            error=error_detail,
         )
         summary.update(
             {
                 "status": "error",
-                "error": str(exc),
+                "error": error_detail,
                 "duration_ms": round(duration_ms, 2),
             }
         )
