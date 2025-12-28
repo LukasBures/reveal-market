@@ -114,9 +114,9 @@ contract Deploy is Script {
         config.beta2 = _readG2(json, ".vk_beta_2");
         config.gamma2 = _readG2(json, ".vk_gamma_2");
         config.delta2 = _readG2(json, ".vk_delta_2");
-        config.ic = _readIcPoints(json, ".IC");
-        config.circuitHash = abi.decode(vm.parseJson(json, ".circuitHash"), (bytes32));
         config.expectedInputs = _readUint(json, ".expectedInputs");
+        config.ic = _readIcPoints(json, ".IC", config.expectedInputs + 1);
+        config.circuitHash = abi.decode(vm.parseJson(json, ".circuitHash"), (bytes32));
         return config;
     }
 
@@ -141,19 +141,15 @@ contract Deploy is Script {
         }
     }
 
-    function _readUintMatrix(string memory json, string memory key) private pure returns (uint256[][] memory matrix) {
-        string memory firstRowKey = string.concat(key, "[0]");
-        try vm.parseJsonStringArray(json, firstRowKey) returns (string[] memory) {
-            string[][] memory text = abi.decode(vm.parseJson(json, key), (string[][]));
-            matrix = new uint256[][](text.length);
-            for (uint256 i = 0; i < text.length; ++i) {
-                matrix[i] = new uint256[](text[i].length);
-                for (uint256 j = 0; j < text[i].length; ++j) {
-                    matrix[i][j] = vm.parseUint(text[i][j]);
-                }
-            }
-        } catch {
-            matrix = abi.decode(vm.parseJson(json, key), (uint256[][]));
+    function _readUintMatrix(string memory json, string memory key, uint256 rows)
+        private
+        pure
+        returns (uint256[][] memory matrix)
+    {
+        matrix = new uint256[][](rows);
+        for (uint256 i = 0; i < rows; ++i) {
+            string memory rowKey = string.concat(key, "[", vm.toString(i), "]");
+            matrix[i] = _readUintArray(json, rowKey);
         }
     }
 
@@ -165,7 +161,7 @@ contract Deploy is Script {
     }
 
     function _readG2(string memory json, string memory key) private pure returns (uint256[2][2] memory point) {
-        uint256[][] memory coords = _readUintMatrix(json, key);
+        uint256[][] memory coords = _readUintMatrix(json, key, 3);
         require(coords.length >= 2 && coords[0].length >= 2 && coords[1].length >= 2, "invalid g2 coords");
         point[0][0] = coords[0][0];
         point[0][1] = coords[0][1];
@@ -173,8 +169,12 @@ contract Deploy is Script {
         point[1][1] = coords[1][1];
     }
 
-    function _readIcPoints(string memory json, string memory key) private pure returns (uint256[2][] memory points) {
-        uint256[][] memory coords = _readUintMatrix(json, key);
+    function _readIcPoints(string memory json, string memory key, uint256 expectedLength)
+        private
+        pure
+        returns (uint256[2][] memory points)
+    {
+        uint256[][] memory coords = _readUintMatrix(json, key, expectedLength);
         points = new uint256[2][](coords.length);
         for (uint256 i = 0; i < coords.length; ++i) {
             require(coords[i].length >= 2, "invalid ic coords");
