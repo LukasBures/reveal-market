@@ -3,6 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
+DEFAULT_ENV_FILE="${REPO_ROOT}/.env.production"
+ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+fi
+
 RPC_URL="${RPC_URL:-${RM_RPC_URL:-}}"
 VERIFIER_ADDRESS="${VERIFIER_ADDRESS:-${RM_VERIFIER_ADDRESS:-}}"
 FACTORY_ADDRESS="${FACTORY_ADDRESS:-${RM_FACTORY_ADDRESS:-}}"
