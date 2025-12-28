@@ -238,7 +238,9 @@ def create_app() -> FastAPI:
         def _iso(ts: datetime | None) -> str | None:
             return ts.isoformat() if ts else None
 
-        if stale_markets:
+        if stale_markets and state.should_log_stale_markets(
+            len(stale_markets), min_interval_seconds=settings.market_stale_log_interval_seconds
+        ):
             stale_sample = stale_markets[:50]
             extra = {
                 "event": "stream.stale.markets",

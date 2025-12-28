@@ -56,7 +56,7 @@
 
 (proxy_frontend) {
   reverse_proxy frontend:3000 {
-    health_uri /healthz
+    health_uri /
     health_interval 10s
     health_timeout 3s
     max_fails 2

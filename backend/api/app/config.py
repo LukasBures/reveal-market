@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     container_heartbeat_seconds: int = Field(default=60, ge=10)
     api_heartbeat_ttl_seconds: int = Field(default=180, ge=30)
     performance_heartbeat_interval_seconds: int = Field(default=60, ge=10)
-    worker_heartbeat_stale_seconds: int = Field(default=180, ge=30)
+    worker_heartbeat_stale_seconds: int = Field(default=420, ge=30)
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
     run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)

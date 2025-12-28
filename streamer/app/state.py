@@ -93,6 +93,8 @@ class StreamState:
         self._history_last_ts: dict[str, datetime] = {}
         self.active_connections: int = 0
         self._last_ws_ping: datetime | None = None
+        self._stale_log_last_at: datetime | None = None
+        self._stale_log_last_count: int = 0
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(
@@ -406,6 +408,28 @@ class StreamState:
             return self.metrics.record_staleness(self.last_seen, stale_after=stale_after_seconds)
         cutoff = now - timedelta(seconds=stale_after_seconds)
         return [mid for mid, ts in self.last_seen.items() if ts < cutoff]
+
+    def should_log_stale_markets(self, count: int, *, min_interval_seconds: int) -> bool:
+        if count <= 0:
+            self._stale_log_last_count = 0
+            self._stale_log_last_at = None
+            return False
+        now = datetime.now(UTC)
+        last_at = self._stale_log_last_at
+        last_count = self._stale_log_last_count
+        if last_at is None or count != last_count:
+            self._stale_log_last_at = now
+            self._stale_log_last_count = count
+            return True
+        if min_interval_seconds <= 0:
+            self._stale_log_last_at = now
+            self._stale_log_last_count = count
+            return True
+        if (now - last_at).total_seconds() >= min_interval_seconds:
+            self._stale_log_last_at = now
+            self._stale_log_last_count = count
+            return True
+        return False
 
     def acquire_assets(self, assets: Iterable[str]) -> list[str]:
         added: list[str] = []

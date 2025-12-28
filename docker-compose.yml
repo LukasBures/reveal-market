@@ -76,6 +76,8 @@ services:
       POSTGRES_USER: market_admin
       POSTGRES_PASSWORD: <REDACTED>
       POSTGRES_DB: reveal_market
+      PGUSER: market_admin
+      PGDATABASE: reveal_market
       TZ: UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data

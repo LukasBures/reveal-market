@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     market_stale_evict_seconds: int = Field(
         default=900, ge=60, description="Evict markets from staleness tracking after this many seconds"
     )
+    market_stale_log_interval_seconds: int = Field(
+        default=300, ge=0, description="Minimum seconds between stale-market warnings when count is unchanged"
+    )
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25, description="Percent worsen applied to displayed odds")
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")

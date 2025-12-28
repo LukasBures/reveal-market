@@ -48,6 +48,7 @@ services:
           memory: 384M
 
   caddy:
+    profiles: ["caddy"]
     ports:
       - "127.0.0.1:2019:2019"
     environment:
