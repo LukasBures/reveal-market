@@ -428,6 +428,21 @@ jobs:
             else
               git submodule update --init --recursive prover/artifacts
             fi
+            if ! command -v git-lfs >/dev/null 2>&1; then
+              echo ">>> Installing git-lfs for prover artifacts"
+              if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update -y
+                sudo apt-get install -y git-lfs
+              else
+                echo "git-lfs is missing and apt-get is not available." >&2
+                exit 1
+              fi
+            fi
+            if [ -n "${SUBMODULE_GIT_SSH_COMMAND:-}" ]; then
+              GIT_SSH_COMMAND="${SUBMODULE_GIT_SSH_COMMAND}" git -C prover/artifacts lfs pull
+            else
+              git -C prover/artifacts lfs pull
+            fi
 
             echo ">>> Run production deployment script"
             chmod +x run_prod.sh

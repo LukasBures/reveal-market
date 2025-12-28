@@ -190,9 +190,28 @@ EOF
   fi
 }
 
+is_lfs_pointer() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    return 1
+  fi
+  local header
+  header="$(head -n 1 "${path}" 2>/dev/null || true)"
+  [[ "${header}" == "version https://git-lfs.github.com/spec/v1" ]]
+}
+
+has_git_lfs() {
+  command -v git-lfs >/dev/null 2>&1 || git lfs version >/dev/null 2>&1
+}
+
 list_missing_prover_files() {
   for rel_path in "${PROVER_REQUIRED_FILES[@]}"; do
-    if [[ ! -s "${ROOT_DIR}/${rel_path}" ]]; then
+    local full_path="${ROOT_DIR}/${rel_path}"
+    if [[ ! -s "${full_path}" ]]; then
+      echo "${rel_path}"
+      continue
+    fi
+    if is_lfs_pointer "${full_path}"; then
       echo "${rel_path}"
     fi
   done
@@ -215,6 +234,24 @@ update_prover_artifacts_submodule() {
     fi
   fi
   "${submodule_env[@]}" git -C "${ROOT_DIR}" submodule update --init --recursive prover/artifacts >/dev/null
+}
+
+pull_prover_artifacts_lfs() {
+  if [[ ! -d "${PROVER_ARTIFACTS_DIR}" ]]; then
+    return 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! has_git_lfs; then
+    return 1
+  fi
+  log_step "Pulling LFS artifacts in prover/artifacts"
+  local lfs_env=()
+  if [[ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" ]] && [[ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]]; then
+    lfs_env=(GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes")
+  fi
+  "${lfs_env[@]}" git -C "${PROVER_ARTIFACTS_DIR}" lfs pull
 }
 
 seed_prover_from_submodule() {
@@ -302,6 +339,7 @@ check_prover_artifacts() {
   mapfile -t missing < <(list_missing_prover_files)
   if (( ${#missing[@]} > 0 )); then
     update_prover_artifacts_submodule || true
+    pull_prover_artifacts_lfs || true
     seed_prover_from_submodule || true
     mapfile -t missing < <(list_missing_prover_files)
   fi
@@ -316,7 +354,7 @@ check_prover_artifacts() {
     cat <<EOF
 Missing prover artifacts after sync attempts:
 $(printf '  - %s\n' "${missing[@]}")
-Populate prover/artifacts, set PROVER_ARTIFACTS_URL/PROVER_ARTIFACTS_SHA256, or run 'bash prover/circuits/generate_keys.sh' before deploying.
+Populate prover/artifacts (including Git LFS objects), set PROVER_ARTIFACTS_URL/PROVER_ARTIFACTS_SHA256, or run 'bash prover/circuits/generate_keys.sh' before deploying.
 EOF
     exit 1
   fi
