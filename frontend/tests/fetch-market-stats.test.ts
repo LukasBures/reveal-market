@@ -38,6 +38,7 @@ describe("fetchMarketStatsBreakdown", () => {
     );
     expect(stats).toEqual([
       { status: "live", count: 3 },
+      { status: "ended", count: 1 },
       { status: "finalized", count: 1 },
       { status: "total", count: 4 },
     ]);
@@ -61,6 +62,7 @@ describe("fetchMarketStatsBreakdown", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(stats).toEqual([
       { status: "live", count: 2 },
+      { status: "ended", count: 5 },
       { status: "finalized", count: 5 },
       { status: "total", count: 7 },
     ]);
@@ -82,6 +84,7 @@ describe("fetchMarketStatsBreakdown", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(stats).toEqual([
       { status: "live", count: 0 },
+      { status: "ended", count: 0 },
       { status: "finalized", count: 0 },
       { status: "total", count: 0 },
     ]);
@@ -103,6 +106,7 @@ describe("fetchMarketStatsBreakdown", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(stats).toEqual([
       { status: "live", count: 9 },
+      { status: "ended", count: 0 },
       { status: "finalized", count: 0 },
       { status: "total", count: 9 },
     ]);

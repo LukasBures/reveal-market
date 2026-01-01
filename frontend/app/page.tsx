@@ -29,7 +29,10 @@ export default async function HomePage({ searchParams }: PageProps) {
   const [stats, health] = await Promise.all([fetchMarketStatsBreakdown(), fetchHealthSnapshot()]);
   const kpis = await fetchInvestorKpis(stats, health);
   const liveMarkets = stats.find((stat) => stat.status === "live")?.count ?? 0;
-  const endedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
+  const endedMarkets =
+    stats.find((stat) => stat.status === "ended")?.count ??
+    stats.find((stat) => stat.status === "finalized")?.count ??
+    0;
   const callouts = [
     { label: "Live markets", value: formatNumber(liveMarkets) },
     { label: "Ended markets", value: formatNumber(endedMarkets) },

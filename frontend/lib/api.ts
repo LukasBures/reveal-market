@@ -509,9 +509,11 @@ const normalizeMarketStats = (payload: any): MarketStatusStat[] | null => {
   }, {});
   const live = normalized["live"] ?? 0;
   const finalized = normalized["finalized"] ?? 0;
-  const total = normalized["total"] ?? live + finalized;
+  const ended = normalized["ended"] ?? finalized;
+  const total = normalized["total"] ?? live + ended;
   return [
     { status: "live", count: live },
+    { status: "ended", count: ended },
     { status: "finalized", count: finalized },
     { status: "total", count: total },
   ];

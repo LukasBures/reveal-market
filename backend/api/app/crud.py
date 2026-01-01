@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from shared import repository_async as shared_repository
 from sqlalchemy import func, literal, or_, select
@@ -78,7 +78,12 @@ async def get_markets(
 
 
 async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBreakdown]:
-    live_stmt = select(func.count(models.Market.id)).where(models.Market.status == models.MarketStatusEnum.COMMIT.value)
+    now = datetime.now(UTC)
+    live_stmt = select(func.count(models.Market.id)).where(
+        models.Market.status == models.MarketStatusEnum.COMMIT.value,
+        or_(models.Market.closes_at.is_(None), models.Market.closes_at > now),
+        or_(models.Market.commits_blocked_at.is_(None), models.Market.commits_blocked_at > now),
+    )
     live = int((await session.execute(live_stmt)).scalar_one() or 0)
 
     finalized_stmt = select(func.count(models.Market.id)).where(
@@ -86,10 +91,13 @@ async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBr
     )
     finalized = int((await session.execute(finalized_stmt)).scalar_one() or 0)
 
-    total = live + finalized
+    total_stmt = select(func.count(models.Market.id))
+    total = int((await session.execute(total_stmt)).scalar_one() or 0)
+    ended = max(total - live, 0)
 
     return [
         schemas.MarketStatusBreakdown(status="live", count=live),
+        schemas.MarketStatusBreakdown(status="ended", count=ended),
         schemas.MarketStatusBreakdown(status="finalized", count=finalized),
         schemas.MarketStatusBreakdown(status="total", count=total),
     ]

@@ -15,7 +15,7 @@ import { MARKET_CATEGORY_FILTERS } from "@/lib/markets";
 type Props = {
   initialSearch?: string;
   liveMarketsCount?: number;
-  finalizedMarketsCount?: number;
+  endedMarketsCount?: number;
   totalMarketsCount?: number;
 };
 
@@ -26,7 +26,7 @@ const windowSuggestionCache = new Map<
   { data: MarketSummary[]; expiresAt: number }
 >();
 
-export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarketsCount, totalMarketsCount }: Props) {
+export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCount, totalMarketsCount }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const [search, setSearch] = useState(initialSearch ?? "");
@@ -49,10 +49,10 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
             : "—",
       },
       {
-        label: "Finalized markets",
+        label: "Ended markets",
         value:
-          typeof finalizedMarketsCount === "number" && finalizedMarketsCount > 0
-            ? formatNumber(finalizedMarketsCount)
+          typeof endedMarketsCount === "number" && endedMarketsCount > 0
+            ? formatNumber(endedMarketsCount)
             : "—",
       },
       {
@@ -63,7 +63,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, finalizedMarket
             : "—",
       },
     ],
-    [liveMarketsCount, finalizedMarketsCount, totalMarketsCount],
+    [liveMarketsCount, endedMarketsCount, totalMarketsCount],
   );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
