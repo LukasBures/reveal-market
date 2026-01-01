@@ -136,6 +136,7 @@ def test_health_status_stale(monkeypatch):
 def test_health_status_degraded(monkeypatch):
     settings = Settings(market_stale_seconds=10)
     state = StreamState(settings)
+    state.subscriptions.add_assets(["m1"])
     state.fx_quote = FxQuote(zen_usd=1, fetched_at=datetime.now(UTC), stale=False, source="test")
     state.fx_last_update = state.fx_quote.fetched_at
     state.fx_ws_connected = True

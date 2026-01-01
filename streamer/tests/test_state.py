@@ -121,6 +121,7 @@ async def test_cache_tick_signs_payload():
 
 def test_stale_markets_detection():
     state = StreamState(Settings())
+    state.subscriptions.add_assets(["fresh", "old"])
     state.last_seen["fresh"] = datetime.now(UTC)
     state.last_seen["old"] = datetime.now(UTC) - timedelta(seconds=120)
     stale = state.stale_markets(stale_after_seconds=60)
@@ -131,6 +132,7 @@ def test_stale_markets_eviction():
     metrics = StreamerMetrics(registry=CollectorRegistry())
     settings = Settings(market_stale_seconds=60, market_stale_evict_seconds=120)
     state = StreamState(settings, metrics=metrics)
+    state.subscriptions.add_assets(["stale", "evict"])
     state.last_seen["stale"] = datetime.now(UTC) - timedelta(seconds=90)
     state.last_seen["evict"] = datetime.now(UTC) - timedelta(seconds=300)
     metrics.market_staleness.labels(market_id="evict").set(300)
