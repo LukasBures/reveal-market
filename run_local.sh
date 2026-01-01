@@ -486,6 +486,8 @@ log_info "Running: ${UP_CMD[*]}"
 API_PORT="${API_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 STREAMER_PORT="${STREAMER_PORT:-8100}"
+RELAYER_PORT="${RELAYER_PORT:-8088}"
+HEDGER_API_PORT="${HEDGER_API_PORT:-8090}"
 POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:5432/reveal_market}"
 REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
 
@@ -497,12 +499,12 @@ Stack ready. Useful URLs:
     • Frontend:             http://localhost:${FRONTEND_PORT}
     • API docs:             http://localhost:${API_PORT}/docs
     • API health:           http://localhost:${API_PORT}/healthz
-    • API heartbeats:       http://localhost:${API_PORT}/health/heartbeats
+    • API heartbeats:       http://localhost:${API_PORT}/healthz/heartbeats
     • Streamer health:      http://localhost:${STREAMER_PORT}/healthz
     • Streamer history:     http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
   Infra:
-    • Relayer health:       http://localhost:${RELAYER_PORT:-8088}/healthz
-    • Hedger health:        http://localhost:${HEDGER_PORT:-8079}/healthz
+    • Relayer health:       http://localhost:${RELAYER_PORT}/healthz
+    • Hedger health:        http://localhost:${HEDGER_API_PORT}/health
     • Prover health:        http://localhost:8085/healthz
 
 Internal service ports (for debugging):
@@ -512,8 +514,8 @@ Internal service ports (for debugging):
     • Streamer direct:      http://localhost:${STREAMER_PORT}
     • Frontend direct:      http://localhost:${FRONTEND_PORT}
   Infra:
-    • Relayer (internal):   http://relayer:${RELAYER_PORT:-8088}/healthz
-    • Hedger (internal):    http://hedger:${HEDGER_PORT:-8079}/healthz
+    • Relayer (internal):   http://relayer:${RELAYER_PORT}/healthz
+    • Hedger (internal):    http://hedger:${HEDGER_API_PORT}/health
     • Prover (internal):    http://prover:8085/healthz
 
 Datastores:

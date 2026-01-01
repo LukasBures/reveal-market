@@ -104,6 +104,8 @@ services:
           memory: 192M
 
   relayer:
+    ports:
+      - "127.0.0.1:${RELAYER_PORT:-8088}:${RELAYER_PORT:-8088}"
     deploy:
       resources:
         limits:
