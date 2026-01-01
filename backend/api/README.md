@@ -14,7 +14,6 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, and Polymarket; `/metrics` exposes Prometheus counters |
 | Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
-| AI narratives | Surfaces pre-generated `summary`/`summary_source`/`summary_model` fields produced by the enrichment worker so clients never call the LLM synchronously |
 
 > **Note:** Proof receipts and settlement summaries require the worker to be running with Redis + Postgres connectivity. The `prover` container emits real Groth16 proofs (rapidsnark + the Circom artifacts under `prover/circuits/build`) and fails fast if those files are missing. Refresh the proving/verifying keys via `prover/circuits/generate_keys.sh` before promising zk-grade receipts to partners.
 
@@ -98,7 +97,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_MARKET_CATEGORY_ALLOWLIST` | Optional filters to hide markets that don’t belong to pre-approved segments. |
 | `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 0.1 ZEN max; quotes above this return 400). |
 | FX feed | Pricing uses the streamer `/fx/zen-usd`; `RM_FX_FEED_URL` currently only informs health/CORS checks. Quotes reject when FX is stale/unavailable. |
-| `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. API signs the ABI-packed digest used by `RevealMarket.commitWithQuote`, bound to chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId. |
+| `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. The API signs an ABI-packed QUOTE_V1 digest (chain id, market address, wallet, outcome, stake wei, FX 1e8, expiry, quoteId) that is validated and consumed off-chain by `/pricing/submit` and `/trade/commit`. |
 
 ### How the pipeline stays fresh
 
@@ -120,14 +119,14 @@ Use `.env` or `SETTINGS_FILE` to load a dedicated config file (see `app.config.g
 
 ### Pricing & signed quotes
 
-- `/pricing/quote` now requires `wallet_address`, `market_address`, and `outcome_id` and ignores any client-supplied FX. It signs an ABI-packed digest matching `RevealMarket.commitWithQuote` (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
-- `/pricing/submit` verifies the same digest, enforces expiry, and optionally checks FX drift vs the live feed. Quotes are cached in Redis for replay/audit with a short TTL.
-- Set `RM_PRICING_CHAIN_ID` to the chain where markets live; keep the signer key private and expose `PRICING_SIGNER_ADDRESS` to contracts/deployment scripts.
+- `/pricing/quote` requires `market_id`, `wallet_address`, and `outcome_id`; `market_address` is optional and auto-created when missing. It ignores any client-supplied FX and signs the QUOTE_V1 digest (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
+- `/pricing/submit` verifies the same digest, enforces expiry, and optionally checks FX drift vs the live feed. Quotes are stored in Postgres with the expiry sweeper; Redis is not used for quote persistence.
+- Set `RM_PRICING_CHAIN_ID` to the chain where markets live; keep the signer key private and expose `PRICING_SIGNER_ADDRESS` for clients/ops that want to display the active signer.
  - Liveness probe: `/live` (no deps). Readiness probe: `/ready` or `/healthz` (checks DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS). Metrics: `/metrics`.
 
-#### QUOTE_V1 digest (do not change without on-chain coordination)
+#### QUOTE_V1 digest (do not change without backend/frontend coordination)
 
-The signed pricing payload is bound to the on-chain verifier via a fixed digest:
+The signed pricing payload uses a fixed digest for API validation and client integrity:
 
 ```
 keccak256(
@@ -143,7 +142,7 @@ keccak256(
 )
 ```
 
-`app.server.build_quote_digest` (and the test suite) enforce this shape. Changing it requires a deliberate contract + backend dual upgrade.
+`app.server.build_quote_digest` (and the test suite) enforce this shape. Changing it requires coordinated backend/frontend updates (contracts are unaffected unless you add on-chain enforcement).
 
 ### Trade + relayer
 
@@ -322,9 +321,3 @@ hey -n 1000 -c 50 http://localhost:8000/markets
 The API is intentionally small, deterministic, and cache-heavy—keep new routes consistent with this model and reuse the shared helpers whenever possible.
 
 ---
-
-## 14. AI Summaries
-
-- Markets can now include `summary`, `summary_source`, `summary_model`, `summary_checked_at`, and `summary_metadata` fields.
-- These values are populated asynchronously by the worker-side enrichment service and cached alongside every `/markets` payload. The API never calls the LLM inline.
-- If you need to invalidate a stale summary manually, delete the corresponding Redis tags (`market:{event_id}`) or clear the record in Postgres; the worker will enqueue a refreshed job.

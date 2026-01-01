@@ -320,7 +320,6 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
     assert stats["markets_changed"] == len(sample_markets)
     assert stats["resolutions_changed"] == 0
     assert stats["categories_changed"] == 2
-    assert stats["summaries_enqueued"] == 0
     assert stats["cache_invalidations"] >= 0
 
     async with session_factory() as session:
@@ -389,7 +388,6 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
     assert stats["markets_changed"] == 0
     assert stats["resolutions_changed"] == 0
     assert stats["markets_changed"] == 0
-    assert stats["summaries_enqueued"] == 0
     assert stats["resolutions_changed"] == 0
     assert dummy.store.get(runtime_module.settings.schema_version_key) == schema_state.current_revision
     assert "schema:unknown" in invalidated
@@ -510,7 +508,6 @@ async def test_publish_heartbeat_includes_flags():
         "markets_created": 1,
         "markets_updated": 1,
         "markets_deleted": 0,
-        "summaries_enqueued": 0,
         "proofs_generated": 0,
         "cache_invalidations": 0,
         "resolution_gaps": 0,

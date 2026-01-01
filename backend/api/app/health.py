@@ -161,7 +161,7 @@ async def _check_polymarket_api(settings: Settings) -> tuple[str, schemas.Health
 
 
 async def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.HealthComponent]:
-    """Smoke-test pricing signer envs so signed quotes/commitWithQuote can function."""
+    """Smoke-test pricing signer envs so signed quotes and trade commits can function."""
 
     status: schemas.HealthState = "ok"
     details: list[str] = []

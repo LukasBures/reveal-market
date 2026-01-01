@@ -77,11 +77,6 @@ class MarketBase(BaseModel):
     group_item_title: str | None = None
     group_item_threshold: float | None = None
     group_position: int | None = None
-    summary: str | None = None
-    summary_source: str | None = None
-    summary_model: str | None = None
-    summary_metadata: dict[str, Any] | None = None
-    summary_checked_at: datetime | None = None
     liquidity_usd: float | None = None
     volume_24h_usd: float | None = None
     orderbook_volume_usd: float | None = None

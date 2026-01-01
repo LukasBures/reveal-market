@@ -1,4 +1,4 @@
-DeployVerifyingKeyLoadTest:testLoadSettlementVkJson() (gas: 55423)
+DeployVerifyingKeyLoadTest:testLoadSettlementVkJson() (gas: 98914)
 MarketAdminTest:testAuthorizationSignerGuard() (gas: 101429621)
 MarketAdminTest:testAuthorizationSignerRotationDuringCommit() (gas: 1853584)
 MarketAdminTest:testExtendDeadlinesAndGuards() (gas: 101426205)

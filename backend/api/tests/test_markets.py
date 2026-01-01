@@ -165,26 +165,6 @@ def test_create_market_with_rake(client):
     assert fetched["rake_bps"] == 75
 
 
-def test_market_response_includes_summary_fields(client, db_session):
-    market = _make_market("evt-555", "Summary Ready", category="finance", oracle="0xdef", status="commit")
-    market.summary = "AI generated overview."
-    market.summary_source = "ai_enrichment"
-    market.summary_model = "gpt-5.1-mini"
-    now = datetime.now(UTC)
-    market.summary_checked_at = now
-    market.summary_metadata = {"mode": "fallback"}
-    db_session.add(market)
-    db_session.commit()
-
-    response = client.get(f"/markets/{market.event_id}")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["summary"] == "AI generated overview."
-    assert payload["summary_source"] == "ai_enrichment"
-    assert payload["summary_model"] == "gpt-5.1-mini"
-    assert payload["summary_checked_at"].startswith(now.strftime("%Y-%m-%d"))
-
-
 def test_market_detail_includes_grouping_and_siblings(client, db_session):
     group_slug = "makina-public-sale-total-commitments"
     first = _make_market(

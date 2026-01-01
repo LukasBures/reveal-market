@@ -37,8 +37,8 @@ DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen-testnet.rpc.
 DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen-testnet.explorer.caldera.xyz")
 DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "testnet_zenith_token_random_1764886505.txt"
 DEFAULT_TOKEN_ADDRESS = "0x070040A826B586b58569750ED43cb5979b171e8d"  # ZEN ERC-20 on Horizen testnet  # noqa: S105
-DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x1dfcD2AAFbEe1be900DeefC59E05012d802F2d41")
-DEFAULT_TOKEN_AMOUNT = "1.9"  # noqa: S105
+DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x613FC63d5FCAE6ED62694f3b7A171a72d18Cb429")
+DEFAULT_TOKEN_AMOUNT = "2.0"  # noqa: S105
 
 ERC20_ABI: list[dict[str, Any]] = [
     {

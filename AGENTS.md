@@ -2,20 +2,23 @@
 
 ## Project Structure & Module Organization
 - **backend/** – FastAPI API (`api/`) and ingestion/automation worker (`worker/`) sharing utilities in `backend/shared/`. Alembic migrations live in `backend/migrations/`. Each service has its own README describing security/logging/health probes.
-- **contracts/** – Foundry workspace (`src/`, `test/`, `script/`). `run_local.sh` wraps build → tests → gas snapshot; `run_local.sh full` adds fuzz + coverage.
+- **contracts/** – Two Foundry workspaces (`contracts/zen`, `contracts/polygon`) with their own `src/`, `test/`, `script/` trees. `contracts/run_local.sh` and `contracts/run_tests.sh` orchestrate both.
 - **frontend/** – Next.js 15 + TypeScript + Tailwind workspace powering the marketing/docs site. SEO helpers sit in `frontend/lib/seo.ts`; sitemap/robots and security headers are auto-generated via the app router.
 - **streamer/** – FastAPI SSE/WS service for Polymarket CLOB + RTDS ingestion with Binance FX, Redis cache/pubsub, and Redis-backed history.
+- **relayer/** – FastAPI relayer that queues and submits commit/claim/lock transactions.
+- **hedger/** – FastAPI hedger for exposure/risk tracking, settlement orchestration, and admin APIs.
+- **prover/** – Go-based Groth16 prover service with circuits/artifacts.
 
 ## Build, Test, and Development Commands
-- `make api` / `make worker` – Build + run individual Docker services (includes Postgres/Redis dependencies).
-- `make test` – Runs `./backend/run_tests.sh` (API + worker pytest suites).
-- `backend/run_tests.sh` – Discovers Poetry/venv envs and executes pytest with asyncio plugins, defaulting to four workers per suite (override via `PYTEST_WORKER_COUNT`).
-- `forge build`, `forge test` (inside `contracts/`) – Compile/test Solidity. `contracts/run_local.sh [full]` for full pipeline.
+- `make api` / `make worker` / `make hedger` / `make streamer` / `make prover` / `make frontend` / `make caddy` – Build + run individual Docker services.
+- `make test` – Runs `./run_tests.sh` (full sequential suite).
+- `backend/run_tests.sh` – Uses `backend/api/.venv` + `backend/worker/.venv` (via `uv sync`) to run pytest (xdist, default 4 workers), OpenAPI snapshot checks, and mypy.
+- `forge build`, `forge test` (inside `contracts/zen` or `contracts/polygon`) – Compile/test Solidity. `./run_local.sh [full]` in each workspace adds gas snapshot + optional fuzz/coverage; `contracts/run_local.sh` runs both.
 - `npm run dev|build|start|lint|test` (inside `frontend/`) – Next.js workflows. `npm run test` executes Vitest + Testing Library.
-- `cd streamer && ./run_tests.sh` – Validates Python 3.12, installs `[dev]` extras if missing, then runs pytest (xdist when available).
-- `./run_local.sh` – Build every Docker image with `--no-cache` and launch the full stack (API, worker, frontend, Postgres, Redis).
-- `./run_prod.sh` – Build with cache + start stack detached (production/VPS flow).
-- `./run_tests.sh` – Sequential test harness (backend → frontend → contracts → prover). Frontend stage requires the backend stack to answer `/health` or it fails fast.
+- `cd streamer && ./run_tests.sh` – Validates Python 3.12, runs mypy, installs dev extras if missing, then runs pytest (xdist when available).
+- `./run_local.sh` – Build + launch the stack with cached BuildKit by default (pass `--no-cache` for clean rebuilds).
+- `./run_prod.sh` – Cached builds + detached compose; verifies prover artifacts before booting.
+- `./run_tests.sh` – Sequential harness (backend → hedger → streamer → relayer → frontend → contracts/polygon → contracts/zen → prover). Frontend API reachability is enforced only when `FRONTEND_REQUIRE_API=true`.
 
 ## Coding Style & Naming Conventions
 - Python: PEP 8, Black 120 cols, isort, Flake8 (`make fmt` / `pre-commit`).
@@ -41,15 +44,14 @@
 - Streamer presets pin public/internal hosts and CORS origins; align `STREAMER_PUBLIC_BASE_URL`/`NEXT_PUBLIC_PRICE_STREAMER_URL` with your frontend origin (HTTPS for WSS) and keep CORS lists tight even in dev.
 
 ## Agent-Specific Instructions
-- Review `backend/TODO.md`, `contracts/TODO.md`, `frontend/TODO.md`, and `streamer/TODO.md` before large tasks; they capture prioritized work.
+- Review `TODO.md`, `backend/TODO.md`, `backend/worker/TODO.md`, `contracts/TODO.md`, `contracts/zen/TODO.md`, `frontend/TODO.md`, `streamer/TODO.md`, `relayer/TODO.md`, `hedger/TODO.md`, and `prover/TODO.md` before large tasks; they capture prioritized work.
 - Prefer existing helpers (e.g., `shared/onchain/`, `lib/seo.ts`) over introducing new frameworks.
 - Maintain the unified logging format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 - When editing docs/marketing copy, ensure metadata (via `docsMetadata`/`buildMetadata`) stays accurate so sitemap/robots remain valid.
 - Batch settlement is Poseidon-based (BN254): keep `BATCH_SIZE=256` and `MERKLE_DEPTH=8` aligned across contracts, prover, backend, and relayer helpers.
-- Frontend builds always call the FastAPI backend. Make sure the Docker stack (API + worker + Postgres + Redis + prover) is running locally before invoking `npm run build` or `frontend/run_tests.sh`; those scripts now hard-fail if `/health` cannot be reached.
-- `frontend/run_tests.sh` no longer offers an offline mode—start the backend stack (or point `NEXT_PUBLIC_API_BASE_URL` at staging) before invoking it locally or through automation.
+- Frontend tests/builds only enforce backend `/health` when `FRONTEND_REQUIRE_API=true`; otherwise they warn and proceed. Start the backend stack (or set `NEXT_PUBLIC_API_BASE_URL`) when you need a live API during builds.
 - Global lint/tool settings live in repo-root `.flake8`, `.isort.cfg`, and `pyproject.toml` (Black/isort/flake8/pytest). Keep overrides centralized there.
-- The bundled `prover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if the compiled artifacts under `prover/circuits/build` are missing. Always mount fresh proving/verifying keys (see `prover/circuits/`) before representing the stack as production-grade zk.
+- The bundled `prover` service now boots a real Groth16 pipeline (Node witness generation + `rapidsnark`) and refuses to start if required artifacts under `prover/circuits/build` are missing. `run_local.sh`/`run_prod.sh` can seed artifacts from `prover/artifacts` or `PROVER_ARTIFACTS_URL`; keep keys current before claiming production-grade zk.
 
 ## Agent Notes
 
@@ -80,18 +82,14 @@
 - **Client expectations** – Browsers should pass `assets_ids` when possible; missing assets fall back to market_id with metrics; keep `STREAMER_CORS_ALLOW_ORIGINS` set to the frontend origin so SSE/WS upgrades succeed locally and in prod.
 
 ### Contracts (Foundry)
-- `src/` houses RevealMarket, MarketFactory, RakeManager, Verifier. `test/` contains Forge suites (unit + fuzz). `run_local.sh full` builds/tests/gas-checks/fuzzes; CI runs this via GitHub Actions.
+- `contracts/zen/src` houses RevealMarket, MarketFactory, ProtocolPool, RelayerEscrow, and Verifier; `contracts/polygon/src` houses BaseLpVault and HedgeStrategyExecutor. `contracts/run_local.sh` runs both workspaces; `run_local.sh full` adds fuzz/coverage per workspace.
 - Events like `MarketResolved` + `resolutionSummary()` emit settlement metadata for downstream services.
-- MarketFactory/RakeManager use `Ownable2Step`; follow the new TODO guidance to script/t-test ownership transfers when modifying admin logic.
+- MarketFactory, ProtocolPool, RelayerEscrow, and Verifier use `Ownable2Step`; follow the TODO guidance to script/test ownership transfers when modifying admin logic.
 - RevealMarket commitments use Poseidon leaf hashing and batch roots (`BATCH_SIZE=256`, `MERKLE_DEPTH=8`); use `lockBatches` + `verifyAndSettleBatched` when multiple batches are present.
 
 ### CI / Automation
-- `.github/workflows/ci.yml` runs three jobs in parallel:
-  - **backend**: setup Python 3.12 + uv, cache the uv resolver, run `./backend/run_tests.sh`.
-  - **contracts**: install Foundry via `foundryup`, execute `./contracts/run_local.sh full`.
-  - **frontend**: setup Node 20, boot the Docker backend stack (Postgres/Redis/prover/api/worker), install deps, then run `npm run lint`, `npm run test`, and `npm run build` against the live API.
-- `.github/workflows/contracts-ci.yml` exists for legacy Forge-only runs; keep it unless instructed otherwise.
-- Repo-root `./run_tests.sh` matches CI ordering (backend → frontend → contracts → prover) to simplify pre-push validation; ensure the backend stack is reachable before invoking it so the frontend stage doesn’t fail the run.
+- `.github/workflows/cicd.yml` runs pre-commit checks (Foundry + uv sync + pre-commit), then backend, streamer, relayer, hedger, contracts-polygon, contracts-zen, frontend, and prover jobs; deploy runs on `main` after all test jobs succeed.
+- Repo-root `./run_tests.sh` mirrors the CI ordering (backend → hedger → streamer → relayer → frontend → contracts/polygon → contracts/zen → prover) and passes `FRONTEND_REQUIRE_API` through when set.
 
 ---
 

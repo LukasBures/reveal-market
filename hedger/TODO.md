@@ -12,7 +12,7 @@ Short list of items to reach a functional hedger MVP.
 - Track LP utilization + ZEN float from on-chain sources and enforce risk actions (throttle/pause/bridge top-ups). Persist float snapshots with reason codes.
 - Bridge integration to move USDC→ZEN when float low and USDC→vault/bridge when PnL positive; add dry-run/test mode and alerting on failures.
 - Expand risk metrics: slippage, fill quality, hedge latency, implied odds variance, hedge coverage ratio trend; expose via Prometheus + admin API.
-- Enforce off-chain bet caps: per-bet (100 ZEN default), per-user-per-market, and per-market caps mirrored from API; reject before placement when caps are exceeded. Document future on-chain `maxTicketStake`/`maxUserStakePerMarket` mirror path.
+- Enforce off-chain bet caps: per-bet (1000 ZEN default via `HEDGER_RISK_MAX_COMMIT_ZEN`), per-user-per-market, and per-market caps mirrored from API; reject before placement when caps are exceeded. Document future on-chain `maxTicketStake`/`maxUserStakePerMarket` mirror path.
 - Keep envs/chain config aligned to Horizen Testnet defaults (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`) when validating quote signatures, vault targets, and bridge destinations.
 
 ## Settlement

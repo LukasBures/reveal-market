@@ -10,12 +10,12 @@ The Hedger keeps RevealMarket economically neutral while preserving privacy. It 
 - Concurrency + idempotency: Redis locks + idempotency for commit ingestion and hedge execution, plus DB duplicate checks; stream offsets stored for replay safety.
 - Metrics: exposures, net exposure, coverage ratio, LP utilization, float balance, PnL placeholders, event lag, hedge executions, and settlement/prover latency histograms.
 - Settlement orchestration: builds per-batch prover payloads (Poseidon depth-8 roots, 256 tickets) from stored commits + outcome, persists receipts, marks markets resolved, and clears exposure (on-chain submission is stubbed).
-- Pricing guardrails: hedges refuse stale FX and enforce per-commit stake caps; defaults mirror UI (100 ZEN per bet) and haircuts/worsen/rake are applied server-side.
+- Pricing guardrails: hedges refuse stale FX and enforce per-commit stake caps; default cap is 1000 ZEN (tune via `HEDGER_RISK_MAX_COMMIT_ZEN`) and haircuts/worsen/rake are applied server-side.
 
 ### Current implementation snapshot
 - **State model** – `hedger_commits`, `hedger_hedge_actions`, `hedger_settlements`, `hedger_offsets`, `hedger_resolved_markets`, and `hedger_treasury_snapshots` store everything needed to replay exposure and audit hedging/settlement decisions. Hydration rebuilds YES/NO vectors and hedged USD on startup.
 - **Exposure ingestion** – Commit ingestion path expects backend/chain events with idempotency keys; Redis locks + DB uniqueness stop duplicate exposure. Offsets mark last processed commit/stream slot for replay.
-- **Risk/FX gating** – FX cache enforces staleness + haircut; slippage ceiling via `HEDGER_MAX_SLIPPAGE_BPS`. Risk checks enforce per-commit cap (100 ZEN default), optional per-market/global caps, and coverage ratio thresholds before emitting hedge instructions.
+- **Risk/FX gating** – FX cache enforces staleness + haircut; slippage ceiling via `HEDGER_MAX_SLIPPAGE_BPS`. Risk checks enforce per-commit cap (1000 ZEN default), optional per-market/global caps, and coverage ratio thresholds before emitting hedge instructions.
 - **Hedging actions** – Buy/sell/unwind instructions are persisted with execution payloads/response bodies; partial unwinds occur when over-hedged. Polymarket/vault bridges are stubbed but the control surface (state + retries) is in place.
 - **Settlement path** – Given stored commits + oracle outcome, the hedger builds per-batch prover payloads (BATCH_SIZE=256), requests proofs, stores receipts, marks resolved markets, and clears exposure. Tx submission is stubbed; logs/metrics cover latency and retries.
 - **API/metrics** – Admin API exposes exposures, risk config, positions, offsets, and settlements; Prometheus histograms for hedge latency, prover latency, coverage ratios, and event lag. Health probes check Postgres + Redis + FX reachability.

@@ -1,7 +1,7 @@
 # Reveal Market TODO
 
 ## MVP
-- None (MVP blockers cleared).
+- MVP blockers are tracked in `MVP.md` and the service-specific TODOs; nothing is duplicated here.
 
 ## Production/Mainnet Readiness
 - **Secrets & configs**: lock real RPCs/API keys in secret managers; audit `.env` usage and ensure defaults reference testnet only. Align chain IDs across API/worker/frontend/contract envs.

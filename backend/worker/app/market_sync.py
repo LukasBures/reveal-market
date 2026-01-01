@@ -32,7 +32,6 @@ from .polymarket import (
 )
 from .resolution import apply_resolution
 from .settlement import _upsert_settlement_from_chain, settlement_needs_refresh
-from .summary_jobs import maybe_enqueue_summary_job
 
 logger = runtime.logger
 
@@ -97,7 +96,6 @@ class SyncSummary:
     markets_deleted: int = 0
     gamma_metadata_updates: int = 0
     gamma_events_written: int = 0
-    summaries_enqueued: int = 0
     proofs_generated: int = 0
     lock_batches_submitted: int = 0
     resolutions_backfilled: int = 0
@@ -119,7 +117,6 @@ class SyncSummary:
             "markets_created": self.markets_created,
             "markets_updated": self.markets_updated,
             "markets_deleted": self.markets_deleted,
-            "summaries_enqueued": self.summaries_enqueued,
             "proofs_generated": self.proofs_generated,
             "cache_invalidations": cache_invalidations,
             "settlement_txs": self.settlement_txs,
@@ -620,8 +617,6 @@ async def collect_market_changes_with_summary(
             summary.gamma_metadata_updates += outcome.gamma_metadata_updates
             summary.gamma_events_written += outcome.gamma_events_written
             summary.stats_dirty = True
-        if await maybe_enqueue_summary_job(redis_client, market_record=db_market, market_payload=market):
-            summary.summaries_enqueued += 1
         if runtime.PROVER_CLIENT is not None and db_market is not None and db_market.id is not None:
             if getattr(db_market, "resolution_status", None) not in (
                 None,

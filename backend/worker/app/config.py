@@ -174,39 +174,6 @@ class Settings(BaseSettings):
     resolved_retention_dry_run: bool = Field(default=False)
     featured_categories: list[str] = Field(default_factory=list)
     featured_suggest_queries: list[str] = Field(default_factory=list)
-    summary_enabled: bool = Field(default=True)
-    summary_queue_key: str = Field(default="reveal_market_worker:summary_queue")
-    summary_dead_letter_key: str = Field(default="reveal_market_worker:summary_dead_letter")
-    summary_requested_ttl_seconds: int = Field(default=600, ge=60)
-    summary_refresh_interval_seconds: int = Field(default=604800, ge=3600)
-    summary_min_words: int = Field(default=200, ge=50)
-    summary_max_words: int = Field(default=400, ge=100)
-    summary_model: str = Field(default="gpt-5.1-mini")
-    summary_source_label: str = Field(default="ai_enrichment")
-    summary_prompt_template: str = Field(
-        default=(
-            "You are an analyst preparing a concise but well-researched summary for a prediction market.\n"
-            "Write {min_words}-{max_words} words that:\n"
-            "- Restate the core question in neutral, plain language.\n"
-            "- Highlight the key drivers/risk factors investors should research.\n"
-            "- Mention relevant timelines if they appear in the source data.\n"
-            "Always disclose that this section is AI generated after a quick public-source scan.\n"
-            "QUESTION: {title}\n"
-            "CATEGORY: {category}\n"
-            "TAGS: {tags}\n"
-            "DESCRIPTION:\n"
-            "{description}\n"
-            "EXTRA CONTEXT:\n"
-            "{extra_context}\n"
-        )
-    )
-    summary_api_base_url: AnyHttpUrl | None = Field(default=cast(AnyHttpUrl, "https://api.openai.com/v1"))
-    summary_api_key: SecretStr | None = Field(default=None)
-    summary_http_timeout_seconds: float = Field(default=20.0, gt=0)
-    summary_queue_poll_seconds: float = Field(default=2.0, gt=0)
-    summary_retry_backoff_seconds: float = Field(default=30.0, ge=0)
-    summary_retry_max_attempts: int = Field(default=3, ge=1)
-    summary_fallback_enabled: bool = Field(default=True)
     container_heartbeat_seconds: int = Field(default=60, ge=10)
     prover_base_url: AnyHttpUrl | None = Field(default=None)
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
@@ -356,7 +323,6 @@ def validate_required_settings(settings: Settings) -> None:
         require("RM_POLYMARKET_API_BASE")
 
     # Feature-gated requirements
-    require("RM_SUMMARY_API_KEY", when=settings.summary_enabled and not settings.summary_fallback_enabled)
     require("RM_PROVER_BASE_URL", when=prod_like)
     require("RM_RPC_URL", when=prod_like)
     if settings.lock_batches_use_relayer:
@@ -375,7 +341,6 @@ def sanitize_settings(settings: Settings) -> dict[str, Any]:
         "database_url",
         "redis_url",
         "wallet_private_key",
-        "summary_api_key",
         "rpc_url",
         "prover_base_url",
     }

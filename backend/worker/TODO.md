@@ -5,9 +5,7 @@
 - [ ] MarketFactory mirroring: consume on-chain events (MarketCreated, RakeConfigured, guardian updates) or a Goldsky fallback to keep DB/cache in sync. (new sync helper + shared cache/model updates)
 
 ## MVP recommended
-- [ ] Summary provenance: store each summary generation with prompt hash/model/context/timestamps, and fix tag collection to use `tags_rel`. (backend/worker/app/summary_jobs.py, backend/shared/repository_async.py)
 - [ ] Retention behavior: decide whether to re-enable deletes or document/implement archival/backpressure; keep cache tags consistent on delete. (backend/worker/app/market_sync.py)
-- [ ] Summary worker resiliency: retry/backoff on Redis outages instead of crashing at startup. (backend/worker/app/summary_worker.py)
 
 ## Notes
 - Proof generation requires `RM_PROVER_BASE_URL` and existing commitments.

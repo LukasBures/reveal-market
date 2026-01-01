@@ -8,7 +8,7 @@ The backend is the heartbeat of Reveal Market’s investable ecosystem. It trans
 | --- | --- |
 | **Market API** | Surfaces curated markets, stats, and settlements through a high-availability FastAPI layer backed by Redis caching, structured logging, and Prometheus metrics. Investors see the same latency and transparency they expect from Tier-1 exchanges. |
 | **Ingestion & On-Chain Worker** | Continuously ingests Polymarket data, reconciles it with our PostgreSQL source of truth, and sends heartbeats so ops can verify freshness. |
-| **Price Streamer** | Separate FastAPI service (see `streamer/`) that handles live Polymarket CLOB + FX streaming via SSE/WS. The frontend calls `/stream`/`/stream/ws` with explicit `assets_ids` (clobTokenIds) from the market-detail API for the fastest live books/trades; no auto-discovery is used. |
+| **Price Streamer** | Separate FastAPI service (see `streamer/`) that handles live Polymarket CLOB + FX streaming via SSE/WS. The frontend should call `/stream`/`/stream/ws` with explicit `assets_ids` (clobTokenIds) from the market-detail API for the fastest live books/trades; if omitted the streamer falls back to REST discovery (slower). |
 
 Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both services speak a single data dialect—which is critical for compliance reviews and long-term valuation work.
 
@@ -26,7 +26,7 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 - **Resolution pipeline** – Goldsky for payout vectors; stored in Postgres/Redis, cached in `/resolution/{condition_id}`, and surfaced in `/markets` detail payloads. Resolved markets drop from cache 12 hours after `resolved_at`.
 - **Signed pricing** – `/pricing/quote` ignores client FX, pulls streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and writes quote rows; `/pricing/submit` revalidates digest/expiry/FX drift and marks consumed.
 - **Health/metrics** – `/health` fans DB + Redis + worker heartbeat + Polymarket + signer/CORS checks; `/metrics` exposes Prometheus histograms/counters for HTTP, cache, ingest, and proof flows. Docker health probes use Python entrypoints instead of cURL.
-- **Automation hooks** – Worker emits heartbeats/batch stats, primes featured caches (markets/categories/suggest), can request Groth16 proofs, and has stubs for MarketFactory automation and AI summary queues. Retention currently reports metrics only.
+- **Automation hooks** – Worker emits heartbeats/batch stats, primes featured caches (markets/categories/suggest), can request Groth16 proofs, and has stubs for MarketFactory automation. Retention currently reports metrics only.
 - **Logging** – Unified `timestamp | LEVEL | logger | file:line | event | request_id` formatter across API/worker/tests; optional file rotation.
 
 ## Proof Points For Stakeholders
@@ -59,7 +59,7 @@ These milestones ladder up to the same thesis: reliable data fuels confident liq
 
 - [`backend/api/README.md`](./api/README.md) – FastAPI runtime, security headers, health check details, and env vars.
 - [`backend/worker/README.md`](./worker/README.md) – Polymarket ingest, cache invalidation, on-chain automation, and worker config.
-- Signed-quote flow: the API signs ABI-packed pricing quotes (bound to chain id, market, wallet, outcome, stake wei, FX 1e8, expiry, quoteId) and the `RevealMarket.commitWithQuote` entrypoint enforces them on-chain. Set `RM_PRICING_CHAIN_ID` + `RM_PRICING_SIGNER_PRIVATE_KEY` and expose `PRICING_SIGNER_ADDRESS` in deployments.
+- Signed-quote flow: the API signs ABI-packed pricing quotes (bound to chain id, market, wallet, outcome, stake wei, FX 1e8, expiry, quoteId) and consumes them during `/trade/commit`. The relayer submits `commitOnBehalf` → `commitWithAuthorization` enforced by `RM_AUTHORIZATION_SIGNER`; configure `RM_PRICING_CHAIN_ID`, `RM_PRICING_SIGNER_PRIVATE_KEY`, and `RM_AUTHORIZATION_SIGNER_PRIVATE_KEY` (plus `RM_AUTHORIZATION_SIGNER` for on-chain checks).
 
 ## Partner Takeaways
 

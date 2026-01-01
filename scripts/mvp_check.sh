@@ -22,13 +22,22 @@ pushd "$ROOT/contracts" >/dev/null
 ./run_local.sh full
 popd >/dev/null
 
-if [[ -x "$ROOT/prover/cmd/verify-artifacts" ]]; then
+if [[ -f "$ROOT/prover/cmd/verify-artifacts" && -x "$ROOT/prover/cmd/verify-artifacts" ]]; then
   echo "==> prover: verifying artifacts"
   pushd "$ROOT/prover" >/dev/null
   ./cmd/verify-artifacts
   popd >/dev/null
+elif [[ -d "$ROOT/prover/cmd/verify-artifacts" ]]; then
+  if command -v go >/dev/null 2>&1; then
+    echo "==> prover: verifying artifacts (go run)"
+    pushd "$ROOT/prover" >/dev/null
+    go run ./cmd/verify-artifacts
+    popd >/dev/null
+  else
+    echo "==> prover: skip (go not found; run 'go run ./cmd/verify-artifacts')"
+  fi
 else
-  echo "==> prover: skip (prover/cmd/verify-artifacts not found or not executable)"
+  echo "==> prover: skip (prover/cmd/verify-artifacts not found)"
 fi
 
 echo "MVP test matrix complete."

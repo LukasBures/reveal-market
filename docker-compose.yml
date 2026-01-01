@@ -200,7 +200,6 @@ services:
       RM_POLL_INTERVAL_SECONDS: 300
       RM_POLYMARKET_TIMEOUT_SECONDS: 10
       RM_MARKETS_CACHE_LIMIT: 18
-      RM_SUMMARY_ENABLED: ${RM_SUMMARY_ENABLED}
       RM_PROVER_BASE_URL: ${RM_PROVER_BASE_URL}
       # Keep worker footprint light to avoid OOM restarts during sync.
       APP_WORKERS: ${APP_WORKERS:-1}

@@ -22,7 +22,6 @@ from .metrics import (
     POLYMARKET_RATE_LIMIT_COUNTER,
     POLYMARKET_RETRY_COUNTER,
     RETENTION_METRIC,
-    SUMMARY_DLQ_COUNTER,
     CacheInvalidationReport,
 )
 from .polymarket import build_filters_from_settings
@@ -93,7 +92,6 @@ __all__ = [
     "POLYMARKET_RATE_LIMIT_COUNTER",
     "POLYMARKET_RETRY_COUNTER",
     "RETENTION_METRIC",
-    "SUMMARY_DLQ_COUNTER",
     "PROVER_CLIENT",
     "clob_client",
     "goldsky_client",

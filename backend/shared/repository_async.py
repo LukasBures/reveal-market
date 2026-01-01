@@ -225,31 +225,6 @@ async def record_schema_version(
     return previous_revision
 
 
-async def apply_market_summary(
-    session: AsyncSession,
-    event_id: str,
-    *,
-    summary: str,
-    source: str,
-    model: str,
-    metadata: Mapping[str, Any] | None,
-    checked_at: datetime,
-) -> models.Market:
-    """Persist AI-generated summary metadata onto a market row."""
-
-    market = await get_market_by_event_id(session, event_id)
-    if market is None:
-        raise ValueError(f"market {event_id} not found")
-    market.summary = summary
-    market.summary_source = source
-    market.summary_model = model
-    market.summary_metadata = dict(metadata or {})
-    market.summary_checked_at = checked_at
-    market.summary_requested_at = None
-    session.add(market)
-    return market
-
-
 async def upsert_settlement_snapshot(
     session: AsyncSession, market_id: int, data: Mapping[str, Any]
 ) -> models.Settlement:

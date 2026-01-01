@@ -152,12 +152,6 @@ LEASE_SKIP_COUNTER = _safe_counter(
     ["outcome"],
 )
 
-SUMMARY_DLQ_COUNTER = _safe_counter(
-    "worker_summary_dead_letter_total",
-    "Summary jobs sent to dead letter queue",
-    ["outcome"],
-)
-
 
 def record_retention_metrics(category_counts: dict[str, int]) -> None:
     """Increment retention gauge per category so ops can track expired markets by cohort."""

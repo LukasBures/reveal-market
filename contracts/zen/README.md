@@ -31,7 +31,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 - Factory owner rotates `authorizationSigner`, `oracle`, or `relayerEscrow` on existing markets; new relayers must set `marketFactory` before rotation so hooks succeed.
 - Per-market `protocolLiabilityCap` is adjustable until settlement; global rake is mutable and can be pushed to markets.
 - Commit deadlines can only be extended (never shortened) while in the commit phase.
-- Pauses: `pauseFactory` stops new markets; `setCommitsPaused`/`setClaimsPaused` freeze activity per-market in emergencies.
+- Pauses: `setFactoryPaused` stops new markets; `setCommitsPaused`/`setClaimsPaused` freeze activity per-market in emergencies.
 
 ## Public Signal Order (10)
 `[merkleRoot, marketId, winningOutcomeId, totalEscrowNet, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]`
