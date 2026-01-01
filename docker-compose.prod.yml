@@ -1,0 +1,44 @@
+services:
+  caddy:
+    build:
+      context: ./docker/caddy
+      dockerfile: Dockerfile
+    image: reveal-market-caddy
+    container_name: reveal-market-caddy
+    user: root
+    restart: unless-stopped
+    mem_swappiness: 0
+    env_file:
+      - ${ENV_FILE:-.env.local}
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      TZ: UTC
+      CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:2019/config/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+volumes:
+  caddy_data:
+  caddy_config:

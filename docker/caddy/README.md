@@ -1,6 +1,6 @@
 # Caddy deployment notes
 
-- **Image**: Built via `docker/caddy/Dockerfile` with the Cloudflare DNS plugin baked in. The `caddy` service in `docker-compose.yml` builds this image.
+- **Image**: Built via `docker/caddy/Dockerfile` with the Cloudflare DNS plugin baked in. The `caddy` service in `docker-compose.prod.yml` builds this image.
 - **Runtime**: Builder/runtime Caddy versions are pinned via `CADDY_VERSION`; the binary is `setcap`-enabled so it can bind 80/443 while running as the `caddy` user.
 - **TLS profiles** (`CADDY_TLS_PROFILE`):
   - `tls_prod` – default HTTP/ALPN ACME.

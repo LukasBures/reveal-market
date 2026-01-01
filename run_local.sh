@@ -45,7 +45,6 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 export ENV_FILE
 export FRONTEND_ENV_FILE
-TARGET_CADDYFILE="${ROOT_DIR}/docker/caddy/Caddyfile"
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_BUILD_DIR="${PROVER_ARTIFACTS_DIR}/prover/circuits/build"
@@ -59,7 +58,7 @@ PROVER_REQUIRED_FILES=(
 SKIP_PROVER_CHECK="${SKIP_PROVER_CHECK:-false}"
 APK_REPO_URL="${APK_REPO_URL:-https://dl-cdn.alpinelinux.org/alpine}"
 APK_FALLBACK_URL="${APK_FALLBACK_URL:-https://mirror.leaseweb.net/alpine}"
-ALPINE_BASE_IMAGES=("caddy:2-alpine" "node:20-alpine" "python:3.12-alpine")
+ALPINE_BASE_IMAGES=("node:20-alpine" "python:3.12-alpine")
 
 prune_docker_artifacts() {
   log_step "Pruning unused Docker data"
@@ -393,10 +392,6 @@ if [[ "${RUN_PRUNE}" == "true" ]]; then
   prune_docker_artifacts
 fi
 
-if [[ ! -f "${TARGET_CADDYFILE}" ]]; then
-  log_warn "Missing Caddyfile at ${TARGET_CADDYFILE}"
-  exit 1
-fi
 sync_prover_from_artifacts_source || true
 ensure_prover_artifacts
 check_apk_mirror
@@ -509,7 +504,6 @@ Stack ready. Useful URLs:
     • Relayer health:       http://localhost:${RELAYER_PORT:-8088}/healthz
     • Hedger health:        http://localhost:${HEDGER_PORT:-8079}/healthz
     • Prover health:        http://localhost:8085/healthz
-    • Caddy admin:          http://localhost:2019/config/
 
 Internal service ports (for debugging):
 
@@ -521,7 +515,6 @@ Internal service ports (for debugging):
     • Relayer (internal):   http://relayer:${RELAYER_PORT:-8088}/healthz
     • Hedger (internal):    http://hedger:${HEDGER_PORT:-8079}/healthz
     • Prover (internal):    http://prover:8085/healthz
-    • Caddy (internal):     http://caddy:2019/config/
 
 Datastores:
 

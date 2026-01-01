@@ -125,8 +125,10 @@ else
   log_warn "docker compose or docker-compose is required"
   exit 1
 fi
-export COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
-COMPOSE_FILE_ARGS=(-f "${COMPOSE_FILE}")
+COMPOSE_FILE_BASE="${ROOT_DIR}/docker-compose.yml"
+COMPOSE_FILE_PROD="${ROOT_DIR}/docker-compose.prod.yml"
+export COMPOSE_FILE="${COMPOSE_FILE_BASE}:${COMPOSE_FILE_PROD}"
+COMPOSE_FILE_ARGS=(-f "${COMPOSE_FILE_BASE}" -f "${COMPOSE_FILE_PROD}")
 
 cd "${ROOT_DIR}"
 

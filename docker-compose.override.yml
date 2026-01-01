@@ -47,19 +47,6 @@ services:
         reservations:
           memory: 384M
 
-  caddy:
-    profiles: ["caddy"]
-    ports:
-      - "127.0.0.1:2019:2019"
-    environment:
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 64M
-
   api:
     # Override prod-like defaults so local runs get verbose logs + live code reloading.
     environment:
