@@ -305,6 +305,7 @@ class DataStreamer:
 
     async def _rest_poll_loop(self) -> None:
         while not self._stop.is_set():
+            self._record_clob_rest_poll(success=False)
             try:
                 await self._poll_rest()
                 self._record_clob_rest_poll(success=True)

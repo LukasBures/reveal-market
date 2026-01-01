@@ -385,6 +385,18 @@ class StreamState:
         unique = sorted(set(outcomes), key=int)
         return unique[:max_outcomes]
 
+    def _staleness_targets(self) -> set[str]:
+        assets = self.subscriptions.assets
+        if not assets:
+            return set()
+        tracked: set[str] = {market_id for market_id in self.last_seen if market_id in assets}
+        for market_id, tokens in self.market_tokens.items():
+            if market_id in tracked:
+                continue
+            if market_id in assets or any(token in assets for token in tokens):
+                tracked.add(market_id)
+        return tracked
+
     def stale_markets(self, stale_after_seconds: int = 60) -> list[str]:
         now = datetime.now(UTC)
         evict_after_seconds = max(
@@ -404,10 +416,16 @@ class StreamState:
                 "evicted long-stale markets from tracking",
                 extra={"event": "stream.stale.evict", "count": len(evicted), "evicted_sample": evicted[:10]},
             )
+        tracked = self._staleness_targets()
+        if not tracked:
+            if self.metrics:
+                self.metrics.stale_market_total.set(0)
+            return []
+        filtered_last_seen = {market_id: ts for market_id, ts in self.last_seen.items() if market_id in tracked}
         if self.metrics:
-            return self.metrics.record_staleness(self.last_seen, stale_after=stale_after_seconds)
+            return self.metrics.record_staleness(filtered_last_seen, stale_after=stale_after_seconds)
         cutoff = now - timedelta(seconds=stale_after_seconds)
-        return [mid for mid, ts in self.last_seen.items() if ts < cutoff]
+        return [mid for mid, ts in filtered_last_seen.items() if ts < cutoff]
 
     def should_log_stale_markets(self, count: int, *, min_interval_seconds: int) -> bool:
         if count <= 0:

@@ -105,6 +105,21 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
         return True
 
 
+async def _release_sync_lease(redis_client: Redis | None) -> None:
+    if redis_client is None:
+        return
+    try:
+        await redis_client.delete(runtime.settings.polymarket_sync_lease_key)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.sync.lease_release_failed",
+            message="failed to release polymarket sync lease",
+            error=str(exc),
+        )
+
+
 async def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None:
     """Update a Redis key so external monitors can assert liveness."""
 
@@ -214,209 +229,214 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         )
         latency_ms = (time.perf_counter() - start) * 1000
         return summary, total_fetched, gap_count, latency_ms
-    log_event(
-        logger,
-        logging.INFO,
-        event="worker.fetch.begin",
-        message="starting polymarket fetch",
-        page_size=runtime.settings.polymarket_page_size,
-        max_pages=runtime.settings.polymarket_max_pages,
-    )
-    attempts = max(1, runtime.settings.polymarket_sync_max_attempts)
-    backoff = max(runtime.settings.polymarket_sync_retry_backoff_seconds, 0.0)
-    backoff_max = max(runtime.settings.polymarket_sync_retry_backoff_max_seconds, 0.0)
-    attempt = 0
-    last_exc: Exception | None = None
-    while attempt < attempts:
-        attempt += 1
-        last_exc = None
-        page_no = 0
-        summary = SyncSummary()
-        total_fetched = 0
-        gap_count = 0
-        try:
-            async with session_scope() as session:
-                only_open = runtime.settings.polymarket_only_open_markets is True
-                closed_param = False if only_open else None
-                async for page in runtime.polymarket_client.fetch_events_paginated(
-                    page_size=runtime.settings.polymarket_page_size,
-                    max_pages=runtime.settings.polymarket_max_pages,
-                    order=runtime.settings.polymarket_order,
-                    ascending=runtime.settings.polymarket_sort_ascending,
-                    closed=closed_param,
-                    extra_params=build_filters_from_settings(runtime.settings),
-                ):
-                    page_start = time.perf_counter()
-                    page_no += 1
-                    raw_count = len(page)
-                    if only_open:
-                        page = [market for market in page if getattr(market, "closed", None) is not True]
-                    filtered_count = len(page)
-                    page_from = total_fetched + 1 if filtered_count else total_fetched
-                    total_fetched += filtered_count
-                    page_to = total_fetched
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        event="worker.fetch.page",
-                        message="fetched polymarket page",
-                        page=page_no,
-                        count=filtered_count,
-                        raw_count=raw_count,
-                        filtered=raw_count - filtered_count if raw_count != filtered_count else None,
-                        total=total_fetched,
-                        from_index=page_from,
-                        to_index=page_to,
-                    )
-                    if filtered_count == 0:
-                        continue
-                    process_start = time.perf_counter()
-                    timing_before = (
-                        summary.timing_match_ms,
-                        summary.timing_upsert_ms,
-                        summary.timing_normalized_ms,
-                        summary.timing_resolution_ms,
-                    )
-                    summary = await collect_market_changes_with_summary(session, page, redis_client, summary=summary)
-                    process_ms = (time.perf_counter() - process_start) * 1000
-                    timing_after = (
-                        summary.timing_match_ms,
-                        summary.timing_upsert_ms,
-                        summary.timing_normalized_ms,
-                        summary.timing_resolution_ms,
-                    )
-                    delta_match = timing_after[0] - timing_before[0]
-                    delta_upsert = timing_after[1] - timing_before[1]
-                    delta_normalized = timing_after[2] - timing_before[2]
-                    delta_resolution = timing_after[3] - timing_before[3]
-                    flush_start = time.perf_counter()
-                    await session.flush()
-                    flush_ms = (time.perf_counter() - flush_start) * 1000
-                    commit_start = time.perf_counter()
-                    await session.commit()
-                    commit_ms = (time.perf_counter() - commit_start) * 1000
-                    expunge_start = time.perf_counter()
-                    session.expunge_all()  # keep identity map small between pages
-                    expunge_ms = (time.perf_counter() - expunge_start) * 1000
-                    page_duration_ms = (time.perf_counter() - page_start) * 1000
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="worker.sync.page",
-                        message="processed polymarket page",
-                        page=page_no,
-                        count=len(page),
-                        total=total_fetched,
-                        duration_ms=round(page_duration_ms, 2),
-                        process_ms=round(process_ms, 2),
-                        flush_ms=round(flush_ms, 2),
-                        commit_ms=round(commit_ms, 2),
-                        expunge_ms=round(expunge_ms, 2),
-                        match_ms=round(delta_match, 2),
-                        upsert_ms=round(delta_upsert, 2),
-                        normalized_ms=round(delta_normalized, 2),
-                        resolution_ms=round(delta_resolution, 2),
-                    )
-                await apply_retention_cleanup_async(session, summary)
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.sync.retention_complete",
-                    message="retention cleanup finished",
-                )
-                backfilled = await backfill_missing_resolutions_async(session, summary)
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.sync.backfill_complete",
-                    message="resolution backfill finished",
-                    backfilled=backfilled,
-                )
-                if runtime.settings.factory_address and runtime.settings.rpc_url:
-                    updated = await backfill_market_addresses(
-                        session,
-                        rpc_url=str(runtime.settings.rpc_url),
-                        factory_address=str(runtime.settings.factory_address),
-                        get_markets_missing_address=repository_async.list_markets_missing_address,
-                    )
-                    if updated:
+    try:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.fetch.begin",
+            message="starting polymarket fetch",
+            page_size=runtime.settings.polymarket_page_size,
+            max_pages=runtime.settings.polymarket_max_pages,
+        )
+        attempts = max(1, runtime.settings.polymarket_sync_max_attempts)
+        backoff = max(runtime.settings.polymarket_sync_retry_backoff_seconds, 0.0)
+        backoff_max = max(runtime.settings.polymarket_sync_retry_backoff_max_seconds, 0.0)
+        attempt = 0
+        last_exc: Exception | None = None
+        while attempt < attempts:
+            attempt += 1
+            last_exc = None
+            page_no = 0
+            summary = SyncSummary()
+            total_fetched = 0
+            gap_count = 0
+            try:
+                async with session_scope() as session:
+                    only_open = runtime.settings.polymarket_only_open_markets is True
+                    closed_param = False if only_open else None
+                    async for page in runtime.polymarket_client.fetch_events_paginated(
+                        page_size=runtime.settings.polymarket_page_size,
+                        max_pages=runtime.settings.polymarket_max_pages,
+                        order=runtime.settings.polymarket_order,
+                        ascending=runtime.settings.polymarket_sort_ascending,
+                        closed=closed_param,
+                        extra_params=build_filters_from_settings(runtime.settings),
+                    ):
+                        page_start = time.perf_counter()
+                        page_no += 1
+                        raw_count = len(page)
+                        if only_open:
+                            page = [market for market in page if getattr(market, "closed", None) is not True]
+                        filtered_count = len(page)
+                        page_from = total_fetched + 1 if filtered_count else total_fetched
+                        total_fetched += filtered_count
+                        page_to = total_fetched
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            event="worker.fetch.page",
+                            message="fetched polymarket page",
+                            page=page_no,
+                            count=filtered_count,
+                            raw_count=raw_count,
+                            filtered=raw_count - filtered_count if raw_count != filtered_count else None,
+                            total=total_fetched,
+                            from_index=page_from,
+                            to_index=page_to,
+                        )
+                        if filtered_count == 0:
+                            continue
+                        process_start = time.perf_counter()
+                        timing_before = (
+                            summary.timing_match_ms,
+                            summary.timing_upsert_ms,
+                            summary.timing_normalized_ms,
+                            summary.timing_resolution_ms,
+                        )
+                        summary = await collect_market_changes_with_summary(
+                            session, page, redis_client, summary=summary
+                        )
+                        process_ms = (time.perf_counter() - process_start) * 1000
+                        timing_after = (
+                            summary.timing_match_ms,
+                            summary.timing_upsert_ms,
+                            summary.timing_normalized_ms,
+                            summary.timing_resolution_ms,
+                        )
+                        delta_match = timing_after[0] - timing_before[0]
+                        delta_upsert = timing_after[1] - timing_before[1]
+                        delta_normalized = timing_after[2] - timing_before[2]
+                        delta_resolution = timing_after[3] - timing_before[3]
+                        flush_start = time.perf_counter()
+                        await session.flush()
+                        flush_ms = (time.perf_counter() - flush_start) * 1000
+                        commit_start = time.perf_counter()
+                        await session.commit()
+                        commit_ms = (time.perf_counter() - commit_start) * 1000
+                        expunge_start = time.perf_counter()
+                        session.expunge_all()  # keep identity map small between pages
+                        expunge_ms = (time.perf_counter() - expunge_start) * 1000
+                        page_duration_ms = (time.perf_counter() - page_start) * 1000
                         log_event(
                             logger,
                             logging.INFO,
-                            event="worker.resolution.backfill_addresses",
-                            message="backfilled market addresses",
-                            count=updated,
+                            event="worker.sync.page",
+                            message="processed polymarket page",
+                            page=page_no,
+                            count=len(page),
+                            total=total_fetched,
+                            duration_ms=round(page_duration_ms, 2),
+                            process_ms=round(process_ms, 2),
+                            flush_ms=round(flush_ms, 2),
+                            commit_ms=round(commit_ms, 2),
+                            expunge_ms=round(expunge_ms, 2),
+                            match_ms=round(delta_match, 2),
+                            upsert_ms=round(delta_upsert, 2),
+                            normalized_ms=round(delta_normalized, 2),
+                            resolution_ms=round(delta_resolution, 2),
                         )
-                    params_updated = await backfill_market_params(
-                        session,
-                        rpc_url=str(runtime.settings.rpc_url),
-                        factory_address=str(runtime.settings.factory_address),
-                        get_markets_for_sync=repository_async.list_markets_for_factory_sync,
+                    await apply_retention_cleanup_async(session, summary)
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.sync.retention_complete",
+                        message="retention cleanup finished",
                     )
-                    if params_updated:
+                    backfilled = await backfill_missing_resolutions_async(session, summary)
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.sync.backfill_complete",
+                        message="resolution backfill finished",
+                        backfilled=backfilled,
+                    )
+                    if runtime.settings.factory_address and runtime.settings.rpc_url:
+                        updated = await backfill_market_addresses(
+                            session,
+                            rpc_url=str(runtime.settings.rpc_url),
+                            factory_address=str(runtime.settings.factory_address),
+                            get_markets_missing_address=repository_async.list_markets_missing_address,
+                        )
+                        if updated:
+                            log_event(
+                                logger,
+                                logging.INFO,
+                                event="worker.resolution.backfill_addresses",
+                                message="backfilled market addresses",
+                                count=updated,
+                            )
+                        params_updated = await backfill_market_params(
+                            session,
+                            rpc_url=str(runtime.settings.rpc_url),
+                            factory_address=str(runtime.settings.factory_address),
+                            get_markets_for_sync=repository_async.list_markets_for_factory_sync,
+                        )
+                        if params_updated:
+                            log_event(
+                                logger,
+                                logging.INFO,
+                                event="worker.market_params.backfill",
+                                message="backfilled market factory params",
+                                count=params_updated,
+                            )
+                    if backfilled:
                         log_event(
                             logger,
                             logging.INFO,
-                            event="worker.market_params.backfill",
-                            message="backfilled market factory params",
-                            count=params_updated,
+                            event="worker.resolution.backfill_complete",
+                            message="backfilled missing resolution snapshots",
+                            count=backfilled,
                         )
-                if backfilled:
+                        gap_count = await log_resolution_gaps_async(session)
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.sync.postprocess",
+                            message="post-processing completed",
+                            retention_deleted=summary.markets_deleted,
+                            resolutions_backfilled=summary.resolutions_backfilled,
+                            resolution_gaps=gap_count,
+                        )
+                break
+            except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
+                last_exc = exc
+                if attempt >= attempts:
+                    POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
                     log_event(
                         logger,
-                        logging.INFO,
-                        event="worker.resolution.backfill_complete",
-                        message="backfilled missing resolution snapshots",
-                        count=backfilled,
+                        logging.ERROR,
+                        event="worker.fetch.error",
+                        message="failed to fetch markets from polymarket after retries",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                        error=str(exc),
                     )
-                    gap_count = await log_resolution_gaps_async(session)
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="worker.sync.postprocess",
-                        message="post-processing completed",
-                        retention_deleted=summary.markets_deleted,
-                        resolutions_backfilled=summary.resolutions_backfilled,
-                        resolution_gaps=gap_count,
-                    )
-            break
-        except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
-            last_exc = exc
-            if attempt >= attempts:
-                POLYMARKET_FETCH_COUNTER.labels(outcome="error").inc()
+                    raise
+                delay = backoff * (2 ** (attempt - 1))
+                if backoff_max > 0:
+                    delay = min(delay, backoff_max)
                 log_event(
                     logger,
-                    logging.ERROR,
-                    event="worker.fetch.error",
-                    message="failed to fetch markets from polymarket after retries",
+                    logging.WARNING,
+                    event="worker.fetch.retry",
+                    message="retrying polymarket fetch",
                     attempt=attempt,
                     max_attempts=attempts,
+                    delay_seconds=delay,
                     error=str(exc),
                 )
-                raise
-            delay = backoff * (2 ** (attempt - 1))
-            if backoff_max > 0:
-                delay = min(delay, backoff_max)
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.fetch.retry",
-                message="retrying polymarket fetch",
-                attempt=attempt,
-                max_attempts=attempts,
-                delay_seconds=delay,
-                error=str(exc),
-            )
-            if delay > 0:
-                await asyncio.sleep(delay)
-            continue
-    if total_fetched > 0:
-        POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()
-    else:
-        outcome = "empty" if last_exc is None else "error"
-        POLYMARKET_FETCH_COUNTER.labels(outcome=outcome).inc()
-    latency_ms = (time.perf_counter() - start) * 1000
-    return summary, total_fetched, gap_count, latency_ms
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                continue
+        if total_fetched > 0:
+            POLYMARKET_FETCH_COUNTER.labels(outcome="success").inc()
+        else:
+            outcome = "empty" if last_exc is None else "error"
+            POLYMARKET_FETCH_COUNTER.labels(outcome=outcome).inc()
+        latency_ms = (time.perf_counter() - start) * 1000
+        return summary, total_fetched, gap_count, latency_ms
+    finally:
+        await _release_sync_lease(redis_client)
 
 
 async def process_once(redis_client: Redis | None = None) -> dict[str, float | int | str | bool]:
