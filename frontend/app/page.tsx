@@ -29,13 +29,10 @@ export default async function HomePage({ searchParams }: PageProps) {
   const [stats, health] = await Promise.all([fetchMarketStatsBreakdown(), fetchHealthSnapshot()]);
   const kpis = await fetchInvestorKpis(stats, health);
   const liveMarkets = stats.find((stat) => stat.status === "live")?.count ?? 0;
-  const finalizedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
-  const totalMarkets = stats.find((stat) => stat.status === "total")?.count ?? liveMarkets + finalizedMarkets;
+  const endedMarkets = stats.find((stat) => stat.status === "finalized")?.count ?? 0;
   const callouts = [
     { label: "Live markets", value: formatNumber(liveMarkets) },
-    { label: "Finalized markets", value: formatNumber(finalizedMarkets) },
-    { label: "Total markets tracked", value: formatNumber(totalMarkets) },
-    { label: "Access", value: "Invite only" },
+    { label: "Ended markets", value: formatNumber(endedMarkets) },
   ];
   const resolvedParams = (await searchParams) ?? {};
   const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
