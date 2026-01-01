@@ -43,9 +43,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 2G
         reservations:
-          memory: 384M
+          memory: 1G
 
   api:
     # Override prod-like defaults so local runs get verbose logs + live code reloading.

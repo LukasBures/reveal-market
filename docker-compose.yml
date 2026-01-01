@@ -411,10 +411,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 2G
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/healthz || exit 1"]
       interval: 30s

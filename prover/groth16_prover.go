@@ -13,9 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -100,6 +103,15 @@ func newGroth16Prover(settings groth16Settings) (*groth16Prover, error) {
 		sem:         make(chan struct{}, settings.MaxConcurrency),
 		circuitHash: hash,
 	}
+	logLine("info", "prover.backend.ready", map[string]any{
+		"backend":         prover.Backend(),
+		"max_concurrency": settings.MaxConcurrency,
+		"timeout_seconds": settings.Timeout.Seconds(),
+		"witness_mode":    witnessMode(settings),
+		"zkey_bytes":      fileSize(settings.ZKeyPath),
+		"wasm_bytes":      fileSize(settings.WasmPath),
+		"witness_bytes":   fileSize(settings.WitnessBinary),
+	})
 	prover.ready.Store(true)
 	return prover, nil
 }
@@ -171,47 +183,147 @@ func (p *groth16Prover) Generate(ctx context.Context, req settlementProofRequest
 }
 
 func (p *groth16Prover) runWitness(ctx context.Context, inputFile, witnessFile string) error {
+	start := time.Now()
+	startFields := map[string]any{
+		"stage":        "witness_generation",
+		"witness_mode": witnessMode(p.settings),
+		"input_bytes":  fileSize(inputFile),
+	}
+	if strings.TrimSpace(p.settings.WitnessBinary) == "" {
+		startFields["wasm_bytes"] = fileSize(p.settings.WasmPath)
+	}
+	addMemorySnapshot(startFields)
+	logLine("info", "prover.stage.start", startFields)
 	if strings.TrimSpace(p.settings.WitnessBinary) != "" {
 		args := []string{inputFile, witnessFile}
 		if err := p.runCommand(ctx, p.settings.WitnessBinary, args, "witness_generation_cpp"); err != nil {
+			failFields := map[string]any{
+				"stage":         "witness_generation_cpp",
+				"duration_ms":   time.Since(start).Milliseconds(),
+				"input_bytes":   fileSize(inputFile),
+				"witness_bytes": fileSize(witnessFile),
+			}
+			addMemorySnapshot(failFields)
+			logLine("error", "prover.stage.failed", failFields)
 			return err
 		}
+		completeFields := map[string]any{
+			"stage":         "witness_generation_cpp",
+			"duration_ms":   time.Since(start).Milliseconds(),
+			"witness_bytes": fileSize(witnessFile),
+		}
+		addMemorySnapshot(completeFields)
+		logLine("info", "prover.stage.completed", completeFields)
 		return nil
 	}
 	args := []string{p.settings.WitnessScriptPath, p.settings.WasmPath, inputFile, witnessFile}
 	if err := p.runCommand(ctx, p.settings.NodeBinary, args, "witness_generation"); err != nil {
+		failFields := map[string]any{
+			"stage":         "witness_generation",
+			"duration_ms":   time.Since(start).Milliseconds(),
+			"input_bytes":   fileSize(inputFile),
+			"witness_bytes": fileSize(witnessFile),
+		}
+		addMemorySnapshot(failFields)
+		logLine("error", "prover.stage.failed", failFields)
 		return err
 	}
+	completeFields := map[string]any{
+		"stage":         "witness_generation",
+		"duration_ms":   time.Since(start).Milliseconds(),
+		"witness_bytes": fileSize(witnessFile),
+	}
+	addMemorySnapshot(completeFields)
+	logLine("info", "prover.stage.completed", completeFields)
 	return nil
 }
 
 func (p *groth16Prover) runProve(ctx context.Context, witnessFile, proofFile, publicFile string) error {
+	start := time.Now()
+	startFields := map[string]any{
+		"stage":         "groth16_prove",
+		"witness_bytes": fileSize(witnessFile),
+		"zkey_bytes":    fileSize(p.settings.ZKeyPath),
+	}
+	addMemorySnapshot(startFields)
+	logLine("info", "prover.stage.start", startFields)
 	args := []string{p.settings.ZKeyPath, witnessFile, proofFile, publicFile}
 	if err := p.runCommand(ctx, p.settings.RapidSnarkBinary, args, "groth16_prove"); err != nil {
+		failFields := map[string]any{
+			"stage":         "groth16_prove",
+			"duration_ms":   time.Since(start).Milliseconds(),
+			"witness_bytes": fileSize(witnessFile),
+			"proof_bytes":   fileSize(proofFile),
+			"public_bytes":  fileSize(publicFile),
+			"zkey_bytes":    fileSize(p.settings.ZKeyPath),
+		}
+		addMemorySnapshot(failFields)
+		logLine("error", "prover.stage.failed", failFields)
 		return err
 	}
+	completeFields := map[string]any{
+		"stage":        "groth16_prove",
+		"duration_ms":  time.Since(start).Milliseconds(),
+		"proof_bytes":  fileSize(proofFile),
+		"public_bytes": fileSize(publicFile),
+	}
+	addMemorySnapshot(completeFields)
+	logLine("info", "prover.stage.completed", completeFields)
 	return nil
 }
 
 func (p *groth16Prover) runCommand(ctx context.Context, binary string, args []string, stage string) error {
+	start := time.Now()
+	logLine("debug", "prover.command.started", map[string]any{
+		"stage":  stage,
+		"binary": binary,
+		"args":   args,
+	})
 	stdout, stderr, err := runCommand(ctx, binary, args, "")
+	duration := time.Since(start)
 	if err != nil {
 		msg := strings.TrimSpace(string(stderr))
 		if msg == "" {
 			msg = err.Error()
 		}
-		logLine("error", "prover.command.failed", map[string]any{
-			"stage":  stage,
-			"binary": binary,
-			"error":  msg,
-			"args":   args,
-		})
+		fields := map[string]any{
+			"stage":       stage,
+			"binary":      binary,
+			"error":       msg,
+			"args":        args,
+			"duration_ms": duration.Milliseconds(),
+		}
+		if details := exitDetails(err); len(details) > 0 {
+			for key, value := range details {
+				fields[key] = value
+			}
+		}
+		if ctx.Err() != nil {
+			fields["context_error"] = ctx.Err().Error()
+		}
+		if len(stdout) > 0 {
+			fields["stdout"] = truncateLogOutput(stdout)
+		}
+		if len(stderr) > 0 {
+			fields["stderr"] = truncateLogOutput(stderr)
+		}
+		addMemorySnapshot(fields)
+		logLine("error", "prover.command.failed", fields)
 		return newInternalError(fmt.Errorf("%s failed: %s", stage, msg))
 	}
+	if len(stderr) > 0 {
+		logLine("warn", "prover.command.stderr", map[string]any{
+			"stage":       stage,
+			"binary":      binary,
+			"stderr":      truncateLogOutput(stderr),
+			"duration_ms": duration.Milliseconds(),
+		})
+	}
 	logLine("debug", "prover.command.completed", map[string]any{
-		"stage":  stage,
-		"binary": binary,
-		"stdout": strings.TrimSpace(string(stdout)),
+		"stage":       stage,
+		"binary":      binary,
+		"duration_ms": duration.Milliseconds(),
+		"stdout":      truncateLogOutput(stdout),
 	})
 	return nil
 }
@@ -235,6 +347,109 @@ func runCommand(ctx context.Context, binary string, args []string, workdir strin
 	outCopy := append([]byte(nil), stdout.Bytes()...)
 	errCopy := append([]byte(nil), stderr.Bytes()...)
 	return outCopy, errCopy, err
+}
+
+func witnessMode(settings groth16Settings) string {
+	if strings.TrimSpace(settings.WitnessBinary) != "" {
+		return "cpp"
+	}
+	return "node"
+}
+
+func fileSize(path string) int64 {
+	if strings.TrimSpace(path) == "" {
+		return 0
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return 0
+	}
+	return info.Size()
+}
+
+func truncateLogOutput(data []byte) string {
+	const maxLogBytes = 2048
+	text := strings.TrimSpace(string(data))
+	if len(text) <= maxLogBytes {
+		return text
+	}
+	return text[:maxLogBytes] + "...(truncated)"
+}
+
+func exitDetails(err error) map[string]any {
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return nil
+	}
+	fields := map[string]any{}
+	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+		fields["exit_code"] = status.ExitStatus()
+		if status.Signaled() {
+			fields["signal"] = status.Signal().String()
+		}
+	}
+	return fields
+}
+
+func addMemorySnapshot(fields map[string]any) {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	fields["go_mem_alloc_bytes"] = stats.Alloc
+	fields["go_mem_sys_bytes"] = stats.Sys
+	fields["go_mem_heap_inuse_bytes"] = stats.HeapInuse
+	fields["go_mem_heap_idle_bytes"] = stats.HeapIdle
+	fields["go_mem_heap_released_bytes"] = stats.HeapReleased
+	fields["go_mem_num_gc"] = stats.NumGC
+	if available, ok := readMemAvailableBytes(); ok {
+		fields["mem_available_bytes"] = available
+	}
+	if limit, ok := readCgroupValue([]string{"/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"}); ok {
+		fields["cgroup_memory_max_bytes"] = limit
+	}
+	if current, ok := readCgroupValue([]string{"/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"}); ok {
+		fields["cgroup_memory_current_bytes"] = current
+	}
+}
+
+func readMemAvailableBytes() (uint64, bool) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "MemAvailable:") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			return 0, false
+		}
+		value, err := strconv.ParseUint(parts[1], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return value * 1024, true
+	}
+	return 0, false
+}
+
+func readCgroupValue(paths []string) (uint64, bool) {
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		raw := strings.TrimSpace(string(data))
+		if raw == "" || raw == "max" {
+			continue
+		}
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			continue
+		}
+		return value, true
+	}
+	return 0, false
 }
 
 func requireCommand(name string) error {

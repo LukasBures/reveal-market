@@ -69,6 +69,10 @@ def _strip_hex(value: str) -> str:
     return value[2:] if value.startswith("0x") else value
 
 
+def _ensure_0x(value: str) -> str:
+    return value if value.startswith("0x") else f"0x{value}"
+
+
 def _normalize_bytes32(value: Any) -> str | None:
     """Return a 0x-prefixed hex string for bytes/HexBytes values."""
 
@@ -1568,7 +1572,7 @@ async def trade_commit(
         "commitment": commitment,
         "nonce": nonce,
         "expiry": expiry,
-        "signature": signed.signature.hex(),
+        "signature": _ensure_0x(signed.signature.hex()),
         "ticket_value_wei": ticket_size_wei,
         "amount_wei": net_amount_wei,
         "chain_id": chain_id,
