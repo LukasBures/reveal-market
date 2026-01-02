@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import type { ProofReceipt } from "@/lib/api-types";
+import { formatNumber } from "@/lib/formatters";
 import { logger } from "@/lib/logging";
 import { ProofReceiptList } from "./ProofReceiptList";
 
@@ -68,27 +69,27 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
   }, [filters, initialReceipts, pageSize]);
 
   const loadMore = useCallback(() => {
-      if (!hasMore || isPending) {
-        return;
-      }
-      startTransition(async () => {
-        try {
-          const next = await fetchNextReceipts(pageSize, offsetRef.current, filtersRef.current);
-          if (!next.length) {
-            setHasMore(false);
-            return;
-          }
-          offsetRef.current += next.length;
-          setReceipts((prev) => [...prev, ...next]);
-          if (next.length < pageSize) {
-            setHasMore(false);
-          }
-        } catch (error) {
-          logger.clientError("ProofsClient:loadMore_failed", { error: (error as Error).message });
+    if (!hasMore || isPending) {
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const next = await fetchNextReceipts(pageSize, offsetRef.current, filtersRef.current);
+        if (!next.length) {
+          setHasMore(false);
+          return;
+        }
+        offsetRef.current += next.length;
+        setReceipts((prev) => [...prev, ...next]);
+        if (next.length < pageSize) {
           setHasMore(false);
         }
-      });
-    }, [hasMore, isPending, pageSize]);
+      } catch (error) {
+        logger.clientError("ProofsClient:loadMore_failed", { error: (error as Error).message });
+        setHasMore(false);
+      }
+    });
+  }, [hasMore, isPending, pageSize]);
 
   useEffect(() => {
     const target = sentinelRef.current;
@@ -111,8 +112,38 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
     return () => observer.disconnect();
   }, [hasMore, loadMore]);
 
+  const proofCachedCount = receipts.filter((receipt) => Boolean(receipt.proofHash)).length;
+  const zeroLiabilityCount = receipts.filter((receipt) => isZeroValue(receipt.totalLiability)).length;
+  const uniqueMarkets = new Set(
+    receipts
+      .map((receipt) => receipt.marketAddress ?? receipt.marketId?.toString() ?? receipt.eventId ?? receipt.conditionId)
+      .filter(Boolean),
+  ).size;
+  const filterChips = buildFilterChips(filters);
+
   return (
     <div className="space-y-6">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-md shadow-black/30">
+        <div className="grid gap-4 md:grid-cols-4">
+          <SummaryMetric label="Receipts loaded" value={formatNumber(receipts.length)} />
+          <SummaryMetric label="Proofs cached" value={formatNumber(proofCachedCount)} />
+          <SummaryMetric label="Unique markets" value={formatNumber(uniqueMarkets)} />
+          <SummaryMetric label="Zero-liability" value={formatNumber(zeroLiabilityCount)} />
+        </div>
+        {filterChips.length ? (
+          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-200">
+            {filterChips.map((chip) => (
+              <span key={chip.label} className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                <span className="text-slate-400">{chip.label}</span> {chip.value}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-slate-400">
+            Values are shown in ZEN (18 decimals) with raw wei listed in each receipt for auditability.
+          </p>
+        )}
+      </div>
       <ProofReceiptList receipts={receipts} />
       <div ref={sentinelRef} aria-hidden className="h-6 w-full" />
       {hasMore ? (
@@ -133,4 +164,54 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
       )}
     </div>
   );
+}
+
+type SummaryMetricProps = {
+  label: string;
+  value: string;
+};
+
+function SummaryMetric({ label, value }: SummaryMetricProps) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+type FilterChip = {
+  label: string;
+  value: string;
+};
+
+function buildFilterChips(filters?: Props["filters"]): FilterChip[] {
+  if (!filters) {
+    return [];
+  }
+  const chips: FilterChip[] = [];
+  if (filters.marketId) {
+    chips.push({ label: "Market", value: String(filters.marketId) });
+  }
+  if (filters.eventId) {
+    chips.push({ label: "Event", value: filters.eventId });
+  }
+  if (filters.conditionId) {
+    chips.push({ label: "Condition", value: filters.conditionId });
+  }
+  if (filters.requestId) {
+    chips.push({ label: "Request", value: filters.requestId });
+  }
+  return chips;
+}
+
+function isZeroValue(value?: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    return BigInt(value) === 0n;
+  } catch {
+    return false;
+  }
 }

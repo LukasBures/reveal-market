@@ -63,11 +63,12 @@ export default async function ProofsPage({
     <>
       <div className="mx-auto max-w-5xl px-4 py-16">
         <div className="space-y-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof viewer</p>
-          <h1 className="text-4xl font-semibold text-white">Groth16 receipts & zk attestations</h1>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof ledger</p>
+          <h1 className="text-4xl font-semibold text-white">Settlement proofs & receipt ledger</h1>
           <p className="text-lg text-slate-300">
-            Every settlement emits a replay-protected nonce, the market address, and zk proof metadata. Use this dashboard
-            to cross-check on-chain verification with zkVerify receipts and downstream attestations.
+            Each settlement emits a replay-safe request id, market address, and circuit hash. Use this ledger to verify
+            on-chain settlements, confirm proof hashes, and trace the exact parameters used in Groth16 generation.
+            Amounts are displayed in ZEN (18 decimals) with raw wei shown in every receipt.
           </p>
         </div>
         {error ? (

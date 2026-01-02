@@ -42,8 +42,8 @@ describe("ProofsClient", () => {
   it("renders provided receipts and the manual pagination control", () => {
     render(<ProofsClient initialReceipts={[baseReceipt]} pageSize={1} />);
 
-    expect(screen.getByText(/Proof request/i)).toBeInTheDocument();
-    expect(screen.getByText(/req-abc/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proof receipt/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/req-abc/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Load more receipts/i)).toBeInTheDocument();
   });
 
@@ -64,7 +64,7 @@ describe("ProofsClient", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/proofs?limit=1&offset=1", { cache: "no-store" });
-      expect(screen.getByText(/req-def/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/req-def/i).length).toBeGreaterThan(0);
     });
   });
 

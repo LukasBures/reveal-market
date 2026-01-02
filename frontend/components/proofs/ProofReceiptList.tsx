@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ProofReceipt } from "@/lib/api-types";
 import { formatDateTime } from "@/lib/formatters";
 
@@ -37,95 +38,157 @@ function ProofReceiptCard({ receipt }: CardProps) {
   const statusColor = receipt.proofHash
     ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
     : "bg-amber-500/20 text-amber-100 border border-amber-300/30";
+  const zeroLiability = isZeroValue(receipt.totalLiability);
   const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
   const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
   const settlementTxHref = hrefFor("tx", receipt.settlementTxHash);
+  const winningPoolDisplay = formatZenValue(winningPool);
+  const totalPoolDisplay = formatZenValue(totalPool);
+  const liabilityDisplay = formatZenValue(receipt.totalLiability);
+  const escrowDisplay = formatZenValue(receipt.totalEscrow);
+  const rakeLabel = formatBps(receipt.rakeBps);
+  const detailItems: DetailItem[] = [
+    { label: "Request id", value: receipt.requestId },
+    { label: "Market address", value: receipt.marketAddress },
+    { label: "Settlement tx", value: receipt.settlementTxHash },
+    { label: "Proof hash", value: receipt.proofHash },
+    { label: "Circuit hash", value: receipt.circuitHash },
+    { label: "Merkle root", value: receipt.merkleRoot },
+    {
+      label: receipt.publicSignals?.length ? `Public signals (${receipt.publicSignals.length})` : null,
+      value: receipt.publicSignals?.join(", "),
+    },
+    {
+      label: receipt.proof ? "Proof payload (truncated)" : null,
+      value: receipt.proof ? shorten(receipt.proof, 48) : null,
+    },
+  ].filter((item): item is DetailItem => Boolean(item.label && item.value));
 
   return (
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-md shadow-black/40">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof request</p>
-          <p className="font-mono text-sm text-white">{shorten(receipt.requestId ?? receipt.proofHash ?? "—")}</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof receipt</p>
+          <p className="font-mono text-sm text-white" title={receipt.requestId ?? undefined}>
+            {shorten(receipt.requestId ?? receipt.proofHash ?? "—", 10)}
+          </p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span>{formatTimestamp(receipt.generatedAt)}</span>
+            {rakeLabel ? <span>Rake {rakeLabel}</span> : null}
+          </div>
         </div>
-        <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColor}`}>
-          {statusLabel}
-        </span>
-      </div>
-
-      <dl className="mt-6 grid gap-4 text-sm text-slate-300 md:grid-cols-2">
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Market</dt>
-          <dd className="font-mono text-white">
-            <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress ?? "—"} />
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Condition</dt>
-          <dd className="font-mono text-white">{shorten(receipt.conditionId ?? receipt.eventId ?? "—", 14)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof hash</dt>
-          <dd className="font-mono text-white">{shorten(receipt.proofHash ?? "—", 14)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Circuit</dt>
-          <dd className="font-mono text-white">
-            {shorten(receipt.circuitHash ?? "—", 14)}
-            {receipt.proverVersion ? <span className="text-slate-400"> (v{receipt.proverVersion})</span> : null}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Generated at</dt>
-          <dd>{formatTimestamp(receipt.generatedAt)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Settlement tx</dt>
-          <dd className="font-mono text-white">
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColor}`}>
+              {statusLabel}
+            </span>
+            {zeroLiability ? (
+              <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100">
+                Zero liability
+              </span>
+            ) : null}
+          </div>
+          <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Settlement tx</div>
+          <div className="font-mono text-sm text-white">
             {settlementTxHref ? (
               <ExplorerLink href={settlementTxHref} label={receipt.settlementTxHash} />
             ) : (
-              shorten(receipt.settlementTxHash, 10)
+              <span title={receipt.settlementTxHash ?? undefined}>{shorten(receipt.settlementTxHash, 10)}</span>
             )}
-          </dd>
+          </div>
         </div>
-        <div>
-          <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">Winning outcome</dt>
-          <dd className="font-mono text-white">{receipt.winningOutcomeId ?? "—"}</dd>
-        </div>
+      </div>
+
+      <dl className="mt-6 grid gap-4 text-sm text-slate-300 md:grid-cols-3">
+        <DataCell label="Market">
+          <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress ?? "—"} />
+        </DataCell>
+        <DataCell label="Condition">
+          <TruncatedValue value={receipt.conditionId ?? receipt.eventId} visible={12} />
+        </DataCell>
+        <DataCell label="Winning outcome">
+          <span className="font-mono text-white">{receipt.winningOutcomeId ?? "—"}</span>
+        </DataCell>
+        <DataCell label="Proof hash">
+          <TruncatedValue value={receipt.proofHash} visible={14} />
+        </DataCell>
+        <DataCell label="Circuit">
+          <span className="font-mono text-white" title={receipt.circuitHash ?? undefined}>
+            {shorten(receipt.circuitHash ?? "—", 14)}
+            {receipt.proverVersion ? <span className="text-slate-400"> (v{receipt.proverVersion})</span> : null}
+          </span>
+        </DataCell>
+        <DataCell label="Merkle root">
+          <TruncatedValue value={receipt.merkleRoot} visible={14} />
+        </DataCell>
       </dl>
 
       <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Settlement signals</p>
-        <div className="mt-3 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
-          <Signal label="Winning pool" value={formatBigInt(winningPool)} />
-          <Signal label="Total pool" value={formatBigInt(totalPool)} />
-          <Signal label="Total liability" value={formatBigInt(receipt.totalLiability)} />
-          <Signal label="Total escrow" value={formatBigInt(receipt.totalEscrow)} />
-          <Signal label="Merkle root" value={shorten(receipt.merkleRoot, 12)} />
+        <div className="mt-3 grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+          <Signal label="Winning pool" primary={winningPoolDisplay.primary} secondary={winningPoolDisplay.secondary} />
+          <Signal label="Total pool" primary={totalPoolDisplay.primary} secondary={totalPoolDisplay.secondary} />
+          <Signal label="Total liability" primary={liabilityDisplay.primary} secondary={liabilityDisplay.secondary} />
+          <Signal label="Total escrow" primary={escrowDisplay.primary} secondary={escrowDisplay.secondary} />
         </div>
       </div>
 
-      {receipt.proof && (
-        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof (truncated)</p>
-          <p className="font-mono text-xs text-slate-100 break-all">{shorten(receipt.proof, 24)}</p>
-        </div>
-      )}
+      {detailItems.length ? (
+        <details className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
+          <summary className="cursor-pointer text-xs uppercase tracking-[0.3em] text-slate-400">
+            Full receipt values
+          </summary>
+          <div className="mt-3 space-y-3 text-sm text-slate-300">
+            {detailItems.map((item) => (
+              <DetailRow key={item.label} label={item.label ?? ""} value={item.value ?? ""} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </article>
+  );
+}
+
+type DataCellProps = {
+  label: string;
+  children: ReactNode;
+};
+
+function DataCell({ label, children }: DataCellProps) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-[0.3em] text-slate-400">{label}</dt>
+      <dd className="font-mono text-white">{children}</dd>
+    </div>
   );
 }
 
 type SignalProps = {
   label: string;
-  value: string;
+  primary: string;
+  secondary?: string;
 };
 
-function Signal({ label, value }: SignalProps) {
+function Signal({ label, primary, secondary }: SignalProps) {
   return (
     <div>
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
-      <p className="font-mono text-sm text-white">{value}</p>
+      <p className="font-mono text-sm text-white">{primary}</p>
+      {secondary ? <p className="text-xs text-slate-500">{secondary}</p> : null}
+    </div>
+  );
+}
+
+type DetailRowProps = {
+  label: string;
+  value: string;
+};
+
+function DetailRow({ label, value }: DetailRowProps) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
+      <p className="font-mono text-xs text-white break-all">{value}</p>
     </div>
   );
 }
@@ -133,17 +196,29 @@ function Signal({ label, value }: SignalProps) {
 type ExplorerLinkProps = {
   href?: string | null;
   label?: string | null;
+  visible?: number;
 };
 
-function ExplorerLink({ href, label }: ExplorerLinkProps) {
-  const text = shorten(label, 10);
+function ExplorerLink({ href, label, visible = 10 }: ExplorerLinkProps) {
+  const text = shorten(label, visible);
   if (!href) return <span>{text}</span>;
   return (
-    <a className="text-brand-200 hover:text-brand-100 underline-offset-4 hover:underline" href={href} target="_blank" rel="noreferrer">
+    <a
+      className="text-brand-200 hover:text-brand-100 underline-offset-4 hover:underline"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={label ?? undefined}
+    >
       {text}
     </a>
   );
 }
+
+type DetailItem = {
+  label: string;
+  value: string;
+};
 
 function deriveWinningPool(receipt: ProofReceipt): string | undefined {
   if (receipt.winningOutcomeId === 0) {
@@ -176,6 +251,78 @@ function shorten(value?: string | null, visible = 6): string {
     return value;
   }
   return `${value.slice(0, visible)}…${value.slice(-visible)}`;
+}
+
+type TruncatedValueProps = {
+  value?: string | null;
+  visible?: number;
+};
+
+function TruncatedValue({ value, visible = 10 }: TruncatedValueProps) {
+  const display = shorten(value, visible);
+  if (display === "—") {
+    return <span>—</span>;
+  }
+  return (
+    <span title={value ?? undefined} className="font-mono text-white">
+      {display}
+    </span>
+  );
+}
+
+function formatZenValue(value?: string | null) {
+  if (!value) {
+    return { primary: "—" };
+  }
+  const primary = formatZen(value);
+  const raw = formatBigInt(value);
+  const secondary = raw === "—" ? undefined : `${raw} wei`;
+  return { primary, secondary };
+}
+
+function formatZen(value?: string | null) {
+  if (!value) return "—";
+  let raw: bigint;
+  try {
+    raw = BigInt(value);
+  } catch {
+    return value;
+  }
+  const sign = raw < 0n ? "-" : "";
+  const abs = raw < 0n ? -raw : raw;
+  const base = 10n ** 18n;
+  const integer = abs / base;
+  const fraction = abs % base;
+  const precision = integer === 0n ? 6 : 4;
+  let fractionStr = fraction.toString().padStart(18, "0").slice(0, precision);
+  fractionStr = fractionStr.replace(/0+$/, "");
+  const integerStr = formatWhole(integer);
+  const display = fractionStr ? `${integerStr}.${fractionStr}` : integerStr;
+  return `${sign}${display} ZEN`;
+}
+
+function formatWhole(value: bigint) {
+  const digits = value.toString();
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatBps(value?: number | null): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const percent = value / 100;
+  return `${percent % 1 === 0 ? percent.toFixed(0) : percent.toFixed(2)}%`;
+}
+
+function isZeroValue(value?: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    return BigInt(value) === 0n;
+  } catch {
+    return false;
+  }
 }
 
 function formatTimestamp(timestamp?: string | null) {
