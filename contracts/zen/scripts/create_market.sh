@@ -105,14 +105,7 @@ tx_json="$(cast send --json --rpc-url "${RPC_URL}" --private-key "${PRIVATE_KEY}
   "createMarket((address,address,bytes32,uint256,uint256,uint256,address,uint256))" \
   "${create_payload}")"
 
-tx_hash="$(python3 - <<'PY' <<< "${tx_json}"
-import json
-import sys
-
-data = json.load(sys.stdin)
-print(data.get("transactionHash") or data.get("transaction_hash") or "")
-PY
-)"
+tx_hash="$(printf '%s' "${tx_json}" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("transactionHash") or data.get("transaction_hash") or "")')"
 
 if [[ -z "${tx_hash}" ]]; then
   echo "Failed to parse transaction hash from cast output" >&2
