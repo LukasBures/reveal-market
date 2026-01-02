@@ -24,7 +24,7 @@ import (
 
 const (
 	defaultLogLevel       = "INFO"
-	artifactCheckInterval = 60 * time.Second
+	artifactCheckInterval = 10 * time.Minute
 	settlementBatchSize   = 256
 )
 
@@ -128,6 +128,20 @@ func newApp(cfg shared.Config, prover proverEngine) *app {
 	return a
 }
 
+func (a *app) seedArtifactCheck(report shared.ArtifactReport) {
+	now := time.Now().UTC()
+	ok := len(report.Missing) == 0 && len(report.HashMismatches) == 0
+	a.artifactCheckMu.Lock()
+	a.artifactCheck = artifactCheck{
+		ok:         ok,
+		missing:    append([]string(nil), report.Missing...),
+		mismatches: append([]string(nil), report.HashMismatches...),
+		err:        "",
+		checkedAt:  now,
+	}
+	a.artifactCheckMu.Unlock()
+}
+
 func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.healthHandler)
@@ -153,7 +167,8 @@ func main() {
 		"listen_addr":    cfg.ListenAddr,
 		"heartbeat_secs": cfg.HeartbeatSeconds,
 	})
-	verifiedCircuitHash := requireArtifactsOrExit(cfg)
+	report := requireArtifactsOrExit(cfg)
+	verifiedCircuitHash := report.Hashes.CircuitHash
 	if cfg.ManualCircuitHash != "" {
 		matches, err := equalHex(cfg.ManualCircuitHash, verifiedCircuitHash)
 		if err != nil || !matches {
@@ -171,6 +186,7 @@ func main() {
 	cfg.ManualCircuitHash = verifiedCircuitHash
 	prover := initProver(cfg)
 	server := newApp(cfg, prover)
+	server.seedArtifactCheck(report)
 
 	go server.heartbeatLoop()
 
@@ -292,7 +308,7 @@ func equalHex(left, right string) (bool, error) {
 	return leftValue.Cmp(rightValue) == 0, nil
 }
 
-func requireArtifactsOrExit(cfg shared.Config) string {
+func requireArtifactsOrExit(cfg shared.Config) shared.ArtifactReport {
 	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
 		WitnessScriptPath:   cfg.WitnessScriptPath,
 		WasmPath:            cfg.WasmPath,
@@ -330,7 +346,7 @@ func requireArtifactsOrExit(cfg shared.Config) string {
 	logLine("info", "prover.artifacts.verified", map[string]any{
 		"circuit_hash": report.Hashes.CircuitHash,
 	})
-	return report.Hashes.CircuitHash
+	return report
 }
 
 func (a *app) verifyArtifacts() (bool, []string, []string, string) {

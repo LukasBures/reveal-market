@@ -197,9 +197,10 @@ is_lfs_pointer() {
   if [[ ! -f "${path}" ]]; then
     return 1
   fi
-  local header
-  header="$(head -n 1 "${path}" 2>/dev/null || true)"
-  [[ "${header}" == "version https://git-lfs.github.com/spec/v1" ]]
+  if head -c 200 "${path}" 2>/dev/null | tr -d '\000' | grep -q "version https://git-lfs.github.com/spec/v1"; then
+    return 0
+  fi
+  return 1
 }
 
 has_git_lfs() {
