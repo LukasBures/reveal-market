@@ -190,7 +190,9 @@ const encoded = AbiCoder.defaultAbiCoder().encode(
   ["string", "string", "bytes32", "bytes32"],
   [CIRCUIT_NAME, CIRCUIT_VERSION, pkHash, vkHash]
 );
-const circuitHash = keccak256(getBytes(encoded));
+const circuitHashRaw = keccak256(getBytes(encoded));
+const FIELD_PRIME = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+const circuitHash = "0x" + (BigInt(circuitHashRaw) % FIELD_PRIME).toString(16).padStart(64, "0");
 
 const hashes = {
   provingKeyHash: pkHash,
