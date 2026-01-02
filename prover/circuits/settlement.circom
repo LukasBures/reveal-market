@@ -68,6 +68,10 @@ template SettlementCircuit() {
     signal rawLeaf[256];
     signal leaf[256];
     signal outcomeSum[256];
+    signal winYesTicket[256];
+    signal winNoTicket[256];
+    signal liabilityYes[256];
+    signal liabilityNo[256];
 
     component activeCheck[256];
     component userSaltHash[256];
@@ -141,8 +145,11 @@ template SettlementCircuit() {
         (outcomeSum[i] - 1) * isActive[i] === 0;
         poolYesAccum[i + 1] <== poolYesAccum[i] + amount[i] * isYes[i].out;
         poolNoAccum[i + 1] <== poolNoAccum[i] + amount[i] * isNo[i].out;
-        liabilityAccum[i + 1] <== liabilityAccum[i]
-            + payout[i] * (isYes[i].out * winYes.out + isNo[i].out * winNo.out);
+        winYesTicket[i] <== isYes[i].out * winYes.out;
+        winNoTicket[i] <== isNo[i].out * winNo.out;
+        liabilityYes[i] <== payout[i] * winYesTicket[i];
+        liabilityNo[i] <== payout[i] * winNoTicket[i];
+        liabilityAccum[i + 1] <== liabilityAccum[i] + liabilityYes[i] + liabilityNo[i];
     }
 
     signal poolYesComputed;
