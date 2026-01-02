@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
+import { usePathname } from "next/navigation";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { useFxStream } from "@/hooks/useFxStream";
 import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
@@ -30,6 +31,8 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const pathname = usePathname();
+  const isProofsRoute = pathname?.startsWith("/proofs");
   const { fx, error: fxError, status } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
@@ -117,9 +120,15 @@ export function MainNav() {
             Menu
             <span className="relative h-1.5 w-1.5 rounded-full bg-accent-400 shadow-[0_0_10px_rgba(123,240,94,0.8)]" />
           </button>
-          <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
-            <ConnectWalletButton />
-          </div>
+          {isProofsRoute ? (
+            <span className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-300">
+              Wallet optional
+            </span>
+          ) : (
+            <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
+              <ConnectWalletButton />
+            </div>
+          )}
         </div>
       </div>
       {isMobileMenuOpen ? (
