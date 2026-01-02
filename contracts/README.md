@@ -15,7 +15,7 @@ Notes
 
 - **Zen workspace** – Fixed-ticket commit/reveal flow with `RelayerEscrow`, `ProtocolPool`, `MarketFactory` (EIP-1167 clones), `RevealMarket`, and Groth16 `Verifier`. Commitments use Poseidon leaves and are locked in depth-8 batch roots (BATCH_SIZE=256); settlement uses `verifyAndSettleBatched` to sum per-batch proofs and enforces circuit hash + pool top-up limits. Tests cover authorization, deadlines, rake, surplus handling, cap enforcement, batch roots, and verifier wiring.
 - **Polygon workspace** – LP vault and hedging contracts for Base/Polymarket integration (self-contained Foundry project) with its own scripts/tests; keep artifacts isolated from Zen to avoid address collisions.
-- **Artifacts & vk caches** – `cache/` holds generated verifier metadata (`settlement-vk.json`) synced with prover exports; `contracts/run_tests.sh` calls each workspace runner, while CI uses `contracts/zen/run_local.sh` and `contracts/polygon/run_local.sh` (no `full` by default).
+- **Artifacts & vk caches** – `cache/` holds generated verifier metadata (`settlement-vk.json`) synced with prover exports; the circuit hash is field-reduced in `settlement_hashes.json`. `contracts/run_tests.sh` calls each workspace runner, while CI uses `contracts/zen/run_local.sh` and `contracts/polygon/run_local.sh` (no `full` by default).
 - **Error selector generation** – `scripts/generate_error_selectors.py` produces `contracts/cache/errors.json` so backend/frontend decoders stay aligned with Solidity custom errors; run it when Solidity errors change.
 
 ## Development & testing

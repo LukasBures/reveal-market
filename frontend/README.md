@@ -48,8 +48,8 @@ Tech stack callouts:
 - **SSR-first data** – All routes fetch directly from the FastAPI backend; cache tags mirror worker invalidation so `revalidateTag` and server actions stay aligned. Suggestions proxy through `/app/api/markets/suggest` to avoid double hits.
 - **Search + discovery** – Hero suggestions, `/markets/search` with load-more pagination, and category pages reuse the same cached fetchers.
 - **Live pricing** – `usePriceStream`/`useLiveOutcomePrices` tie WS/SSE `/stream` to market detail; history hydrates from the streamer and merges live ticks. FX uses WS-first `/fx/zen-usd` with HTTP fallback + stale warnings that block trades.
-- **Trading flow** – Stake panels enforce the 0.1 ZEN ticket size + caps, request previews from `/pricing/preview`, fetch signed quotes from `/pricing/quote`, submit `/trade/commit`, and poll `/trade/status` for relayer/tx updates.
-- **Positions + escrow** – `/dashboard` shows escrow balances, approve/deposit/withdraw, positions, and per-ticket claims after a bundle signature.
+- **Trading flow** – Stake panels enforce the 0.1 ZEN ticket size plus per-user/per-market caps, request previews from `/pricing/preview`, fetch signed quotes from `/pricing/quote`, submit `/trade/commit`, and poll `/trade/status` for relayer/tx updates (commit hashes link to the explorer when available).
+- **Positions + escrow** – `/dashboard` shows escrow balances, approve/deposit/withdraw, positions, and per-ticket claims after a bundle signature; escrow/claim tx hashes link to the explorer.
 - **Proof receipts** – `/proofs` streams receipts with infinite scroll and supports deep links via query params; multi-batch settlements surface one receipt per batch (the `merkle_root` in the payload is the batch root).
 - **Security + observability** – `next.config.mjs` ships CSP/HSTS/COOP/Permissions-Policy; GA/gtag only allowed in production. Structured logs and a client heartbeat run from `RootLayout`, plus Vitest coverage across navs, markets, streaming hooks, dashboards, and proofs.
 

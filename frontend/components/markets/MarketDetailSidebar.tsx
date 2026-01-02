@@ -97,6 +97,14 @@ export function MarketDetailSidebar({ market }: Props) {
   const extraData = toRecord(market.extraData);
   const gamma = toRecord(extraData?.gamma);
   const sources: Array<LooseRecord | null> = [extraData, gamma];
+  const explorerBase = (
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz"
+  ).replace(/\/+$/, "");
+  const resolutionTxHash =
+    typeof resolution?.transactionHash === "string" && resolution.transactionHash.trim()
+      ? resolution.transactionHash.trim()
+      : null;
+  const resolutionTxHref = resolutionTxHash ? `${explorerBase}/tx/${resolutionTxHash}` : null;
 
   const liquidity =
     market.liquidityUsd ??
@@ -264,8 +272,17 @@ export function MarketDetailSidebar({ market }: Props) {
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Settlement proof</p>
           <div className="mt-3 space-y-1 text-xs text-slate-400">
             <p>Checked at {formatDate(resolution.checkedAt)}</p>
-            {resolution.transactionHash && (
-              <p className="break-all text-slate-500">TX: {resolution.transactionHash}</p>
+            {resolutionTxHash && (
+              <p className="break-all text-slate-500">
+                TX:{" "}
+                {resolutionTxHref ? (
+                  <a className="underline underline-offset-4" href={resolutionTxHref} target="_blank" rel="noreferrer">
+                    {resolutionTxHash}
+                  </a>
+                ) : (
+                  resolutionTxHash
+                )}
+              </p>
             )}
             {resolution.blockNumber && <p className="text-slate-500">Block #{resolution.blockNumber}</p>}
           </div>

@@ -12,6 +12,7 @@ sequenceDiagram
   participant REL as Relayer
   participant ESC as RelayerEscrow
   participant MKT as RevealMarket
+  participant POOL as ProtocolPool
   participant FACT as MarketFactory
   participant OPS as Worker/Oracle
   participant PROV as Prover
@@ -40,6 +41,7 @@ sequenceDiagram
   API->>REL: POST /commit
   REL->>ESC: commitOnBehalf(...) (gas: relayer)
   ESC->>MKT: commitWithAuthorization(...) (internal, same tx)
+  MKT->>POOL: transfer rake (internal, same tx)
 
   opt Poll commit status
     FE->>API: GET /trade/status?job_id=... or ?tx_hash=...
@@ -57,6 +59,8 @@ sequenceDiagram
   OPS->>MKT: postResult(outcomeId) (gas: oracle signer)
   OPS->>PROV: POST /api/v1/proofs/settlement
   OPS->>MKT: verifyAndSettleBatched(...) (gas: oracle signer)
+  MKT->>POOL: draw deficit (if needed, same tx)
+  MKT->>POOL: transfer surplus (same tx)
 
   opt Settlement snapshot ingest
     OPS->>API: POST /relayer/settlements or /settlements/ingest
@@ -96,7 +100,7 @@ Ordered API calls + on-chain transactions (gas payer noted):
 4. POST /pricing/quote (signed quote).
 5. Optional market auto-create (if market address missing): MarketFactory.createMarket(...) (gas: API wallet).
 6. POST /trade/commit {quote_id, max_fx_diff_percent?} (API validates + consumes quote, builds CommitAuth, calls relayer).
-7. Single relayer tx: RelayerEscrow.commitOnBehalf(...) which internally calls RevealMarket.commitWithAuthorization(...) (gas: relayer).
+7. Single relayer tx: RelayerEscrow.commitOnBehalf(...) which internally calls RevealMarket.commitWithAuthorization(...); rake is transferred to ProtocolPool in the same tx (gas: relayer).
 8. Poll /trade/status by job_id or tx_hash until confirmed.
 9. GET /positions?wallet=0x... (committed/locked status).
 10. Lock commitments after deadline:
@@ -104,7 +108,7 @@ Ordered API calls + on-chain transactions (gas payer noted):
     - Direct RPC: RevealMarket.lockBatches(...) (gas: oracle signer).
 11. RevealMarket.postResult(outcomeId) (gas: oracle signer).
 12. Prover request: POST /api/v1/proofs/settlement.
-13. RevealMarket.verifyAndSettleBatched(...) (or verifyAndSettle(...) for single batch) (gas: oracle signer).
+13. RevealMarket.verifyAndSettleBatched(...) (or verifyAndSettle(...) for single batch) (gas: oracle signer). If liability exceeds market balance, ProtocolPool.draw covers the deficit (bounded by cap) and any surplus is forwarded to the pool in the same tx.
 14. Optional settlement snapshot ingest: POST /relayer/settlements or /settlements/ingest; /claim/bundles can backfill from chain if missing.
 15. Claim flow:
     - Wallet signs claim-bundles:<wallet>.
@@ -124,56 +128,45 @@ Notes:
 This file describes the exact implementation scope to ship the MVP on Horizen Testnet and to demo end-to-end zk-proof settlement. Treat each section as blocking; wire logs/metrics to the unified format (`timestamp | LEVEL | logger | file:line | event | request_id`).
 
 ### 1) Environment & readiness baseline
-- Chain/env defaults: chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, streamer FX endpoint `http://streamer:8100/fx/zen-usd`, prover enabled only when artifacts present. Ensure `RM_PRICING_CHAIN_ID`, signer key/address, and env vars are loaded; add a health/smoke check that fails fast if missing.
-- CORS/CSP/connect-src: align API + streamer + frontend origins; update defaults and dev warnings when blocked. Ensure pricing FX endpoint passes CORS smoke test.
-- Migrations/backfill: apply Alembic head (`0001_initial_schema.py`) and backfill normalized tables (outcomes, tags, clob tokens, market_gamma_metadata, gamma_raw). Confirm health probes see schema.
-- Gamma stats exposure: surface bestBid/bestAsk/spread/volume/openInterest from Gamma into API schemas (MarketSummary/MarketDetail) and worker serialization; ensure cache tags update.
-- Current gaps to close:
-  - Defaults: `RM_PRICING_CHAIN_ID`/RPC/signer are unset (`None`) and `.env` still points at Polygon; pin Horizen defaults and derive signer address for checks.
-  - Health: pricing signer check only degrades on missing envs; add a hard fail for missing/mismatched chain id, signer key/address, and RPC alignment; assert `PRICING_SIGNER_ADDRESS` presence.
-  - CORS/CSP: API CORS only warns on wildcard; CSP connect-src still `self` so origin drift goes undetected. Streamer logs mismatches but has no smoke for frontend origin; frontend lacks dev warnings. Add a CORS/CSP smoke test proving `/pricing/fx` is reachable from the configured origin.
-  - Schema/backfill: health only does `SELECT 1`; it never asserts Alembic head or schema version key. Add revision checks and ensure markets are backfilled into normalized tables with cache tags invalidated.
-  - Gamma metrics: worker doesn't populate bestBid/bestAsk/spread/openInterest; API schemas and cache enrichment don't expose them; frontend types/mappers ignore them. Map through ingestion -> models -> API responses -> cache tags and update frontend types/consumers.
+- Defaults: chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, streamer FX endpoint `http://streamer:8100/fx/zen-usd`, prover enabled only when artifacts are present.
+- `/health` hard-fails when `RM_PRICING_CHAIN_ID`, `RM_PRICING_SIGNER_PRIVATE_KEY`, `PRICING_SIGNER_ADDRESS`, or RPC settings are missing/mismatched; derived signer + chain id are surfaced in the response.
+- CORS/hosts: `RM_ALLOWED_HOSTS` + `RM_CORS_ALLOW_ORIGINS` must align to API + frontend origins; `/health` warns on wildcard CORS in production and checks FX host alignment.
+- Migrations/backfill: API/worker run Alembic on startup; worker backfills normalized tables (outcomes, tags, clob tokens, Gamma metadata/events) and publishes schema revision keys for cache invalidation.
+- Gamma stats: best_bid, best_ask, spread, volume, and open_interest are stored during ingest and surfaced in API responses and frontend mappers.
 
 ### 2) Backend pricing, quotes, caps
-- Quote issuance: `/pricing/quote` must ABI-pack QUOTE_V1 (chainId, market, wallet, outcomeId, stake_wei, fx_scaled 1e8, expiry, quoteId), sign with pricing key, and persist quotes durably (status, expiry, consumed_at). Reject missing/mismatched fields; log request_id and quoteId.
-- Signer health: tighten `_check_pricing_signer` so `/health` surfaces derived chain id + signer address, compares against env values, and returns `error` when chain id or key is missing/mismatched. Include derived signer address/chain in health detail; fail fast when `PRICING_SIGNER_ADDRESS` disagrees with the derived key or when `RM_PRICING_CHAIN_ID` differs from env.
-- Cap enforcement: drop the per-bet cap to 0.1 ZEN (`max_stake_zen`), require `market_id` + `wallet_address` for quote issuance (treat `user_id` as deprecated), and ensure errors return structured limits (max + remaining per-user/per-market) alongside the failure reason. Enforce per-user-per-market and per-market caps server-side even when clients omit IDs; include remaining caps in successful responses. Add tests for boundary cases (exactly at cap, just over cap, missing IDs, mixed consumed/issued quotes, stale quote expiry in cap sums).
-- FX handling: always pull FX from the streamer endpoint and propagate `stale` + `received_at`/timestamp metadata into `/pricing/fx` and quote responses so the frontend can block stale trades. `/pricing/fx` should warn and 503 when using fallback or stale data instead of silently returning 200. `/pricing/quote`/`/pricing/submit` should reject stale FX, surface the FX timestamp/age in responses, and use the streamer timestamp when checking drift.
+- Quote issuance: `/pricing/quote` ABI-packs QUOTE_V1 (chainId, market, wallet, outcomeId, stake_wei, fx_scaled 1e8, expiry, quoteId), signs with the pricing key, and persists quotes with expiry + status.
+- Cap enforcement: per-bet (`RM_MAX_STAKE_ZEN`), per-user-per-market (`RM_MAX_USER_STAKE_PER_MARKET_ZEN`), and per-market (`RM_MAX_MARKET_STAKE_ZEN`) caps are enforced server-side. Defaults in the repo envs are 0.1 / 0.5 / 5 ZEN; responses include remaining caps.
+- FX handling: pricing always pulls FX from the streamer endpoint, rejects stale FX, and returns `fx_received_at`/`fx_stale` metadata. `/pricing/submit` revalidates the digest, expiry, and FX drift (UI does not call it).
 
 ### 3) Frontend trading flow (relayed commit)
-- Wallet/chain guard: enforce Horizen Testnet (2651420) in wagmi config + runtime; block quote/trade UI on wrong/missing chain or wallet. Prompt network switch CTA and auto-refresh quotes when chain/account changes; never reuse quotes from the wrong chain. Display connected chain vs pricing signer/chain returned by the API in the trade panel.
-- Quote UX: outcome/stake picker calls `/pricing/quote` with wallet+market+outcome, renders live expiry countdown, FX timestamp/age/source, and caps. Auto-refresh quotes on expiry, chain drift, FX stale->fresh transitions, or manual refresh. Normalize error reasons (stale FX, missing wallet, wrong chain, caps exhausted). Keep a single shared FX WS connection per session (canonical `/fx/zen-usd` path) and reuse it across pages.
-- Cap/stake enforcement: apply the 0.1 ZEN per-bet cap plus API caps (max/remaining per-user and per-market) to stake inputs and CTA disabled state. If remaining cap is 0, block quotes/trades and show the cap reason. Do not floor caps to 0.1 when API returns 0; clamp stakes to the smallest non-null cap and message the adjustment.
-- Tx submission: submit `/trade/commit` with the quote id and surface relayer tx pending/confirmed states (wait for receipt) with hash display. Handle specific failures (expired/consumed quote, wrong chain/signature) with tailored messaging and auto-refresh quote on revert. Keep escrow funding (approve + deposit) visible and keep submission blocked on wrong network or stale FX.
-- Stale/cap guards + FX alignment: disable submit when FX is stale, quote expired, or caps exceeded; show explicit reason. Standardize FX path (`/fx/zen-usd` with alias to `/fx/zen-usdc`) and expose `received_at/lastUpdate` in the FX state so UI can display freshness and enforce guards.
+- Wallet/chain guard: Wagmi is pinned to Horizen Testnet (2651420) and blocks quotes/commits when the wallet is on the wrong chain; the UI can prompt a chain switch.
+- Quote UX: outcome/stake picker requests `/pricing/quote`, shows expiry + FX freshness, and auto-refreshes on expiry or FX staleness. Caps are surfaced and clamp the stake input.
+- Tx submission: `/trade/commit` sends the quote id to the relayer, the UI polls `/trade/status`, and the commit hash is displayed with an explorer link once available.
+- Guards: submit is blocked when FX is stale, quotes are expired, or caps are exhausted; stale FX warnings and cap exhaustion messages are shown inline.
 
 ### 4) Positions + claim
-- Backend: expose positions endpoint (wallet-scoped) with stakes, entry FX, current FX, PnL, potential winnings, volume, aggregated stats; include claimable status.
-- Frontend: positions dashboard showing active/resolved positions, PnL, potential winnings, totals; single "Claim winnings" CTA per claimable set.
-- Claim flow: frontend calls RevealMarket.claim directly with bundle proof data; backend/worker mirrors claim in DB and updates resolution ledger/positions on success; show tx status and refreshed balances.
+- Backend: `/positions` returns wallet-scoped positions + escrow balance, claimable status, and settlement metadata; `/claim/bundles` is signature-gated.
+- Frontend: `/dashboard` shows escrow balances, positions, claimable tickets, and lifecycle status. Claim uses direct on-chain `claim` with a local leaf/root check before submission; tx hash is shown with an explorer link.
 
 ### 5) Resolution ledger & automation
-- Ledger persistence: on resolution ingest, store condition ID, payouts, winners, oracle/question IDs, block number/timestamp, tx hash, and payload snapshot in Postgres + Redis. Expose via `/markets`, `/markets/{event}`, `/proofs`.
-- On-chain mirroring: stream MarketFactory events (MarketCreated, GlobalRakeUpdated, AuthorizationSignerUpdated, OracleUpdated, MarketRelayerUpdated, pause events) into DB/Redis to prevent drift.
-- Automation (optional flag): when payouts finalized, queue settlement transactions or alert ops with duplicate suppression and retry logging. Respect env toggle.
-- Health/metrics: emit counters for resolution gaps, automation retries, and ledger writes.
+- Ledger persistence: resolutions, settlement snapshots, and proof receipts live in Postgres + Redis and are surfaced via `/markets`, `/markets/{event}`, and `/proofs`.
+- On-chain backfills: the worker hydrates missing market addresses/params from the factory when RPC settings are available and records factory events in the ledger.
+- Automation: optional lock-batches and settlement submission are driven by `RM_LOCK_BATCHES_*` and `RM_SETTLEMENT_*` envs, with relayer routing available when configured.
 
 ### 6) Proofs pipeline (zk demo critical path)
-- Worker ingest: ensure commitments and settlements populate DB tables; resolution ledger ties to proofs.
-- Prover artifacts: regenerate Groth16 artifacts for updated settlement circuit (liability cap removed, 10 public signals). Publish verifying key hash and update on-chain verifier/circuitHash (contracts/zen).
-- Prover service: on startup, verify artifacts (existence + optional hash); expose `/healthz` and `/metrics` (add Prometheus histograms/gauges for latency, inflight, errors). Document allowed origins/ingress.
-- Proof requests: worker issues settlement proof requests to prover when market resolved and commitments present; store request_id/hash/status/timestamps; cache proofs in Redis.
-- API exposure: `/proofs` and market detail endpoints include proof metadata (status, request_id, hash, created_at, verifier). Include resolution ledger info.
-- Frontend: proofs page supports filters (status/verifier/market), CSV export, diligence CTA; detail view shows proof metadata. Claim/positions flow displays proof availability where relevant.
-- Demo script: provide step sequence to show commit -> resolution ingest -> proof generated -> claim succeeds on testnet using regenerated artifacts.
+- Commitments and settlements populate DB tables; proof jobs are queued once settlements/roots are available.
+- Artifacts: `prover/circuits/generate_keys.sh` writes `settlement_hashes.json` with a field-reduced circuit hash; verifier deployments and `market.circuitHash` must match that value.
+- Prover: `/healthz` + `/metrics` report readiness and circuit hash; `go run ./cmd/verify-artifacts` validates required files/hashes.
+- API exposure: `/proofs` and market detail endpoints include proof metadata (status, request_id, tx hash, batch root).
+- Frontend: `/proofs` lists receipts with filters and deep links; dashboard/market views show proof availability where applicable.
 
 ### 7) Search experience
-- Backend endpoint: build search API with pagination, category pills, and keyboard shortcut support; returns markets ordered by relevance.
-- Frontend: replace client-only filter with backend results; add pagination controls, category chips, and keyboard shortcuts.
+- Backend `/markets` supports full-text search + pagination; `/markets/suggest` powers typeahead suggestions.
+- Frontend `/markets/search` uses server actions + load-more pagination; category chips and suggestions reuse the same backend search.
 
 ### 8) Market history/chart
-- Data source: provide historical price/liquidity from backend/streamer history endpoint; ensure SSE/WS or polling delivers recent points.
+- Market detail charts hydrate from the streamer `/history` endpoint and merge live WS/SSE ticks for recent points.
 - Frontend: wire MarketDetail chart to real data; handle loading/empty states; update live if stream present.
 
 ### 9) CSP/CORS/FX alignment
@@ -186,16 +179,14 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 - Validate Gamma-derived stats in API responses and caches; add tests to ensure fields exist and are typed.
 
 ### 11) Contracts/zen tasks
-- Regenerate Groth16 artifacts for settlement circuit; update verifier and `circuitHash`; redeploy to testnet; document addresses.
-- Testing: add fuzz for Merkle inclusion/replay protection, protocol cap edges (draw failures), multi-claim sequencing.
-- Deploy scripts: build env-driven scripts for market creation and protocol cap adjustments; include signer rotation/ownership notes and optional timelock/pauser guidance.
+- Verifier + circuit hash must stay aligned with `prover/circuits/build/settlement_hashes.json` (field-reduced hash). Update env addresses and caches after each redeploy.
+- Testing: add fuzz for Merkle inclusion/replay protection, protocol cap edges (draw failures), and multi-claim sequencing.
+- Deploy scripts: keep env-driven market creation and protocol cap adjustments documented (signer rotation, ownership transfer, optional timelock/pauser guidance).
 - Monitoring hooks: add events/metrics for protocol pool draws and relayer credits if downstream consumers expect them.
 
 ### 12) Prover hardening
-- Artifact verification: optionally add hash checks in `check_artifacts.sh`/startup to prevent stale/poisoned zkeys.
-- Metrics: expand `/metrics` with Prometheus histograms/gauges for latency, inflight jobs, errors.
-- CLI tooling (optional): add `go run ./cmd/verify-artifacts` to report circuit hash/artifact presence for CI gates.
-- Runtime pinning: document `PROVER_RAPIDSNARK_BINARY` and Node versions for deployment manifests.
+- Artifact verification is enforced by `check_artifacts.sh` and `go run ./cmd/verify-artifacts`; keep these in CI.
+- Remaining: add a signed artifact manifest, document recommended `PROVER_MAX_CONCURRENCY` vs memory, and add an integration test path for the C++ witness binary.
 
 ### 13) Test/QA plan (prove the zk flow)
 - End-to-end script: start stack, ensure backend `/health` passes signer/FX checks, regenerate artifacts, deploy verifier, set `RM_PROVER_BASE_URL` and required signer/RPC envs.
@@ -248,20 +239,20 @@ This checklist closes the minimum gaps for a production-ready MVP. Use it before
 ## Current State Snapshot
 
 Implemented
-- Escrow approve/deposit/withdraw + dashboard controls with chain guard.
-- API auto-creates markets on quote/commit when address is missing; worker can backfill `market_address` and factory params from the factory.
-- QUOTE_V1 signing + caps; relayer commit path and relayer queue status polling.
-- Positions endpoint + dashboard claim flow; dashboard validates bundle leaf/root before calling claim.
-- Ingest endpoints exist for relayer/prover backfills (`/commitments/sync`, `/settlements/ingest`, `/relayer/settlements`).
+- Escrow approve/deposit/withdraw + dashboard controls with chain guard and explorer-linked tx hashes.
+- API auto-creates markets on quote/commit when address is missing; worker backfills `market_address` and factory params from the factory.
+- QUOTE_V1 signing with per-bet/per-user/per-market caps (0.1 / 0.5 / 5 ZEN defaults); relayer commit path with `/trade/status` polling.
+- Settlement pipeline from lockBatches -> postResult -> verifyAndSettleBatched, with protocol pool top-ups for deficits and surplus forwarding.
+- Positions endpoint + claim flow; dashboard validates bundle leaf/root before calling `claim`.
+- Ingest endpoints for relayer/prover backfills (`/commitments/sync`, `/settlements/ingest`, `/relayer/settlements`) are live.
 
-Gaps / follow-ups
-- Ensure relayer/prover/worker ingestion is wired so commitments + settlement snapshots are persisted for `/claim/bundles`.
-- Align pricing caps and frontend guards with the 0.1 ZEN per-bet target.
-- Enforce pricing signer/chain/RPC checks in `/health` (see section 2).
+Follow-ups (non-blocking)
+- Add additional fuzz coverage around cap edges and multi-claim ordering.
 
 ## Testnet Guardrails (Horizen)
 
 - `lockBatches`, `postResult`, and `verifyAndSettle*` are `onlyOracle`; the settlement signer is not sufficient to advance markets.
+- The worker enforces that `RM_ORACLE_ADDRESS` matches the settlement signer address; if they differ, settlement automation will refuse to submit.
 - `lockBatches` can only run after the commit window closes; until it runs, `commitmentsRoot` is zero and proofs will revert.
 - Proofs must be generated against the live on-chain roots/totals; proofs against zero roots/totals will fail contract checks.
 - For rapid testing, deploy a short-window market with an oracle you control or wait for commitDeadline before locking.

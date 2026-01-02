@@ -80,3 +80,4 @@ The script sends expired `/commit` payloads and expects a `429` after the config
 - Queue mode is the default in `relayer.main`; to run synchronous commits/claims, construct the app without a `TxQueue`.
 - Rate limiting and allowlists are enforced in-memory per relayer instance; configure upstream proxies for global limits.
 - Logs are structured JSON with timestamp/level/event fields and tx metadata for observability.
+- `lockBatches` is `onlyOracle`; relayer submissions only succeed if the relayer key matches the market oracle address.

@@ -4,14 +4,13 @@ This list tracks the remaining backend work needed to ship the MVP. Items are or
 
 ## Critical before MVP launch
 - Lock down internal and mutation endpoints with auth (API key/JWT or network allowlist). Cover: `/markets` POST/PATCH, `/pricing/quotes/{id}`, `/proofs`, `/treasury/snapshots`, `/markets/onchain`, `/clob/orderbook`, `/commitments/sync`, `/settlements/ingest`, `/metrics`, `/healthz/heartbeats`.
-- Quote issuance hardening: decide whether to keep API auto-create; if not, require `market_id` exists in DB and remove on-chain auto-create. Validate `outcome_id` against stored outcomes when present and enforce `market_address` consistency when provided.
+- Quote issuance hardening: decide whether to keep API auto-create in prod; if disabled, require `market_id` exists in DB and block on-chain auto-create.
 - Bind quotes and trade endpoints (`/trade/commit`, `/positions`, `/trade/claim`) to authenticated wallet identity (signed payload or session). Persist auth context in the quote ledger and use it for caps.
-- Require `X-Relayer-Secret` (or equivalent auth) on all ingest hooks and remove or disable the unauthenticated variants.
+- Ensure `RM_RELAYER_WEBHOOK_SECRET` is set in prod and protect `/commitments/sync` + `/settlements/ingest` with internal auth or network allowlists.
 - Rate limiting: enable Redis-backed limits for `/pricing/quote` and `/trade/commit` in prod, configure trusted proxies, and avoid in-memory fallback in production.
-- FX configuration alignment: make pricing use `RM_FX_FEED_URL` or remove the setting; keep health/CORS checks and docs consistent with the actual FX source.
+- FX configuration alignment: keep `RM_FX_FEED_URL` aligned to the streamer endpoint and ensure CORS/health checks reflect the configured host.
 
 ## Post-MVP / nice-to-have
 - Quote audit endpoints (list/search) behind admin auth.
 - Circuit hash/verifier alignment checks in proof receipts.
-- Surface `batch_roots`/`batch_counts` and per-batch receipts in `/proofs` responses for multi-batch markets.
 - On-chain mirroring/automation for factory events and settlement.

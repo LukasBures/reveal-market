@@ -34,6 +34,8 @@ const normalizePositionStatus = (status: string | null | undefined): PositionLif
   return "committed";
 };
 
+const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash);
+
 type PositionStatusFlowProps = {
   status: string;
   claimable?: boolean | null;
@@ -165,6 +167,7 @@ export function DashboardClient() {
   const [escrowBalance, setEscrowBalance] = useState<string | number | null>(null);
   const [claimingTicket, setClaimingTicket] = useState<string | null>(null);
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
+  const [claimTxHash, setClaimTxHash] = useState<string | null>(null);
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
   const [bundlesRequested, setBundlesRequested] = useState(false);
@@ -185,7 +188,7 @@ export function DashboardClient() {
   const tokenAddress = ZEN_TOKEN_ADDRESS;
   const [depositInput, setDepositInput] = useState<string>("0.10");
   const [withdrawInput, setWithdrawInput] = useState<string>("0.00");
-  const [escrowStatus, setEscrowStatus] = useState<string | null>(null);
+  const [escrowStatus, setEscrowStatus] = useState<{ label: string; txHash?: string | null } | null>(null);
   const [escrowError, setEscrowError] = useState<string | null>(null);
   const { data: onchainEscrowBalance, refetch: refetchOnchainEscrow } = useReadContract({
     address: escrowAddress ?? undefined,
@@ -255,6 +258,15 @@ export function DashboardClient() {
     const cleaned = message.replace(/^Details:\s*/i, "").trim();
     return cleaned || "Action cancelled";
   }, []);
+  const txHref = useCallback(
+    (hash?: string | null) => {
+      if (!hash || !explorerBase) return null;
+      const trimmed = hash.trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
+      return `${explorerBase}/tx/${trimmed}`;
+    },
+    [explorerBase],
+  );
 
   const load = useMemo(
     () => async (wallet: string) => {
@@ -275,6 +287,7 @@ export function DashboardClient() {
       try {
         setBundleError(null);
         setClaimMessage(null);
+        setClaimTxHash(null);
         const message = `claim-bundles:${wallet.toLowerCase()}`;
         const signature =
           bundleSignature && bundleSignature.length > 0
@@ -347,7 +360,7 @@ export function DashboardClient() {
           args: [escrowAddress as Address, maxUint256],
           chainId,
         });
-        setEscrowStatus(`Approve tx: ${approveHash.slice(0, 10)}…${approveHash.slice(-6)}`);
+        setEscrowStatus({ label: "Approve tx", txHash: approveHash as string });
         await waitForReceipt(approveHash as Hex, "Approval");
       }
       const depositHash = await writeContract({
@@ -365,7 +378,7 @@ export function DashboardClient() {
         args: [amountWei],
         chainId,
       });
-      setEscrowStatus(`Deposit tx: ${depositHash.slice(0, 10)}…${depositHash.slice(-6)}`);
+      setEscrowStatus({ label: "Deposit tx", txHash: depositHash as string });
       await waitForReceipt(depositHash as Hex, "Deposit");
       await refetchTokenBalance();
       await refetchEscrowAllowance();
@@ -416,7 +429,7 @@ export function DashboardClient() {
         args: [amountWei],
         chainId,
       });
-      setEscrowStatus(`Withdraw tx: ${withdrawHash.slice(0, 10)}…${withdrawHash.slice(-6)}`);
+      setEscrowStatus({ label: "Withdraw tx", txHash: withdrawHash as string });
       await waitForReceipt(withdrawHash as Hex, "Withdraw");
       await refetchTokenBalance();
       await refetchEscrowAllowance();
@@ -437,6 +450,9 @@ export function DashboardClient() {
       setBundleSignature(null);
       setBundlesRequested(false);
       setMarketDetails(new Map());
+      setClaimMessage(null);
+      setClaimTxHash(null);
+      setEscrowStatus(null);
       return;
     }
     startTransition(() => {
@@ -480,6 +496,7 @@ export function DashboardClient() {
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
+    setClaimTxHash(null);
     let bundle = bundleLookup.get(key);
     if (!bundle) {
       setClaimMessage("Loading claim data for this ticket…");
@@ -555,7 +572,8 @@ export function DashboardClient() {
         salt: (bundle.salt ?? "0x") as Hex,
         merkleProof: (bundle.merkleProof ?? []) as Hex[],
       });
-      setClaimMessage(`Claim sent: ${txHash}`);
+      setClaimMessage("Claim sent");
+      setClaimTxHash(txHash as string);
       await load(address);
       await fetchBundlesWithUi(address);
     } catch (err) {
@@ -716,7 +734,28 @@ export function DashboardClient() {
               see the approval once unless you lower your allowance.
             </p>
             {fundingBlockedReason && <p className="mt-2 text-xs text-amber-200">{fundingBlockedReason}</p>}
-            {escrowStatus && <p className="mt-2 text-xs text-emerald-200">{escrowStatus}</p>}
+            {escrowStatus && (
+              <p className="mt-2 text-xs text-emerald-200">
+                {escrowStatus.label}
+                {escrowStatus.txHash ? (
+                  <>
+                    {": "}
+                    {txHref(escrowStatus.txHash) ? (
+                      <a
+                        className="underline underline-offset-4"
+                        href={txHref(escrowStatus.txHash) ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {shortenHash(escrowStatus.txHash)}
+                      </a>
+                    ) : (
+                      shortenHash(escrowStatus.txHash)
+                    )}
+                  </>
+                ) : null}
+              </p>
+            )}
             {escrowError && <p className="mt-2 text-xs text-rose-300">{escrowError}</p>}
           </div>
           <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-slate-800/40 via-black/60 to-black/80 p-4 shadow-inner shadow-black/40">
@@ -947,7 +986,28 @@ export function DashboardClient() {
               })()}
             </div>
           ))}
-          {claimMessage && <p className="text-sm text-emerald-200">{claimMessage}</p>}
+          {claimMessage && (
+            <p className="text-sm text-emerald-200">
+              {claimMessage}
+              {claimTxHash ? (
+                <>
+                  {" "}
+                  {txHref(claimTxHash) ? (
+                    <a
+                      className="underline underline-offset-4"
+                      href={txHref(claimTxHash) ?? undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {shortenHash(claimTxHash)}
+                    </a>
+                  ) : (
+                    shortenHash(claimTxHash)
+                  )}
+                </>
+              ) : null}
+            </p>
+          )}
           {claimError && (
             <p className="text-sm text-rose-200">
               {claimError instanceof Error ? claimError.message : String(claimError)}

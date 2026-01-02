@@ -13,7 +13,7 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 | Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
 | Operational signals | Publish Redis heartbeats, batch stats, Prometheus counters (`worker.*`), plus proof queue depth gauge and DLQ counter. |
 | Retention | Track retention candidates and emit metrics; deletion is currently disabled (dry-run forced). |
-| Commitments & Merkle | Consume commitments/settlements recorded by the API/relayer (no direct ingestion), rebuild Poseidon Merkle roots/paths for 256-ticket batches (depth 8), submit `lockBatches` when RPC + signer/relayer are configured, and keep prover payloads aligned with on-chain batch roots. |
+| Commitments & Merkle | Consume commitments/settlements recorded by the API/relayer (no direct ingestion), rebuild Poseidon Merkle roots/paths for 256-ticket batches (depth 8), submit `lockBatches` when RPC + oracle signer are configured (relayer mode only works if the relayer key is the oracle), and keep prover payloads aligned with on-chain batch roots. |
 | On-chain backfills | Backfill missing `market_address` via MarketFactory and hydrate settlement snapshots from chain when RPC/factory settings are present. |
 | Proof receipts | When configured, call the `prover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
 

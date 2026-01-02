@@ -2,7 +2,7 @@
 
 ## MVP blockers
 - **Circuit + verifier alignment**
-  - Regenerate Groth16 artifacts and deploy a fresh verifier; update `contracts/zen/cache/settlement-vk.json`, factory `circuitHash`, and prover hashes so settlement cannot verify with stale circuits.
+  - Keep the on-chain verifier + `circuitHash` aligned with `prover/circuits/build/settlement_hashes.json` (field-reduced hash). Update env addresses after each redeploy.
   - Wire `scripts/check_circuit_hash.sh` into CI when RPC/VERIFIER envs are available so mismatches fail fast.
 - **Deployment + env hygiene**
   - None at the moment; `run_deploy.sh` defaults and `.env.example` are aligned, and `scripts/create_market.sh` emits JSON for backend ingestion.

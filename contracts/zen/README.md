@@ -4,7 +4,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 
 ## Components
 - `RelayerEscrow`: holds user funds, exposes `deposit/withdraw`, and forwards fixed-size tickets to markets via `commitOnBehalf` using backend-signed auth. `creditFromMarket` exists for escrow-style payouts but `RevealMarket` currently pays users directly.
-- `ProtocolPool`: protocol bankroll that enforces per-market liability caps and collects rake/surplus. Only markets registered by the factory may draw.
+- `ProtocolPool`: protocol bankroll that enforces per-market liability caps, tops up deficits at settlement, and collects rake/surplus. Only markets registered by the factory may draw.
 - `MarketFactory`: owner-only EIP-1167 clone deployer for `RevealMarket`, wiring oracle, verifier, circuit hash, deadlines, fixed ticket size, max commitments, authorization signer, and protocol liability cap. Registers markets with escrow/pool; `syncFactoryHooks` sets itself on both. Rake is global (default 2%) and can be updated/synced to all markets.
 - `RevealMarket`: per-event contract storing sealed commitments and minimal settlement state. Relayer-only commits, rake skimmed upfront to `ProtocolPool`, oracle-driven `lockBatches` + result, Groth16 proofs (`verifyAndSettleBatched` or single-batch `verifyAndSettle`) enforcing solvency + circuit hash, open `claim` that pays ERC20 directly to the user address, and a post-settlement claim deadline with sweep to the protocol pool or relayer escrow.
 - `Verifier`: configurable Groth16 verifier (10 public signals) with circuit hash.
@@ -13,7 +13,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 1) Users `deposit` ZEN ERC20 into `RelayerEscrow` (all collateral stays in-token; native gas still pays fees).
 2) Backend issues `CommitAuth` signature; relayer calls `commitOnBehalf` → `market.commitWithAuthorization` with fixed ticket value (choose denominations like `0.1 ZEN` or `1 ZEN` per market); per-commit rake is forwarded immediately to `ProtocolPool`, net ticket value stays in-market, only commitments are stored.
 3) After `commitDeadline`, oracle calls `lockBatches()` with depth-8 Poseidon roots + per-batch counts (BATCH_SIZE=256). For single-batch markets, `commitmentsRoot` is set; otherwise it is zeroed.
-4) Oracle posts the result, then settles via `verifyAndSettleBatched` (or `verifyAndSettle` if there is exactly one batch). On-chain checks each batch proof against its stored root, sums totals across batches, and enforces `totalLiability <= totalEscrow(net) + protocolCap` before moving to `Settled`.
+4) Oracle posts the result, then settles via `verifyAndSettleBatched` (or `verifyAndSettle` if there is exactly one batch). On-chain checks each batch proof against its stored root, sums totals across batches, enforces `totalLiability <= totalEscrow(net) + protocolCap`, draws from the ProtocolPool if needed, and forwards any surplus back to the pool before moving to `Settled`.
 5) Anyone (typically the relayer) calls `claim(...)` with a Poseidon Merkle proof for the ticket’s batch. Payouts transfer directly to the user address. After the claim window closes, the factory can sweep unclaimed payouts to the protocol pool or relayer escrow (default claim window is 180 days from settlement; extendable by the factory).
 
 ### Current state (what’s implemented)
@@ -23,7 +23,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 - Escape hatch: relayer or factory owner can `enableRefunds` after the commit deadline to cancel settlement and refund net tickets.
 - Authorization signer enforced on every commit; digest binds market, id, commitment, user, nonce, expiry, ticket value, chain id. Nonces and expiries prevent replay.
 - ProtocolPool tracks per-market draws and global balance; `ProtocolPool.draw` reverts on cap breach. Surplus flows back after settlement.
-- Circuit hash stored in factory and market; settlement checks proof hash to prevent mismatched circuits.
+- Circuit hash stored in factory and market; settlement checks proof hash (field-reduced mod BN254) to prevent mismatched circuits.
 - Verifier is configurable; tests assert correct calldata layout from prover and circuit hash alignment.
 - Events emitted for every admin mutation (rake change, signer/oracle/relayer/escrow rotation, cap updates) to feed backend mirroring.
 
@@ -34,7 +34,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 - Pauses: `setFactoryPaused` stops new markets; `setCommitsPaused`/`setClaimsPaused` freeze activity per-market in emergencies.
 
 ## Public Signal Order (10)
-`[merkleRoot, marketId, winningOutcomeId, totalEscrowNet, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]`
+`[merkleRoot, marketId, winningOutcomeId, totalEscrowNet, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]` (`circuitHash` is field-reduced mod BN254).
 
 `merkleRoot` is the per-batch Poseidon root (depth 8). Multi-batch settlements submit one proof per batch and sum totals on-chain.
 
@@ -69,7 +69,7 @@ Create `contracts/zen/.env` (or export in your shell) with:
 - `RPC_URL=https://horizen-testnet.rpc.caldera.xyz/http`
 - `CHAIN_ID=2651420`
 - `PRIVATE_KEY=<deployer key>` (e.g., `0x....77`)
-- `ZEN_TOKEN_ADDRESS=<ZEN ERC20>` (e.g., `0x48e96bA58969f09e86B8B22AfEd12d3aF3367795`)
+- `ZEN_TOKEN_ADDRESS=<ZEN ERC20>` (e.g., `0x070040A826B586b58569750ED43cb5979b171e8d`)
 - `COLLATERAL_TOKEN=<ERC20>` (optional fallback if `ZEN_TOKEN_ADDRESS` is unset)
 - `AUTHORIZATION_SIGNER=<authorization signer address>` (the backend holds the private key)
 - `ORACLE_ADDRESS=<oracle EOA>` (e.g., `0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369`)
@@ -93,7 +93,7 @@ Optional:
 
 The script prints a JSON payload to stdout (and optionally `OUTPUT_PATH`) with the resolved market id/address, tx hash, and predicted values for auditability.
 
-- `CIRCUIT_HASH`: The expected hash of the settlement circuit (Groth16) that markets verify in `verifyAndSettleBatched` (or `verifyAndSettle` for single batches). Set this to the hash of your proving circuit so on-chain verification rejects proofs for a different circuit. Use the value produced when you generated the vk/proof artifacts.
+- `CIRCUIT_HASH`: The expected hash of the settlement circuit (Groth16) that markets verify in `verifyAndSettleBatched` (or `verifyAndSettle` for single batches). Use the field-reduced hash from `prover/circuits/build/settlement_hashes.json` so on-chain verification rejects proofs for a different circuit.
 - `TICKET_SIZE_WEI`: Fixed stake per commit (in wei). Every commitWithAuthorization must match this exact amount. Set to your chosen ticket size (e.g., 100000000000000000 for 0.1 ZEN).
 - `MAX_COMMITMENTS`: Maximum number of commits (tickets) the market will accept. Controls the anonymity set and caps liability.
 - `PROTOCOL_LIABILITY_CAP_WEI`: Per-market liability cap drawn from ProtocolPool to cover shortfall. Set to 0 to disable protocol top-up; otherwise set the cap in wei.

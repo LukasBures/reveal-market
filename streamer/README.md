@@ -10,7 +10,7 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 - SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis and signed optionally.
 - Worsen% applied server-side; haircut/rake are config values used by backend pricing. Structured logs at INFO call out source and fallback decisions.
 - Connection pooling: one WS per path is shared across subscribers, with periodic HTTP refresh to rehydrate stale data and automatic reconnect to WS.
-- Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services. The API now assumes the streamer is reachable at `/fx/zen-usd`; update host/port in `backend/api/app/pricing.py` if you change it.
+- Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services. The API uses `RM_FX_FEED_URL` (default `/fx/zen-usd`) to fetch FX.
   - Presets: `RM_ENVIRONMENT=local` uses `http://localhost:8100` + localhost CORS; `RM_ENVIRONMENT=prod` pins `https://stream.revealmarket.xyz` + prod CORS union into middleware so both local + prod origins are allowed without extra overrides. Presets override `STREAMER_PUBLIC_BASE_URL`, `STREAMER_INTERNAL_BASE_URL`, and `STREAMER_CORS_ALLOW_ORIGINS` at startup. Wildcard CORS is disallowed in prod.
 
 ## Current implementation snapshot

@@ -42,12 +42,12 @@ Additional docs live in each directory’s README.
 - **Backend API** (`backend/api`) – FastAPI surface with Redis-tagged caches, normalized market/outcome/tag/clob metadata tables, signed QUOTE_V1 pricing, health/metrics, rate limiting, and startup migrations; tests via `./backend/run_tests.sh`.
 - **Worker** (`backend/worker`) – Async Polymarket Gamma ingest with retries/rate limits, Goldsky + Conditional Tokens resolution ledger, cache priming/invalidation, prover receipt requests, heartbeats/batch stats, retention metrics; runs inside the same test harness.
 - **Frontend** (`frontend`) – Next.js 15 App Router with streaming odds/FX, SSR data fetches aligned to backend cache tags, signed-quote flow via `/trade/commit` (API + relayer), CSP/HSTS headers, Vitest suites for hero/nav/featured/search/market cards/FX; lint/test/build via `frontend/run_tests.sh`.
-- **Contracts (Zen)** (`contracts/zen`) – Fixed-ticket commit/reveal markets (`RelayerEscrow`, `ProtocolPool`, `MarketFactory`, `RevealMarket`, Groth16 `Verifier`) with Poseidon batch roots (BATCH_SIZE=256, depth 8), `lockBatches` + `verifyAndSettleBatched`, rake skimmed at commit, circuit hash enforced at settle, protocol liability caps, forge tests + gas snapshots via `contracts/run_tests.sh`; use `contracts/zen/run_local.sh full` for fuzz/coverage.
+- **Contracts (Zen)** (`contracts/zen`) – Fixed-ticket commit/reveal markets (`RelayerEscrow`, `ProtocolPool`, `MarketFactory`, `RevealMarket`, Groth16 `Verifier`) with Poseidon batch roots (BATCH_SIZE=256, depth 8), `lockBatches` + `verifyAndSettleBatched`, rake skimmed at commit, circuit hash enforced at settle, protocol liability caps, protocol pool top-ups for deficits and surplus forwarding, forge tests + gas snapshots via `contracts/run_tests.sh`; use `contracts/zen/run_local.sh full` for fuzz/coverage.
 - **Contracts (Polygon)** (`contracts/polygon`) – LP vault/hedging workspace with its own scripts/tests; run with the same `contracts/run_tests.sh`.
 - **Streamer** (`streamer`) – FastAPI SSE/WS for Polymarket CLOB + RTDS + Binance FX with REST fallback, Redis cache/history, staleness guards, optional HMAC/access tokens, Prometheus metrics; tests via `streamer/run_tests.sh`.
 - **Hedger** (`hedger`) – FastAPI admin API with exposure/risk ledger, FX/slippage caps, Redis locks/idempotency, hedging/unwind instructions, settlement/prover payload builder, metrics; tests via `hedger/run_tests.sh`.
 - **Relayer** (`relayer`) – FastAPI relayer for `commitOnBehalf`/`claim` with retries/backoff or durable queue + fee bumps, health/metrics/admin DLQ endpoints; tests via `relayer/run_tests.sh`.
-- **Prover** (`prover`) – Go rapidsnark service with artifact gate, witness/proof pipeline, metrics/pprof, integration tests; check artifacts via `prover/cmd/verify-artifacts` and run tests with `prover/run_tests.sh`.
+- **Prover** (`prover`) – Go rapidsnark service with artifact gate, witness/proof pipeline, metrics/pprof, integration tests; check artifacts via `go run ./prover/cmd/verify-artifacts` and run tests with `prover/run_tests.sh`.
 
 ## Database Schema (Postgres)
 
@@ -69,13 +69,13 @@ Additional docs live in each directory’s README.
 - **Contracts** – Foundry projects compile/test (unit + fuzz) the RevealMarket suite today, emitting `MarketResolved` data and rake metadata the backend can ingest. The Horizen deployment locks Poseidon batch roots (BATCH_SIZE=256) and settles via `verifyAndSettleBatched` when multiple batches are present. Deployment scripts capture manifests, and `forge test`/`forge snapshot` guard gas usage in CI. Both `contracts/zen` (Horizen) and `contracts/polygon` (Polygon LP vault + hedging) run via shared wrappers.
   - Generate custom error selectors via `uv run --with eth-utils --with "eth-hash[pysha3]" python scripts/generate_error_selectors.py > contracts/cache/errors.json` whenever Solidity errors change so frontend/backend decoders stay in sync.
 - **Groth16 prover** – The prover service verifies that circuit artifacts exist before boot, exposes `/healthz`/`/metrics`, and processes settlement proof jobs the worker submits. `prover/circuits/generate_keys.sh` keeps artifacts fresh for demos and deployments.
-  - Use `prover/cmd/verify-artifacts` to fail fast when artifacts are missing and rely on `/metrics`/expvar for proof counts/latency/active requests.
+  - Use `go run ./prover/cmd/verify-artifacts` to fail fast when artifacts are missing and rely on `/metrics`/expvar for proof counts/latency/active requests.
 - **Hedger** – FastAPI admin surface with Prometheus metrics; tracks exposures (YES/NO), FX haircuts, risk limits, and emits buy/sell/unwind hedge instructions with slippage gates. Uses Redis locks/idempotency + DB offsets for replay safety, hydrates state from Postgres on restart, and builds prover payloads from stored commits/outcomes before marking markets resolved. Metrics include exposures, coverage, LP utilization, float, PnL placeholders, event lag, hedge executions, and settlement/prover latency.
 - **Price streamer** – FastAPI SSE/WS fanout that ingests Polymarket CLOB WS + RTDS feeds, hydrates token IDs via REST, applies worsen% to display prices, caches ticks/history in Redis, and serves `/stream`, `/stream/ws`, `/history`, and `/fx/zen-usd[c|t]` with Binance WS first, Binance REST + CryptoCompare fallback. Presets pin CORS origins and public/internal streamer hosts to the frontend so WSS upgrades work locally and in prod.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/zen/run_local.sh`, `contracts/polygon/run_local.sh`, and `./run_tests.sh` map to CI in `.github/workflows/cicd.yml`. Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
-- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Binance REST then CryptoCompare HTTP fallback; `/fx/zen-usd` exposes the latest quote + staleness. The API hardcodes FX to the streamer endpoint (`http://streamer:8100/fx/zen-usd`; update `app/pricing.py` if your host/port differs) and ignores env overrides. API/hedger reject stale FX and enforce configurable caps; the UI uses a fixed 0.1 ZEN ticket size. Haircut/worsen/rake apply in pricing logic. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
+- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Binance REST then CryptoCompare HTTP fallback; `/fx/zen-usd` exposes the latest quote + staleness. The API uses `RM_FX_FEED_URL` (default `http://streamer:8100/fx/zen-usd`) and ignores client-supplied FX. API/hedger reject stale FX and enforce configurable caps; the UI uses a fixed 0.1 ZEN ticket size. Haircut/worsen/rake apply in pricing logic. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
 - **Signed quotes (off-chain enforcement)** – Quotes bind chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId to a `pricingSigner`. The API ignores client FX, signs this ABI-packed digest, enforces per-user/per-market caps via the quote ledger, and consumes quotes during `/trade/commit`. On-chain enforcement is via CommitAuth signatures in `commitWithAuthorization`.
-- **Bet caps (off-chain)** – UI stake inputs clamp to 0.1 ZEN; API enforces `RM_MAX_STAKE_ZEN`, and hedger mirrors per-commit caps. Per-user/per-market caps are planned on-chain (see service TODOs) and will be mirrored off-chain first.
+- **Bet caps (off-chain)** – UI stake inputs clamp to 0.1 ZEN; API enforces per-bet, per-user-per-market, and per-market caps (`RM_MAX_STAKE_ZEN`, `RM_MAX_USER_STAKE_PER_MARKET_ZEN`, `RM_MAX_MARKET_STAKE_ZEN`). Defaults are 0.1 / 0.5 / 5 ZEN in the repo env files; on-chain caps remain off-chain only.
 
 ---
 
@@ -141,8 +141,9 @@ The Dockerized frontend serves the prebuilt `.next/standalone` bundle, so it no 
 
 ### Groth16 prover setup / current circuit status
 
-- Run `bash prover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `prover/circuits/build`. The script now computes proving/verifying key hashes, derives the 10-signal circuit hash, and writes deploy config to `contracts/cache/settlement-vk.json` + `contracts/zen/cache/settlement-vk.json` / `prover/circuits/build/settlement_deploy.json`. The prover container mounts those paths read-only; without them it refuses to start.
+- Run `bash prover/circuits/generate_keys.sh` once (or whenever you regenerate circuits) so `settlement_final.zkey` and the `settlement_js/` assets exist under `prover/circuits/build`. The script now computes proving/verifying key hashes, derives the 10-signal circuit hash (field-reduced mod BN254), and writes deploy config to `contracts/cache/settlement-vk.json` + `contracts/zen/cache/settlement-vk.json` / `prover/circuits/build/settlement_deploy.json`. The prover container mounts those paths read-only; without them it refuses to start.
 - Both `./run_local.sh` and `./run_prod.sh` call a built-in artifact check before launching Docker. If files are missing, the scripts attempt to sync from `prover/artifacts` or download via `PROVER_ARTIFACTS_URL`; otherwise they exit with instructions to run `prover/circuits/generate_keys.sh`. Set `SKIP_PROVER_CHECK=true` only when you have already mounted known-good artifacts.
+- Artifact source of truth: use `prover/circuits/export_artifacts.sh` to write vetted artifacts into `prover/artifacts`, commit/push that repo, then update the submodule pointer in the main repo. Use `prover/circuits/import_from_artifacts.sh` on new machines/CI to sync the vetted artifacts into `prover/circuits/build` and the contract caches.
 - The prover exposes `http://localhost:8085/healthz`, `/metrics`, and `/api/v1/proofs/settlement`. If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on proof requests. After the stack is up, hit `/healthz` or send a sample payload (see `prover/README.md`) to confirm witness generation + `rapidsnark` proofs succeed. Public signals are fixed at 10: `[merkleRoot, marketId, winningOutcomeId, totalEscrow, totalLiability, rakeBps, poolYes, poolNo, circuitHash, padding(0)]` where `merkleRoot` is the per-batch Poseidon root; multi-batch markets submit one proof per batch and settle via `verifyAndSettleBatched`.
 
 ### Live market ingestion
@@ -171,20 +172,3 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via the contact form on the site.
 
 Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `prover/circuits/build` are missing or invalid. Run `prover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.
-
-
-
-
-https://horizen-testnet.explorer.caldera.xyz/address/0xe928a273C83c80445adF89a880D0c7cc8Ee089b0?tab=tokens
-
-
-
-
-  Step-by-step (single source of truth = artifacts submodule):
-
-  1. Generate + stage artifacts: cd prover/circuits && bash export_artifacts.sh (writes to prover/artifacts/...).
-  2. Commit/push the submodule: cd prover/artifacts && git status -> add/commit/push; then cd .. and git add prover/artifacts to update the pointer in the main repo.
-  3. Deploy verifier from the vetted vk: use contracts/zen/cache/settlement-vk.json (populated by export/import) with your forge script ... Deploy.s.sol flow; set RM_VERIFIER_ADDRESS to the new verifier.
-  4. Sync artifacts on any machine/CI: cd prover/circuits && bash import_from_artifacts.sh (copies vetted artifacts into prover/circuits/build and vk caches).
-  5. Run services: mount prover/artifacts/prover/circuits/build (or run the import script) for the prover; restart worker/API with `RM_PROVER_BASE_URL` set and the funded signer/RPC envs.
-  6. Validate alignment: cast call <verifier> "circuitHash()(bytes32)" must equal jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json.

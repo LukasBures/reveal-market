@@ -35,6 +35,8 @@ const formatZen = (value: number | undefined): string => {
   return `${value.toFixed(3)} ZEN`;
 };
 
+const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash);
+
 export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const outcomes = market.outcomes ?? [];
   const prices = useMemo(() => market.outcomePrices ?? [], [market.outcomePrices]);
@@ -99,6 +101,14 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const quoteRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quoteDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const txPending = false;
+  const explorerBase = (
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ??
+    defaultChain.blockExplorers?.default?.url ??
+    "https://horizen-testnet.explorer.caldera.xyz"
+  ).replace(/\/+$/, "");
+  const trimmedTxHash = txHash?.trim() ?? "";
+  const txHashIsHex = Boolean(trimmedTxHash && /^0x[0-9a-fA-F]{64}$/.test(trimmedTxHash));
+  const txHref = txHashIsHex && explorerBase ? `${explorerBase}/tx/${trimmedTxHash}` : null;
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
@@ -760,7 +770,19 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                         </button>
                         {txHash && (
                           <span className="text-[11px] text-emerald-200">
-                            Submitted tx: {txHash.slice(0, 10)}…{txHash.slice(-6)}
+                            Submitted tx:{" "}
+                            {txHref ? (
+                              <a
+                                className="underline underline-offset-4"
+                                href={txHref}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {shortenHash(trimmedTxHash)}
+                              </a>
+                            ) : (
+                              shortenHash(trimmedTxHash || txHash)
+                            )}
                           </span>
                         )}
                         {txConfirmed && txHash && (
