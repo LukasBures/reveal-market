@@ -275,11 +275,13 @@ export const computePoseidonLeaf = (
   ticketId: bigint,
   outcomeId: bigint,
   amount: bigint,
+  payout: bigint,
   user: bigint,
   salt: bigint,
 ): bigint => {
   const userSalt = poseidonT3(user, salt);
   const h1 = poseidonT3(ticketId, outcomeId);
-  const h2 = poseidonT3(amount, userSalt);
-  return poseidonT3(h1, h2);
+  const h2 = poseidonT3(amount, payout);
+  const h3 = poseidonT3(h2, userSalt);
+  return poseidonT3(h1, h3);
 };

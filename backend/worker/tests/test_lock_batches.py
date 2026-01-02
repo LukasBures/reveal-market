@@ -7,14 +7,22 @@ from shared.models import Commitment
 from shared.poseidon import compute_leaf, int_to_hex32
 
 
-def _make_commitment(ticket_id: int, outcome_id: int, amount: int, user: str, salt: str) -> Commitment:
-    leaf_int = compute_leaf(ticket_id, outcome_id, amount, user, salt)
+def _make_commitment(
+    ticket_id: int,
+    outcome_id: int,
+    amount: int,
+    payout: int,
+    user: str,
+    salt: str,
+) -> Commitment:
+    leaf_int = compute_leaf(ticket_id, outcome_id, amount, payout, user, salt)
     leaf_hex = int_to_hex32(leaf_int)
     return Commitment(
         market_id=1,
         user_address=user,
         outcome_id=outcome_id,
         amount_wei=amount,
+        payout_wei=payout,
         salt=salt,
         ticket_hash=leaf_hex,
         leaf=leaf_hex,
@@ -28,6 +36,7 @@ def test_build_batch_roots_from_commitments_matches_merkle():
             ticket_id=0,
             outcome_id=0,
             amount=10,
+            payout=15,
             user="0x0000000000000000000000000000000000000001",
             salt="0x" + "1" * 64,
         ),
@@ -35,6 +44,7 @@ def test_build_batch_roots_from_commitments_matches_merkle():
             ticket_id=1,
             outcome_id=1,
             amount=20,
+            payout=25,
             user="0x0000000000000000000000000000000000000002",
             salt="0x" + "2" * 64,
         ),
@@ -54,6 +64,7 @@ def test_build_batch_roots_requires_leaf_index():
         ticket_id=0,
         outcome_id=0,
         amount=10,
+        payout=15,
         user="0x0000000000000000000000000000000000000001",
         salt="0x" + "1" * 64,
     )

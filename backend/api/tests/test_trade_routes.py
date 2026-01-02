@@ -215,6 +215,7 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
             user_address=user.address.lower(),
             outcome_id=0,
             amount_wei=100,
+            payout_wei=150,
             salt="0x0",
             ticket_hash=commitment_hex.lower(),
             leaf=commitment_hex.lower(),
@@ -252,6 +253,7 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
     body = resp.json()
     assert body["tx_hash"] == tx_hash
     assert body["ticket_id"] == 0
+    assert body["payout_wei"] == 150
     assert body["status"] == "claimed"
 
 
@@ -270,6 +272,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
             user_address=user.address.lower(),
             outcome_id=1,
             amount_wei=200,
+            payout_wei=250,
             salt="0xbeef",
             ticket_hash=commitment_hex.lower(),
             leaf=commitment_hex.lower(),
@@ -301,6 +304,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert bundle["marketId"] == market.event_id
     assert bundle["ticketId"] == 0
     assert bundle["amountWei"] == 200
+    assert bundle["payoutWei"] == 250
     assert bundle["merkleProof"] == expected_proof
     assert bundle["commitmentsRoot"].lower() == merkle_root.lower()
     assert bundle["user"].lower() == user.address.lower()
@@ -320,6 +324,7 @@ def test_claim_bundles_skip_claimed_commitment(client, db_session):
             user_address=user.address.lower(),
             outcome_id=1,
             amount_wei=200,
+            payout_wei=250,
             salt="0xbeef",
             ticket_hash=commitment_hex.lower(),
             leaf=commitment_hex.lower(),
@@ -359,6 +364,7 @@ def test_positions_marks_claimed(client, db_session):
             user_address=user.address.lower(),
             outcome_id=1,
             amount_wei=200,
+            payout_wei=250,
             salt="0xbeef",
             ticket_hash=commitment_hex.lower(),
             leaf=commitment_hex.lower(),
@@ -399,6 +405,7 @@ def test_sync_commitments_endpoint(client, db_session):
                 "user_address": "0xabc",
                 "outcomeId": 1,
                 "amount": 100,
+                "payout": 110,
                 "salt": "0x0",
                 "merkleIndex": 0,
                 "merklePath": [],

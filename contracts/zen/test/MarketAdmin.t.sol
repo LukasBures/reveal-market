@@ -70,7 +70,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         assertEq(market.authorizationSigner(), newSigner, "signer rotated");
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("leaf"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("leaf"), user),
             user: user,
             nonce: 1,
             expiry: block.timestamp + 4 hours,
@@ -96,7 +96,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
     function testOracleRotation() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("leaf2"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("leaf2"), user),
             user: user,
             nonce: 2,
             expiry: block.timestamp + 4 hours,
@@ -143,7 +143,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         assertEq(market.relayerEscrow(), address(newRelayer));
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("leaf3"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("leaf3"), user),
             user: user,
             nonce: 3,
             expiry: block.timestamp + 4 hours,
@@ -174,7 +174,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
         uint256 netTicket = ticketSize - (ticketSize * market.rakeBps()) / 10_000;
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 1, netTicket, bytes32("leaf4"), user),
+            commitment: _leaf(0, 1, netTicket, netTicket, bytes32("leaf4"), user),
             user: user,
             nonce: 4,
             expiry: block.timestamp + 4 hours,
@@ -246,12 +246,12 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         return abi.encodePacked(r, s, v);
     }
 
-    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address leafUser)
+    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, uint256 payout, bytes32 salt, address leafUser)
         internal
         pure
         returns (bytes32)
     {
-        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
+        return _poseidonLeaf(ticketId, outcomeId, amount, payout, salt, leafUser);
     }
 
     function testRakeBoundsAndOverride() external {
@@ -266,7 +266,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
     function testRakeLockedAfterFirstCommit() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("rake-lock"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("rake-lock"), user),
             user: user,
             nonce: 88,
             expiry: block.timestamp + 4 hours,
@@ -293,7 +293,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         assertEq(market.commitDeadline(), newCommit);
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("deadline-leaf"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("deadline-leaf"), user),
             user: user,
             nonce: 77,
             expiry: block.timestamp + 4 hours,
@@ -332,7 +332,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
     function testAuthorizationSignerGuard() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
-            commitment: _leaf(0, 0, ticketSize, bytes32("guard-leaf"), user),
+            commitment: _leaf(0, 0, ticketSize, ticketSize, bytes32("guard-leaf"), user),
             user: user,
             nonce: 9,
             expiry: block.timestamp + 4 hours,

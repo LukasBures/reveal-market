@@ -142,6 +142,7 @@ def test_claim_route_with_queue(tmp_path):
         ticket_id=0,
         outcome_id=1,
         amount=10,
+        payout=15,
         salt="0x" + "1" * 64,
         merkle_proof=[],
     ).model_dump()
@@ -200,6 +201,7 @@ def test_claim_route(client):
         ticket_id=0,
         outcome_id=1,
         amount=10,
+        payout=15,
         salt="0x" + "1" * 64,
         merkle_proof=[],
     ).model_dump()
@@ -217,6 +219,7 @@ def test_lock_batches_route(client):
                 "ticket_id": 0,
                 "outcome_id": 0,
                 "amount": 10,
+                "payout": 15,
                 "user": "0x0000000000000000000000000000000000000001",
                 "salt": "0x" + "1" * 64,
             }
@@ -241,6 +244,7 @@ def test_lock_batches_route_with_queue(tmp_path):
                 "ticket_id": 0,
                 "outcome_id": 0,
                 "amount": 10,
+                "payout": 15,
                 "user": "0x0000000000000000000000000000000000000001",
                 "salt": "0x" + "1" * 64,
             }
@@ -287,6 +291,7 @@ def test_claim_route_triggers_ingest():
         ticket_id=0,
         outcome_id=1,
         amount=10,
+        payout=15,
         salt="0x" + "1" * 64,
         merkle_proof=[],
     ).model_dump()
@@ -310,6 +315,7 @@ def test_lock_batches_route_triggers_ingest():
                 "ticket_id": 0,
                 "outcome_id": 0,
                 "amount": 10,
+                "payout": 15,
                 "user": "0x0000000000000000000000000000000000000001",
                 "salt": "0x" + "1" * 64,
             }
@@ -329,6 +335,7 @@ def test_lock_batches_requires_market_identifier(client):
                 "ticket_id": 0,
                 "outcome_id": 0,
                 "amount": 10,
+                "payout": 15,
                 "user": "0x0000000000000000000000000000000000000001",
                 "salt": "0x" + "1" * 64,
             }
@@ -375,6 +382,7 @@ def test_claim_requires_auth_when_enabled():
         ticket_id=0,
         outcome_id=1,
         amount=10,
+        payout=15,
         salt="0x" + "1" * 64,
         merkle_proof=[],
     ).model_dump()
@@ -439,6 +447,7 @@ def test_claim_invalid_address(client):
         ticket_id=0,
         outcome_id=1,
         amount=10,
+        payout=15,
         salt="0x" + "1" * 64,
         merkle_proof=[],
     ).model_dump()

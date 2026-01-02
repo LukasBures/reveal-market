@@ -569,13 +569,21 @@ def poseidon_t4(a: int, b: int, c: int) -> int:
     return poseidon([a, b, c])
 
 
-def compute_leaf(ticket_id: int, outcome_id: int, amount: int, user: int | str, salt: int | str) -> int:
+def compute_leaf(
+    ticket_id: int,
+    outcome_id: int,
+    amount: int,
+    payout: int,
+    user: int | str,
+    salt: int | str,
+) -> int:
     user_int = _to_int(user)
     salt_int = _to_int(salt)
     user_salt = poseidon_t3(user_int, salt_int)
     h1 = poseidon_t3(int(ticket_id), int(outcome_id))
-    h2 = poseidon_t3(int(amount), user_salt)
-    return poseidon_t3(h1, h2)
+    h2 = poseidon_t3(int(amount), int(payout))
+    h3 = poseidon_t3(h2, user_salt)
+    return poseidon_t3(h1, h3)
 
 
 def int_to_bytes32(value: int) -> bytes:

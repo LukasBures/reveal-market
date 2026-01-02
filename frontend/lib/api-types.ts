@@ -159,6 +159,7 @@ export type ClaimBundle = {
   ticketId: number | string;
   outcomeId: number | string;
   amountWei: number | string;
+  payoutWei: number | string;
   quoteId?: string | null;
   salt?: string | null;
   merkleProof: string[];

@@ -388,6 +388,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 ticketId,
         uint256 outcomeId,
         uint256 amount,
+        uint256 payout,
         bytes32 salt,
         bytes32[] calldata merkleProof
     ) external nonReentrant {
@@ -396,15 +397,15 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimWindowClosed();
         if (outcomeId != winningOutcomeId) revert WrongOutcome();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
-        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, user);
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, user);
         if (!_verifyLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
-        claimedLiability += amount;
+        claimedLiability += payout;
         if (claimedLiability > totalLiability) revert OverClaimed();
 
-        IERC20(collateralToken).safeTransfer(user, amount);
-        emit Claimed(msg.sender, user, ticketId, amount);
+        IERC20(collateralToken).safeTransfer(user, payout);
+        emit Claimed(msg.sender, user, ticketId, payout);
     }
 
     /// @notice Enables refunds after the commit window closes; cancels further settlement/claims.
@@ -424,13 +425,14 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 ticketId,
         uint256 outcomeId,
         uint256 amount,
+        uint256 payout,
         bytes32 salt,
         bytes32[] calldata merkleProof
     ) external nonReentrant onlyRelayerOrFactoryOwner {
         if (phase != Phase.Cancelled) revert RefundsNotEnabled();
         if (user == address(0)) revert InvalidAddress();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
-        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, user);
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, user);
         if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
@@ -441,13 +443,17 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     /// @notice Users may self-refund after refunds are enabled (caller must match the commitment leaf).
-    function refundSelf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, bytes32[] calldata merkleProof)
-        external
-        nonReentrant
-    {
+    function refundSelf(
+        uint256 ticketId,
+        uint256 outcomeId,
+        uint256 amount,
+        uint256 payout,
+        bytes32 salt,
+        bytes32[] calldata merkleProof
+    ) external nonReentrant {
         if (phase != Phase.Cancelled) revert RefundsNotEnabled();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
-        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, salt, msg.sender);
+        bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, msg.sender);
         if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
@@ -598,15 +604,23 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit ClaimsSwept(recipient, remaining);
     }
 
-    function _computeLeaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address user)
+    function _computeLeaf(
+        uint256 ticketId,
+        uint256 outcomeId,
+        uint256 amount,
+        uint256 payout,
+        bytes32 salt,
+        address user
+    )
         internal
         pure
         returns (bytes32 hash)
     {
         uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
         uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
-        uint256 h2 = PoseidonT3.poseidon([amount, userSalt]);
-        uint256 leaf = PoseidonT3.poseidon([h1, h2]);
+        uint256 h2 = PoseidonT3.poseidon([amount, payout]);
+        uint256 h3 = PoseidonT3.poseidon([h2, userSalt]);
+        uint256 leaf = PoseidonT3.poseidon([h1, h3]);
         hash = bytes32(leaf);
     }
 

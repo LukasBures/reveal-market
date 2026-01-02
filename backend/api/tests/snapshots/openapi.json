@@ -1426,6 +1426,10 @@
             "type": "integer",
             "title": "Amountwei"
           },
+          "payoutWei": {
+            "type": "integer",
+            "title": "Payoutwei"
+          },
           "salt": {
             "anyOf": [
               {
@@ -1461,6 +1465,7 @@
           "ticketId",
           "outcomeId",
           "amountWei",
+          "payoutWei",
           "salt",
           "merkleProof",
           "leaf",
@@ -1540,6 +1545,17 @@
               }
             ],
             "title": "Amount"
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout"
           },
           "salt": {
             "anyOf": [
@@ -4545,6 +4561,10 @@
             "type": "integer",
             "title": "Amount Wei"
           },
+          "payout_wei": {
+            "type": "integer",
+            "title": "Payout Wei"
+          },
           "status": {
             "type": "string",
             "title": "Status",
@@ -4557,7 +4577,8 @@
           "market_id",
           "ticket_id",
           "outcome_id",
-          "amount_wei"
+          "amount_wei",
+          "payout_wei"
         ],
         "title": "TradeClaimResponse"
       },

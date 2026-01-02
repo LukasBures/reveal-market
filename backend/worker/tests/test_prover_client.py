@@ -15,7 +15,9 @@ def test_prover_client_success():
         assert payload["marketId"] == "0x123"
         assert payload["batchIndex"] == "0"
         assert payload["commitmentsCount"] == "1"
-        assert payload["tickets"] == [{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}]
+        assert payload["tickets"] == [
+            {"ticketId": "0", "outcomeId": "0", "amount": "0", "payout": "0", "user": "0x0", "salt": "0x0"}
+        ]
         assert "payoutMultiplierWad" not in payload
         assert request.headers.get("X-Prover-Secret") == "secret"
         return httpx.Response(
@@ -44,12 +46,12 @@ def test_prover_client_success():
         winning_outcome_id=0,
         pool_totals=["70", "30"],
         total_escrow="100",
-        total_liability="90",
+        total_liability="100",
         rake_bps=100,
         circuit_hash="0x1234",
         batch_index="0",
         commitments_count="1",
-        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}],
+        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "payout": "0", "user": "0x0", "salt": "0x0"}],
     )
     response = client.generate_settlement_proof(request)
     assert response.proof == "0xdeadbeef"
@@ -76,7 +78,7 @@ def test_prover_client_raises_on_error():
         circuit_hash="0x1234",
         batch_index="0",
         commitments_count="1",
-        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "user": "0x0", "salt": "0x0"}],
+        tickets=[{"ticketId": "0", "outcomeId": "0", "amount": "0", "payout": "0", "user": "0x0", "salt": "0x0"}],
     )
     try:
         client.generate_settlement_proof(request)

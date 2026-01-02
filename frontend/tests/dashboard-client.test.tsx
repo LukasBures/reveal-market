@@ -114,10 +114,12 @@ describe("DashboardClient", () => {
     });
     const salt = "0x" + "00".repeat(32);
     const user = "0x9999999999999999999999999999999999999999";
+    const payout = 110000000000000000n;
     const leafValue = computePoseidonLeaf(
       0n,
       0n,
       100000000000000000n,
+      payout,
       parseBigInt(user),
       parseBigInt(salt),
     );
@@ -140,6 +142,7 @@ describe("DashboardClient", () => {
           ticketId: "0",
           outcomeId: "0",
           amountWei: "100000000000000000",
+          payoutWei: payout.toString(),
           salt,
           merkleProof,
           leaf,

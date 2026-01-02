@@ -1502,22 +1502,21 @@ async def trade_commit(
     )
     stake_zen = float(quote.stake_zen)
     entry_fx = float(quote.zen_usd)
-    potential = None
+    payout_zen = None
     try:
-        profit_usd = float(quote.hedge_usdc) * float(quote.displayed_odds_multiplier) - float(quote.hedge_usdc)
-        potential = (profit_usd / entry_fx) + stake_zen if entry_fx > 0 else None
+        payout_zen = float(quote.payout_zen)
     except Exception:
-        potential = None
+        payout_zen = None
+    potential = payout_zen if payout_zen is not None else None
     rake_zen_value = None
     protocol_topup = None
     try:
         rake_zen_value = float(quote.rake_zen)
     except Exception:
         rake_zen_value = None
-    if potential is not None and rake_zen_value is not None:
-        protocol_topup = max(0.0, potential - stake_zen - rake_zen_value)
-    protocol_topup_wei = _zen_to_wei(protocol_topup) if protocol_topup is not None else 0
-    await _assert_protocol_pool_headroom(market_onchain_id, market_address, protocol_topup_wei)
+    if payout_zen is not None and rake_zen_value is not None:
+        net_zen = max(0.0, stake_zen - rake_zen_value)
+        protocol_topup = max(0.0, payout_zen - net_zen)
 
     # Derive next ticket id by counting on-chain Committed events (fallback to DB count).
     ticket_id = await _next_ticket_id_onchain(market_address, market_db_id, session)
@@ -1546,7 +1545,11 @@ async def trade_commit(
     rake_bps = rake_bps or 0
     rake_wei = (ticket_size_wei * rake_bps) // 10_000
     net_amount_wei = ticket_size_wei - rake_wei
-    leaf_value = compute_leaf(ticket_id, outcome_id, net_amount_wei, user_address, salt_hex)
+    payout_wei = _zen_to_wei(payout_zen) if payout_zen is not None else net_amount_wei
+    protocol_topup_wei = max(0, payout_wei - net_amount_wei)
+    await _assert_protocol_pool_headroom(market_onchain_id, market_address, protocol_topup_wei)
+
+    leaf_value = compute_leaf(ticket_id, outcome_id, net_amount_wei, payout_wei, user_address, salt_hex)
     commitment = int_to_hex32(leaf_value)
 
     nonce = secrets.randbelow(2**256 - 1)
@@ -1575,6 +1578,7 @@ async def trade_commit(
         "signature": _ensure_0x(signed.signature.hex()),
         "ticket_value_wei": ticket_size_wei,
         "amount_wei": net_amount_wei,
+        "payout_wei": payout_wei,
         "chain_id": chain_id,
         "event_id": quote.market_id or market_onchain_id,
         "market_id": quote.market_id,
@@ -1619,6 +1623,7 @@ async def trade_commit(
                 "user": quote.wallet_address,
                 "outcomeId": quote.outcome_id,
                 "amount": net_amount_wei,
+                "payout": payout_wei,
                 "salt": salt_hex,
                 "merkleIndex": ticket_id,
                 "merklePath": [],
@@ -1811,6 +1816,7 @@ async def list_claim_bundles(
                 ticketId=commitment.leaf_index,
                 outcomeId=commitment.outcome_id,
                 amountWei=int(commitment.amount_wei),
+                payoutWei=int(commitment.payout_wei),
                 salt=commitment.salt,
                 merkleProof=merkle_proof,
                 leaf=commitment.leaf,
@@ -1873,6 +1879,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         "ticket_id": ticket_id,
         "outcome_id": winning_outcome,
         "amount": int(commitment.amount_wei),
+        "payout": int(commitment.payout_wei),
         "salt": commitment.salt,
         "merkle_proof": merkle_proof,
         "merkle_root": settlement.merkle_root,
@@ -1909,6 +1916,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         ticket_id=ticket_id,
         outcome_id=winning_outcome,
         amount_wei=int(commitment.amount_wei),
+        payout_wei=int(commitment.payout_wei),
         status="claimed",
     )
 
@@ -1933,6 +1941,7 @@ async def sync_commitments(payload: schemas.CommitmentsSyncRequest, session: Asy
                 "user": ticket.user,
                 "outcomeId": ticket.outcome_id,
                 "amount": ticket.amount_wei,
+                "payout": ticket.payout_wei,
                 "salt": ticket.salt,
                 "merkleIndex": ticket.leaf_index,
                 "merklePath": ticket.merkle_path or [],

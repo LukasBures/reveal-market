@@ -78,7 +78,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
 
         for (uint256 i = 0; i < totalTickets; i++) {
             uint256 outcome = i < BATCH_SIZE ? 0 : 1;
-            bytes32 leaf = _poseidonLeaf(i, outcome, netTicket, bytes32(i + 1), user);
+            bytes32 leaf = _poseidonLeaf(i, outcome, netTicket, netTicket, bytes32(i + 1), user);
             if (i < BATCH_SIZE) {
                 batch0Leaves[i] = leaf;
             } else {

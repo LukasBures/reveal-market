@@ -163,6 +163,11 @@ class RelayerService:
             "amount",
             allow_zero=False,
         )
+        payout = self._require_uint(
+            self._require_field(payload, "payout"),
+            "payout",
+            allow_zero=False,
+        )
 
         salt_value = self._require_field(payload, "salt")
         self._require_hex(salt_value, "salt", length_bytes=32)
@@ -182,6 +187,7 @@ class RelayerService:
             "ticket_id": ticket_id,
             "outcome_id": outcome_id,
             "amount": amount,
+            "payout": payout,
             "user_addr": user_addr,
             "market_addr": market_addr,
         }
@@ -215,6 +221,7 @@ class RelayerService:
             ticket_id = self._require_uint(ticket.get("ticket_id"), f"tickets[{idx}].ticket_id")
             outcome_id = self._require_uint(ticket.get("outcome_id"), f"tickets[{idx}].outcome_id")
             amount = self._require_uint(ticket.get("amount"), f"tickets[{idx}].amount", allow_zero=True)
+            payout = self._require_uint(ticket.get("payout"), f"tickets[{idx}].payout", allow_zero=True)
             try:
                 user_addr: ChecksumAddress = self.web3.to_checksum_address(self._require_field(ticket, "user"))
             except ValueError as err:
@@ -222,7 +229,7 @@ class RelayerService:
             salt_raw = self._require_field(ticket, "salt")
             self._require_hex(salt_raw, f"tickets[{idx}].salt", length_bytes=32)
 
-            computed_leaf = compute_leaf(ticket_id, outcome_id, amount, user_addr, salt_raw)
+            computed_leaf = compute_leaf(ticket_id, outcome_id, amount, payout, user_addr, salt_raw)
             leaf_raw = ticket.get("leaf")
             if leaf_raw is not None:
                 leaf_bytes = self._require_hex(leaf_raw, f"tickets[{idx}].leaf", length_bytes=32)
@@ -529,6 +536,7 @@ class RelayerService:
             ticket_id=validation["ticket_id"],
             outcome_id=validation["outcome_id"],
             amount=validation["amount"],
+            payout=validation["payout"],
             bump_factor=bump_factor,
             nonce_override=nonce_override,
         )
@@ -539,6 +547,7 @@ class RelayerService:
                 validation["ticket_id"],
                 validation["outcome_id"],
                 validation["amount"],
+                validation["payout"],
                 payload["salt"],
                 payload["merkle_proof"],
             ).build_transaction(base_tx)
@@ -687,6 +696,7 @@ class RelayerService:
             "user": payload.get("user"),
             "outcome_id": payload.get("outcome_id"),
             "amount_wei": payload.get("amount_wei"),
+            "payout_wei": payload.get("payout_wei"),
             "salt": payload.get("salt"),
             "ticket_id": payload.get("ticket_id"),
         }
@@ -710,6 +720,7 @@ class RelayerService:
             "user_address": required["user"],
             "outcomeId": required["outcome_id"],
             "amount": required["amount_wei"],
+            "payout": required["payout_wei"],
             "salt": required["salt"],
             "merkleIndex": required["ticket_id"],
             "merklePath": payload.get("merkle_path") or [],

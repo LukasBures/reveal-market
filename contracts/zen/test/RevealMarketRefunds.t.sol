@@ -80,7 +80,7 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
 
     function testRefundFlowAfterEnable() external {
         bytes32 salt = keccak256("refund-salt");
-        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
@@ -93,27 +93,27 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
 
         uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
         vm.prank(relayerOwner);
-        market.refund(user, 0, 1, ticketSize, salt, new bytes32[](0));
+        market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
         assertEq(token.balanceOf(user), netTicket, "refund credited");
 
         vm.prank(relayerOwner);
         vm.expectRevert(RevealMarket.TicketAlreadyClaimed.selector);
-        market.refund(user, 0, 1, ticketSize, salt, new bytes32[](0));
+        market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function testRefundRequiresEnable() external {
         bytes32 salt = keccak256("refund-disabled");
-        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.prank(relayerOwner);
         vm.expectRevert(RevealMarket.RefundsNotEnabled.selector);
-        market.refund(user, 0, 1, ticketSize, salt, new bytes32[](0));
+        market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function testRefundUnauthorized() external {
         bytes32 salt = keccak256("refund-unauth");
-        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
@@ -121,12 +121,12 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.NotAuthorized.selector);
-        market.refund(user, 0, 1, ticketSize, salt, new bytes32[](0));
+        market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function testRefundSelfAfterEnable() external {
         bytes32 salt = keccak256("refund-self");
-        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
@@ -135,22 +135,22 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
 
         uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
         vm.prank(user);
-        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
+        market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
         assertEq(token.balanceOf(user), netTicket, "self refund credited");
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.TicketAlreadyClaimed.selector);
-        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
+        market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function testRefundSelfRequiresEnable() external {
         bytes32 salt = keccak256("refund-self-disabled");
-        bytes32 leaf = _leaf(0, 1, ticketSize, salt, user);
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.RefundsNotEnabled.selector);
-        market.refundSelf(0, 1, ticketSize, salt, new bytes32[](0));
+        market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function _depositAndCommit(bytes32 commitment, uint256 nonce) internal {
@@ -191,11 +191,11 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         return abi.encodePacked(r, s, v);
     }
 
-    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address leafUser)
+    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, uint256 payout, bytes32 salt, address leafUser)
         internal
         pure
         returns (bytes32)
     {
-        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
+        return _poseidonLeaf(ticketId, outcomeId, amount, payout, salt, leafUser);
     }
 }

@@ -52,6 +52,7 @@ CLAIM_ABI = [
             {"internalType": "uint256", "name": "ticketId", "type": "uint256"},
             {"internalType": "uint256", "name": "outcomeId", "type": "uint256"},
             {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "uint256", "name": "payout", "type": "uint256"},
             {"internalType": "bytes32", "name": "salt", "type": "bytes32"},
             {"internalType": "bytes32[]", "name": "merkleProof", "type": "bytes32[]"},
         ],

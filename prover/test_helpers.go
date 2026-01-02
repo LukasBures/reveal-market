@@ -9,6 +9,7 @@ func buildTestTickets() []ticket {
 			TicketID:  strconv.Itoa(i),
 			OutcomeID: "0",
 			Amount:    "0",
+			Payout:    "0",
 			User:      "0",
 			Salt:      "0",
 		}

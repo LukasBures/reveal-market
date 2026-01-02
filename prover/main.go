@@ -56,6 +56,7 @@ type ticket struct {
 	TicketID  string `json:"ticketId"`
 	OutcomeID string `json:"outcomeId"`
 	Amount    string `json:"amount"`
+	Payout    string `json:"payout"`
 	User      string `json:"user"`
 	Salt      string `json:"salt"`
 }

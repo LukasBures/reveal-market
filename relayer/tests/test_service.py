@@ -230,6 +230,7 @@ def test_build_batch_roots_matches_poseidon():
             "ticket_id": 0,
             "outcome_id": 0,
             "amount": 10,
+            "payout": 15,
             "user": "0x0000000000000000000000000000000000000001",
             "salt": "0x" + "1" * 64,
         },
@@ -237,6 +238,7 @@ def test_build_batch_roots_matches_poseidon():
             "ticket_id": 1,
             "outcome_id": 1,
             "amount": 5,
+            "payout": 8,
             "user": "0x0000000000000000000000000000000000000002",
             "salt": "0x" + "2" * 64,
         },
@@ -248,6 +250,7 @@ def test_build_batch_roots_matches_poseidon():
             tickets[0]["ticket_id"],
             tickets[0]["outcome_id"],
             tickets[0]["amount"],
+            tickets[0]["payout"],
             tickets[0]["user"],
             tickets[0]["salt"],
         ),
@@ -255,6 +258,7 @@ def test_build_batch_roots_matches_poseidon():
             tickets[1]["ticket_id"],
             tickets[1]["outcome_id"],
             tickets[1]["amount"],
+            tickets[1]["payout"],
             tickets[1]["user"],
             tickets[1]["salt"],
         ),
@@ -278,6 +282,7 @@ def test_build_batch_roots_rejects_leaf_mismatch():
             "ticket_id": 0,
             "outcome_id": 0,
             "amount": 10,
+            "payout": 15,
             "user": "0x0000000000000000000000000000000000000001",
             "salt": "0x" + "1" * 64,
             "leaf": "0x" + "3" * 64,
@@ -330,6 +335,7 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
         "user": "0x0000000000000000000000000000000000000001",
         "outcome_id": 1,
         "amount_wei": 99,
+        "payout_wei": 120,
         "salt": "0x" + "1" * 64,
         "ticket_id": 7,
     }
@@ -345,6 +351,7 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
     assert ticket["user_address"] == payload["user"]
     assert ticket["outcomeId"] == payload["outcome_id"]
     assert ticket["amount"] == payload["amount_wei"]
+    assert ticket["payout"] == payload["payout_wei"]
     assert ticket["merkleIndex"] == payload["ticket_id"]
     assert ticket["txHash"] == "0xabc"
 

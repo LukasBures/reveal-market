@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from eth_abi import encode as abi_encode
 from httpx import AsyncClient
 from shared.logging import log_event
 
@@ -57,9 +58,19 @@ class SettlementProofResponse:
         generated_at = (
             datetime.fromisoformat(generated_at_raw) if isinstance(generated_at_raw, str) else datetime.now(UTC)
         )
+        proof_calldata = payload.get("proof_calldata")
+        proof_args, public_args = _normalize_calldata(proof_calldata)
+        proof = _encode_proof_bytes(proof_args) if proof_args else None
+        if not proof:
+            proof_raw = str(payload.get("proof") or "")
+            # Strip NUL padding so DB persistence doesn't fail on invalid UTF-8.
+            proof = proof_raw.replace("\x00", "")
+        public_signals = payload.get("public_signals") or []
+        if not public_signals and public_args:
+            public_signals = public_args
         return cls(
-            proof=str(payload.get("proof") or ""),
-            public_signals=list(payload.get("public_signals") or []),
+            proof=proof,
+            public_signals=[str(value) for value in public_signals],
             circuit_hash=str(payload.get("circuit_hash") or ""),
             generated_at=generated_at,
             prover_version=payload.get("prover_version"),
@@ -138,6 +149,35 @@ class ProverClient:
             raise ProverError("failed to generate proof") from exc
         data = response.json()
         return SettlementProofResponse.from_payload(data)
+
+
+def _normalize_calldata(proof_calldata: Any) -> tuple[list[str] | None, list[str] | None]:
+    if not isinstance(proof_calldata, list) or not proof_calldata:
+        return None, None
+    if all(isinstance(item, list) for item in proof_calldata):
+        proof_args = [str(value) for value in (proof_calldata[0] or [])]
+        public_args = [str(value) for value in (proof_calldata[1] or [])] if len(proof_calldata) > 1 else None
+        return proof_args, public_args
+    if all(isinstance(item, (str, int)) for item in proof_calldata):
+        return [str(value) for value in proof_calldata], None
+    return None, None
+
+
+def _encode_proof_bytes(proof_args: list[str] | None) -> str | None:
+    if not proof_args or len(proof_args) != 8:
+        return None
+    try:
+        values = [int(value, 0) for value in proof_args]
+    except (TypeError, ValueError):
+        return None
+    a = values[0:2]
+    b = [[values[2], values[3]], [values[4], values[5]]]
+    c = values[6:8]
+    try:
+        encoded = abi_encode(["uint256[2]", "uint256[2][2]", "uint256[2]"], [a, b, c])
+    except Exception:
+        return None
+    return f"0x{encoded.hex()}"
 
 
 class AsyncProverClient:

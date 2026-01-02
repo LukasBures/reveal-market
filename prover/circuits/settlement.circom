@@ -8,7 +8,7 @@ include "circomlib/circuits/poseidon.circom";
 // 1: marketId
 // 2: winningOutcomeId
 // 3: totalEscrow
-// 4: totalLiability
+// 4: totalLiability (sum of winning payouts)
 // 5: rakeBps
 // 6: poolTotalYes
 // 7: poolTotalNo
@@ -30,6 +30,7 @@ template SettlementCircuit() {
     signal input ticketId[256];
     signal input outcomeId[256];
     signal input amount[256];
+    signal input payout[256];
     signal input user[256];
     signal input salt[256];
 
@@ -63,6 +64,7 @@ template SettlementCircuit() {
     signal userSalt[256];
     signal h1[256];
     signal h2[256];
+    signal h3[256];
     signal rawLeaf[256];
     signal leaf[256];
     signal outcomeSum[256];
@@ -71,14 +73,25 @@ template SettlementCircuit() {
     component userSaltHash[256];
     component h1Hash[256];
     component h2Hash[256];
+    component h3Hash[256];
     component leafHash[256];
     component isYes[256];
     component isNo[256];
 
     signal poolYesAccum[257];
     signal poolNoAccum[257];
+    signal liabilityAccum[257];
     poolYesAccum[0] <== 0;
     poolNoAccum[0] <== 0;
+    liabilityAccum[0] <== 0;
+
+    component winYes = IsEqual();
+    winYes.in[0] <== winningOutcomeId;
+    winYes.in[1] <== 0;
+    component winNo = IsEqual();
+    winNo.in[0] <== winningOutcomeId;
+    winNo.in[1] <== 1;
+    winYes.out + winNo.out === 1;
 
     for (var i = 0; i < 256; i++) {
         activeCheck[i] = LessThan(9);
@@ -88,6 +101,7 @@ template SettlementCircuit() {
 
         // Force inactive rows to contribute zero.
         amount[i] * (1 - isActive[i]) === 0;
+        payout[i] * (1 - isActive[i]) === 0;
 
         userSaltHash[i] = Poseidon(2);
         userSaltHash[i].inputs[0] <== user[i];
@@ -101,12 +115,17 @@ template SettlementCircuit() {
 
         h2Hash[i] = Poseidon(2);
         h2Hash[i].inputs[0] <== amount[i];
-        h2Hash[i].inputs[1] <== userSalt[i];
+        h2Hash[i].inputs[1] <== payout[i];
         h2[i] <== h2Hash[i].out;
+
+        h3Hash[i] = Poseidon(2);
+        h3Hash[i].inputs[0] <== h2[i];
+        h3Hash[i].inputs[1] <== userSalt[i];
+        h3[i] <== h3Hash[i].out;
 
         leafHash[i] = Poseidon(2);
         leafHash[i].inputs[0] <== h1[i];
-        leafHash[i].inputs[1] <== h2[i];
+        leafHash[i].inputs[1] <== h3[i];
         rawLeaf[i] <== leafHash[i].out;
 
         leaf[i] <== rawLeaf[i] * isActive[i];
@@ -122,6 +141,8 @@ template SettlementCircuit() {
         (outcomeSum[i] - 1) * isActive[i] === 0;
         poolYesAccum[i + 1] <== poolYesAccum[i] + amount[i] * isYes[i].out;
         poolNoAccum[i + 1] <== poolNoAccum[i] + amount[i] * isNo[i].out;
+        liabilityAccum[i + 1] <== liabilityAccum[i]
+            + payout[i] * (isYes[i].out * winYes.out + isNo[i].out * winNo.out);
     }
 
     signal poolYesComputed;
@@ -133,20 +154,7 @@ template SettlementCircuit() {
     poolNoComputed <== poolNoAccum[256];
     totalEscrowComputed <== poolYesComputed + poolNoComputed;
 
-    component winYes = IsEqual();
-    winYes.in[0] <== winningOutcomeId;
-    winYes.in[1] <== 0;
-    component winNo = IsEqual();
-    winNo.in[0] <== winningOutcomeId;
-    winNo.in[1] <== 1;
-    winYes.out + winNo.out === 1;
-
-    signal poolYesLiability;
-    signal poolNoLiability;
-
-    poolYesLiability <== poolYesComputed * winYes.out;
-    poolNoLiability <== poolNoComputed * winNo.out;
-    totalLiabilityComputed <== poolYesLiability + poolNoLiability;
+    totalLiabilityComputed <== liabilityAccum[256];
 
     // Fixed depth-8 Poseidon Merkle root over 256 leaves.
     signal tree[9][256];

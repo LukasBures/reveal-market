@@ -635,13 +635,14 @@ func buildProofCalldata(proof rawProof) ([]string, error) {
 		return nil, errors.New("proof points missing coordinates")
 	}
 
+	// Swap FQ2 components to match Solidity pairing precompile order.
 	parts := []string{
 		proof.PiA[0],
 		proof.PiA[1],
-		proof.PiB[0][0],
 		proof.PiB[0][1],
-		proof.PiB[1][0],
+		proof.PiB[0][0],
 		proof.PiB[1][1],
+		proof.PiB[1][0],
 		proof.PiC[0],
 		proof.PiC[1],
 	}
@@ -727,7 +728,7 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
-	totalLiability, err := parsePositiveDecimal(req.TotalLiability, "total_liability")
+	totalLiability, err := parseNonNegativeDecimal(req.TotalLiability, "total_liability")
 	if err != nil {
 		return nil, newValidationError(err.Error())
 	}
@@ -774,6 +775,7 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 	ticketIDs := make([]string, settlementBatchSize)
 	outcomeIDs := make([]string, settlementBatchSize)
 	amounts := make([]string, settlementBatchSize)
+	payouts := make([]string, settlementBatchSize)
 	users := make([]string, settlementBatchSize)
 	salts := make([]string, settlementBatchSize)
 	for i, ticket := range req.Tickets {
@@ -789,6 +791,10 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 		if err != nil {
 			return nil, newValidationError(err.Error())
 		}
+		payoutValue, err := parseFlexibleNumber(ticket.Payout, fmt.Sprintf("tickets[%d].payout", i))
+		if err != nil {
+			return nil, newValidationError(err.Error())
+		}
 		userValue, err := parseFlexibleNumber(ticket.User, fmt.Sprintf("tickets[%d].user", i))
 		if err != nil {
 			return nil, newValidationError(err.Error())
@@ -800,6 +806,7 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 		ticketIDs[i] = fieldElement(ticketID).String()
 		outcomeIDs[i] = fieldElement(outcomeID).String()
 		amounts[i] = fieldElement(amountValue).String()
+		payouts[i] = fieldElement(payoutValue).String()
 		users[i] = fieldElement(userValue).String()
 		salts[i] = fieldElement(saltValue).String()
 	}
@@ -819,6 +826,7 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 		"ticketId":         ticketIDs,
 		"outcomeId":        outcomeIDs,
 		"amount":           amounts,
+		"payout":           payouts,
 		"user":             users,
 		"salt":             salts,
 	}

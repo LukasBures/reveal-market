@@ -502,13 +502,22 @@ export function DashboardClient() {
     let ticketIdValue = 0n;
     let outcomeIdValue = 0n;
     let amountValue = 0n;
+    let payoutValue = 0n;
     try {
       ticketIdValue = parseBigInt(bundle.ticketId);
       outcomeIdValue = parseBigInt(bundle.outcomeId);
       amountValue = parseBigInt(bundle.amountWei);
+      payoutValue = parseBigInt(bundle.payoutWei);
       const userValue = parseBigInt(bundle.user);
       const saltValue = parseBigInt(bundle.salt);
-      const leafValue = computePoseidonLeaf(ticketIdValue, outcomeIdValue, amountValue, userValue, saltValue);
+      const leafValue = computePoseidonLeaf(
+        ticketIdValue,
+        outcomeIdValue,
+        amountValue,
+        payoutValue,
+        userValue,
+        saltValue,
+      );
       const storedLeaf = parseBigInt(bundle.leaf);
       if (leafValue !== storedLeaf) {
         setClaimMessage("Bundle integrity check failed (leaf mismatch).");
@@ -542,6 +551,7 @@ export function DashboardClient() {
         ticketId: ticketIdValue,
         outcomeId: outcomeIdValue,
         amountWei: amountValue,
+        payoutWei: payoutValue,
         salt: (bundle.salt ?? "0x") as Hex,
         merkleProof: (bundle.merkleProof ?? []) as Hex[],
       });

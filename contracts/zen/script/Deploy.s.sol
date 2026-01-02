@@ -163,10 +163,11 @@ contract Deploy is Script {
     function _readG2(string memory json, string memory key) private pure returns (uint256[2][2] memory point) {
         uint256[][] memory coords = _readUintMatrix(json, key, 3);
         require(coords.length >= 2 && coords[0].length >= 2 && coords[1].length >= 2, "invalid g2 coords");
-        point[0][0] = coords[0][0];
-        point[0][1] = coords[0][1];
-        point[1][0] = coords[1][0];
-        point[1][1] = coords[1][1];
+        // Swap FQ2 components to match Solidity pairing precompile order.
+        point[0][0] = coords[0][1];
+        point[0][1] = coords[0][0];
+        point[1][0] = coords[1][1];
+        point[1][1] = coords[1][0];
     }
 
     function _readIcPoints(string memory json, string memory key, uint256 expectedLength)

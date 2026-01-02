@@ -283,6 +283,7 @@ async def record_commitments(
             "user_address": str(ticket.get("user") or ticket.get("user_address") or "").lower(),
             "outcome_id": int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
             "amount_wei": int(ticket.get("amount") or ticket.get("amount_wei") or 0),
+            "payout_wei": int(ticket.get("payout") or ticket.get("payout_wei") or 0),
             "salt": str(ticket.get("salt") or "0x0"),
             "ticket_hash": ticket_hash,
             "leaf": str(ticket.get("leaf") or ""),
@@ -546,9 +547,23 @@ async def record_settlement_receipt(
     ).scalar_one_or_none()
     if existing:
         return existing
+    normalized_market = None
+    if isinstance(market_address, str):
+        normalized_market = market_address
+        market_exists = (
+            await session.execute(
+                select(models.Market.market_address).where(models.Market.market_address == normalized_market)
+            )
+        ).scalar_one_or_none()
+        if market_exists is None:
+            lower = market_address.lower()
+            market_exists = (
+                await session.execute(select(models.Market.market_address).where(models.Market.market_address == lower))
+            ).scalar_one_or_none()
+            normalized_market = lower if market_exists is not None else None
     receipt = models.SettlementReceipt(
         market_id=market_id,
-        market_address=market_address.lower() if isinstance(market_address, str) else None,
+        market_address=normalized_market,
         request_id=request_id,
         proof_hash=proof_hash,
         proof=proof,

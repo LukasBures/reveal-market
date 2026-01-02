@@ -11,13 +11,15 @@ abstract contract PoseidonTestUtils {
         uint256 ticketId,
         uint256 outcomeId,
         uint256 amount,
+        uint256 payout,
         bytes32 salt,
         address user
     ) internal pure returns (bytes32) {
         uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
         uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
-        uint256 h2 = PoseidonT3.poseidon([amount, userSalt]);
-        uint256 leaf = PoseidonT3.poseidon([h1, h2]);
+        uint256 h2 = PoseidonT3.poseidon([amount, payout]);
+        uint256 h3 = PoseidonT3.poseidon([h2, userSalt]);
+        uint256 leaf = PoseidonT3.poseidon([h1, h3]);
         return bytes32(leaf);
     }
 

@@ -56,6 +56,7 @@ func TestBuildWitnessInput(t *testing.T) {
 		TicketID:  "7",
 		OutcomeID: "1",
 		Amount:    "5",
+		Payout:    "11",
 		User:      "0x02",
 		Salt:      "0x03",
 	}
@@ -96,6 +97,32 @@ func TestBuildWitnessInput(t *testing.T) {
 	users, ok := inputs["user"].([]string)
 	if !ok || users[0] != "2" {
 		t.Fatalf("user[0] mismatch: got %v want 2", inputs["user"])
+	}
+	payouts, ok := inputs["payout"].([]string)
+	if !ok || payouts[0] != "11" {
+		t.Fatalf("payout[0] mismatch: got %v want 11", inputs["payout"])
+	}
+}
+
+func TestBuildWitnessInputAllowsZeroLiability(t *testing.T) {
+	req := buildTestRequest()
+	req.PoolTotals = []string{"0", "10"}
+	req.TotalEscrow = "10"
+	req.TotalLiability = "0"
+	req.WinningOutcome = "0"
+	req.CommitmentsCount = "1"
+	tickets := buildTestTickets()
+	tickets[0] = ticket{
+		TicketID:  "1",
+		OutcomeID: "1",
+		Amount:    "10",
+		Payout:    "10",
+		User:      "0x01",
+		Salt:      "0x02",
+	}
+	req.Tickets = tickets
+	if _, err := buildWitnessInput(req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

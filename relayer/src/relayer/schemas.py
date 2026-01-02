@@ -10,6 +10,7 @@ class CommitRequest(BaseModel):
     chain_id: int = Field(..., description="Chain id the CommitAuth was built for")
     ticket_value_wei: int = Field(..., description="Ticket value encoded into the authorization")
     amount_wei: int | None = Field(default=None, description="Net amount used in commitment hashing")
+    payout_wei: int | None = Field(default=None, description="Payout amount used in commitment hashing")
     signature: str
     event_id: str | None = Field(default=None, description="Optional market/event identifier for ingest")
     market_id: str | None = Field(default=None, description="Optional market id for ingest")
@@ -25,6 +26,7 @@ class ClaimRequest(BaseModel):
     ticket_id: int
     outcome_id: int
     amount: int
+    payout: int
     salt: str
     merkle_proof: list[str]
     merkle_root: str | None = Field(default=None, description="Optional root for ingest")
@@ -44,6 +46,7 @@ class LockTicket(BaseModel):
     ticket_id: int = Field(..., description="Ticket id/leaf index")
     outcome_id: int = Field(..., description="Outcome id for leaf hashing")
     amount: int = Field(..., description="Net amount used in the Poseidon leaf")
+    payout: int = Field(..., description="Payout amount used in the Poseidon leaf")
     user: str = Field(..., description="User address for leaf hashing")
     salt: str = Field(..., description="Salt for leaf hashing")
     leaf: str | None = Field(default=None, description="Optional precomputed commitment leaf")

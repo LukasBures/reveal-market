@@ -5,7 +5,8 @@ pragma solidity ^0.8.24;
 /// @dev Adapted from the contracts produced by circom/snarkjs (MIT licensed). Exposed as a standalone library so both the
 ///      production verifier and unit tests can exercise the same primitives (G1/G2 negation, addition, scalar multiplication, pairing checks).
 library Pairing {
-    uint256 internal constant PRIME_Q = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    // BN254 base field prime (q) used for curve coordinates and pairing checks.
+    uint256 internal constant PRIME_Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
 
     struct G1Point {
         uint256 X;

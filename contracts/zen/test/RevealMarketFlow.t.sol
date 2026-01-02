@@ -35,12 +35,12 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
     uint256 private commitDeadline;
     RevealMarket private market;
 
-    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, bytes32 salt, address leafUser)
+    function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, uint256 payout, bytes32 salt, address leafUser)
         internal
         pure
         returns (bytes32)
     {
-        return _poseidonLeaf(ticketId, outcomeId, amount, salt, leafUser);
+        return _poseidonLeaf(ticketId, outcomeId, amount, payout, salt, leafUser);
     }
 
     function setUp() external {
@@ -85,9 +85,10 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         bytes32 salt = keccak256("salt");
         uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
-        uint256 payoutAmount = ticketSize - rakePerTicket;
+        uint256 netAmount = ticketSize - rakePerTicket;
+        uint256 payoutAmount = netAmount + 0.1 ether;
         uint256 outcome = 1;
-        bytes32 leaf = _leaf(0, outcome, payoutAmount, salt, user);
+        bytes32 leaf = _leaf(0, outcome, netAmount, payoutAmount, salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
             user: user,
@@ -117,8 +118,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
         assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "user balance debited");
-        uint256 netTicket = ticketSize - rakePerTicket;
-        assertEq(market.totalEscrow(), netTicket, "escrow matches net ticket");
+        assertEq(market.totalEscrow(), netAmount, "escrow matches net ticket");
 
         vm.warp(commitDeadline + 1);
         bytes32[] memory leaves = new bytes32[](1);
@@ -136,11 +136,11 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
             uint256(root),
             uint256(1),
             outcome,
-            ticketSize - (ticketSize * rakeBps) / 10_000,
+            netAmount,
             payoutAmount,
             rakeBps,
-            payoutAmount,
             uint256(0),
+            netAmount,
             uint256(circuitHash),
             uint256(0)
         ];
@@ -149,16 +149,16 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         vm.stopPrank();
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
-        assertEq(protocolPool.consumedLiability(address(market)), 0, "no top-up required");
+        assertEq(protocolPool.consumedLiability(address(market)), payoutAmount - netAmount, "top-up recorded");
 
         // Wrong user should fail because user is bound into the commitment leaf
         address impostor = makeAddr("impostor");
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
-        market.claim(impostor, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(impostor, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         vm.prank(relayer);
-        market.claim(user, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
         assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "escrow debited once");
@@ -166,7 +166,11 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
-        assertApproxEqAbs(token.balanceOf(address(protocolPool)), 5 ether + expectedRake, 2);
+        assertApproxEqAbs(
+            token.balanceOf(address(protocolPool)),
+            5 ether + expectedRake - (payoutAmount - netAmount),
+            2
+        );
     }
 
     function testClaimDeadlineSweepUnclaimed() external {
@@ -179,9 +183,10 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         bytes32 salt = keccak256("sweep-salt");
         uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
-        uint256 payoutAmount = ticketSize - rakePerTicket;
+        uint256 netAmount = ticketSize - rakePerTicket;
+        uint256 payoutAmount = netAmount + 0.1 ether;
         uint256 outcome = 1;
-        bytes32 leaf = _leaf(0, outcome, payoutAmount, salt, user);
+        bytes32 leaf = _leaf(0, outcome, netAmount, payoutAmount, salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
             user: user,
@@ -226,11 +231,11 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
             uint256(root),
             uint256(1),
             outcome,
-            ticketSize - (ticketSize * rakeBps) / 10_000,
+            netAmount,
             payoutAmount,
             rakeBps,
-            payoutAmount,
             uint256(0),
+            netAmount,
             uint256(circuitHash),
             uint256(0)
         ];
@@ -244,7 +249,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.ClaimWindowClosed.selector);
-        market.claim(user, 0, outcome, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         uint256 marketBalance = token.balanceOf(address(market));
         uint256 poolBefore = token.balanceOf(address(protocolPool));

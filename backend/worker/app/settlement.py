@@ -703,6 +703,7 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     or not commitment.salt
                     or not commitment.leaf
                     or commitment.leaf_index is None
+                    or not getattr(commitment, "payout_wei", 0)
                 ]
                 if missing_meta:
                     log_event(
@@ -736,6 +737,7 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                                 "ticket_id": int(commitment.leaf_index),
                                 "outcome_id": int(commitment.outcome_id),
                                 "amount": int(commitment.amount_wei),
+                                "payout": int(commitment.payout_wei),
                                 "user": commitment.user_address,
                                 "salt": commitment.salt,
                                 "leaf": commitment.leaf,
@@ -1061,7 +1063,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
 
             if not market.market_address:
                 continue
-            winning_outcome_id = settlement.winning_outcome_id or await _resolve_winning_outcome(session, market)
+            winning_outcome_id = settlement.winning_outcome_id
+            if winning_outcome_id is None:
+                winning_outcome_id = await _resolve_winning_outcome(session, market)
             if winning_outcome_id is None:
                 continue
             if account is not None and web3 is not None:

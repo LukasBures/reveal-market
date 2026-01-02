@@ -5,7 +5,7 @@ import logging
 from typing import Any, cast
 
 from shared.merkle import build_merkle_root_and_paths
-from shared.models import Commitment, Settlement
+from shared.models import Commitment, Market, Settlement
 from shared.poseidon import BATCH_SIZE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +47,7 @@ def _is_empty_hex(value: Any) -> bool:
 
 def _build_batch_payloads(
     settlement: Settlement,
-    market_id: int,
+    market_identifier: int | str,
     commitments: list[Commitment],
 ) -> list[dict[str, Any]]:
     if settlement.winning_outcome_id not in (0, 1):
@@ -81,6 +81,7 @@ def _build_batch_payloads(
         leaves: list[bytes | None] = [None] * count
         pool_yes = 0
         pool_no = 0
+        total_liability = 0
         tickets: list[dict[str, Any]] = []
 
         for i in range(BATCH_SIZE):
@@ -91,11 +92,16 @@ def _build_batch_payloads(
                 leaf_bytes = bytes.fromhex(batch_commitment.leaf.removeprefix("0x"))
                 leaves[i] = leaf_bytes
                 amount = int(batch_commitment.amount_wei)
+                payout = int(getattr(batch_commitment, "payout_wei", 0) or 0)
+                if payout <= 0:
+                    raise SettlementDataMissingError("missing payout data for batch")
                 outcome_id = int(batch_commitment.outcome_id)
                 if outcome_id == 0:
                     pool_yes += amount
                 elif outcome_id == 1:
                     pool_no += amount
+                if outcome_id == int(settlement.winning_outcome_id):
+                    total_liability += payout
                 fallback_ticket_id = batch_index * BATCH_SIZE + i
                 tickets.append(
                     {
@@ -106,6 +112,7 @@ def _build_batch_payloads(
                         ),
                         "outcomeId": str(outcome_id),
                         "amount": str(amount),
+                        "payout": str(payout),
                         "user": str(batch_commitment.user_address or "0x0"),
                         "salt": str(batch_commitment.salt or "0x0"),
                     }
@@ -116,6 +123,7 @@ def _build_batch_payloads(
                         "ticketId": "0",
                         "outcomeId": "0",
                         "amount": "0",
+                        "payout": "0",
                         "user": "0",
                         "salt": "0",
                     }
@@ -130,11 +138,10 @@ def _build_batch_payloads(
             raise SettlementDataMissingError("computed batch merkle root does not match stored root")
 
         total_escrow = pool_yes + pool_no
-        total_liability = pool_yes if settlement.winning_outcome_id == 0 else pool_no
 
         payloads.append(
             {
-                "marketId": str(market_id),
+                "marketId": str(market_identifier),
                 "merkleRoot": str(root_value),
                 "winningOutcomeId": str(settlement.winning_outcome_id),
                 "poolTotals": [str(pool_yes), str(pool_no)],
@@ -166,7 +173,9 @@ def build_prover_payload(session: Session, market_id: int) -> list[dict[str, Any
     if not commitments:
         raise SettlementDataMissingError("no commitments for market")
 
-    return _build_batch_payloads(settlement, market_id, commitments)
+    market = session.get(Market, market_id)
+    market_identifier = market.onchain_market_id if market and market.onchain_market_id is not None else market_id
+    return _build_batch_payloads(settlement, market_identifier, commitments)
 
 
 async def build_prover_payload_async(session: AsyncSession, market_id: int) -> list[dict[str, Any]]:
@@ -189,4 +198,6 @@ async def build_prover_payload_async(session: AsyncSession, market_id: int) -> l
     if not commitments:
         raise SettlementDataMissingError("no commitments for market")
 
-    return _build_batch_payloads(settlement, market_id, commitments)
+    market = await session.get(Market, market_id)
+    market_identifier = market.onchain_market_id if market and market.onchain_market_id is not None else market_id
+    return _build_batch_payloads(settlement, market_identifier, commitments)

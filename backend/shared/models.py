@@ -360,6 +360,7 @@ class Commitment(Base):
     user_address: Mapped[str] = mapped_column(String(64), nullable=False)
     outcome_id: Mapped[int] = mapped_column(Integer, nullable=False)
     amount_wei: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payout_wei: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     salt: Mapped[str | None] = mapped_column(String(66), nullable=True)
     ticket_hash: Mapped[str] = mapped_column(String(66), nullable=False)
     leaf: Mapped[str] = mapped_column(String(66), nullable=False)

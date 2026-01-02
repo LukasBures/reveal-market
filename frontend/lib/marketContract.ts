@@ -11,6 +11,7 @@ const revealMarketClaimAbi = [
       { "name": "ticketId", "type": "uint256" },
       { "name": "outcomeId", "type": "uint256" },
       { "name": "amount", "type": "uint256" },
+      { "name": "payout", "type": "uint256" },
       { "name": "salt", "type": "bytes32" },
       { "name": "merkleProof", "type": "bytes32[]" }
     ],
@@ -24,6 +25,7 @@ export type ClaimTicketParams = {
   ticketId: bigint;
   outcomeId: bigint;
   amountWei: bigint;
+  payoutWei: bigint;
   salt: Hex;
   merkleProof: Hex[];
 };
@@ -37,7 +39,15 @@ export function useClaimTicket() {
       address: params.marketAddress,
       abi: revealMarketClaimAbi,
       functionName: "claim",
-      args: [params.user, params.ticketId, params.outcomeId, params.amountWei, params.salt, params.merkleProof],
+      args: [
+        params.user,
+        params.ticketId,
+        params.outcomeId,
+        params.amountWei,
+        params.payoutWei,
+        params.salt,
+        params.merkleProof,
+      ],
       chainId,
     });
   }

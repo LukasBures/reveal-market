@@ -406,6 +406,7 @@ class CommitmentTicket(BaseModel):
     user: str | None = Field(default=None, alias="user_address")
     outcome_id: int | None = Field(default=None, alias="outcomeId")
     amount_wei: int | None = Field(default=None, alias="amount")
+    payout_wei: int | None = Field(default=None, alias="payout")
     salt: str | None = None
     leaf_index: int | None = Field(default=None, alias="merkleIndex")
     merkle_path: list[str] | None = Field(default=None, alias="merklePath")
@@ -467,6 +468,7 @@ class TradeClaimResponse(BaseModel):
     ticket_id: int
     outcome_id: int
     amount_wei: int
+    payout_wei: int
     status: str = "claimed"
 
 
@@ -477,6 +479,7 @@ class ClaimBundle(BaseModel):
     ticket_id: int = Field(alias="ticketId")
     outcome_id: int = Field(alias="outcomeId")
     amount_wei: int = Field(alias="amountWei")
+    payout_wei: int = Field(alias="payoutWei")
     salt: str | None
     merkle_proof: list[str] = Field(alias="merkleProof")
     leaf: str
