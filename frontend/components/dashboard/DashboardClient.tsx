@@ -885,15 +885,25 @@ export function DashboardClient() {
             </div>
             <label className="flex items-center gap-2 text-xs text-slate-300">
               Sort
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                className="rounded-lg border border-white/30 bg-black/40 px-2 py-1 text-xs text-white shadow-inner shadow-black/40 focus:border-white/60 focus:outline-none"
-              >
-                <option value="recent">Most recent</option>
-                <option value="stake">Stake size</option>
-                <option value="closes">Closing time</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                  className="appearance-none rounded-full border border-white/20 bg-white/10 px-3 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-white shadow shadow-black/30 transition focus:border-white/60 focus:outline-none"
+                >
+                  <option value="recent">Most recent</option>
+                  <option value="stake">Stake size</option>
+                  <option value="closes">Closing time</option>
+                </select>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 20 20"
+                  className="pointer-events-none absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 text-white/70"
+                  fill="currentColor"
+                >
+                  <path d="M5.25 7.5L10 12.25L14.75 7.5H5.25Z" />
+                </svg>
+              </div>
             </label>
           </div>
           <div className="grid gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-900/30 via-slate-900/60 to-slate-900/40 p-4 text-white shadow-inner shadow-black/30 sm:grid-cols-4">

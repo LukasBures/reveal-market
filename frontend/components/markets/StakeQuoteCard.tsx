@@ -35,6 +35,7 @@ const MIN_STAKE_ZEN = TICKET_SIZE_ZEN;
 const STAKE_RANGE_ERROR = `Stake must be exactly ${TICKET_SIZE_ZEN} ZEN (fixed ticket size)`;
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 const PREVIEW_MIN_INTERVAL_MS = QUOTE_REFRESH_INTERVAL_MS;
+const PREVIEW_RETRY_INTERVAL_MS = 1_000;
 
 const getQuoteExpiryMs = (value: PricingQuote | null): number | null => {
   if (!value) return null;
@@ -300,12 +301,13 @@ export function StakeQuoteCard({
         setStakeInput(TICKET_SIZE_ZEN.toFixed(2));
       }
       const previewKey = buildPreviewKey(address, marketId, selectedOutcome, cappedStake, chainId);
-      if (previewKey && previewKeyRef.current === previewKey) {
+      if (previewKey && previewKeyRef.current === previewKey && quote) {
         if (!quoteRefreshing && !quoteExpired) return;
       }
       if (previewInFlightRef.current) return;
       const now = Date.now();
-      if (now - lastPreviewAtRef.current < PREVIEW_MIN_INTERVAL_MS) return;
+      const minInterval = quote && !quoteExpired ? PREVIEW_MIN_INTERVAL_MS : PREVIEW_RETRY_INTERVAL_MS;
+      if (now - lastPreviewAtRef.current < minInterval) return;
       lastPreviewAtRef.current = now;
       previewInFlightRef.current = true;
       previewKeyRef.current = previewKey;
@@ -370,9 +372,10 @@ export function StakeQuoteCard({
   useEffect(() => {
     if (!address || !marketId || tradingDisabled || fxUnavailable || chainMismatch) return;
     if (quote && !quoteExpired && !quoteRefreshing) return;
+    const intervalMs = quote && !quoteExpired ? QUOTE_REFRESH_INTERVAL_MS : PREVIEW_RETRY_INTERVAL_MS;
     const timer = setInterval(() => {
       setRefreshNonce((prev) => prev + 1);
-    }, QUOTE_REFRESH_INTERVAL_MS);
+    }, intervalMs);
     return () => clearInterval(timer);
   }, [address, marketId, tradingDisabled, fxUnavailable, chainMismatch, quote, quoteExpired, quoteRefreshing]);
 
@@ -414,6 +417,7 @@ export function StakeQuoteCard({
     // Clear quotes on account or chain changes to avoid reusing stale signatures.
     setQuote(null);
     setQuoteRefreshing(false);
+    setError(null);
     setRefreshNonce((prev) => prev + 1);
     if (!initialTxHash) {
       setTxHash(null);
