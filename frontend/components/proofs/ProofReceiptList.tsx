@@ -34,26 +34,25 @@ type CardProps = {
 };
 
 function ProofReceiptCard({ receipt }: CardProps) {
-  const statusLabel = receipt.proofHash ? "Proof cached" : "Receipt cached";
-  const statusColor = receipt.proofHash
-    ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
-    : "bg-amber-500/20 text-amber-100 border border-amber-300/30";
-  const zeroLiability = isZeroValue(receipt.totalLiability);
+  const batchIndex = typeof receipt.batchIndex === "number" ? receipt.batchIndex : null;
+  const batchNumber = batchIndex !== null ? batchIndex + 1 : null;
+  const batchLabel = batchNumber !== null ? `Batch ${batchNumber}` : null;
   const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
   const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
   const settlementTxHref = hrefFor("tx", receipt.settlementTxHash);
-  const winningPoolDisplay = formatZenValue(winningPool);
-  const totalPoolDisplay = formatZenValue(totalPool);
-  const liabilityDisplay = formatZenValue(receipt.totalLiability);
-  const escrowDisplay = formatZenValue(receipt.totalEscrow);
-  const rakeLabel = formatBps(receipt.rakeBps);
+  const winningPoolDisplay = formatZen(winningPool);
+  const totalPoolDisplay = formatZen(totalPool);
+  const liabilityDisplay = formatZen(receipt.totalLiability);
+  const escrowDisplay = formatZen(receipt.totalEscrow);
   const detailItems: DetailItem[] = [
     { label: "Request id", value: receipt.requestId },
     { label: "Market address", value: receipt.marketAddress },
     { label: "Settlement tx", value: receipt.settlementTxHash },
     { label: "Proof hash", value: receipt.proofHash },
     { label: "Circuit hash", value: receipt.circuitHash },
+    { label: "Prover build", value: receipt.proverVersion },
     { label: "Merkle root", value: receipt.merkleRoot },
+    { label: "Batch", value: batchNumber !== null ? String(batchNumber) : null },
     {
       label: receipt.publicSignals?.length ? `Public signals (${receipt.publicSignals.length})` : null,
       value: receipt.publicSignals?.join(", "),
@@ -74,20 +73,10 @@ function ProofReceiptCard({ receipt }: CardProps) {
           </p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span>{formatTimestamp(receipt.generatedAt)}</span>
-            {rakeLabel ? <span>Rake {rakeLabel}</span> : null}
+            {batchLabel ? <span>{batchLabel}</span> : null}
           </div>
         </div>
         <div className="flex flex-col items-start gap-2 md:items-end">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColor}`}>
-              {statusLabel}
-            </span>
-            {zeroLiability ? (
-              <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100">
-                Zero liability
-              </span>
-            ) : null}
-          </div>
           <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Settlement tx</div>
           <div className="font-mono text-sm text-white">
             {settlementTxHref ? (
@@ -115,21 +104,25 @@ function ProofReceiptCard({ receipt }: CardProps) {
         <DataCell label="Circuit">
           <span className="font-mono text-white" title={receipt.circuitHash ?? undefined}>
             {shorten(receipt.circuitHash ?? "—", 14)}
-            {receipt.proverVersion ? <span className="text-slate-400"> (v{receipt.proverVersion})</span> : null}
           </span>
         </DataCell>
         <DataCell label="Merkle root">
           <TruncatedValue value={receipt.merkleRoot} visible={14} />
         </DataCell>
+        {batchNumber !== null ? (
+          <DataCell label="Batch">
+            <span className="font-mono text-white">{batchNumber}</span>
+          </DataCell>
+        ) : null}
       </dl>
 
       <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Settlement signals</p>
         <div className="mt-3 grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
-          <Signal label="Winning pool" primary={winningPoolDisplay.primary} secondary={winningPoolDisplay.secondary} />
-          <Signal label="Total pool" primary={totalPoolDisplay.primary} secondary={totalPoolDisplay.secondary} />
-          <Signal label="Total liability" primary={liabilityDisplay.primary} secondary={liabilityDisplay.secondary} />
-          <Signal label="Total escrow" primary={escrowDisplay.primary} secondary={escrowDisplay.secondary} />
+          <Signal label="Winning pool" value={winningPoolDisplay} />
+          <Signal label="Total pool" value={totalPoolDisplay} />
+          <Signal label="Total liability" value={liabilityDisplay} />
+          <Signal label="Total escrow" value={escrowDisplay} />
         </div>
       </div>
 
@@ -165,16 +158,14 @@ function DataCell({ label, children }: DataCellProps) {
 
 type SignalProps = {
   label: string;
-  primary: string;
-  secondary?: string;
+  value: string;
 };
 
-function Signal({ label, primary, secondary }: SignalProps) {
+function Signal({ label, value }: SignalProps) {
   return (
     <div>
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
-      <p className="font-mono text-sm text-white">{primary}</p>
-      {secondary ? <p className="text-xs text-slate-500">{secondary}</p> : null}
+      <p className="font-mono text-sm text-white">{value}</p>
     </div>
   );
 }
@@ -270,16 +261,6 @@ function TruncatedValue({ value, visible = 10 }: TruncatedValueProps) {
   );
 }
 
-function formatZenValue(value?: string | null) {
-  if (!value) {
-    return { primary: "—" };
-  }
-  const primary = formatZen(value);
-  const raw = formatBigInt(value);
-  const secondary = raw === "—" ? undefined : `${raw} wei`;
-  return { primary, secondary };
-}
-
 function formatZen(value?: string | null) {
   if (!value) return "—";
   let raw: bigint;
@@ -306,39 +287,8 @@ function formatWhole(value: bigint) {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-function formatBps(value?: number | null): string | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return null;
-  }
-  const percent = value / 100;
-  return `${percent % 1 === 0 ? percent.toFixed(0) : percent.toFixed(2)}%`;
-}
-
-function isZeroValue(value?: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-  try {
-    return BigInt(value) === 0n;
-  } catch {
-    return false;
-  }
-}
-
 function formatTimestamp(timestamp?: string | null) {
   return formatDateTime(timestamp ?? undefined);
-}
-
-function formatBigInt(value?: string | null) {
-  if (!value) return "—";
-  try {
-    const big = BigInt(value);
-    const sign = big < 0 ? "-" : "";
-    const digits = (sign === "-" ? -big : big).toString();
-    return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  } catch {
-    return value;
-  }
 }
 
 function hrefFor(kind: "address" | "tx", value?: string | null) {

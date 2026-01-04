@@ -68,7 +68,7 @@ export default async function ProofsPage({
           <p className="text-lg text-slate-300">
             Each settlement emits a replay-safe request id, market address, and circuit hash. Use this ledger to verify
             on-chain settlements, confirm proof hashes, and trace the exact parameters used in Groth16 generation.
-            Amounts are displayed in ZEN (18 decimals) with raw wei shown in every receipt.
+            Amounts are displayed in ZEN (18 decimals).
           </p>
         </div>
         {error ? (

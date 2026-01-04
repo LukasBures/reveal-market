@@ -112,8 +112,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
     return () => observer.disconnect();
   }, [hasMore, loadMore]);
 
-  const proofCachedCount = receipts.filter((receipt) => Boolean(receipt.proofHash)).length;
-  const zeroLiabilityCount = receipts.filter((receipt) => isZeroValue(receipt.totalLiability)).length;
+  const proofReadyCount = receipts.filter((receipt) => Boolean(receipt.proofHash)).length;
   const uniqueMarkets = new Set(
     receipts
       .map((receipt) => receipt.marketAddress ?? receipt.marketId?.toString() ?? receipt.eventId ?? receipt.conditionId)
@@ -124,11 +123,10 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-md shadow-black/30">
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3">
           <SummaryMetric label="Receipts loaded" value={formatNumber(receipts.length)} />
-          <SummaryMetric label="Proofs cached" value={formatNumber(proofCachedCount)} />
+          <SummaryMetric label="Proofs ready" value={formatNumber(proofReadyCount)} />
           <SummaryMetric label="Unique markets" value={formatNumber(uniqueMarkets)} />
-          <SummaryMetric label="Zero-liability" value={formatNumber(zeroLiabilityCount)} />
         </div>
         {filterChips.length ? (
           <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-200">
@@ -139,9 +137,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
             ))}
           </div>
         ) : (
-          <p className="mt-4 text-xs text-slate-400">
-            Values are shown in ZEN (18 decimals) with raw wei listed in each receipt for auditability.
-          </p>
+          <p className="mt-4 text-xs text-slate-400">Values are shown in ZEN (18 decimals).</p>
         )}
       </div>
       <ProofReceiptList receipts={receipts} />
@@ -203,15 +199,4 @@ function buildFilterChips(filters?: Props["filters"]): FilterChip[] {
     chips.push({ label: "Request", value: filters.requestId });
   }
   return chips;
-}
-
-function isZeroValue(value?: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-  try {
-    return BigInt(value) === 0n;
-  } catch {
-    return false;
-  }
 }

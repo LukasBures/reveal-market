@@ -118,6 +118,7 @@ export type ProofReceipt = {
   proof?: string | null;
   publicSignals?: string[];
   merkleRoot?: string | null;
+  batchIndex?: number | null;
   totalEscrow?: string | null;
   totalLiability?: string | null;
   rakeBps?: number | null;
