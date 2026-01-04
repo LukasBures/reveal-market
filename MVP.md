@@ -157,6 +157,7 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 ### 6) Proofs pipeline (zk demo critical path)
 - Commitments and settlements populate DB tables; proof jobs are queued once settlements/roots are available.
 - Artifacts: `prover/circuits/generate_keys.sh` writes `settlement_hashes.json` with a field-reduced circuit hash; verifier deployments and `market.circuitHash` must match that value.
+- Artifact hosting: package `prover/circuits/build` into a tar/zip, host it over HTTPS, and set `PROVER_ARTIFACTS_URL` + `PROVER_ARTIFACTS_SHA256` so CI/prod can fetch artifacts without Git LFS.
 - Prover: `/healthz` + `/metrics` report readiness and circuit hash; `go run ./cmd/verify-artifacts` validates required files/hashes.
 - API exposure: `/proofs` and market detail endpoints include proof metadata (status, request_id, tx hash, batch root).
 - Frontend: `/proofs` lists receipts with filters and deep links; dashboard/market views show proof availability where applicable.

@@ -13,3 +13,4 @@
 - **Upstream health**: Reverse proxies now probe `/healthz` with quick failover (`max_fails=2`, `fail_duration=30s`) so unhealthy backends are shed quickly.
 - **Access logs**: All vhosts emit JSON access logs to stdout at INFO by default; override with `CADDY_LOG_LEVEL` / `CADDY_ACCESS_LOG_LEVEL` if you need to dial verbosity down.
 - **Proof endpoints**: `/proofs` and `/api/v1/proofs/settlement` continue to proxy unchanged; Poseidon batch settlement does not require Caddy config changes beyond standard timeouts.
+- **Prover artifacts hosting**: `/artifacts/*` is served from `/srv/artifacts` (mounted from `./artifacts` in `docker-compose.prod.yml`) so CI can fetch `PROVER_ARTIFACTS_URL` over HTTPS without Git LFS.
