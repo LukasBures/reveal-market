@@ -10,11 +10,11 @@ The service now boots a rapidsnark-backed pipeline by default:
 4. Convert the proof + public signals into Solidity calldata directly inside Go—no `snarkjs` roundtrips.
 5. Return a cache- and log-safe response with proof JSON, public signals, calldata, backend metadata, and Groth16 circuit hash.
 
-If the compiled artifacts are missing (for example, on a brand-new clone), the service refuses to start so you never return mocked data by accident. Generate the Circom assets (below) or sync vetted artifacts from `prover/artifacts` before launching the Docker stack.
+If the compiled artifacts are missing (for example, on a brand-new clone), the service refuses to start so you never return mocked data by accident. Generate the Circom assets (below) or download the hosted archive via `PROVER_ARTIFACTS_URL`; the `prover/artifacts` submodule is an optional mirror.
 
 ## Prerequisites
 
-- Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh` (or imported from `prover/artifacts`), which produces:
+- Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh`, installed from the hosted archive (`PROVER_ARTIFACTS_URL`), or imported from the optional `prover/artifacts` mirror, which produces:
   - `circuits/build/settlement_final.zkey`
   - `circuits/build/settlement_vk.json`
   - `circuits/build/settlement_hashes.json`
@@ -31,9 +31,9 @@ If you set `PROVER_WITNESS_BINARY` (or `PROVER_WITNESS_MODE=cpp`), Node is optio
 > **Tip:** `docker/prover/Dockerfile` installs Node 20 and pulls `rapidsnark v0.0.7` from official releases, mounting `./prover/circuits` into `/app/circuits`. Run `bash prover/circuits/generate_keys.sh` on the host before `./run_local.sh` so the container can read the compiled assets at runtime. The npm registry only exposes `rapidsnark` as `0.0.2`; stick to the bundled binary unless you need a different build.
 > **Network defaults:** Proof payloads align with Horizen Testnet (chain id `2651420`). Keep circuit hashes, signer addresses, and `RM_PRICING_CHAIN_ID` consistent across services when swapping networks.
 
-The vetted, source-of-truth artifacts live in the `prover/artifacts` submodule. Use `prover/circuits/export_artifacts.sh` to write `prover/circuits/build/*` plus `contracts/*/cache/settlement-vk.json` (from `settlement_deploy.json`) into that repo, and `prover/circuits/import_from_artifacts.sh` to sync them back into the main checkout.
+The hosted archive is the source of truth for CI/prod. Package `prover/circuits/build` into a tar/zip, host it over HTTPS (example: `https://revealmarket.xyz/artifacts/prover-artifacts.tgz`), and set `PROVER_ARTIFACTS_URL` plus `PROVER_ARTIFACTS_SHA256`. `prover/scripts/download_artifacts.sh` downloads, verifies the checksum, installs `prover/circuits/build`, and writes `contracts/*/cache/settlement-vk.json` from `settlement_deploy.json`.
 
-If Git LFS bandwidth is constrained (or for CI), host a tar/zip of `prover/circuits/build` over HTTPS and set `PROVER_ARTIFACTS_URL` plus `PROVER_ARTIFACTS_SHA256`. `prover/scripts/download_artifacts.sh` downloads, verifies the checksum, and installs the required files into `prover/circuits/build`.
+`prover/artifacts` is an optional mirror for version history. Use `prover/circuits/export_artifacts.sh` to write `prover/circuits/build/*` plus `contracts/*/cache/settlement-vk.json` (from `settlement_deploy.json`) into that repo, and `prover/circuits/import_from_artifacts.sh` to sync them back into the main checkout when you want to use the submodule locally.
 
 ## Current implementation snapshot
 - Artifact checks (`check_artifacts.sh`, `go run ./cmd/verify-artifacts`) run before tests/startup; service refuses to start when `settlement_final.zkey`, `settlement_vk.json`, `settlement_hashes.json`, or WASM/witness assets are missing or hash mismatched.
@@ -218,7 +218,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 
 ## Operational Tips
 
-- **Key management / artifacts** – The source of truth is the `prover/artifacts` submodule. Use `prover/circuits/export_artifacts.sh` to generate/export `prover/circuits/build/*` (including `settlement_deploy.json`) plus `contracts/*/cache/settlement-vk.json` (derived from `settlement_deploy.json`), and `prover/circuits/import_from_artifacts.sh` (or `./run_local.sh`/`./run_prod.sh`) to sync vetted files into `prover/circuits/build` and the contract caches. CI can pull a tar/zip of `prover/circuits/build` via `prover/scripts/download_artifacts.sh` (driven by `PROVER_ARTIFACTS_URL` + optional `PROVER_ARTIFACTS_SHA256`); package it with `tar czf prover-artifacts.tgz -C prover/circuits/build .` and host it at an HTTPS URL reachable by runners. Refresh keys before releasing new circuits and rerun `check_artifacts.sh`/`go run ./cmd/verify-artifacts` to validate integrity.
+- **Key management / artifacts** – The source of truth is the hosted archive (`PROVER_ARTIFACTS_URL` + `PROVER_ARTIFACTS_SHA256`). Package with `tar czf prover-artifacts.tgz -C prover/circuits/build .` and host it at an HTTPS URL reachable by runners. `prover/artifacts` remains an optional mirror; use `prover/circuits/export_artifacts.sh` and `prover/circuits/import_from_artifacts.sh` (or `./run_local.sh`/`./run_prod.sh`) to sync vetted files into `prover/circuits/build` and the contract caches if you still want the submodule. Refresh keys before releasing new circuits and rerun `check_artifacts.sh`/`go run ./cmd/verify-artifacts` to validate integrity.
 - **Concurrency tuning** – Start with the default `PROVER_MAX_CONCURRENCY=runtime.NumCPU()` and raise it incrementally only after measuring CPU saturation and memory usage (rapidsnark typically peaks around 250–350 MB per job for this circuit). Set `PROVER_TEMP_DIR` to tmpfs for lower I/O latency if available.
 - **Artifact hygiene** – Store `settlement_final.zkey` and the WASM/witness assets in a secret-managed bucket (S3 with bucket policies, GCS with CMEK) and mount them read-only into the container so proofs can’t be spoofed by tampering with files on disk.
 - **Graceful restarts** – Because each job spawns a fresh rapidsnark process, `SIGTERM` simply waits for the current subprocesses to exit. Consider draining the worker (pause proof requests) before restarting for zero dropped jobs.
@@ -232,7 +232,49 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
 - The Dockerfile installs Node 20 + rapidsnark v0.0.7 (GitHub release); override `PROVER_RAPIDSNARK_BINARY` if you need a different version.
 - Running `./run_local.sh` rebuilds the prover image, so re-run after regenerating circuits.
 
-## Step-by-Step: Artifacts Submodule (Source of Truth)
+## Step-by-Step: Hosted Artifacts (Source of Truth)
+
+1. Generate artifacts (if the circuit changed):
+
+   ```bash
+   cd prover/circuits
+   bash generate_keys.sh
+   ```
+
+2. Package the archive:
+
+   ```bash
+   tar czf prover-artifacts.tgz -C prover/circuits/build .
+   ```
+
+3. Upload the archive to your HTTPS host and record the SHA256:
+
+   ```bash
+   sha256sum prover-artifacts.tgz
+   ```
+
+4. Set `PROVER_ARTIFACTS_URL` + `PROVER_ARTIFACTS_SHA256` for CI/prod and validate the download:
+
+   ```bash
+   cd prover
+   PROVER_ARTIFACTS_URL="https://revealmarket.xyz/artifacts/prover-artifacts.tgz" \
+     PROVER_ARTIFACTS_SHA256="<sha256>" \
+     ./scripts/download_artifacts.sh
+   ```
+
+   The download step installs `prover/circuits/build` and writes `contracts/*/cache/settlement-vk.json` from `settlement_deploy.json`.
+
+5. Validate alignment:
+
+   ```bash
+   jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json
+   cast call <verifier> "circuitHash()(bytes32)" --rpc-url <RPC_URL>
+   ```
+
+6. If the circuit hash changed, redeploy the verifier and update `RM_VERIFIER_ADDRESS`.
+7. Start the stack with `./run_local.sh` or `./run_prod.sh`.
+
+### Optional: Artifacts Submodule Mirror
 
 1. Update the artifacts submodule:
 
@@ -240,7 +282,7 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
    git submodule update --init --recursive prover/artifacts
    ```
 
-2. If the circuit changed, regenerate + export artifacts (otherwise skip to step 4):
+2. Export artifacts (if the circuit changed):
 
    ```bash
    cd prover/circuits
@@ -254,15 +296,3 @@ The script is also invoked by repo-root `./run_tests.sh`, keeping local workflow
    cd prover/circuits
    bash import_from_artifacts.sh
    ```
-
-   `./run_local.sh` and `./run_prod.sh` also sync `contracts/*/cache/settlement-vk.json` from `settlement_deploy.json`.
-
-5. Validate alignment:
-
-   ```bash
-   jq -r '.circuitHash' prover/circuits/build/settlement_hashes.json
-   cast call <verifier> "circuitHash()(bytes32)" --rpc-url <RPC_URL>
-   ```
-
-6. If the circuit hash changed, redeploy the verifier and update `RM_VERIFIER_ADDRESS`.
-7. Start the stack with `./run_local.sh` or `./run_prod.sh`.

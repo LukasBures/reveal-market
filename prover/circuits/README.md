@@ -41,13 +41,22 @@ bash generate_keys.sh
 #   .circom-bin/              -> cached circom binary (auto-downloaded when not on PATH)
 ```
 
-To export the generated artifacts into the vetted `prover/artifacts` store (submodule), run:
+The hosted archive is the source of truth for CI/prod. Package `build/` into a tar/zip, upload it to your HTTPS host, and set `PROVER_ARTIFACTS_URL` + `PROVER_ARTIFACTS_SHA256`. To install the hosted artifacts locally:
+
+```bash
+cd ..
+PROVER_ARTIFACTS_URL="https://revealmarket.xyz/artifacts/prover-artifacts.tgz" \
+  PROVER_ARTIFACTS_SHA256="<sha256>" \
+  ./scripts/download_artifacts.sh
+```
+
+`prover/artifacts` is an optional mirror. To export the generated artifacts into the submodule, run:
 
 ```bash
 bash export_artifacts.sh
 ```
 
-To pull the vetted artifacts back into the live build/caches (e.g., in CI or on a fresh checkout), run:
+To pull the mirror back into the live build/caches (e.g., on a fresh checkout), run:
 
 ```bash
 bash import_from_artifacts.sh
