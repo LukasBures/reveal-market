@@ -37,6 +37,7 @@ function ProofReceiptCard({ receipt }: CardProps) {
   const batchIndex = typeof receipt.batchIndex === "number" ? receipt.batchIndex : null;
   const batchNumber = batchIndex !== null ? batchIndex + 1 : null;
   const batchLabel = batchNumber !== null ? `Batch ${batchNumber}` : null;
+  const rootLabel = batchNumber !== null ? "Batch root" : "Merkle root";
   const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
   const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
   const settlementTxHref = hrefFor("tx", receipt.settlementTxHash);
@@ -51,7 +52,7 @@ function ProofReceiptCard({ receipt }: CardProps) {
     { label: "Proof hash", value: receipt.proofHash },
     { label: "Circuit hash", value: receipt.circuitHash },
     { label: "Prover build", value: receipt.proverVersion },
-    { label: "Merkle root", value: receipt.merkleRoot },
+    { label: rootLabel, value: receipt.merkleRoot },
     { label: "Batch", value: batchNumber !== null ? String(batchNumber) : null },
     {
       label: receipt.publicSignals?.length ? `Public signals (${receipt.publicSignals.length})` : null,
@@ -109,7 +110,7 @@ function ProofReceiptCard({ receipt }: CardProps) {
         <DataCell label="Prover build">
           <TruncatedValue value={receipt.proverVersion} visible={12} />
         </DataCell>
-        <DataCell label="Merkle root">
+        <DataCell label={rootLabel}>
           <TruncatedValue value={receipt.merkleRoot} visible={14} />
         </DataCell>
         {batchNumber !== null ? (
