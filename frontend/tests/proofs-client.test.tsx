@@ -4,6 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProofsClient } from "@/components/proofs/ProofsClient";
 import type { ProofReceipt } from "@/lib/api-types";
 
+const pushMock = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: pushMock,
+    prefetch: vi.fn(),
+  }),
+}));
+
 const baseReceipt: ProofReceipt = {
   requestId: "req-abc",
   marketAddress: "0xMarket",
@@ -20,6 +29,7 @@ const baseReceipt: ProofReceipt = {
 describe("ProofsClient", () => {
   let fetchMock: Mock;
   beforeEach(() => {
+    pushMock.mockReset();
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     class NoopIntersectionObserver {
