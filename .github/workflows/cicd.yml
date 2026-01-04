@@ -35,6 +35,7 @@ jobs:
           echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
           chmod 600 ~/.ssh/id_artifacts
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          git config submodule.prover/artifacts.update none
           GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
 
       - name: Checkout submodules (skip artifacts if no key)
@@ -285,6 +286,9 @@ jobs:
           echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
           chmod 600 ~/.ssh/id_artifacts
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          if [ -n "${PROVER_ARTIFACTS_URL}" ]; then
+            git config submodule.prover/artifacts.update none
+          fi
           GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
 
       - name: Checkout submodules (skip artifacts if no key)

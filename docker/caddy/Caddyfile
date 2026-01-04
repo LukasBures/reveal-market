@@ -129,6 +129,11 @@ revealmarket.xyz {
   import header_common
   import cache_frontend
   import log_common
+  handle_path /artifacts/* {
+    root * /srv/artifacts
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
+  }
   import proxy_frontend
 }
 

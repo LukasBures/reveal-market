@@ -17,6 +17,7 @@ services:
       - "443:443"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./artifacts:/srv/artifacts:ro
       - caddy_data:/data
       - caddy_config:/config
     environment:
