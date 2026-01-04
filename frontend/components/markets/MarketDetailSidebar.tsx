@@ -1,7 +1,7 @@
 "use client";
 
 import type { MarketDetail } from "@/lib/api-types";
-import { formatDate, formatDateTime, formatNumber, formatUsd } from "@/lib/formatters";
+import { formatDate, formatDateTime, formatNumber, formatUsd, normalizeHex } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
@@ -100,11 +100,13 @@ export function MarketDetailSidebar({ market }: Props) {
   const explorerBase = (
     process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz"
   ).replace(/\/+$/, "");
-  const resolutionTxHash =
+  const resolutionTxRaw =
     typeof resolution?.transactionHash === "string" && resolution.transactionHash.trim()
       ? resolution.transactionHash.trim()
       : null;
-  const resolutionTxHref = resolutionTxHash ? `${explorerBase}/tx/${resolutionTxHash}` : null;
+  const resolutionTxNormalized = normalizeHex(resolutionTxRaw);
+  const resolutionTxHash = resolutionTxNormalized ?? resolutionTxRaw;
+  const resolutionTxHref = resolutionTxNormalized ? `${explorerBase}/tx/${resolutionTxNormalized}` : null;
 
   const liquidity =
     market.liquidityUsd ??

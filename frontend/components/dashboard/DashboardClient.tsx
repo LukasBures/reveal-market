@@ -8,7 +8,7 @@ import { fetchPositions, fetchClaimBundles, fetchMarketByEventId } from "@/lib/a
 import type { ClaimBundle, MarketDetail, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, normalizeTxHash } from "@/lib/formatters";
 import { computePoseidonLeaf, parseBigInt, poseidonHashPair } from "@/lib/poseidon";
 import Link from "next/link";
 import { revealMarketClaimAbi, useClaimTicket } from "@/lib/marketContract";
@@ -34,7 +34,10 @@ const normalizePositionStatus = (status: string | null | undefined): PositionLif
   return "committed";
 };
 
-const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash);
+const shortenHash = (hash: string) => {
+  const normalized = normalizeTxHash(hash) ?? hash;
+  return normalized.length > 16 ? `${normalized.slice(0, 10)}…${normalized.slice(-6)}` : normalized;
+};
 const MIN_CLAIM_GAS = 5_000_000n;
 
 type PositionStatusFlowProps = {
@@ -262,9 +265,9 @@ export function DashboardClient() {
   const txHref = useCallback(
     (hash?: string | null) => {
       if (!hash || !explorerBase) return null;
-      const trimmed = hash.trim();
-      if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
-      return `${explorerBase}/tx/${trimmed}`;
+      const normalized = normalizeTxHash(hash);
+      if (!normalized) return null;
+      return `${explorerBase}/tx/${normalized}`;
     },
     [explorerBase],
   );
@@ -924,8 +927,8 @@ export function DashboardClient() {
               className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg shadow-black/30"
             >
               {(() => {
-                const txIsHash = typeof p.tx_hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(p.tx_hash);
-                const txHref = explorerBase && txIsHash ? `${explorerBase}/tx/${p.tx_hash}` : null;
+                const normalizedTxHash = normalizeTxHash(p.tx_hash);
+                const txHref = explorerBase && normalizedTxHash ? `${explorerBase}/tx/${normalizedTxHash}` : null;
                 return (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-white">

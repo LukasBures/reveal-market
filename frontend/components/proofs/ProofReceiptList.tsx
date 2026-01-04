@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ProofReceipt } from "@/lib/api-types";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, normalizeHex } from "@/lib/formatters";
 
 type Props = {
   receipts: ProofReceipt[];
@@ -40,7 +40,8 @@ function ProofReceiptCard({ receipt }: CardProps) {
   const rootLabel = batchNumber !== null ? "Batch root" : "Merkle root";
   const winningPool = receipt.winningPool ?? deriveWinningPool(receipt);
   const totalPool = receipt.totalPool ?? deriveTotalPool(receipt);
-  const settlementTxHref = hrefFor("tx", receipt.settlementTxHash);
+  const settlementTxDisplay = normalizeHex(receipt.settlementTxHash) ?? receipt.settlementTxHash ?? null;
+  const settlementTxHref = hrefFor("tx", settlementTxDisplay);
   const winningPoolDisplay = formatZen(winningPool);
   const totalPoolDisplay = formatZen(totalPool);
   const liabilityDisplay = formatZen(receipt.totalLiability);
@@ -48,7 +49,7 @@ function ProofReceiptCard({ receipt }: CardProps) {
   const detailItems: DetailItem[] = [
     { label: "Request id", value: receipt.requestId },
     { label: "Market address", value: receipt.marketAddress },
-    { label: "Settlement tx", value: receipt.settlementTxHash },
+    { label: "Settlement tx", value: settlementTxDisplay },
     { label: "Proof hash", value: receipt.proofHash },
     { label: "Circuit hash", value: receipt.circuitHash },
     { label: "Prover build", value: receipt.proverVersion },
@@ -81,9 +82,9 @@ function ProofReceiptCard({ receipt }: CardProps) {
           <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Settlement tx</div>
           <div className="font-mono text-sm text-white">
             {settlementTxHref ? (
-              <ExplorerLink href={settlementTxHref} label={receipt.settlementTxHash} />
+              <ExplorerLink href={settlementTxHref} label={settlementTxDisplay} />
             ) : (
-              <span title={receipt.settlementTxHash ?? undefined}>{shorten(receipt.settlementTxHash, 10)}</span>
+              <span title={settlementTxDisplay ?? undefined}>{shorten(settlementTxDisplay, 10)}</span>
             )}
           </div>
         </div>
@@ -300,5 +301,10 @@ function hrefFor(kind: "address" | "tx", value?: string | null) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const base = explorerBase.replace(/\/+$/, "");
-  return kind === "tx" ? `${base}/tx/${trimmed}` : `${base}/address/${trimmed}`;
+  if (kind === "tx") {
+    const normalized = normalizeHex(trimmed);
+    if (!normalized) return null;
+    return `${base}/tx/${normalized}`;
+  }
+  return `${base}/address/${trimmed}`;
 }

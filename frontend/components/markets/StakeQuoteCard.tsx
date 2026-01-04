@@ -12,7 +12,7 @@ import {
 import { fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useChainId, useConnection } from "wagmi";
-import { formatTime } from "@/lib/formatters";
+import { formatTime, normalizeTxHash } from "@/lib/formatters";
 import { defaultChain } from "@/lib/wagmi";
 
 type Props = {
@@ -439,7 +439,9 @@ export function StakeQuoteCard({
     return null;
   }, [quote, priceForOutcome, selectedOutcome, stakeZen]);
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
-  const txHashIsHex = typeof txHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(txHash);
+  const normalizedTxHash = normalizeTxHash(txHash);
+  const txHashIsHex = Boolean(normalizedTxHash);
+  const txHashDisplay = normalizedTxHash ?? (typeof txHash === "string" ? txHash.trim() : "");
   const ctaLabel = txLoading
     ? "Submitting…"
     : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
@@ -546,7 +548,8 @@ export function StakeQuoteCard({
       const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;
       const respHash = resp.tx_hash || null;
       if (respHash || respJob) {
-        setTxHash(respHash || null);
+        const normalizedHash = normalizeTxHash(respHash) ?? respHash;
+        setTxHash(normalizedHash || null);
         setRelayerJobId(respJob);
         const initialStatus = resp.relayer_status || (respHash ? "pending" : null);
         setTxStatus(initialStatus);
@@ -578,15 +581,16 @@ export function StakeQuoteCard({
     let cancelled = false;
     const poll = async () => {
       try {
-        const isHexHash = txHash && /^0x[0-9a-fA-F]{64}$/.test(txHash);
+        const isHexHash = normalizeTxHash(txHash);
         const statusResp = await fetchTradeStatus(
-          isHexHash ? txHash : undefined,
+          isHexHash ?? undefined,
           relayerJobId || (!isHexHash && txHash ? txHash : undefined),
         );
         if (!cancelled) {
           setTxStatus(statusResp.status);
-          if (statusResp.txHash && statusResp.txHash !== txHash) {
-            setTxHash(statusResp.txHash);
+          const nextHash = normalizeTxHash(statusResp.txHash) ?? statusResp.txHash;
+          if (nextHash && nextHash !== txHash) {
+            setTxHash(nextHash);
           }
           if (statusResp.status === "confirmed" || statusResp.status === "failed") {
             setTxConfirmed(statusResp.status === "confirmed");
@@ -868,15 +872,15 @@ export function StakeQuoteCard({
             Commit tx:{" "}
             {explorerBase ? (
               <a
-                href={`${explorerBase}/tx/${txHash}`}
+                href={`${explorerBase}/tx/${normalizedTxHash}`}
                 target="_blank"
                 rel="noreferrer"
                 className="underline decoration-dotted"
               >
-                {txHash.slice(0, 10)}…{txHash.slice(-6)}
+                {txHashDisplay.slice(0, 10)}…{txHashDisplay.slice(-6)}
               </a>
             ) : (
-              `${txHash.slice(0, 10)}…${txHash.slice(-6)}`
+              `${txHashDisplay.slice(0, 10)}…${txHashDisplay.slice(-6)}`
             )}{" "}
             ({txStatus ?? "pending"})
           </p>

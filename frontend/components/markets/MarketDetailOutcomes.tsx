@@ -14,7 +14,7 @@ import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStream
 import { useFxStream } from "@/hooks/useFxStream";
 import { useChainId, useConnection, useSwitchChain } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
-import { formatTime } from "@/lib/formatters";
+import { formatTime, normalizeTxHash } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { defaultChain } from "@/lib/wagmi";
@@ -107,8 +107,10 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
     "https://horizen-testnet.explorer.caldera.xyz"
   ).replace(/\/+$/, "");
   const trimmedTxHash = txHash?.trim() ?? "";
-  const txHashIsHex = Boolean(trimmedTxHash && /^0x[0-9a-fA-F]{64}$/.test(trimmedTxHash));
-  const txHref = txHashIsHex && explorerBase ? `${explorerBase}/tx/${trimmedTxHash}` : null;
+  const normalizedTxHash = normalizeTxHash(trimmedTxHash);
+  const txHashIsHex = Boolean(normalizedTxHash);
+  const txHref = txHashIsHex && explorerBase ? `${explorerBase}/tx/${normalizedTxHash}` : null;
+  const txHashLabel = normalizedTxHash ?? trimmedTxHash;
 
   const effectiveMaxStake = useMemo(() => {
     const caps = [
@@ -778,10 +780,10 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                                 target="_blank"
                                 rel="noreferrer"
                               >
-                                {shortenHash(trimmedTxHash)}
+                                {shortenHash(txHashLabel)}
                               </a>
                             ) : (
-                              shortenHash(trimmedTxHash || txHash)
+                              shortenHash(txHashLabel || txHash)
                             )}
                           </span>
                         )}

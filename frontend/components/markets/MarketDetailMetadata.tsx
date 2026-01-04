@@ -1,7 +1,7 @@
 "use client";
 
 import type { MarketDetail } from "@/lib/api-types";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, normalizeHex } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";
 
 type Props = {
@@ -54,11 +54,20 @@ export function MarketDetailMetadata({ market }: Props) {
   const resolutionWinners: ResolutionWinner[] = Array.isArray(resolution?.winners)
     ? (resolution.winners as ResolutionWinner[])
     : [];
+  const resolutionTxDisplay =
+    typeof resolution?.transactionHash === "string"
+      ? normalizeHex(resolution.transactionHash) ?? resolution.transactionHash
+      : null;
   const explorerHref = (kind: "address" | "tx", value?: string | null) => {
     if (!value) return null;
     const trimmed = value.trim();
     if (!trimmed) return null;
-    return kind === "tx" ? `${explorerBase}/tx/${trimmed}` : `${explorerBase}/address/${trimmed}`;
+    if (kind === "tx") {
+      const normalized = normalizeHex(trimmed);
+      if (!normalized) return null;
+      return `${explorerBase}/tx/${normalized}`;
+    }
+    return `${explorerBase}/address/${trimmed}`;
   };
 
   const copyToClipboard = async (value?: string | null) => {
@@ -210,26 +219,26 @@ export function MarketDetailMetadata({ market }: Props) {
                 ))}
               </ul>
             )}
-            {(resolution.transactionHash || resolution.blockNumber) && (
+            {(resolutionTxDisplay || resolution.blockNumber) && (
               <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-xs text-slate-400">
-                {resolution.transactionHash && (
+                {resolutionTxDisplay && (
                   <p className="break-all">
                     TX:{" "}
-                    {explorerHref("tx", resolution.transactionHash) ? (
+                    {explorerHref("tx", resolutionTxDisplay) ? (
                       <a
-                        href={explorerHref("tx", resolution.transactionHash) ?? undefined}
+                        href={explorerHref("tx", resolutionTxDisplay) ?? undefined}
                         target="_blank"
                         rel="noreferrer"
                         className="underline underline-offset-4 hover:text-brand-200"
                       >
-                        {resolution.transactionHash}
+                        {resolutionTxDisplay}
                       </a>
                     ) : (
-                      resolution.transactionHash
+                      resolutionTxDisplay
                     )}{" "}
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(resolution.transactionHash)}
+                      onClick={() => copyToClipboard(resolutionTxDisplay)}
                       className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-400 hover:text-brand-200"
                     >
                       Copy

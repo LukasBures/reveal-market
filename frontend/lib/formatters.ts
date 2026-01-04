@@ -107,3 +107,24 @@ export function formatTime(value?: string | number | Date | null, options?: Intl
   delete (formatterOptions as any).timeStyle;
   return new Intl.DateTimeFormat(DEFAULT_LOCALE, formatterOptions).format(date);
 }
+
+export function normalizeHex(value?: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const hasPrefix = trimmed.startsWith("0x") || trimmed.startsWith("0X");
+  const raw = hasPrefix ? trimmed.slice(2) : trimmed;
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (!/^[0-9a-f]+$/.test(lower)) return null;
+  if (!hasPrefix && !(lower.length === 40 || lower.length === 64 || /[a-f]/.test(lower))) {
+    return null;
+  }
+  return `0x${raw}`;
+}
+
+export function normalizeTxHash(value?: string | null): string | null {
+  const normalized = normalizeHex(value);
+  if (!normalized) return null;
+  return normalized.length === 66 ? normalized : null;
+}
