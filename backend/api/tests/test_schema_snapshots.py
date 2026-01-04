@@ -10,6 +10,8 @@ EXPECTED_SCHEMAS = {
         "properties": [
             "best_ask",
             "best_bid",
+            "batch_counts",
+            "batch_roots",
             "caps",
             "category",
             "clob_pair_id",
@@ -17,6 +19,7 @@ EXPECTED_SCHEMAS = {
             "closed",
             "closes_at",
             "commits_blocked_at",
+            "commitments_count",
             "condition_id",
             "created_at",
             "description",

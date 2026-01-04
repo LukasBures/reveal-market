@@ -17,7 +17,8 @@ const navLinks = [
   { href: "/proofs", label: "Proofs" },
 ] as const;
 
-const resolvedSiteUrl = (resolveUrlConfig().siteUrl ?? "").trim();
+const resolvedUrls = resolveUrlConfig();
+const resolvedSiteUrl = (resolvedUrls.siteUrl ?? "").trim();
 const fallbackHomeRoute: Route = "/";
 const isTestEnv = (process.env.NODE_ENV ?? "").toLowerCase() === "test";
 const rawHomeLink = isTestEnv ? "/" : resolvedSiteUrl;
@@ -31,12 +32,20 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [apiWarning, setApiWarning] = useState<string | null>(null);
+  const [streamerWarning, setStreamerWarning] = useState<string | null>(null);
   const pathname = usePathname();
   const isProofsRoute = pathname?.startsWith("/proofs");
   const { fx, error: fxError, status } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
   const fxLabel = fxValue ? `ZEN/USD $${fxValue}` : null;
+  const warningsEnabled = (() => {
+    const env = (process.env.NODE_ENV ?? "").toLowerCase();
+    if (env === "production" || env === "test") return false;
+    if ((process.env.VITEST ?? "").toLowerCase() === "true") return false;
+    return true;
+  })();
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -50,6 +59,57 @@ export function MainNav() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    if (!warningsEnabled) return;
+    if (typeof window === "undefined" || typeof fetch !== "function") return;
+    let cancelled = false;
+    const pageProtocol = window.location?.protocol ?? "http:";
+
+    const isMixedContent = (baseUrl: string) => {
+      try {
+        const parsed = new URL(baseUrl);
+        const protocol = parsed.protocol;
+        return pageProtocol === "https:" && (protocol === "http:" || protocol === "ws:");
+      } catch {
+        return false;
+      }
+    };
+
+    const checkOrigin = async (label: string, baseUrl: string, path: string) => {
+      if (!baseUrl) return `${label} origin missing`;
+      if (isMixedContent(baseUrl)) return `${label} blocked (mixed content)`;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 3000);
+      try {
+        const url = `${baseUrl.replace(/\/$/, "")}${path}`;
+        const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) {
+          return `${label} unreachable`;
+        }
+        return null;
+      } catch {
+        return `${label} blocked/unreachable`;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    const run = async () => {
+      const [apiWarningNext, streamerWarningNext] = await Promise.all([
+        checkOrigin("API", resolvedUrls.apiBaseUrl, "/healthz"),
+        checkOrigin("Streamer", resolvedUrls.streamerPublic, "/healthz"),
+      ]);
+      if (cancelled) return;
+      setApiWarning(apiWarningNext);
+      setStreamerWarning(streamerWarningNext);
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [warningsEnabled]);
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl">
@@ -159,7 +219,13 @@ export function MainNav() {
           <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
         </>
       ) : null}
-      <PriceBanner fxLabel={fxLabel} fxStale={fxStale} fxError={fxError} />
+      <PriceBanner
+        fxLabel={fxLabel}
+        fxStale={fxStale}
+        fxError={fxError}
+        apiWarning={apiWarning}
+        streamerWarning={streamerWarning}
+      />
     </header>
   );
 }

@@ -61,4 +61,22 @@ describe("PriceBanner", () => {
     expect(screen.getByText(/zen\/usd loading/i)).toBeInTheDocument();
     expect(screen.queryByText(/wrong network/i)).not.toBeInTheDocument();
   });
+
+  it("surfaces API and streamer warnings when provided", () => {
+    accountState = { chain: { id: hoisted.defaultChain.id }, status: "connected" };
+
+    render(
+      <PriceBanner
+        fxLabel="FX: 1 ZEN"
+        fxError={null}
+        fxStale={false}
+        apiWarning="API blocked"
+        streamerWarning="Streamer blocked"
+      />,
+    );
+
+    expect(screen.getByText(/api blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/streamer blocked/i)).toBeInTheDocument();
+    expect(screen.queryByText(/live pricing/i)).not.toBeInTheDocument();
+  });
 });

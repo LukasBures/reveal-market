@@ -69,6 +69,9 @@ export type MarketDetail = MarketSummary & {
   questionId?: string;
   umaStatus?: string;
   marketAddress?: string;
+  commitmentsCount?: number | null;
+  batchRoots?: string[] | null;
+  batchCounts?: number[] | null;
   resolution?: {
     resolved: boolean;
     payouts?: number[];

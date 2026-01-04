@@ -8,9 +8,17 @@ type PriceBannerProps = {
   fxLabel: string | null;
   fxStale: boolean;
   fxError: string | null;
+  apiWarning?: string | null;
+  streamerWarning?: string | null;
 };
 
-export function PriceBanner({ fxLabel, fxStale, fxError }: PriceBannerProps) {
+export function PriceBanner({
+  fxLabel,
+  fxStale,
+  fxError,
+  apiWarning = null,
+  streamerWarning = null,
+}: PriceBannerProps) {
   const { chain, status: accountStatus, connector } = useConnection();
   const { mutate: switchChainMutate, isPending: isSwitching } = useSwitchChain();
   const switchChainSupported = typeof connector?.switchChain === "function";
@@ -20,6 +28,7 @@ export function PriceBanner({ fxLabel, fxStale, fxError }: PriceBannerProps) {
     if (!chain?.id) return false;
     return chain.id !== defaultChain.id;
   }, [accountStatus, chain]);
+  const showLive = !fxStale && !fxError && !apiWarning && !streamerWarning;
 
   const handleSwitch = () => {
     if (!switchChain) return;
@@ -44,11 +53,15 @@ export function PriceBanner({ fxLabel, fxStale, fxError }: PriceBannerProps) {
             </>
           ) : (
             <>
+              {apiWarning && (
+                <span className="text-rose-300 text-[11px] uppercase tracking-[0.2em]">{apiWarning}</span>
+              )}
+              {streamerWarning && (
+                <span className="text-amber-300 text-[11px] uppercase tracking-[0.2em]">{streamerWarning}</span>
+              )}
               {fxStale && <span className="text-amber-300 text-[11px] uppercase tracking-[0.2em]">FX stale</span>}
               {fxError && <span className="text-rose-300 text-[11px] uppercase tracking-[0.2em]">FX unavailable</span>}
-              {!fxStale && !fxError && (
-                <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>
-              )}
+              {showLive && <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>}
             </>
           )}
         </div>

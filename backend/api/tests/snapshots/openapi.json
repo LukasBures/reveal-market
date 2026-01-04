@@ -2532,6 +2532,45 @@
             ],
             "title": "Merkle Root"
           },
+          "commitments_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commitments Count"
+          },
+          "batch_roots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Roots"
+          },
+          "batch_counts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Counts"
+          },
           "proof_status": {
             "anyOf": [
               {

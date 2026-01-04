@@ -55,6 +55,41 @@ const normalizeClobTokenIds = (value: any): string[] | undefined => {
   return undefined;
 };
 
+const normalizeStringArray = (value: any): string[] | undefined => {
+  if (Array.isArray(value)) return value.map((v) => String(v));
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((v) => String(v));
+    } catch {
+      const parts = value.split(",").map((v) => v.trim()).filter(Boolean);
+      if (parts.length) return parts;
+    }
+  }
+  return undefined;
+};
+
+const normalizeNumberArray = (value: any): number[] | undefined => {
+  if (Array.isArray(value)) {
+    const parsed = value.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+    return parsed.length ? parsed : undefined;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        const nums = parsed.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+        return nums.length ? nums : undefined;
+      }
+    } catch {
+      const parts = value.split(",").map((v) => v.trim()).filter(Boolean);
+      const nums = parts.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+      if (nums.length) return nums;
+    }
+  }
+  return undefined;
+};
+
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
   const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
@@ -242,6 +277,9 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
       payload.extra_data?.gamma?.market_address ??
       payload.extra_data?.gamma?.marketAddress ??
       undefined,
+    commitmentsCount: coerceNumber(payload.commitments_count ?? payload.commitmentsCount) ?? null,
+    batchRoots: normalizeStringArray(payload.batch_roots ?? payload.batchRoots) ?? null,
+    batchCounts: normalizeNumberArray(payload.batch_counts ?? payload.batchCounts) ?? null,
     rakeBps: payload.rake_bps ?? undefined,
     startsAt: payload.starts_at ?? null,
     closesAt: payload.closes_at ?? payload.commit_deadline ?? null,

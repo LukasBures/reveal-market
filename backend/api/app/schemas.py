@@ -127,6 +127,9 @@ class MarketRead(MarketBase):
     created_at: datetime
     updated_at: datetime
     merkle_root: str | None = None
+    commitments_count: int | None = None
+    batch_roots: list[str] | None = None
+    batch_counts: list[int] | None = None
     proof_status: str | None = None
     proof_request_id: str | None = None
     proof_hash: str | None = None

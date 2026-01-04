@@ -80,6 +80,26 @@ def test_pricing_fx_rejects_stale_payload(client, monkeypatch):
     assert resp.json()["detail"]["error"] == "fx_stale"
 
 
+def test_pricing_fx_cors_origin_smoke(client, monkeypatch):
+    payload = {"price": 7.5, "stale": False, "received_at": "2024-03-03T00:00:00Z"}
+    monkeypatch.setattr("app.pricing.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientSuccess(payload))
+
+    import app.runtime as runtime
+
+    if runtime.settings.cors_allow_origins == ["*"]:
+        origin = "http://example.com"
+        expected = "*"
+    else:
+        origin = (
+            runtime.settings.cors_allow_origins[0] if runtime.settings.cors_allow_origins else "http://localhost:3000"
+        )
+        expected = origin
+
+    resp = client.get("/pricing/fx", headers={"Origin": origin})
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == expected
+
+
 def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     # Force deterministic FX and signer env.
     import app.runtime as runtime

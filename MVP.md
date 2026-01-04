@@ -186,7 +186,7 @@ This file describes the exact implementation scope to ship the MVP on Horizen Te
 
 ### 12) Prover hardening
 - Artifact verification is enforced by `check_artifacts.sh` and `go run ./cmd/verify-artifacts`; keep these in CI.
-- Remaining: add a signed artifact manifest, document recommended `PROVER_MAX_CONCURRENCY` vs memory, and add an integration test path for the C++ witness binary.
+- Remaining: add a signed artifact manifest (not implemented yet), document recommended `PROVER_MAX_CONCURRENCY` vs memory, and add an integration test path for the C++ witness binary.
 
 ### 13) Test/QA plan (prove the zk flow)
 - End-to-end script: start stack, ensure backend `/health` passes signer/FX checks, regenerate artifacts, deploy verifier, set `RM_PROVER_BASE_URL` and required signer/RPC envs.
@@ -252,7 +252,7 @@ Follow-ups (non-blocking)
 ## Testnet Guardrails (Horizen)
 
 - `lockBatches`, `postResult`, and `verifyAndSettle*` are `onlyOracle`; the settlement signer is not sufficient to advance markets.
-- The worker enforces that `RM_ORACLE_ADDRESS` matches the settlement signer address; if they differ, settlement automation will refuse to submit.
+- The worker enforces that the settlement signer matches the on-chain market oracle address; if they differ, settlement automation will refuse to submit. (No `RM_ORACLE_ADDRESS` config is currently read by the worker.)
 - `lockBatches` can only run after the commit window closes; until it runs, `commitmentsRoot` is zero and proofs will revert.
 - Proofs must be generated against the live on-chain roots/totals; proofs against zero roots/totals will fail contract checks.
 - For rapid testing, deploy a short-window market with an oracle you control or wait for commitDeadline before locking.

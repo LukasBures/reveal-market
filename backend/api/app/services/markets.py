@@ -1015,6 +1015,9 @@ def attach_settlement_to_market(
     if market is None or settlement is None:
         return
     market.merkle_root = settlement.merkle_root
+    market.commitments_count = settlement.commitments_count
+    market.batch_roots = settlement.batch_roots
+    market.batch_counts = settlement.batch_counts
     market.proof_status = settlement.proof_status
     market.proof_request_id = settlement.proof_request_id
     market.proof_hash = settlement.proof_hash

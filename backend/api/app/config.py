@@ -151,11 +151,11 @@ class Settings(BaseSettings):
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_fallback_price: float = Field(default=0.0, ge=0)
     fx_cache_ttl_seconds: float = Field(default=60.0, ge=1.0)
-    max_stake_zen: float = Field(default=100.0, gt=0, description="Per-quote max stake in ZEN")
+    max_stake_zen: float = Field(default=0.1, gt=0, description="Per-quote max stake in ZEN")
     max_user_stake_per_market_zen: float = Field(
-        default=100.0, gt=0, description="Per-user cumulative stake per market in ZEN"
+        default=0.5, gt=0, description="Per-user cumulative stake per market in ZEN"
     )
-    max_market_stake_zen: float = Field(default=1000.0, gt=0, description="Total stake cap per market in ZEN")
+    max_market_stake_zen: float = Field(default=5.0, gt=0, description="Total stake cap per market in ZEN")
     bet_cap_ttl_seconds: int = Field(default=86400, ge=60, description="TTL for bet cap counters in Redis")
     quote_store_ttl_seconds: int = Field(default=900, ge=60, description="TTL for issued quotes (replay guard)")
     quote_expiry_sweep_interval_seconds: int = Field(
