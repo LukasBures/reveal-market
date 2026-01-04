@@ -1,7 +1,7 @@
 import type { Address, Hex } from "viem";
 import { useWriteContract, useChainId } from "wagmi";
 
-const revealMarketClaimAbi = [
+export const revealMarketClaimAbi = [
   {
     "type": "function",
     "name": "claim",
@@ -28,6 +28,7 @@ export type ClaimTicketParams = {
   payoutWei: bigint;
   salt: Hex;
   merkleProof: Hex[];
+  gasLimit?: bigint;
 };
 
 export function useClaimTicket() {
@@ -48,6 +49,7 @@ export function useClaimTicket() {
         params.salt,
         params.merkleProof,
       ],
+      gas: params.gasLimit,
       chainId,
     });
   }

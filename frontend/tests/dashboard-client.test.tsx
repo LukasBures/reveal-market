@@ -89,7 +89,10 @@ describe("DashboardClient", () => {
       error: undefined,
     });
     hoisted.useReadContract.mockReturnValue({ data: 0n });
-    hoisted.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
+    hoisted.usePublicClient.mockReturnValue({
+      waitForTransactionReceipt: vi.fn(),
+      estimateContractGas: vi.fn().mockResolvedValue(5_000_000n),
+    });
     hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
     hoisted.fetchMarketByEventId.mockResolvedValue({
       outcomes: ["Yes", "No"],

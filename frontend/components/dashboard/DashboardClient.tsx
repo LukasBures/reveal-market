@@ -11,7 +11,7 @@ import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { formatDateTime } from "@/lib/formatters";
 import { computePoseidonLeaf, parseBigInt, poseidonHashPair } from "@/lib/poseidon";
 import Link from "next/link";
-import { useClaimTicket } from "@/lib/marketContract";
+import { revealMarketClaimAbi, useClaimTicket } from "@/lib/marketContract";
 import clsx from "clsx";
 
 const POSITION_LIFECYCLE_STAGES = [
@@ -35,6 +35,7 @@ const normalizePositionStatus = (status: string | null | undefined): PositionLif
 };
 
 const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash);
+const MIN_CLAIM_GAS = 5_000_000n;
 
 type PositionStatusFlowProps = {
   status: string;
@@ -560,8 +561,32 @@ export function DashboardClient() {
       return;
     }
     setClaimingTicket(key);
-    setClaimMessage(null);
+    setClaimMessage("Preparing claim transaction…");
     try {
+      let gasLimit = MIN_CLAIM_GAS;
+      if (publicClient) {
+        try {
+          const estimate = await publicClient.estimateContractGas({
+            address: bundle.marketAddress as Address,
+            abi: revealMarketClaimAbi,
+            functionName: "claim",
+            args: [
+              bundle.user as Address,
+              ticketIdValue,
+              outcomeIdValue,
+              amountValue,
+              payoutValue,
+              (bundle.salt ?? "0x") as Hex,
+              (bundle.merkleProof ?? []) as Hex[],
+            ],
+            account: bundle.user as Address,
+          });
+          const buffered = estimate + estimate / 4n;
+          gasLimit = buffered > MIN_CLAIM_GAS ? buffered : MIN_CLAIM_GAS;
+        } catch {
+          gasLimit = MIN_CLAIM_GAS;
+        }
+      }
       const txHash = await claimTicket({
         marketAddress: bundle.marketAddress as Address,
         user: bundle.user as Address,
@@ -571,6 +596,7 @@ export function DashboardClient() {
         payoutWei: payoutValue,
         salt: (bundle.salt ?? "0x") as Hex,
         merkleProof: (bundle.merkleProof ?? []) as Hex[],
+        gasLimit,
       });
       setClaimMessage("Claim sent");
       setClaimTxHash(txHash as string);
