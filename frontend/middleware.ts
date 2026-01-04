@@ -9,6 +9,7 @@ const PUBLIC_PATHS = [
   "/",
   "/healthz",
   "/contact",
+  "/proofs",
   "/brand",
   "/icons",
   "/site.webmanifest",
@@ -29,15 +30,21 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const requestHeaders = new Headers(request.headers);
+  const isPublicPath = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (isPublicPath) {
+    requestHeaders.set("x-rm-public-path", "1");
+  }
+
   const gateCode = process.env.LANDING_ACCESS_CODE?.trim();
   const hasGate = Boolean(gateCode);
   if (!hasGate) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   // Allow public paths through without the gate so the landing page itself loads.
-  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    return NextResponse.next();
+  if (isPublicPath) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   const accessCookie = request.cookies.get(LANDING_ACCESS_COOKIE_NAME)?.value;

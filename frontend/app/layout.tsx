@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import "./globals.css";
 
@@ -131,9 +131,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     nodeEnv: process.env.NODE_ENV,
   });
   const cookieStore = await cookies();
+  const requestHeaders = await headers();
   const hasLandingAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
   const gateEnabled = isLandingGateEnabled();
-  const showProtectedApp = !gateEnabled || hasLandingAccess;
+  const isPublicRoute = requestHeaders.get("x-rm-public-path") === "1";
+  const showProtectedApp = !gateEnabled || hasLandingAccess || isPublicRoute;
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>

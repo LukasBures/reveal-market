@@ -5,9 +5,11 @@ import { describe, beforeEach, afterEach, it, expect, vi } from "vitest";
 import RootLayout from "@/app/layout";
 
 const mockCookies = vi.fn();
+const mockHeaders = vi.fn();
 
 vi.mock("next/headers", () => ({
   cookies: () => mockCookies(),
+  headers: () => mockHeaders(),
 }));
 
 vi.mock("@/components/providers/AppProviders", () => ({
@@ -35,6 +37,8 @@ const originalEnv = process.env.LANDING_ACCESS_CODE;
 describe("RootLayout gate", () => {
   beforeEach(() => {
     mockCookies.mockReset();
+    mockHeaders.mockReset();
+    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
   });
 
   afterEach(() => {
@@ -60,6 +64,7 @@ describe("RootLayout gate", () => {
   it("shows the landing gate when access is required and no cookie is set", async () => {
     process.env.LANDING_ACCESS_CODE = "rm125";
     mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
+    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
 
     const ui = await RootLayout({ children: <>Hidden content</> });
     render(ui);
@@ -72,12 +77,28 @@ describe("RootLayout gate", () => {
   it("allows the main app through when the cookie exists", async () => {
     process.env.LANDING_ACCESS_CODE = "rm125";
     mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue({ value: "granted" }) });
+    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
 
     const ui = await RootLayout({ children: <>Welcome in</> });
     render(ui);
 
     expect(screen.getByTestId("main-nav")).toBeInTheDocument();
     expect(screen.getByText("Welcome in")).toBeInTheDocument();
+    expect(screen.queryByTestId("landing-gate")).not.toBeInTheDocument();
+  });
+
+  it("allows public routes through even without a cookie", async () => {
+    process.env.LANDING_ACCESS_CODE = "rm125";
+    mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
+    mockHeaders.mockReturnValue({
+      get: vi.fn((key: string) => (key === "x-rm-public-path" ? "1" : null)),
+    });
+
+    const ui = await RootLayout({ children: <>Public content</> });
+    render(ui);
+
+    expect(screen.getByTestId("main-nav")).toBeInTheDocument();
+    expect(screen.getByText("Public content")).toBeInTheDocument();
     expect(screen.queryByTestId("landing-gate")).not.toBeInTheDocument();
   });
 });

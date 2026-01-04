@@ -106,6 +106,9 @@ function ProofReceiptCard({ receipt }: CardProps) {
             {shorten(receipt.circuitHash ?? "—", 14)}
           </span>
         </DataCell>
+        <DataCell label="Prover build">
+          <TruncatedValue value={receipt.proverVersion} visible={12} />
+        </DataCell>
         <DataCell label="Merkle root">
           <TruncatedValue value={receipt.merkleRoot} visible={14} />
         </DataCell>
