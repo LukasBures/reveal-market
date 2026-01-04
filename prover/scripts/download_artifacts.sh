@@ -73,4 +73,16 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cp -a "${artifact_root}/." "${BUILD_DIR}/"
 
+cache_source="${BUILD_DIR}/settlement_deploy.json"
+if [[ ! -s "${cache_source}" ]]; then
+  cache_source="${BUILD_DIR}/settlement_vk.json"
+fi
+if [[ -s "${cache_source}" ]]; then
+  for cache_target in "${ROOT_DIR}/../contracts/cache/settlement-vk.json" \
+    "${ROOT_DIR}/../contracts/zen/cache/settlement-vk.json"; do
+    mkdir -p "$(dirname "${cache_target}")"
+    cp "${cache_source}" "${cache_target}"
+  done
+fi
+
 echo "Prover artifacts installed to ${BUILD_DIR}."
