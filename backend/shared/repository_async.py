@@ -238,7 +238,15 @@ async def upsert_settlement_snapshot(
         settlement = models.Settlement(market_id=market_id)
         # SQLite fixtures may not auto-increment BigInteger PKs; align id to market_id for deterministic testing.
         if getattr(settlement, "id", None) is None:
-            settlement.id = market_id  # type: ignore[assignment]
+            bind = session.get_bind()
+            if hasattr(bind, "dialect"):
+                dialect_name = bind.dialect.name
+            elif hasattr(bind, "sync_engine"):
+                dialect_name = bind.sync_engine.dialect.name
+            else:
+                dialect_name = ""
+            if dialect_name == "sqlite":
+                settlement.id = market_id  # type: ignore[assignment]
     for field, value in payload.items():
         if hasattr(settlement, field):
             setattr(settlement, field, value)
