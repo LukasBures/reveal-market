@@ -239,9 +239,12 @@ def _check_fx_cors(settings) -> tuple[str, schemas.HealthComponent]:
     fx_url = settings.fx_feed_url
     parsed = urlparse(str(fx_url))
     fx_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
+    internal_hosts = {"streamer", "localhost", "127.0.0.1"}
     is_prod = (settings.environment or "").lower() == "production"
     if not fx_origin:
         return "fx_cors", schemas.HealthComponent(status="error", detail="FX feed URL invalid")
+    if parsed.hostname in internal_hosts:
+        return "fx_cors", schemas.HealthComponent(status="ok", detail="FX feed uses internal host")
     if not origins or origins == ["*"]:
         state: schemas.HealthState = "degraded" if is_prod else "ok"
         detail = "CORS origins wildcard; streamer FX origin not explicitly allowed"

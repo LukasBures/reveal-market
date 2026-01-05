@@ -212,6 +212,8 @@ async def _handle_sync_failure(
 async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary, int, int, float]:
     """Ingest paginated Polymarket data and apply retention/backfill passes."""
     start = time.perf_counter()
+    heartbeat_interval = max(runtime.settings.container_heartbeat_seconds, 10)
+    last_heartbeat = time.monotonic()
     summary = SyncSummary()
     gap_count = 0
     total_fetched = 0
@@ -333,6 +335,14 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             normalized_ms=round(delta_normalized, 2),
                             resolution_ms=round(delta_resolution, 2),
                         )
+                        if redis_client is not None:
+                            now = time.monotonic()
+                            if now - last_heartbeat >= heartbeat_interval:
+                                interim_latency_ms = (time.perf_counter() - start) * 1000
+                                interim_stats = summary.to_stats(total_fetched, interim_latency_ms, 0)
+                                interim_stats["polymarket_ok"] = True
+                                await publish_heartbeat(redis_client, interim_stats)
+                                last_heartbeat = now
                     await apply_retention_cleanup_async(session, summary)
                     log_event(
                         logger,
