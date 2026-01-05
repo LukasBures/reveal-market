@@ -468,6 +468,7 @@ async def pricing_quote_preview(
     """Return an unsigned, non-persistent preview quote (no market creation, no signature)."""
 
     # No creation here; best-effort fetch of existing market address.
+    now = datetime.now(tz=UTC)
     user_id = payload.user_id or payload.wallet_address
     ticket_size_wei = int(settings.ticket_size_wei)
     stake_wei = _to_wei_amount(payload.stake_zen)
@@ -476,9 +477,13 @@ async def pricing_quote_preview(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"stake_mismatch_expected_{ticket_size_wei}",
         )
-    market_address: str | None = payload.market_address or None
-    if payload.market_id and not market_address:
+    market_record = None
+    if payload.market_id:
         market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+        if market_record:
+            _assert_commits_allowed(market_record, now, session)
+    market_address: str | None = payload.market_address or None
+    if payload.market_id and not market_address and market_record:
         market_address = getattr(market_record, "market_address", None)
     try:
         fx_quote = await fetch_fx_quote(settings)
