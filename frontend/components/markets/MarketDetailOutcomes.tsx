@@ -626,6 +626,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                           Stake (ZEN)
                           <input
                             type="number"
+                            name="stakeZen"
                             min={MIN_STAKE_ZEN}
                             max={effectiveMaxStake}
                             step="0.01"

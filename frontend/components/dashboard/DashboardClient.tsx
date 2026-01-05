@@ -741,6 +741,7 @@ export function DashboardClient() {
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               <input
                 type="number"
+                name="escrowDepositAmount"
                 value={depositInput}
                 onChange={(e) => setDepositInput(e.target.value)}
                 className="w-full rounded-lg border border-emerald-500/40 bg-slate-900/70 px-3 py-2 text-white shadow-sm shadow-emerald-900/30 focus:border-emerald-300 focus:outline-none"
@@ -800,6 +801,7 @@ export function DashboardClient() {
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               <input
                 type="number"
+                name="escrowWithdrawAmount"
                 value={withdrawInput}
                 onChange={(e) => setWithdrawInput(e.target.value)}
                 className="w-full rounded-lg border border-white/20 bg-slate-900/70 px-3 py-2 text-white shadow-sm shadow-black/40 focus:border-white/60 focus:outline-none"
@@ -861,6 +863,7 @@ export function DashboardClient() {
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-slate-900/70 via-slate-900/40 to-slate-800/40 px-4 py-3 shadow-inner shadow-black/30">
             <input
               type="search"
+              name="positionsSearch"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search markets"
@@ -887,6 +890,7 @@ export function DashboardClient() {
               Sort
               <div className="relative">
                 <select
+                  name="positionsSort"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                   className="appearance-none rounded-full border border-white/20 bg-white/10 px-3 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-white shadow shadow-black/30 transition focus:border-white/60 focus:outline-none"

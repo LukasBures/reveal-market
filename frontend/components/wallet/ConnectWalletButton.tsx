@@ -464,6 +464,7 @@ export function ConnectWalletButton() {
                   <label className="flex items-start gap-3 text-sm text-white/80">
                     <input
                       type="checkbox"
+                      name="termsAccepted"
                       className="mt-1 h-4 w-4 rounded border-white/30 bg-transparent text-brand-400 focus:ring-brand-400"
                       checked={acceptedTerms}
                       onChange={(event) => setAcceptedTerms(event.target.checked)}

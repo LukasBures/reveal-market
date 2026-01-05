@@ -336,6 +336,7 @@ export function SearchMarketsClient({
             <span className="sr-only">Search</span>
             <input
               type="search"
+              name="marketsSearch"
               placeholder="Search by keyword (e.g., election, BTC, sports)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}

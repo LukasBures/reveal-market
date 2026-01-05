@@ -350,10 +350,13 @@ type FilterFieldProps = {
 };
 
 function FilterField({ label, value, placeholder, inputMode = "text", onChange }: FilterFieldProps) {
+  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   return (
     <label className="text-xs uppercase tracking-[0.3em] text-slate-400">
       {label}
       <input
+        id={fieldId}
+        name={fieldId}
         type="text"
         value={value}
         placeholder={placeholder}

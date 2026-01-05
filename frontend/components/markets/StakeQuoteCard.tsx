@@ -688,6 +688,7 @@ export function StakeQuoteCard({
           <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Buy with ZEN</span>
           <input
             type="number"
+            name="stakeZen"
             min={0}
             max={effectiveMaxStake}
             step="0.01"
