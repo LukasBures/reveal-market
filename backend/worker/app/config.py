@@ -199,6 +199,11 @@ class Settings(BaseSettings):
         default=False,
         description="Route lockBatches submissions through the relayer API instead of direct RPC",
     )
+    lock_batches_poll_seconds: float = Field(
+        default=60.0,
+        ge=0,
+        description="How often to run lock-batches in the background loop (0 disables)",
+    )
     lock_batches_max_per_tick: int = Field(default=3, ge=1)
     lock_batches_relayer_poll_seconds: float = Field(default=2.0, ge=0.5)
     lock_batches_relayer_max_attempts: int = Field(default=15, ge=1)

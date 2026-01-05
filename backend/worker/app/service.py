@@ -473,17 +473,6 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     except Exception as exc:  # pragma: no cover - defensive
         return await _handle_sync_failure(exc, tick_start, redis_client, schema_state)
 
-    try:
-        await run_lock_batches_jobs(summary, redis_client)
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.lock_batches.failed",
-            message="lock-batches run failed",
-            error=str(exc),
-        )
-
     async def _run_proofs_and_settlements(summary_obj: SyncSummary) -> None:
         try:
             proofs_generated = await run_prover_jobs(summary_obj, redis_client)
@@ -567,6 +556,60 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     await propagate_schema_revision(redis_client, schema_state)
     await persist_resolution_cache_updates(redis_client, summary)
     return stats
+
+
+async def run_lock_batches_loop(redis_client: Redis | None) -> None:
+    """Continuously attempt lock-batches on a fixed cadence independent of Gamma sync."""
+
+    interval = runtime.settings.lock_batches_poll_seconds
+    if interval <= 0:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.lock_batches.loop_disabled",
+            message="lock-batches loop disabled (poll interval <= 0)",
+        )
+        return
+
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.lock_batches.loop_start",
+        message="starting lock-batches loop",
+        poll_seconds=interval,
+    )
+    try:
+        while True:
+            loop_start = time.monotonic()
+            summary = SyncSummary()
+            try:
+                submitted = await run_lock_batches_jobs(summary, redis_client)
+                cache_invalidations = 0
+                if submitted and redis_client is not None:
+                    cache_report = await invalidate_cache_tags(redis_client, summary)
+                    cache_invalidations = cache_report.total
+                if submitted:
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.lock_batches.loop_complete",
+                        message="lock-batches loop processed candidates",
+                        submitted=submitted,
+                        cache_invalidations=cache_invalidations,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.lock_batches.loop_failed",
+                    message="lock-batches loop failed",
+                    error=str(exc),
+                )
+            elapsed = time.monotonic() - loop_start
+            sleep_for = max(interval - elapsed, 0)
+            await asyncio.sleep(sleep_for)
+    except asyncio.CancelledError:  # pragma: no cover - shutdown path
+        return
 
 
 async def record_batch_stats(
@@ -656,9 +699,11 @@ async def run_worker() -> None:
     )
     proof_worker_task: asyncio.Task | None = None
     settlement_worker_task: asyncio.Task | None = None
+    lock_batches_task: asyncio.Task | None = None
     if redis_client is not None:
         proof_worker_task = asyncio.create_task(run_proof_queue_worker(redis_client))
         settlement_worker_task = asyncio.create_task(run_settlement_queue_worker(redis_client))
+    lock_batches_task = asyncio.create_task(run_lock_batches_loop(redis_client))
     try:
         while True:
             loop_start = time.monotonic()
@@ -689,6 +734,10 @@ async def run_worker() -> None:
             await asyncio.sleep(sleep_for)
     finally:
         heartbeat_stop.set()
+        if lock_batches_task is not None:
+            lock_batches_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await lock_batches_task
         if proof_worker_task is not None:
             proof_worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

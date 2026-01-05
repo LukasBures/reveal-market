@@ -161,7 +161,8 @@ All environment variables begin with `RM_`. Notable groups:
 | Variable | Description |
 | --- | --- |
 | `RM_LOCK_BATCHES_USE_RELAYER` | Route lock submissions through the relayer API instead of direct RPC. |
-| `RM_LOCK_BATCHES_MAX_PER_TICK` | Maximum markets to attempt locking per sync tick. |
+| `RM_LOCK_BATCHES_POLL_SECONDS` | Poll interval for the lock-batches background loop (0 disables). |
+| `RM_LOCK_BATCHES_MAX_PER_TICK` | Maximum markets to attempt locking per lock-batches tick. |
 | `RM_LOCK_BATCHES_RELAYER_POLL_SECONDS`, `RM_LOCK_BATCHES_RELAYER_MAX_ATTEMPTS` | Polling settings when the relayer queue returns a job id. |
 | `RM_LOCK_BATCHES_GAS_LIMIT`, `RM_LOCK_BATCHES_GAS_PRICE_GWEI`, `RM_LOCK_BATCHES_MAX_PRIORITY_FEE_GWEI` | Gas overrides for lock-batches transactions (direct RPC mode). |
 
