@@ -3,8 +3,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ContactForm } from "@/components/contact/ContactForm";
 import { vi } from "vitest";
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe("ContactForm", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 

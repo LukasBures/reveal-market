@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactElement } from "react";
-import type { Mock } from "vitest";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedMarketsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
@@ -63,7 +62,7 @@ describe("FeaturedMarketsClient", () => {
       outcomes: [],
       outcomePrices: [],
     };
-    const fetchMock = fetchFeaturedMarkets as unknown as Mock;
+    const fetchMock = vi.mocked(fetchFeaturedMarkets);
     fetchMock.mockResolvedValue([nextMarket]);
 
     renderWithClient(
@@ -99,7 +98,7 @@ describe("FeaturedMarketsClient", () => {
   });
 
   it("keeps the load more button when a short page arrives mid-pagination", async () => {
-    const fetchMock = fetchFeaturedMarkets as unknown as Mock;
+    const fetchMock = vi.mocked(fetchFeaturedMarkets);
     fetchMock
       .mockResolvedValueOnce(
         Array.from({ length: 10 }, (_, idx) => ({
@@ -153,8 +152,8 @@ describe("FeaturedMarketsClient", () => {
 
   it("auto-loads batches then surfaces the manual button after the cap", async () => {
     let callCount = 0;
-    const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;
-    fetchMock.mockImplementation((limit: number) => {
+    const fetchMock = vi.mocked(fetchFeaturedMarkets);
+    fetchMock.mockImplementation((limit = 0) => {
       callCount += 1;
       return Promise.resolve(
         Array.from({ length: limit }, (_, idx) => ({
@@ -204,8 +203,8 @@ describe("FeaturedMarketsClient", () => {
 
   it("shows a loading indicator during automatic pagination", async () => {
     let resolveFetch: (() => void) | undefined;
-    const fetchMock = fetchFeaturedMarkets as unknown as Mock<number>;
-    fetchMock.mockImplementation((limit: number) => {
+    const fetchMock = vi.mocked(fetchFeaturedMarkets);
+    fetchMock.mockImplementation((limit = 0) => {
       return new Promise((resolve) => {
         resolveFetch = () =>
           resolve(

@@ -6,7 +6,7 @@ import type { MarketDetail } from "@/lib/api-types";
 
 const streamMock = vi.hoisted(
   () =>
-    vi.fn(() => ({
+    vi.fn((..._args: unknown[]) => ({
       outcomes: [],
       trades: [],
       histories: {},

@@ -3,16 +3,19 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 
-const mockDefaultChain = vi.hoisted(() => ({
-  id: 2651420,
-  name: "Horizen Testnet",
-  nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
-  rpcUrls: {
-    default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-    public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-  },
-  blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
-})) as const;
+const mockDefaultChain = vi.hoisted(
+  () =>
+    ({
+      id: 2651420,
+      name: "Horizen Testnet",
+      nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
+      rpcUrls: {
+        default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+        public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+      },
+      blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
+    } as const),
+);
 
 const hooks = vi.hoisted(() => ({
   useConnection: vi.fn(),

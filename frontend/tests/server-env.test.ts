@@ -36,6 +36,7 @@ describe("serverEnv", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     resetEnv();
   });
 
@@ -53,7 +54,7 @@ describe("serverEnv", () => {
 
   it("throws when a malformed URL is configured in production", async () => {
     process.env.RM_API_BASE_URL = "not a valid url";
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
 
     await expect(import("@/lib/serverEnv")).rejects.toThrow(/invalid/i);
   });

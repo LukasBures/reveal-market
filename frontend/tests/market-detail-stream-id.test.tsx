@@ -3,15 +3,18 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { MarketDetailOutcomes } from "@/components/markets/MarketDetailOutcomes";
 
-const liveOutcomePricesMock = vi.hoisted(() => vi.fn(() => ({
-  prices: [],
-  streamError: null,
-  fxStale: false,
-})));
+const liveOutcomePricesMock = vi.hoisted(
+  () =>
+    vi.fn((..._args: unknown[]) => ({
+      prices: [],
+      streamError: null,
+      fxStale: false,
+    })),
+);
 
 const priceStreamStoreMock = vi.hoisted(
   () =>
-    vi.fn(() => ({
+    vi.fn((..._args: unknown[]) => ({
       connected: false,
       error: null,
       outcomes: [],

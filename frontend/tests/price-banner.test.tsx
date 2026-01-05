@@ -9,12 +9,13 @@ const hoisted = vi.hoisted(() => ({
 
 type AccountState = {
   chain?: { id: number };
-  connector?: { switchChain?: () => void } | undefined;
+  connector?: { switchChain?: (...args: unknown[]) => unknown } | undefined;
   status: "connected" | "disconnected" | "connecting" | "reconnecting";
 };
 
 let accountState: AccountState;
-let switchChainMock: ReturnType<typeof vi.fn>;
+type SwitchChainFn = (...args: unknown[]) => unknown;
+let switchChainMock: SwitchChainFn;
 
 vi.mock("wagmi", () => ({
   useConnection: () => accountState,
@@ -28,7 +29,7 @@ vi.mock("@/lib/wagmi", () => ({
 describe("PriceBanner", () => {
   beforeEach(() => {
     accountState = { status: "disconnected" };
-    switchChainMock = vi.fn();
+    switchChainMock = vi.fn() as SwitchChainFn;
   });
 
   it("prompts a network switch when on the wrong chain", () => {

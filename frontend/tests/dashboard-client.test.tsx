@@ -4,16 +4,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { bigIntToHex32, computePoseidonLeaf, parseBigInt, poseidonHashPair } from "@/lib/poseidon";
 
-const mockDefaultChain = vi.hoisted(() => ({
-  id: 2651420,
-  name: "Horizen Testnet",
-  nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
-  rpcUrls: {
-    default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-    public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-  },
-  blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
-})) as const;
+const mockDefaultChain = vi.hoisted(
+  () =>
+    ({
+      id: 2651420,
+      name: "Horizen Testnet",
+      nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
+      rpcUrls: {
+        default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+        public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+      },
+      blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
+    } as const),
+);
 
 const hoisted = vi.hoisted(() => ({
   useConnection: vi.fn(),
@@ -109,7 +112,7 @@ describe("DashboardClient", () => {
           ticket_id: 0,
           claimable: true,
           created_at: "2024-01-01T00:00:00Z",
-          merkle_root: "0x" + "ab" * 32,
+          merkle_root: "0x" + "ab".repeat(32),
           closes_at: "2024-01-02T00:00:00Z",
         },
       ],
@@ -132,7 +135,8 @@ describe("DashboardClient", () => {
     let idx = 0n;
     for (const sibling of merkleProof) {
       const siblingValue = parseBigInt(sibling);
-      computed = idx & 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
+      computed =
+        idx % 2n === 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
       idx >>= 1n;
     }
     const commitmentsRoot = bigIntToHex32(computed);

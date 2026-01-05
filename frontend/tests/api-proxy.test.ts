@@ -29,6 +29,10 @@ vi.mock("next/server", () => {
       }
     }
 
+    text() {
+      return Promise.resolve(this.body);
+    }
+
     static json(data: unknown, init?: ResponseInit) {
       const headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers);
       if (!headers.has("content-type")) {
@@ -74,7 +78,7 @@ describe("proxyApiRequest", () => {
       },
     });
     expect(response.status).toBe(200);
-    expect(response.body).toBe('["ok"]');
+    expect(await response.text()).toBe('["ok"]');
     expect(upstreamResponse.text).toHaveBeenCalledTimes(1);
   });
 
@@ -85,7 +89,7 @@ describe("proxyApiRequest", () => {
 
     const response = await proxyApiRequest(request, "/markets");
     expect(response.status).toBe(502);
-    expect(JSON.parse(response.body)).toEqual({ error: "upstream_unavailable" });
+    expect(JSON.parse(await response.text())).toEqual({ error: "upstream_unavailable" });
     expect(loggerMock.error).toHaveBeenCalledWith("apiProxy:error", expect.objectContaining({ pathname: "/markets" }));
   });
 });

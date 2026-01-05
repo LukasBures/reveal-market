@@ -37,11 +37,12 @@ describe("wagmi chain defaults", () => {
     vi.resetModules();
     vi.clearAllMocks();
     resetEnv();
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     delete process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     resetEnv();
   });
 
@@ -55,14 +56,14 @@ describe("wagmi chain defaults", () => {
 
       const module = await import("@/lib/wagmi");
 
-    expect(module.defaultChain.id).toBe(2651420);
-    expect(module.defaultChain.rpcUrls.default.http[0]).toBe("https://horizen-testnet.rpc.caldera.xyz/http");
-    expect(module.defaultChain.blockExplorers?.default?.url).toBe("https://horizen-testnet.explorer.caldera.xyz");
+      expect(module.defaultChain.id).toBe(2651420);
+      expect(module.defaultChain.rpcUrls.default.http[0]).toBe("https://horizen-testnet.rpc.caldera.xyz/http");
+      expect(module.defaultChain.blockExplorers?.default?.url).toBe("https://horizen-testnet.explorer.caldera.xyz");
 
-    const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);
-    expect(warnEvents).toContain("wagmi.chain_id_missing");
-    expect(warnEvents).toContain("wagmi.rpc_url_missing");
-    expect(warnEvents).toContain("wagmi.explorer_missing");
+      const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);
+      expect(warnEvents).toContain("wagmi.chain_id_missing");
+      expect(warnEvents).toContain("wagmi.rpc_url_missing");
+      expect(warnEvents).toContain("wagmi.explorer_missing");
     },
   );
 
@@ -75,15 +76,15 @@ describe("wagmi chain defaults", () => {
       process.env.NEXT_PUBLIC_RPC_URL = "https://example-rpc.test";
       process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL = "https://example-explorer.test";
 
-    const module = await import("@/lib/wagmi");
+      const module = await import("@/lib/wagmi");
 
-    expect(module.defaultChain.id).toBe(2651420);
-    expect(module.defaultChain.name).toBe("Wrong Chain"); // name is kept, but chain id is enforced
+      expect(module.defaultChain.id).toBe(2651420);
+      expect(module.defaultChain.name).toBe("Wrong Chain"); // name is kept, but chain id is enforced
 
-    const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);
-    expect(warnEvents).toContain("wagmi.chain_id_mismatch");
-    expect(warnEvents).not.toContain("wagmi.rpc_url_missing");
-    expect(warnEvents).not.toContain("wagmi.explorer_missing");
+      const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);
+      expect(warnEvents).toContain("wagmi.chain_id_mismatch");
+      expect(warnEvents).not.toContain("wagmi.rpc_url_missing");
+      expect(warnEvents).not.toContain("wagmi.explorer_missing");
     },
   );
 });
