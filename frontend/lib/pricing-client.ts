@@ -85,7 +85,13 @@ const normalizeAssetIds = (tokenIds?: string[]) =>
     .filter(Boolean);
 
 const warnMissingAssets = (tokens: string[], transport: "ws" | "sse") => {
-  if (tokens.length === 0 && typeof console !== "undefined" && process.env.NODE_ENV !== "production") {
+  const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+  if (
+    tokens.length === 0 &&
+    typeof console !== "undefined" &&
+    process.env.NODE_ENV !== "production" &&
+    !isTestEnv
+  ) {
     console.warn(
       `[pricing-client] ${transport} connecting without assets_ids; falling back to market_id placeholder for subscriptions.`,
     );

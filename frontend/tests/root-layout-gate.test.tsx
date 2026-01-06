@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, beforeEach, afterEach, it, expect, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import RootLayout from "@/app/layout";
 
@@ -34,6 +35,13 @@ vi.mock("@/components/layout/Footer", () => ({
 
 const originalEnv = process.env.LANDING_ACCESS_CODE;
 
+const renderLayout = async (children: ReactNode) => {
+  const ui = await RootLayout({ children });
+  const markup = renderToStaticMarkup(ui);
+  const doc = new DOMParser().parseFromString(markup, "text/html");
+  return within(doc.body);
+};
+
 describe("RootLayout gate", () => {
   beforeEach(() => {
     mockCookies.mockReset();
@@ -53,12 +61,11 @@ describe("RootLayout gate", () => {
     process.env.LANDING_ACCESS_CODE = "";
     mockCookies.mockReturnValue({ get: vi.fn() });
 
-    const ui = await RootLayout({ children: <>Child content</> });
-    render(ui);
+    const view = await renderLayout(<>Child content</>);
 
-    expect(screen.getByTestId("main-nav")).toBeInTheDocument();
-    expect(screen.getByText("Child content")).toBeInTheDocument();
-    expect(screen.queryByText(/Private beta/i)).not.toBeInTheDocument();
+    expect(view.getByTestId("main-nav")).toBeInTheDocument();
+    expect(view.getByText("Child content")).toBeInTheDocument();
+    expect(view.queryByText(/Private beta/i)).not.toBeInTheDocument();
   });
 
   it("shows the landing gate when access is required and no cookie is set", async () => {
@@ -66,12 +73,11 @@ describe("RootLayout gate", () => {
     mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
     mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
 
-    const ui = await RootLayout({ children: <>Hidden content</> });
-    render(ui);
+    const view = await renderLayout(<>Hidden content</>);
 
-    expect(screen.getByTestId("landing-gate")).toBeInTheDocument();
-    expect(screen.queryByTestId("main-nav")).not.toBeInTheDocument();
-    expect(screen.queryByText("Hidden content")).not.toBeInTheDocument();
+    expect(view.getByTestId("landing-gate")).toBeInTheDocument();
+    expect(view.queryByTestId("main-nav")).not.toBeInTheDocument();
+    expect(view.queryByText("Hidden content")).not.toBeInTheDocument();
   });
 
   it("allows the main app through when the cookie exists", async () => {
@@ -79,12 +85,11 @@ describe("RootLayout gate", () => {
     mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue({ value: "granted" }) });
     mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
 
-    const ui = await RootLayout({ children: <>Welcome in</> });
-    render(ui);
+    const view = await renderLayout(<>Welcome in</>);
 
-    expect(screen.getByTestId("main-nav")).toBeInTheDocument();
-    expect(screen.getByText("Welcome in")).toBeInTheDocument();
-    expect(screen.queryByTestId("landing-gate")).not.toBeInTheDocument();
+    expect(view.getByTestId("main-nav")).toBeInTheDocument();
+    expect(view.getByText("Welcome in")).toBeInTheDocument();
+    expect(view.queryByTestId("landing-gate")).not.toBeInTheDocument();
   });
 
   it("allows public routes through even without a cookie", async () => {
@@ -94,11 +99,10 @@ describe("RootLayout gate", () => {
       get: vi.fn((key: string) => (key === "x-rm-public-path" ? "1" : null)),
     });
 
-    const ui = await RootLayout({ children: <>Public content</> });
-    render(ui);
+    const view = await renderLayout(<>Public content</>);
 
-    expect(screen.getByTestId("main-nav")).toBeInTheDocument();
-    expect(screen.getByText("Public content")).toBeInTheDocument();
-    expect(screen.queryByTestId("landing-gate")).not.toBeInTheDocument();
+    expect(view.getByTestId("main-nav")).toBeInTheDocument();
+    expect(view.getByText("Public content")).toBeInTheDocument();
+    expect(view.queryByTestId("landing-gate")).not.toBeInTheDocument();
   });
 });

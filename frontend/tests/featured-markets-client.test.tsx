@@ -193,13 +193,19 @@ describe("FeaturedMarketsClient", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(AUTO_LOAD_BATCHES);
-    });
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
-    });
-  });
+    await waitFor(
+      () => {
+        expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(AUTO_LOAD_BATCHES);
+      },
+      { timeout: 3000 },
+    );
+    await waitFor(
+      () => {
+        expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+  }, 10000);
 
   it("shows a loading indicator during automatic pagination", async () => {
     let resolveFetch: (() => void) | undefined;

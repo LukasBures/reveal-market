@@ -1016,10 +1016,10 @@ async def market_price_history(
         cached_payload = await get_json(cache, cache_key)
         if cached_payload is not None:
             try:
-                response = schemas.PriceHistoryResponse.model_validate(cached_payload)
+                cached_response = schemas.PriceHistoryResponse.model_validate(cached_payload)
             except Exception:
-                response = None
-            if response is not None:
+                cached_response = None
+            if cached_response is not None:
                 update_cache_context(request, cache_key=cache_key, hit=True, source="markets:history")
                 log_event(
                     logger,
@@ -1033,9 +1033,9 @@ async def market_price_history(
                     interval=interval,
                     fidelity=fidelity,
                 )
-                return response
+                return cached_response
 
-    params: dict[str, object] = {"market": resolved_token_id}
+    params: dict[str, str | int | float] = {"market": resolved_token_id}
     if interval:
         params["interval"] = interval
     if fidelity is not None:
@@ -1049,7 +1049,7 @@ async def market_price_history(
     url = f"{host.rstrip('/')}/prices-history"
     try:
         async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            response = await client.get(url, params=params)
+            clob_response = await client.get(url, params=params)
     except httpx.RequestError as exc:
         log_event(
             logger,
@@ -1062,9 +1062,9 @@ async def market_price_history(
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="clob_request_failed") from exc
 
-    if response.status_code == status.HTTP_404_NOT_FOUND:
+    if clob_response.status_code == status.HTTP_404_NOT_FOUND:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="clob_market_not_found")
-    if response.status_code >= 400:
+    if clob_response.status_code >= 400:
         log_event(
             logger,
             logging.WARNING,
@@ -1072,20 +1072,25 @@ async def market_price_history(
             message="clob history returned error",
             market_id=normalized_market_id,
             token_id=resolved_token_id,
-            status_code=response.status_code,
+            status_code=clob_response.status_code,
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="clob_request_failed")
 
-    payload = response.json()
+    payload_data = clob_response.json()
+    payload: dict[str, Any] = payload_data if isinstance(payload_data, dict) else {}
     raw_history = payload.get("history")
     history: list[schemas.PriceHistoryPoint] = []
     if isinstance(raw_history, list):
         for item in raw_history:
             if not isinstance(item, dict):
                 continue
+            ts_raw = item.get("t")
+            price_raw = item.get("p")
+            if ts_raw is None or price_raw is None:
+                continue
             try:
-                timestamp = int(item.get("t"))
-                price = float(item.get("p"))
+                timestamp = int(ts_raw)
+                price = float(price_raw)
             except (TypeError, ValueError):
                 continue
             history.append(schemas.PriceHistoryPoint(t=timestamp, p=price))

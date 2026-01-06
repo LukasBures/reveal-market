@@ -67,10 +67,15 @@ const chains = [defaultChain] as const;
 const walletConnectProjectId =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || (process.env.NODE_ENV === "test" ? "test" : "");
 const walletConnectEnabled = Boolean(walletConnectProjectId);
+const isTestEnv =
+  process.env.NODE_ENV === "test" ||
+  process.env.VITEST === "true" ||
+  process.env.VITEST === "1" ||
+  Boolean(process.env.VITEST_WORKER_ID);
 const resolvedSiteUrl =
   (typeof window !== "undefined" && window.location?.origin) || resolveUrlConfig().siteUrl || "https://revealmarket.xyz";
 
-if (!walletConnectEnabled && typeof console !== "undefined") {
+if (!walletConnectEnabled && !isTestEnv && typeof console !== "undefined") {
   console.warn("WalletConnect disabled: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set.");
 }
 

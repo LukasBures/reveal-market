@@ -121,7 +121,10 @@ export function FeaturedMarketsClient({
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
 
   useEffect(() => {
-    setIntersectionSupported(typeof window !== "undefined" && "IntersectionObserver" in window);
+    const hasObserver =
+      (typeof window !== "undefined" && "IntersectionObserver" in window) ||
+      (typeof globalThis !== "undefined" && "IntersectionObserver" in globalThis);
+    setIntersectionSupported(hasObserver);
   }, []);
 
   useEffect(() => {

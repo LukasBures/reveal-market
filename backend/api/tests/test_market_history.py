@@ -37,8 +37,8 @@ def _seed_market(db_session, event_id: str = "evt-history"):
     db_session.flush()
     db_session.add_all(
         [
-            models.MarketClobToken(market_id=market.id, token_id="token-yes", side="yes"),
-            models.MarketClobToken(market_id=market.id, token_id="token-no", side="no"),
+            models.MarketClobToken(market_id=market.id, token_id="token-yes", side="yes"),  # noqa: S106
+            models.MarketClobToken(market_id=market.id, token_id="token-no", side="no"),  # noqa: S106
         ]
     )
     db_session.commit()
