@@ -125,6 +125,12 @@ class Settings(BaseSettings):
     polymarket_sync_lease_jitter_seconds: float = Field(default=2.0, ge=0)
     poll_interval_seconds: int = Field(default=300, ge=1)
     poll_interval_jitter_seconds: float = Field(default=3.0, ge=0)
+    maintenance_poll_seconds: float = Field(
+        default=300.0,
+        ge=0,
+        description="How often to run maintenance loops (0 disables).",
+    )
+    maintenance_lease_key: str = Field(default="reveal_market_worker:maintenance_lease")
     api_base_url: str | None = Field(
         default_factory=lambda: str(PRESET.get("api_internal_base_url", "http://localhost:8000"))
     )

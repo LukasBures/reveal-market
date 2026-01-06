@@ -148,6 +148,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_RESOLVED_RETENTION_SECONDS` | Age threshold used for retention reporting (deletion currently disabled). |
 | `RM_RESOLVED_RETENTION_DRY_RUN` | Dry-run guard; retention deletions are currently forced to dry-run. |
 | `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky resolution fetches. |
+| `RM_MAINTENANCE_POLL_SECONDS`, `RM_MAINTENANCE_LEASE_KEY` | Cadence and Redis lease key for the retention/backfill maintenance loop. |
 
 ### On-chain reads & backfills
 

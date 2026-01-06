@@ -119,6 +119,46 @@ async def _release_sync_lease(redis_client: Redis | None) -> None:
         )
 
 
+async def _acquire_maintenance_lease(redis_client: Redis | None) -> bool:
+    """Best-effort lease so only one worker runs maintenance at a time."""
+
+    if redis_client is None:
+        return True
+    ttl = max(int(runtime.settings.maintenance_poll_seconds), 5)
+    try:
+        acquired = await redis_client.set(
+            runtime.settings.maintenance_lease_key,
+            str(time.time()),
+            nx=True,
+            ex=ttl,
+        )
+        return bool(acquired)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.maintenance.lease_error",
+            message="failed to acquire maintenance lease",
+            error=str(exc),
+        )
+        return True
+
+
+async def _release_maintenance_lease(redis_client: Redis | None) -> None:
+    if redis_client is None:
+        return
+    try:
+        await redis_client.delete(runtime.settings.maintenance_lease_key)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.maintenance.lease_release_failed",
+            message="failed to release maintenance lease",
+            error=str(exc),
+        )
+
+
 async def publish_heartbeat(redis_client: Redis | None, stats: dict[str, Any]) -> None:
     """Update a Redis key so external monitors can assert liveness."""
 
@@ -210,7 +250,7 @@ async def _handle_sync_failure(
 
 
 async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary, int, int, float]:
-    """Ingest paginated Polymarket data and apply retention/backfill passes."""
+    """Ingest paginated Polymarket data."""
     start = time.perf_counter()
     heartbeat_interval = max(runtime.settings.container_heartbeat_seconds, 10)
     last_heartbeat = time.monotonic()
@@ -343,68 +383,6 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                                 interim_stats["polymarket_ok"] = True
                                 await publish_heartbeat(redis_client, interim_stats)
                                 last_heartbeat = now
-                    await apply_retention_cleanup_async(session, summary)
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="worker.sync.retention_complete",
-                        message="retention cleanup finished",
-                    )
-                    backfilled = await backfill_missing_resolutions_async(session, summary)
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="worker.sync.backfill_complete",
-                        message="resolution backfill finished",
-                        backfilled=backfilled,
-                    )
-                    if runtime.settings.factory_address and runtime.settings.rpc_url:
-                        updated = await backfill_market_addresses(
-                            session,
-                            rpc_url=str(runtime.settings.rpc_url),
-                            factory_address=str(runtime.settings.factory_address),
-                            get_markets_missing_address=repository_async.list_markets_missing_address,
-                        )
-                        if updated:
-                            log_event(
-                                logger,
-                                logging.INFO,
-                                event="worker.resolution.backfill_addresses",
-                                message="backfilled market addresses",
-                                count=updated,
-                            )
-                        params_updated = await backfill_market_params(
-                            session,
-                            rpc_url=str(runtime.settings.rpc_url),
-                            factory_address=str(runtime.settings.factory_address),
-                            get_markets_for_sync=repository_async.list_markets_for_factory_sync,
-                        )
-                        if params_updated:
-                            log_event(
-                                logger,
-                                logging.INFO,
-                                event="worker.market_params.backfill",
-                                message="backfilled market factory params",
-                                count=params_updated,
-                            )
-                    if backfilled:
-                        log_event(
-                            logger,
-                            logging.INFO,
-                            event="worker.resolution.backfill_complete",
-                            message="backfilled missing resolution snapshots",
-                            count=backfilled,
-                        )
-                        gap_count = await log_resolution_gaps_async(session)
-                        log_event(
-                            logger,
-                            logging.INFO,
-                            event="worker.sync.postprocess",
-                            message="post-processing completed",
-                            retention_deleted=summary.markets_deleted,
-                            resolutions_backfilled=summary.resolutions_backfilled,
-                            resolution_gaps=gap_count,
-                        )
                 break
             except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
                 last_exc = exc
@@ -558,6 +536,127 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     return stats
 
 
+async def run_maintenance_loop(redis_client: Redis | None) -> None:
+    """Run retention/backfill maintenance on a fixed cadence."""
+
+    interval = runtime.settings.maintenance_poll_seconds
+    if interval <= 0:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.maintenance.loop_disabled",
+            message="maintenance loop disabled (poll interval <= 0)",
+        )
+        return
+
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.maintenance.loop_start",
+        message="starting maintenance loop",
+        poll_seconds=interval,
+        lease_key=runtime.settings.maintenance_lease_key,
+    )
+    try:
+        while True:
+            loop_start = time.monotonic()
+            lease_acquired = await _acquire_maintenance_lease(redis_client)
+            if not lease_acquired:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.maintenance.skipped_lease",
+                    message="skipping maintenance tick because another worker holds the lease",
+                    lease_key=runtime.settings.maintenance_lease_key,
+                )
+            else:
+                summary = SyncSummary()
+                gap_count = 0
+                address_updates = 0
+                params_updates = 0
+                backfilled = 0
+                try:
+                    async with session_scope() as session:
+                        await apply_retention_cleanup_async(session, summary)
+                        if summary.markets_deleted:
+                            log_event(
+                                logger,
+                                logging.INFO,
+                                event="worker.maintenance.retention_complete",
+                                message="retention cleanup finished",
+                                retention_deleted=summary.markets_deleted,
+                            )
+                        backfilled = await backfill_missing_resolutions_async(session, summary)
+                        if backfilled:
+                            log_event(
+                                logger,
+                                logging.INFO,
+                                event="worker.resolution.backfill_complete",
+                                message="backfilled missing resolution snapshots",
+                                count=backfilled,
+                            )
+                        if runtime.settings.factory_address and runtime.settings.rpc_url:
+                            address_updates = await backfill_market_addresses(
+                                session,
+                                rpc_url=str(runtime.settings.rpc_url),
+                                factory_address=str(runtime.settings.factory_address),
+                                get_markets_missing_address=repository_async.list_markets_missing_address,
+                            )
+                            if address_updates:
+                                log_event(
+                                    logger,
+                                    logging.INFO,
+                                    event="worker.resolution.backfill_addresses",
+                                    message="backfilled market addresses",
+                                    count=address_updates,
+                                )
+                            params_updates = await backfill_market_params(
+                                session,
+                                rpc_url=str(runtime.settings.rpc_url),
+                                factory_address=str(runtime.settings.factory_address),
+                                get_markets_for_sync=repository_async.list_markets_for_factory_sync,
+                            )
+                            if params_updates:
+                                log_event(
+                                    logger,
+                                    logging.INFO,
+                                    event="worker.market_params.backfill",
+                                    message="backfilled market factory params",
+                                    count=params_updates,
+                                )
+                        gap_count = await log_resolution_gaps_async(session)
+                    cache_report = await invalidate_cache_tags(redis_client, summary)
+                    summary.cache_invalidations = cache_report.total
+                    await persist_resolution_cache_updates(redis_client, summary)
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.maintenance.complete",
+                        message="maintenance tick complete",
+                        retention_deleted=summary.markets_deleted,
+                        resolutions_backfilled=backfilled,
+                        resolution_gaps=gap_count,
+                        address_updates=address_updates,
+                        params_updates=params_updates,
+                        cache_invalidations=cache_report.total,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.maintenance.failed",
+                        message="maintenance tick failed",
+                        error=str(exc),
+                    )
+                finally:
+                    await _release_maintenance_lease(redis_client)
+            elapsed = time.monotonic() - loop_start
+            sleep_for = max(interval - elapsed, 0)
+            await asyncio.sleep(sleep_for)
+    except asyncio.CancelledError:  # pragma: no cover - shutdown path
+        return
+
+
 async def run_lock_batches_loop(redis_client: Redis | None) -> None:
     """Continuously attempt lock-batches on a fixed cadence independent of Gamma sync."""
 
@@ -700,9 +799,11 @@ async def run_worker() -> None:
     proof_worker_task: asyncio.Task | None = None
     settlement_worker_task: asyncio.Task | None = None
     lock_batches_task: asyncio.Task | None = None
+    maintenance_task: asyncio.Task | None = None
     if redis_client is not None:
         proof_worker_task = asyncio.create_task(run_proof_queue_worker(redis_client))
         settlement_worker_task = asyncio.create_task(run_settlement_queue_worker(redis_client))
+    maintenance_task = asyncio.create_task(run_maintenance_loop(redis_client))
     lock_batches_task = asyncio.create_task(run_lock_batches_loop(redis_client))
     try:
         while True:
@@ -734,6 +835,10 @@ async def run_worker() -> None:
             await asyncio.sleep(sleep_for)
     finally:
         heartbeat_stop.set()
+        if maintenance_task is not None:
+            maintenance_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintenance_task
         if lock_batches_task is not None:
             lock_batches_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
