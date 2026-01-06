@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from .metrics import StreamerMetrics
 
 logger = logging.getLogger("reveal_market.streamer.data")
-CLOB_PAGE_SIZE = 500
+CLOB_PAGE_SIZE = 1000
 
 
 class DataStreamer:
@@ -350,6 +350,9 @@ class DataStreamer:
             while True:
                 params = {"limit": CLOB_PAGE_SIZE}
                 if cursor:
+                    # Polymarket CLOB REST expects next_cursor for pagination.
+                    params["next_cursor"] = cursor
+                    # Keep legacy cursor param for compatibility if upstream changes.
                     params["cursor"] = cursor
                 res = await client.get(str(self.settings.clob_rest_url), params=params)
                 res.raise_for_status()
@@ -366,6 +369,12 @@ class DataStreamer:
                 cursor_val = (
                     payload.get("next_cursor") or payload.get("nextCursor") if isinstance(payload, dict) else None
                 )
+                if cursor_val and cursor_val == cursor:
+                    logger.warning(
+                        "CLOB REST cursor stalled; ending poll",
+                        extra={"event": "clob.rest.cursor.stalled", "cursor": cursor_val},
+                    )
+                    break
                 cursor = cursor_val or None
                 if cursor is None:
                     break
