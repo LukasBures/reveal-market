@@ -21,7 +21,7 @@ from shared.logging import log_event
 from shared.onchain import get_async_web3, to_checksum
 from shared.onchain.abi import REVEAL_MARKET_ABI
 from shared.poseidon import BATCH_SIZE
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import AsyncWeb3
 from web3.contract.async_contract import AsyncContract
@@ -540,6 +540,8 @@ async def _list_lock_candidates(
     *,
     now: datetime,
     limit: int,
+    after_closes_at: datetime | None = None,
+    after_id: int | None = None,
 ) -> list[shared_models.Market]:
     commitments = select(shared_models.Commitment.market_id).distinct().subquery()
     stmt = (
@@ -554,9 +556,21 @@ async def _list_lock_candidates(
                 shared_models.Market.resolution_status.isnot(None),
             )
         )
-        .order_by(shared_models.Market.closes_at.asc(), shared_models.Market.id.asc())
-        .limit(limit)
     )
+    if after_closes_at is not None:
+        if after_id is not None:
+            stmt = stmt.where(
+                or_(
+                    shared_models.Market.closes_at > after_closes_at,
+                    and_(
+                        shared_models.Market.closes_at == after_closes_at,
+                        shared_models.Market.id > after_id,
+                    ),
+                )
+            )
+        else:
+            stmt = stmt.where(shared_models.Market.closes_at > after_closes_at)
+    stmt = stmt.order_by(shared_models.Market.closes_at.asc(), shared_models.Market.id.asc()).limit(limit)
     rows = await session.execute(stmt)
     return list(rows.scalars())
 
@@ -594,13 +608,26 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
 
     web3 = get_async_web3(str(runtime.settings.rpc_url))
     submitted = 0
+    max_submissions = runtime.settings.lock_batches_max_per_tick
+    page_size = max(max_submissions, 5)
+    after_closes_at: datetime | None = None
+    after_id: int | None = None
     async with session_scope() as session:
-        candidates = await _list_lock_candidates(
-            session,
-            now=now,
-            limit=runtime.settings.lock_batches_max_per_tick,
-        )
-        for market in candidates:
+        while submitted < max_submissions:
+            candidates = await _list_lock_candidates(
+                session,
+                now=now,
+                limit=page_size,
+                after_closes_at=after_closes_at,
+                after_id=after_id,
+            )
+            if not candidates:
+                break
+            for market in candidates:
+                after_closes_at = market.closes_at
+                after_id = market.id
+                if submitted >= max_submissions:
+                    break
             if not market.market_address:
                 continue
             use_relayer_for_market = use_relayer
@@ -813,7 +840,7 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                 )
                 LOCK_BATCHES_COUNTER.labels(outcome="failed").inc()
                 continue
-        await session.flush()
+            await session.flush()
     summary.lock_batches_submitted += submitted
     return submitted
 
