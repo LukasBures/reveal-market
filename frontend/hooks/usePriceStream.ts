@@ -1,18 +1,39 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchPriceHistory } from "@/lib/pricing-client";
+import { fetchPriceHistory, type PriceHistoryInterval } from "@/lib/pricing-client";
 import { seedHistory, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 
-export function usePriceStream(marketId: string, outcome = 0, tokenIds: string[] = []) {
+export type PriceHistoryRange = "1H" | "24H" | "7D" | "MAX";
+
+const RANGE_CONFIG: Record<PriceHistoryRange, { interval: PriceHistoryInterval; fidelity: number }> = {
+  "1H": { interval: "1h", fidelity: 1 },
+  "24H": { interval: "1d", fidelity: 5 },
+  "7D": { interval: "1w", fidelity: 30 },
+  "MAX": { interval: "max", fidelity: 240 },
+};
+
+export function usePriceStream(
+  marketId: string,
+  outcome = 0,
+  tokenIds: string[] = [],
+  range: PriceHistoryRange = "24H",
+) {
   const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const streamState = usePriceStreamStore(marketId, tokenIds);
+  const tokenId = tokenIds[outcome];
+  const historyConfig = RANGE_CONFIG[range] ?? RANGE_CONFIG["24H"];
 
   useEffect(() => {
     setHistoryLoaded(false);
+    setError(null);
     let cancelled = false;
     (async () => {
       try {
-        const data = await fetchPriceHistory(marketId, outcome, 500);
+        const data = await fetchPriceHistory(marketId, outcome, {
+          interval: historyConfig.interval,
+          fidelity: historyConfig.fidelity,
+          tokenId,
+        });
         if (cancelled) return;
         seedHistory(
           marketId,
@@ -35,7 +56,7 @@ export function usePriceStream(marketId: string, outcome = 0, tokenIds: string[]
     return () => {
       cancelled = true;
     };
-  }, [marketId, outcome, tokenIds]);
+  }, [marketId, outcome, tokenId, historyConfig.interval, historyConfig.fidelity, tokenIds]);
 
   const chartPoints = useMemo(
     () =>

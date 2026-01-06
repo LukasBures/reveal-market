@@ -173,6 +173,16 @@ class GroupedMarketsResponse(BaseModel):
     aggregate_liquidity_usd: float | None = None
 
 
+class PriceHistoryPoint(BaseModel):
+    t: int = Field(description="UTC timestamp (seconds)")
+    p: float = Field(description="Price")
+
+
+class PriceHistoryResponse(BaseModel):
+    history: list[PriceHistoryPoint]
+    source: str | None = None
+
+
 class MarketCaps(BaseModel):
     max_stake_zen: Decimal
     max_user_stake_per_market_zen: Decimal

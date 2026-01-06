@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePriceStream } from "@/hooks/usePriceStream";
+import { usePriceStream, type PriceHistoryRange } from "@/hooks/usePriceStream";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { formatTime } from "@/lib/formatters";
 import { MarketFomoOverlay } from "./MarketFomoOverlay";
@@ -13,9 +13,9 @@ type Props = {
 };
 
 export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] }: Props) {
-  const [range, setRange] = useState<"1H" | "24H" | "7D" | "MAX">("24H");
+  const [range, setRange] = useState<PriceHistoryRange>("24H");
   const selectedOutcome = 0;
-  const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds);
+  const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds, range);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [fallbackHistory, setFallbackHistory] = useState<

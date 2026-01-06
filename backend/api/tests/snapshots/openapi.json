@@ -898,6 +898,163 @@
         }
       }
     },
+    "/markets/{market_id}/history": {
+      "get": {
+        "tags": [
+          "markets"
+        ],
+        "summary": "Market Price History",
+        "description": "Return cached CLOB price history for a market/outcome combination.",
+        "operationId": "market_price_history_markets__market_id__history_get",
+        "parameters": [
+          {
+            "name": "market_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Market Id"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Outcome index or yes/no label for the market token",
+              "title": "Outcome"
+            },
+            "description": "Outcome index or yes/no label for the market token"
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit CLOB token id override",
+              "title": "Token Id"
+            },
+            "description": "Explicit CLOB token id override"
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "1m",
+                    "1h",
+                    "6h",
+                    "1d",
+                    "1w",
+                    "max"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Duration window ending now (mutually exclusive with startTs/endTs)",
+              "title": "Interval"
+            },
+            "description": "Duration window ending now (mutually exclusive with startTs/endTs)"
+          },
+          {
+            "name": "startTs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startts"
+            }
+          },
+          {
+            "name": "endTs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endts"
+            }
+          },
+          {
+            "name": "fidelity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1440,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fidelity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/markets/{event_id}": {
       "get": {
         "tags": [
@@ -3057,6 +3214,53 @@
           "positions"
         ],
         "title": "PositionsResponse"
+      },
+      "PriceHistoryPoint": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T",
+            "description": "UTC timestamp (seconds)"
+          },
+          "p": {
+            "type": "number",
+            "title": "P",
+            "description": "Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "p"
+        ],
+        "title": "PriceHistoryPoint"
+      },
+      "PriceHistoryResponse": {
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/PriceHistoryPoint"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "history"
+        ],
+        "title": "PriceHistoryResponse"
       },
       "PricingQuotePayload": {
         "properties": {

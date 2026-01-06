@@ -9,6 +9,7 @@ SUGGEST_PREFIX = f"{CACHE_VERSION}:markets:suggest"
 RESOLUTION_PREFIX = f"{CACHE_VERSION}:markets:resolution"
 PROOF_PREFIX = f"{CACHE_VERSION}:proofs:receipt"
 GROUP_PREFIX = f"{CACHE_VERSION}:markets:group"
+CLOB_PRICES_HISTORY_PREFIX = f"{CACHE_VERSION}:clob:prices-history"
 
 
 def markets_list_cache_key(
@@ -78,6 +79,26 @@ def proof_receipt_cache_key(condition_id: str) -> str:
 def group_cache_key(group_slug: str) -> str:
     slug = _slugify(group_slug)
     return f"{GROUP_PREFIX}:{slug}"
+
+
+def clob_prices_history_cache_key(
+    token_id: str,
+    interval: str | None,
+    fidelity: int | None,
+    start_ts: int | None,
+    end_ts: int | None,
+) -> str:
+    """Build the cache key used for CLOB price history lookups."""
+
+    normalized_token = (token_id or "*").strip() or "*"
+    normalized_interval = (interval or "*").strip().lower() or "*"
+    normalized_fidelity = str(fidelity) if fidelity is not None else "*"
+    normalized_start = str(start_ts) if start_ts is not None else "*"
+    normalized_end = str(end_ts) if end_ts is not None else "*"
+    return (
+        f"{CLOB_PRICES_HISTORY_PREFIX}:{normalized_token}:"
+        f"{normalized_interval}:{normalized_fidelity}:{normalized_start}:{normalized_end}"
+    )
 
 
 def _slugify(value: str | None) -> str:

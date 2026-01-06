@@ -7,13 +7,19 @@ import inspect
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from py_clob_client.client import ClobClient
 from shared.cache_async import add_tag, add_tags, get_json, get_schema_tag, set_json
-from shared.cache_keys import markets_list_cache_key, resolution_cache_key, suggest_cache_key
+from shared.cache_keys import (
+    clob_prices_history_cache_key,
+    markets_list_cache_key,
+    resolution_cache_key,
+    suggest_cache_key,
+)
 from shared.logging import log_event
 from shared.onchain import OnChainConfigurationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +34,25 @@ from app.services import markets as market_svc
 from app.services.cache_client import get_cache_client
 
 router = APIRouter()
+
+CLOB_HISTORY_DEFAULT_HOST = "https://clob.polymarket.com"
+CLOB_HISTORY_MAX_RANGE_SECONDS = 30 * 24 * 60 * 60
+HistoryInterval = Literal["1m", "1h", "6h", "1d", "1w", "max"]
+
+
+def _history_cache_ttl_seconds(interval: str | None) -> int:
+    normalized = (interval or "").strip().lower()
+    if normalized in {"1m", "1h"}:
+        return 60
+    if normalized == "6h":
+        return 300
+    if normalized == "1d":
+        return 900
+    if normalized == "1w":
+        return 1800
+    if normalized == "max":
+        return 43200
+    return 600
 
 
 @router.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])
@@ -898,6 +923,200 @@ async def read_resolution(
         request, cache_key=cache_key if cache_available else None, hit=False, source="markets:resolution"
     )
     return summary_model
+
+
+@router.get("/markets/{market_id}/history", response_model=schemas.PriceHistoryResponse, tags=["markets"])
+async def market_price_history(
+    request: Request,
+    market_id: str,
+    outcome: Annotated[
+        str | None,
+        Query(description="Outcome index or yes/no label for the market token"),
+    ] = None,
+    token_id: Annotated[str | None, Query(description="Explicit CLOB token id override")] = None,
+    interval: Annotated[
+        HistoryInterval | None,
+        Query(description="Duration window ending now (mutually exclusive with startTs/endTs)"),
+    ] = None,
+    start_ts: Annotated[int | None, Query(ge=0, alias="startTs")] = None,
+    end_ts: Annotated[int | None, Query(ge=0, alias="endTs")] = None,
+    fidelity: Annotated[int | None, Query(ge=1, le=1440)] = None,
+    session: AsyncSession = Depends(get_session),
+) -> schemas.PriceHistoryResponse:
+    """Return cached CLOB price history for a market/outcome combination."""
+
+    start = time.perf_counter()
+    normalized_market_id = market_id.strip()
+    if not normalized_market_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
+
+    if interval and (start_ts is not None or end_ts is not None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interval_exclusive")
+    if start_ts is not None and end_ts is not None:
+        if end_ts < start_ts:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_time_range")
+        if end_ts - start_ts > CLOB_HISTORY_MAX_RANGE_SECONDS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="range_too_large")
+    if interval is None and start_ts is None and end_ts is None:
+        interval = "1d"
+
+    market = await crud.get_market_by_event_id(session, normalized_market_id)
+    if market is None:
+        market = await crud.get_market_by_condition_id(session, normalized_market_id)
+    if market is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
+
+    token_rows = sorted(
+        list(getattr(market, "clob_tokens_rel", []) or []),
+        key=lambda row: getattr(row, "id", 0),
+    )
+    token_ids = [row.token_id for row in token_rows if row.token_id]
+    gamma_meta = getattr(market, "gamma_metadata_rel", None)
+    if not token_ids and gamma_meta is not None:
+        if getattr(gamma_meta, "clob_token_id_yes", None):
+            token_ids.append(str(gamma_meta.clob_token_id_yes))
+        if getattr(gamma_meta, "clob_token_id_no", None):
+            token_ids.append(str(gamma_meta.clob_token_id_no))
+
+    resolved_token_id = token_id.strip() if isinstance(token_id, str) else None
+    if resolved_token_id and token_ids and resolved_token_id not in token_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="clob_token_not_found")
+    if not resolved_token_id:
+        if not token_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="clob_token_missing")
+        if outcome is None:
+            if len(token_ids) == 1:
+                resolved_token_id = token_ids[0]
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="outcome_required")
+        else:
+            normalized_outcome = outcome.strip().lower()
+            if normalized_outcome in {"yes", "no"}:
+                match = next(
+                    (row.token_id for row in token_rows if row.side == normalized_outcome and row.token_id),
+                    None,
+                )
+                if match:
+                    resolved_token_id = match
+                elif len(token_ids) >= 2:
+                    resolved_token_id = token_ids[0] if normalized_outcome == "yes" else token_ids[1]
+            else:
+                try:
+                    outcome_index = int(normalized_outcome)
+                except (TypeError, ValueError):
+                    outcome_index = None
+                if outcome_index is not None and 0 <= outcome_index < len(token_ids):
+                    resolved_token_id = token_ids[outcome_index]
+    if not resolved_token_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="clob_token_not_found")
+
+    cache = await get_cache_client()
+    cache_key = clob_prices_history_cache_key(resolved_token_id, interval, fidelity, start_ts, end_ts)
+    if cache is not None:
+        cached_payload = await get_json(cache, cache_key)
+        if cached_payload is not None:
+            try:
+                response = schemas.PriceHistoryResponse.model_validate(cached_payload)
+            except Exception:
+                response = None
+            if response is not None:
+                update_cache_context(request, cache_key=cache_key, hit=True, source="markets:history")
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="markets.history.cache_hit",
+                    message="served market history from cache",
+                    cache_hit=True,
+                    duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                    market_id=normalized_market_id,
+                    token_id=resolved_token_id,
+                    interval=interval,
+                    fidelity=fidelity,
+                )
+                return response
+
+    params: dict[str, object] = {"market": resolved_token_id}
+    if interval:
+        params["interval"] = interval
+    if fidelity is not None:
+        params["fidelity"] = fidelity
+    if start_ts is not None:
+        params["startTs"] = start_ts
+    if end_ts is not None:
+        params["endTs"] = end_ts
+
+    host = str(settings.clob_host) if settings.clob_host else CLOB_HISTORY_DEFAULT_HOST
+    url = f"{host.rstrip('/')}/prices-history"
+    try:
+        async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
+            response = await client.get(url, params=params)
+    except httpx.RequestError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.history.error",
+            message="failed to fetch clob history",
+            market_id=normalized_market_id,
+            token_id=resolved_token_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="clob_request_failed") from exc
+
+    if response.status_code == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="clob_market_not_found")
+    if response.status_code >= 400:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="markets.history.error",
+            message="clob history returned error",
+            market_id=normalized_market_id,
+            token_id=resolved_token_id,
+            status_code=response.status_code,
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="clob_request_failed")
+
+    payload = response.json()
+    raw_history = payload.get("history")
+    history: list[schemas.PriceHistoryPoint] = []
+    if isinstance(raw_history, list):
+        for item in raw_history:
+            if not isinstance(item, dict):
+                continue
+            try:
+                timestamp = int(item.get("t"))
+                price = float(item.get("p"))
+            except (TypeError, ValueError):
+                continue
+            history.append(schemas.PriceHistoryPoint(t=timestamp, p=price))
+
+    response_payload = schemas.PriceHistoryResponse(history=history, source="clob")
+    if cache is not None:
+        ttl_seconds = _history_cache_ttl_seconds(interval)
+        response_dump = response_payload.model_dump(mode="json")
+        await set_json(cache, cache_key, response_dump, ttl_seconds)
+        schema_tag = await get_schema_tag(cache, settings.schema_version_key)
+        await add_tag(cache, schema_tag, cache_key)
+        if getattr(market, "event_id", None):
+            await add_tag(cache, f"market:{market.event_id}", cache_key)
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    log_event(
+        logger,
+        logging.INFO,
+        event="markets.history.response",
+        message="served market history",
+        market_id=normalized_market_id,
+        token_id=resolved_token_id,
+        interval=interval,
+        fidelity=fidelity,
+        result_count=len(history),
+        duration_ms=duration_ms,
+    )
+    update_cache_context(
+        request, cache_key=cache_key if cache is not None else None, hit=False, source="markets:history"
+    )
+    return response_payload
 
 
 @router.get("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])

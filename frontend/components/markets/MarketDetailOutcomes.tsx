@@ -342,7 +342,11 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
         const historyPrices = await Promise.all(
           Array.from({ length: outcomes.length }, async (_, index) => {
             try {
-              const history = await fetchPriceHistory(streamMarketId, index, 1);
+              const history = await fetchPriceHistory(streamMarketId, index, {
+                interval: "1h",
+                fidelity: 1,
+                tokenId: tokenIds[index],
+              });
               if (!Array.isArray(history) || history.length === 0) return undefined;
               const latest = history[history.length - 1];
               const display = Number(latest.display_price ?? latest.price);

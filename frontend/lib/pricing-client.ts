@@ -39,6 +39,26 @@ export type FxQuote = {
   source?: string;
 };
 
+export type PriceHistoryPoint = {
+  t: number;
+  p: number;
+};
+
+export type PriceHistoryResponse = {
+  history: PriceHistoryPoint[];
+  source?: string;
+};
+
+export type PriceHistoryInterval = "1m" | "1h" | "6h" | "1d" | "1w" | "max";
+
+export type PriceHistoryOptions = {
+  interval?: PriceHistoryInterval;
+  fidelity?: number;
+  startTs?: number;
+  endTs?: number;
+  tokenId?: string;
+};
+
 import { resolveUrlConfig } from "@/lib/env-presets";
 
 const FX_DEFAULT_PATH = "/fx/zen-usd";
@@ -243,19 +263,52 @@ export async function fetchPricingQuoteWithMeta(
 export async function fetchPriceHistory(
   marketId: string,
   outcome: number,
-  limit = 500,
+  options: PriceHistoryOptions = {},
 ): Promise<Array<{ timestamp: string; price: string; display_price: string; fx_stale?: boolean }>> {
-  const res = await fetch(
-    getStreamerEndpoint(`/history?market_id=${encodeURIComponent(marketId)}&outcome=${outcome}&limit=${limit}`, true),
-    {
-      cache: "no-store",
-    },
-  );
+  if (!marketId) {
+    return [];
+  }
+  const params = new URLSearchParams();
+  if (options.interval) {
+    params.set("interval", options.interval);
+  }
+  if (typeof options.fidelity === "number" && Number.isFinite(options.fidelity)) {
+    params.set("fidelity", String(options.fidelity));
+  }
+  if (typeof options.startTs === "number" && Number.isFinite(options.startTs)) {
+    params.set("startTs", String(Math.floor(options.startTs)));
+  }
+  if (typeof options.endTs === "number" && Number.isFinite(options.endTs)) {
+    params.set("endTs", String(Math.floor(options.endTs)));
+  }
+  if (options.tokenId) {
+    params.set("token_id", options.tokenId);
+  }
+  if (Number.isFinite(outcome)) {
+    params.set("outcome", String(outcome));
+  }
+  const query = params.toString();
+  const url = getEndpoint(`/markets/${encodeURIComponent(marketId)}/history${query ? `?${query}` : ""}`);
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`History fetch failed: ${res.status}`);
   }
-  const payload = await res.json();
-  return Array.isArray(payload.data) ? payload.data : [];
+  const payload = (await res.json()) as PriceHistoryResponse;
+  const history = Array.isArray(payload?.history) ? payload.history : [];
+  return history
+    .map((point) => {
+      const ts = Number(point.t);
+      const price = Number(point.p);
+      if (!Number.isFinite(ts) || !Number.isFinite(price)) {
+        return null;
+      }
+      const timestamp = new Date(ts * 1000).toISOString();
+      const priceStr = String(price);
+      return { timestamp, price: priceStr, display_price: priceStr };
+    })
+    .filter((entry): entry is { timestamp: string; price: string; display_price: string; fx_stale?: boolean } =>
+      Boolean(entry),
+    );
 }
 
 export type TradeCommitResponse = {
