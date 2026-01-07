@@ -2,6 +2,20 @@
 
 This workspace contains the Polygon hedging LP vault used to fund hedging on Polymarket. It is self-contained with its own dependencies under `contracts/polygon/lib/` (OpenZeppelin v5.0.0 and forge-std v1.9.1).
 
+## High-Level Architecture
+
+1. **BaseLpVault** holds USDC, mints ERC20 shares, and allows a designated hedger to borrow/repay within utilization caps.
+2. **HedgeStrategyExecutor** validates EIP-712 orders, enforces caps/whitelists, and calls the vault to fund hedges.
+3. **Owner controls** pause/unpause, update hedger/signer/limits, and adjust utilization guardrails.
+
+```mermaid
+flowchart TD
+  User --> BaseLpVault
+  Hedger --> HedgeStrategyExecutor --> BaseLpVault
+  Owner --> BaseLpVault
+  Owner --> HedgeStrategyExecutor
+```
+
 ## Structure
 - `src/BaseLpVault.sol` – ERC20 share token vault over USDC (6 decimals) with hedger-controlled borrow/repay, pause, utilization cap, and strict accounting.
 - `src/HedgeStrategyExecutor.sol` – EIP-712 order executor that acts as the vault hedger, enforces nonces/expiry/notional+slippage caps, and borrows USDC to whitelisted receivers.

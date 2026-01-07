@@ -4,6 +4,22 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 
 ---
 
+## High-Level Architecture
+
+1. **Startup wiring**: `app.server.create_app` loads settings, configures logging/CORS/security middleware, initializes Goldsky (when configured), runs migrations, validates the on-chain verifier circuit hash (when RPC + verifier config are present), records the schema revision tag, and starts background tasks (cache refresh, quote sweeps, relayer queue processing, API heartbeat metrics).
+2. **Request flow**: HTTP request enters middleware (request ID, structured logs, rate limiting, security headers) then hits route handlers. Cacheable endpoints read/write Redis JSON keys with tags; cache misses fall back to async SQLAlchemy queries before shaping responses.
+3. **Pricing and trade**: `/pricing/quote` fetches FX from the streamer, signs the QUOTE_V1 digest, and stores quotes in Postgres; `/trade/commit` validates quotes, signs CommitAuth payloads, and forwards to the relayer (or Redis queue fallback).
+4. **Observability**: `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. `/metrics` exports Prometheus counters, and a Redis heartbeat publishes rolling request stats.
+
+```mermaid
+flowchart LR
+  Clients --> API
+  API --> Postgres
+  API --> Redis
+  API --> Streamer
+  API --> Relayer
+```
+
 ## 1. Responsibilities at a Glance
 
 | Area | What the API handles |
@@ -11,7 +27,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 | Market discovery | `/markets`, `/categories/{slug}`, `/markets/suggest` (all Redis-backed) |
 | Market detail & settlement | `/markets/{event_id}` and `/resolution/{condition_id}` with sync invalidation from the worker |
 | Trade + relayer | `/pricing/quote`, `/pricing/preview`, `/pricing/submit`, `/trade/commit`, `/positions`, `/claim/bundles`, `/trade/claim`, `/trade/status`, relayer ingest hooks |
-| Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, and Polymarket; `/metrics` exposes Prometheus counters |
+| Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exposes Prometheus counters |
 | Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
 
@@ -21,20 +37,20 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 
 ## Current implementation snapshot
 
-- **Lifespan** – Runs Alembic migrations on startup, configures logging/CORS/security headers, builds async Postgres/Redis clients, and exits hard when critical envs are missing in prod.
+- **Lifespan** – Runs Alembic migrations, validates on-chain verifier circuit hash when configured, records the schema revision tag, configures logging/CORS/security headers, builds async Postgres/Redis clients, and starts background loops (cache refresh, quote sweeps, relayer queue, API heartbeat).
 - **Caching** – List/detail/resolution payloads cached in Redis JSON with schema + logical tags; startup and interval hydrators repopulate `/markets`, categories, and suggest. Clean bypass when Redis is down (no tag pollution).
 - **Search & detail** – Market payloads are normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns removed. `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event}` are async + cache-tagged; search uses indexed Postgres vectors (no cache).
-- **Health/metrics** – `/health` fans DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` for probes.
-- **Signed pricing** - `/pricing/quote` ignores client FX, fetches streamer FX, enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and persists quotes in Postgres; `/pricing/preview` returns unsigned previews; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
+- **Health/metrics** – `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` remain probe-friendly.
+- **Signed pricing** - `/pricing/quote` ignores client FX, pulls FX from the streamer endpoint (hard-pinned in `app.pricing`), enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and persists quotes in Postgres; `/pricing/preview` returns unsigned previews; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
 - **Trade + relayer** - `/trade/commit` consumes a quote, builds CommitAuth signatures, forwards to the relayer (with Redis queue fallback), and records commitment snapshots; `/positions`, `/claim/bundles`, `/trade/claim`, and `/trade/status` expose claim/settlement state; relayer ingest hooks can push commitments plus settlement roots/counts from `lockBatches` so proofs can be generated per batch.
 - **Rate limiting** - Async Redis-backed middleware with trusted proxy allowlist plus in-memory fallback; disabled by default.
-- **Observability** – Structured logs with request_id, Prometheus instrumentation, cache hit/miss counters, quote expiry sweeper; Python healthcheck scripts for Docker probes.
+- **Observability** – Structured logs with request_id, Prometheus instrumentation, cache hit/miss counters, API heartbeat payloads in Redis, quote expiry sweeper, and Python healthcheck scripts for Docker probes.
 
 ---
 
 ## 2. Architecture & Request Lifecycle
 
-1. **Startup**: `app.server` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, and wires middleware (TrustedHost, CORS, security headers, Prometheus).
+1. **Startup**: `app.server` loads settings, configures logging, runs Alembic migrations via `app.database.run_migrations()`, validates the on-chain verifier circuit hash (when configured), records the schema revision tag, starts background loops, and wires middleware (TrustedHost, CORS, security headers, Prometheus).
 2. **Async-first**: Route handlers and background tasks stay async; any blocking third-party clients (for example CLOB orderbook fetches) run via `asyncio.to_thread` so the uvicorn loop never stalls.
 3. **Request entry**: `request_context_middleware` assigns/propagates `x-request-id`, measures latency, and emits structured events (`http.request.*`).
 4. **Routing**:
@@ -98,7 +114,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | `RM_MAX_STAKE_ZEN` | Per-quote stake cap (UI surfaces 0.1 ZEN max; quotes above this return 400). |
 | `RM_MAX_USER_STAKE_PER_MARKET_ZEN` | Per-user cumulative cap per market (used when `market_id` + `wallet_address` are provided). |
 | `RM_MAX_MARKET_STAKE_ZEN` | Per-market cumulative cap across all users. |
-| FX feed | Pricing uses `RM_FX_FEED_URL` (default `http://streamer:8100/fx/zen-usd`); quotes reject when FX is stale/unavailable and responses include FX freshness metadata. |
+| FX feed | Pricing fetches FX from the streamer endpoint and ignores client FX. The fetcher is currently hard-pinned to `http://streamer:8100/fx/zen-usd` in `app.pricing` (settings kept for future overrides). Quotes reject when FX is stale/unavailable and responses include FX freshness metadata. |
 | `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `PRICING_SIGNER_ADDRESS` | Required for signed quotes. The API signs an ABI-packed QUOTE_V1 digest (chain id, market address, wallet, outcome, stake wei, FX 1e8, expiry, quoteId) that is validated and consumed off-chain by `/pricing/submit` and `/trade/commit`. |
 
 ### How the pipeline stays fresh
@@ -114,17 +130,17 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 | Variable | Description |
 | --- | --- |
 | `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Control how `/health` checks the upstream feed. |
-| `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_MARKET_IMPLEMENTATION_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Required only for `/markets/onchain` or when the API needs to interact with on-chain data. |
+| `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_MARKET_IMPLEMENTATION_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_CIRCUIT_HASH`, `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Required only for `/markets/onchain` or when the API needs to interact with on-chain data. When `RM_RPC_URL`, `RM_VERIFIER_ADDRESS`, and `RM_CIRCUIT_HASH` are set, startup validates the on-chain verifier hash matches the configured circuit. |
 | `RM_POLYGON_RPC_URL`, `RM_POLYGON_CTF_ADDRESS`, `RM_POLYMARKET_CLOB_HOST` | Optional overrides for Polygon + CLOB integrations. |
 
 Use `.env` or `SETTINGS_FILE` to load a dedicated config file (see `app.config.get_settings()`).
 
 ### Pricing & signed quotes
 
-- `/pricing/quote` requires `market_id`, `wallet_address`, and `outcome_id`; `market_address` is optional and auto-created when missing. It ignores any client-supplied FX and signs the QUOTE_V1 digest (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
+- `/pricing/quote` requires `market_id`, `wallet_address`, and `outcome_id`; `market_address` is optional and auto-created when missing. It ignores any client-supplied FX, fetches FX from the streamer endpoint, and signs the QUOTE_V1 digest (`QUOTE_V1`, chainid, market, expectedUser, outcomeId, stake_wei, zen_usd_scaled, expiry, quoteId).
 - `/pricing/submit` verifies the same digest, enforces expiry, and optionally checks FX drift vs the live feed. Quotes are stored in Postgres with the expiry sweeper; Redis is not used for quote persistence.
 - Set `RM_PRICING_CHAIN_ID` to the chain where markets live; keep the signer key private and expose `PRICING_SIGNER_ADDRESS` for clients/ops that want to display the active signer.
- - Liveness probe: `/live` (no deps). Readiness probe: `/ready` or `/healthz` (checks DB, Redis, worker heartbeat, Polymarket, pricing signer, CORS). Metrics: `/metrics`.
+ - Liveness probe: `/live` (no deps). Readiness probe: `/ready` or `/healthz` (checks DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, CORS, FX CORS). Metrics: `/metrics`.
 
 #### QUOTE_V1 digest (do not change without backend/frontend coordination)
 
@@ -164,7 +180,7 @@ keccak256(
 
 - Probes: `/live` (liveness) and `/ready`/`/healthz` (readiness: DB, Redis, worker heartbeat, Polymarket, signer, CORS). Metrics at `/metrics`.
 - Cache strategy: versioned keys (`v1:`) with tag invalidation; startup and jittered refresh hydrators; hydrate lock prevents stampedes; clean bypass when Redis is unavailable.
-- Pricing quotes: FX fetched server-side with retry/backoff + cache; per-user/per-market caps enforced via the quote ledger; quote expiry sweeper runs in the background (interval configurable via `RM_QUOTE_EXPIRY_SWEEP_INTERVAL_SECONDS`).
+- Pricing quotes: FX fetched server-side with retry/backoff + cache (streamer endpoint); per-user/per-market caps enforced via the quote ledger; quote expiry sweeper runs in the background (interval configurable via `RM_QUOTE_EXPIRY_SWEEP_INTERVAL_SECONDS`).
 - Relayer queue: failed relayer calls are queued in Redis (`RM_RELAYER_QUEUE_KEY`) and replayed by the background loop; `/trade/status` resolves job ids once results are recorded.
 - Clearing caches: bumping cache version or flushing Redis keys with prefix `v1:` invalidates prior entries. Tags (`cache:tag:*`) group list/detail/resolution keys; hydrators will repopulate hot paths.
 
@@ -245,7 +261,7 @@ curl -H "accept: application/json" http://localhost:8000/markets
 | Surface | How to use |
 | --- | --- |
 | Metrics | `GET /metrics` (Prometheus format, includes HTTP latencies, cache hit counters, instrumented by `prometheus_fastapi_instrumentator`). |
-| Health | `GET /health` or run `python -m app.healthcheck`. The HTTP endpoint aggregates DB, Redis, worker heartbeat, and Polymarket dependency states. |
+| Health | `GET /health` or run `python -m app.healthcheck`. The HTTP endpoint aggregates DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. |
 | Logs | Structured via `logging_config.setup_logging()`. Configure with `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`. |
 | Profiling slow queries | Set `RM_DATABASE_ECHO=true` or attach `SQLALCHEMY_SILENCE_UBER_WARNING=1` for verbose output. |
 

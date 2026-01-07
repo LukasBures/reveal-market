@@ -2,6 +2,24 @@
 
 The backend is the heartbeat of Reveal Market’s investable ecosystem. It transforms third-party liquidity into institutional-grade intelligence, ensuring every chart, fee accrual, and settlement insight backing our treasury is verifiable in real time.
 
+## High-Level Architecture
+
+1. **API service**: FastAPI layer that serves cached market data, signed pricing quotes, and trade/relayer orchestration. Redis stores tagged JSON caches; Postgres is the source of truth.
+2. **Worker service**: async ingestion loop that pulls Polymarket Gamma events, normalizes and upserts data, applies resolutions, invalidates caches, and publishes heartbeats/batch stats.
+3. **Cross-service sync**: the worker drives cache invalidation and schema tags; the API hydrates caches and exposes read/write endpoints. Both share SQLAlchemy models and logging utilities.
+
+```mermaid
+flowchart LR
+  Clients --> API
+  API --> Postgres
+  API --> Redis
+  Worker --> Postgres
+  Worker --> Redis
+  Worker --> Polymarket
+  API --> Streamer
+  API --> Relayer
+```
+
 ## Two Services, One Mission
 
 | Component | Investor Benefit |
@@ -18,14 +36,14 @@ Shared SQLAlchemy models, cache helpers, and logging modules guarantee that both
 > - Worker ingestion targets Polymarket’s Gamma API; when the upstream dataset returns `image_url = null`, the frontend falls back to deterministic placeholders. Populate `extra_data.image_url` via the worker once you negotiate richer feeds.
 > - All environments, including local Docker, rely on the live backend—mock API toggles have been removed from the frontend.
 
-## Current Implementation Snapshot (API + Worker)
+## Current implementation snapshot (API + worker)
 
 - **Schema-first storage** – Alembic-managed tables for markets, outcomes, tags, Gamma metadata, clob tokens, resolutions, quotes, settlements (including batch roots/counts), commitments (Poseidon leaves), Merkle paths, prover receipts, hedger metrics, and ops logs. Indexes cover search, status, event/category slugs, and quote expiry; updated_at triggers run everywhere.
 - **Cache tagging + hydration** – Detail/list/resolution responses are JSON cached in Redis with schema + logical tags. Startup and interval hydrators repopulate `/markets`, categories, and suggest; Redis bypass is clean when unavailable.
 - **Polymarket ingest** – Worker polls Gamma `/events` (active/non-archived defaults), flattens multi-market events, rate limits requests, retries with exponential backoff, and upserts normalized rows; optional CLOB enrichment hooks remain in place.
 - **Resolution pipeline** – Goldsky for payout vectors; stored in Postgres/Redis, cached in `/resolution/{condition_id}`, and surfaced in `/markets` detail payloads. Resolved markets drop from cache 12 hours after `resolved_at`.
-- **Signed pricing** – `/pricing/quote` ignores client FX, pulls streamer FX via `RM_FX_FEED_URL` (default `http://streamer:8100/fx/zen-usd`), enforces per-bet/per-user/per-market caps (`RM_MAX_STAKE_ZEN`, `RM_MAX_USER_STAKE_PER_MARKET_ZEN`, `RM_MAX_MARKET_STAKE_ZEN`), signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and writes quote rows; `/pricing/submit` revalidates digest/expiry/FX drift and marks consumed.
-- **Health/metrics** – `/health` fans DB + Redis + worker heartbeat + Polymarket + signer/CORS checks; `/metrics` exposes Prometheus histograms/counters for HTTP, cache, ingest, and proof flows. Docker health probes use Python entrypoints instead of cURL.
+- **Signed pricing** – `/pricing/quote` ignores client FX, pulls FX from the streamer endpoint (hard-pinned in the API pricing module), enforces per-bet/per-user/per-market caps (`RM_MAX_STAKE_ZEN`, `RM_MAX_USER_STAKE_PER_MARKET_ZEN`, `RM_MAX_MARKET_STAKE_ZEN`), signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and writes quote rows; `/pricing/submit` revalidates digest/expiry/FX drift and marks consumed.
+- **Health/metrics** – `/health` fans DB + Redis + worker heartbeat + Polymarket + pricing signer + schema revision + CORS/FX CORS checks; `/metrics` exposes Prometheus histograms/counters for HTTP, cache, ingest, and proof flows. Docker health probes use Python entrypoints instead of cURL.
 - **Automation hooks** – Worker emits heartbeats/batch stats, primes featured caches (markets/categories/suggest), can request Groth16 proofs, and has stubs for MarketFactory automation. Retention currently reports metrics only.
 - **Logging** – Unified `timestamp | LEVEL | logger | file:line | event | request_id` formatter across API/worker/tests; optional file rotation.
 
@@ -106,7 +124,7 @@ Both `.venv` directories stay ignored by git. `uv` keeps them consistent with th
 ## Deployment Runbook (API + Worker)
 
 - **Prereqs**: Postgres + Redis reachable; run `backend/migrations` before boot if you disable lifespan migrations.
-- **Env**: Set `RM_DATABASE_URL`, `RM_REDIS_URL`, Polymarket endpoints (`RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, rate limits), and FX feed URLs. For Docker compose, copy `.env.example` and adjust addresses.
+- **Env**: Set `RM_DATABASE_URL`, `RM_REDIS_URL`, Polymarket endpoints (`RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, rate limits), and the FX feed URL used for health/CORS checks. Pricing fetches from the streamer endpoint (hard-pinned in the API pricing module). For Docker compose, copy `.env.example` and adjust addresses.
 - **Migrations**: Default lifespan runs migrations on boot. For explicit smoke, run `python -m app.database` or `backend/run_tests.sh` (includes a startup smoke). If migrations fail, the service exits non-zero.
 - **Health / smoke**: After deploy, hit `/healthz` (API) and `/healthz` (worker via Docker healthcheck). Expect `status=ok`, Redis/DB/Polymarket `ok`, and fresh heartbeats. Logs emit `service.configuration` and `markets.cache.refresh.start` on boot.
 - **Cache warmup**: Optional—call `/markets?limit=20` and `/pricing/fx` to prime caches/CDN. Heartbeat dashboards at `/healthz/heartbeats`.

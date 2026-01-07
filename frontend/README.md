@@ -4,19 +4,36 @@ This directory hosts the Reveal Market web experience (marketing, docs, search, 
 
 ---
 
+## High-Level Architecture
+
+1. **App Router shell**: `app/layout.tsx` owns global providers, navigation, landing gate, and JSON-LD metadata; server components render most routes by default.
+2. **Server data layer**: `lib/api.ts` fetches from the FastAPI backend with Next cache tags; server actions (`app/actions/*`) reuse those fetchers for pagination and client triggers.
+3. **Streaming layer**: hooks (`usePriceStream`, `useFxStream`, `useLiveOutcomePrices`) connect to the streamer over WS/SSE, hydrate with cached history, and fall back to HTTP when WS is stale or blocked.
+4. **Trading flow**: UI requests `/pricing/preview` + `/pricing/quote`, commits via `/trade/commit`, polls `/trade/status`, and uses wagmi/viem for on-chain approvals and claims.
+5. **Ops and security**: `next.config.mjs` sets CSP/HSTS/COOP/Permissions-Policy; metadata helpers in `lib/seo.ts` and app router `sitemap.ts`/`robots.ts` keep SEO consistent.
+
+```mermaid
+flowchart LR
+  Browser --> Frontend
+  Frontend --> API
+  Frontend --> Streamer
+  Frontend --> Chain
+```
+
 ## Table of Contents
 
-1. [Stack & Directory Map](#stack--directory-map)
-2. [Environment Variables](#environment-variables)
-3. [Getting Started](#getting-started)
-4. [Data Fetching & Caching](#data-fetching--caching)
-5. [Styling & Design System](#styling--design-system)
-6. [Responsive UX Guidelines](#responsive-ux-guidelines)
-7. [Testing & Quality Gates](#testing--quality-gates)
-8. [Performance & Speed Playbook](#performance--speed-playbook)
-9. [Logging & Docker Observability](#logging--docker-observability)
-10. [Deployment Checklist](#deployment-checklist)
-11. [Troubleshooting](#troubleshooting)
+1. [High-Level Architecture](#high-level-architecture)
+2. [Stack & Directory Map](#stack--directory-map)
+3. [Environment Variables](#environment-variables)
+4. [Getting Started](#getting-started)
+5. [Data Fetching & Caching](#data-fetching--caching)
+6. [Styling & Design System](#styling--design-system)
+7. [Responsive UX Guidelines](#responsive-ux-guidelines)
+8. [Testing & Quality Gates](#testing--quality-gates)
+9. [Performance & Speed Playbook](#performance--speed-playbook)
+10. [Logging & Docker Observability](#logging--docker-observability)
+11. [Deployment Checklist](#deployment-checklist)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 

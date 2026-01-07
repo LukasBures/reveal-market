@@ -9,6 +9,25 @@ Default testnet: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testn
 
 ---
 
+## High-Level Architecture
+
+```mermaid
+flowchart LR
+  Users --> Frontend
+  Frontend --> API
+  Frontend --> Streamer
+  API --> Postgres
+  API --> Redis
+  Worker --> Postgres
+  Worker --> Redis
+  Worker --> Polymarket
+  Streamer --> Polymarket
+  Streamer --> FX[FX Sources]
+  API --> Relayer --> Chain
+  Hedger --> Chain
+  Worker --> Prover
+```
+
 ## Repository Map
 
 | Directory | Purpose | Highlights |
@@ -73,7 +92,7 @@ Additional docs live in each directory’s README.
 - **Hedger** – FastAPI admin surface with Prometheus metrics; tracks exposures (YES/NO), FX haircuts, risk limits, and emits buy/sell/unwind hedge instructions with slippage gates. Uses Redis locks/idempotency + DB offsets for replay safety, hydrates state from Postgres on restart, and builds prover payloads from stored commits/outcomes before marking markets resolved. Metrics include exposures, coverage, LP utilization, float, PnL placeholders, event lag, hedge executions, and settlement/prover latency.
 - **Price streamer** – FastAPI SSE/WS fanout that ingests Polymarket CLOB WS + RTDS feeds, hydrates token IDs via REST, applies worsen% to display prices, caches ticks/history in Redis, and serves `/stream`, `/stream/ws`, `/history`, and `/fx/zen-usd[c|t]` with Binance WS first, Binance REST + CryptoCompare fallback. Presets pin CORS origins and public/internal streamer hosts to the frontend so WSS upgrades work locally and in prod.
 - **Tooling & CI** – `./backend/run_tests.sh`, `frontend/run_tests.sh`, `contracts/zen/run_local.sh`, `contracts/polygon/run_local.sh`, and `./run_tests.sh` map to CI in `.github/workflows/cicd.yml`. Docker Compose stacks (`./run_local.sh`, `./run_prod.sh`) wire API, worker, frontend, Postgres, Redis, and prover together with health probes so you can test the exact production topology locally.
-- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Binance REST then CryptoCompare HTTP fallback; `/fx/zen-usd` exposes the latest quote + staleness. The API uses `RM_FX_FEED_URL` (default `http://streamer:8100/fx/zen-usd`) and ignores client-supplied FX. API/hedger reject stale FX and enforce configurable caps; the UI uses a fixed 0.1 ZEN ticket size. Haircut/worsen/rake apply in pricing logic. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
+- **FX & pricing limits** – Price-streamer sources ZEN/USDT from Binance WS (5s stale threshold) with Binance REST then CryptoCompare HTTP fallback; `/fx/zen-usd` exposes the latest quote + staleness. The API pricing fetcher is pinned to the streamer FX endpoint and ignores client-supplied FX. API/hedger reject stale FX and enforce configurable caps; the UI uses a fixed 0.1 ZEN ticket size. Haircut/worsen/rake apply in pricing logic. Set `STREAMER_CORS_ALLOW_ORIGINS` to your frontend origin when consuming `/stream` and `/history` from the browser.
 - **Signed quotes (off-chain enforcement)** – Quotes bind chain id, market address, wallet, outcome, stake (wei), FX (1e8), expiry, and quoteId to a `pricingSigner`. The API ignores client FX, signs this ABI-packed digest, enforces per-user/per-market caps via the quote ledger, and consumes quotes during `/trade/commit`. On-chain enforcement is via CommitAuth signatures in `commitWithAuthorization`.
 - **Bet caps (off-chain)** – UI stake inputs clamp to 0.1 ZEN; API enforces per-bet, per-user-per-market, and per-market caps (`RM_MAX_STAKE_ZEN`, `RM_MAX_USER_STAKE_PER_MARKET_ZEN`, `RM_MAX_MARKET_STAKE_ZEN`). Defaults are 0.1 / 0.5 / 5 ZEN in the repo env files; on-chain caps remain off-chain only.
 

@@ -1,16 +1,57 @@
 # Caddy deployment notes
 
-- **Image**: Built via `docker/caddy/Dockerfile` with the Cloudflare DNS plugin baked in. The `caddy` service in `docker-compose.prod.yml` builds this image.
-- **Runtime**: Builder/runtime Caddy versions are pinned via `CADDY_VERSION`; the binary is `setcap`-enabled so it can bind 80/443 while running as the `caddy` user.
-- **TLS profiles** (`CADDY_TLS_PROFILE`):
-  - `tls_prod` – default HTTP/ALPN ACME.
-  - `tls_dns` – DNS-01 with Cloudflare (`CLOUDFLARE_API_TOKEN` required).
-  - `tls_local` – internal CA (no public ACME).
-- **ACME overrides**: `CADDY_ACME_EMAIL`, `CADDY_ACME_CA`, `CADDY_DNS_RESOLVERS`.
-- **Healthcheck**: Caddy exposes the admin API on `localhost:2019` for the container health probe.
-- **Config validation**: Run `docker run --rm -v "$(pwd)/docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" reveal-market-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` before deploying changes. The built image includes the Cloudflare DNS module required by the Caddyfile.
-- **Client IPs**: The Caddyfile trusts Cloudflare’s IPv4/IPv6 ranges and `CF-Connecting-IP`/`X-Forwarded-For`/`X-Real-IP` so rate limiting and logs see real client addresses behind the proxy. Validate with the built image (includes the Cloudflare DNS module), not stock `caddy:2`.
-- **Upstream health**: Reverse proxies now probe `/healthz` with quick failover (`max_fails=2`, `fail_duration=30s`) so unhealthy backends are shed quickly.
-- **Access logs**: All vhosts emit JSON access logs to stdout at INFO by default; override with `CADDY_LOG_LEVEL` / `CADDY_ACCESS_LOG_LEVEL` if you need to dial verbosity down.
-- **Proof endpoints**: `/proofs` and `/api/v1/proofs/settlement` continue to proxy unchanged; Poseidon batch settlement does not require Caddy config changes beyond standard timeouts.
-- **Prover artifacts hosting**: `/artifacts/*` is served from `/srv/artifacts` (mounted from `./artifacts` in `docker-compose.prod.yml`) so CI can fetch `PROVER_ARTIFACTS_URL` over HTTPS without Git LFS.
+## High-Level Architecture
+
+1. **Custom Caddy build**: `docker/caddy/Dockerfile` builds Caddy with the Cloudflare DNS module via `xcaddy`.
+2. **Reusable Caddyfile snippets**: shared snippets define headers, caching, logs, health checks, and reverse proxies.
+3. **Host routing**: vhosts front the Next.js frontend, FastAPI API, and streamer; static prover artifacts are served directly.
+
+```mermaid
+flowchart LR
+  Clients --> Caddy
+  Caddy --> Frontend
+  Caddy --> API
+  Caddy --> Streamer
+  Caddy --> Artifacts
+```
+
+## Build and runtime
+
+- **Image build**: `CADDY_VERSION` pins the builder/runtime images. The binary is granted `cap_net_bind_service` so it can bind 80/443 as the `caddy` user.
+- **Config validation**: the image runs `caddy validate` at build time to fail fast on syntax errors.
+- **Admin API**: Caddy listens on `127.0.0.1:2019` for health checks.
+
+## Routing and behavior
+
+- `revealmarket.xyz`:
+  - serves `/artifacts/*` from `/srv/artifacts` with immutable caching
+  - proxies all other traffic to `frontend:3000`
+  - applies `cache_frontend` (public `max-age=60`)
+- `stream.revealmarket.xyz`:
+  - proxies to `streamer:8100`
+  - applies `cache_no_store`
+  - uses JSON access logs (`access_log_json`)
+- `api.revealmarket.xyz`:
+  - proxies to `api:8000` with `Host` header set to `api.revealmarket.xyz`
+  - applies `cache_no_store`
+  - uses JSON access logs (`access_log_json`)
+- `www.revealmarket.xyz`:
+  - 308 redirect to `https://revealmarket.xyz{uri}`
+- `/healthz` on each host is handled directly by Caddy via `health_common`.
+
+## TLS and environment knobs
+
+- `CADDY_TLS_PROFILE` selects a snippet for TLS setup:
+  - `tls_prod`: Cloudflare DNS-01 with `CLOUDFLARE_API_TOKEN` and the Cloudflare resolvers.
+  - `tls_local`: internal CA for local/dev use.
+- `CADDY_TLS_PROFILE` defaults to `tls_local` in the Dockerfile to keep build-time validation working.
+- `CADDY_LOG_LEVEL` and `CADDY_ACCESS_LOG_LEVEL` tune log verbosity for `log_common` and `access_log_json`.
+
+## Reverse-proxy health checks
+
+- Frontend upstream uses `health_uri /` with short timeouts and `max_fails=2`.
+- API and streamer upstreams use `health_uri /healthz` with `Host` overrides (`api.revealmarket.xyz` and `stream.revealmarket.xyz`).
+
+## Artifact hosting
+
+- `/artifacts/*` is served from `/srv/artifacts` (mounted from `./artifacts` in `docker-compose.prod.yml`) so `PROVER_ARTIFACTS_URL` can be fetched over HTTPS without Git LFS.

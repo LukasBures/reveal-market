@@ -2,6 +2,22 @@
 
 Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets with a trusted relayer and protocol-capped liability.
 
+## High-Level Architecture
+
+1. **MarketFactory** deploys clone-based markets, registers them with the escrow + pool, and centralizes admin updates (rake, signer, oracle, caps).
+2. **RelayerEscrow** holds collateral and forwards fixed-size tickets to markets using backend-signed authorizations.
+3. **RevealMarket** stores commitments, locks Poseidon batch roots, verifies Groth16 proofs, and handles claims/settlement state.
+4. **ProtocolPool + Verifier** cap liability and enforce circuit correctness (circuit hash + verifying key).
+
+```mermaid
+flowchart TD
+  MarketFactory --> RevealMarket
+  MarketFactory --> RelayerEscrow
+  MarketFactory --> ProtocolPool
+  RelayerEscrow --> RevealMarket
+  RevealMarket --> Verifier
+```
+
 ## Components
 - `RelayerEscrow`: holds user funds, exposes `deposit/withdraw`, and forwards fixed-size tickets to markets via `commitOnBehalf` using backend-signed auth. `creditFromMarket` exists for escrow-style payouts but `RevealMarket` currently pays users directly.
 - `ProtocolPool`: protocol bankroll that enforces per-market liability caps, tops up deficits at settlement, and collects rake/surplus. Only markets registered by the factory may draw.
@@ -12,7 +28,7 @@ Minimal, privacy-preserving on-chain stack for fixed-size commit/reveal markets 
 ## Flow
 1) Users `deposit` ZEN ERC20 into `RelayerEscrow` (all collateral stays in-token; native gas still pays fees).
 2) Backend issues `CommitAuth` signature; relayer calls `commitOnBehalf` → `market.commitWithAuthorization` with fixed ticket value (choose denominations like `0.1 ZEN` or `1 ZEN` per market); per-commit rake is forwarded immediately to `ProtocolPool`, net ticket value stays in-market, only commitments are stored.
-3) After `commitDeadline`, oracle calls `lockBatches()` with depth-8 Poseidon roots + per-batch counts (BATCH_SIZE=256). For single-batch markets, `commitmentsRoot` is set; otherwise it is zeroed.
+3) After `commitDeadline`, oracle calls `lockBatches()` with depth-8 Poseidon roots + per-batch counts (BATCH_SIZE=256). An optional relayer signature (from the escrow owner) can be supplied for audit. For single-batch markets, `commitmentsRoot` is set; otherwise it is zeroed.
 4) Oracle posts the result, then settles via `verifyAndSettleBatched` (or `verifyAndSettle` if there is exactly one batch). On-chain checks each batch proof against its stored root, sums totals across batches, enforces `totalLiability <= totalEscrow(net) + protocolCap`, draws from the ProtocolPool if needed, and forwards any surplus back to the pool before moving to `Settled`.
 5) Anyone (typically the relayer) calls `claim(...)` with a Poseidon Merkle proof for the ticket’s batch. Payouts transfer directly to the user address. After the claim window closes, the factory can sweep unclaimed payouts to the protocol pool or relayer escrow (default claim window is 180 days from settlement; extendable by the factory).
 

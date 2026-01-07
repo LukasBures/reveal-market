@@ -2,6 +2,20 @@
 
 Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to the Reveal Market contracts. Runs as a FastAPI service with Web3 + EOA signer.
 
+## High-Level Architecture
+1. **Startup**: load env config, create Web3 client + relayer account, build `RelayerService`, and start the `TxQueue` worker (SQLite by default, Postgres when `RM_DATABASE_URL` is set).
+2. **Request flow**: `/commit`, `/claim`, and `/lock-batches` validate payloads, enqueue jobs (default) or execute immediately, and optionally forward ingest metadata to the API.
+3. **Queue processing**: the worker reserves jobs, applies fee bumps per retry, and submits transactions with optional preflight (`eth_call`/`estimate_gas`). Results and errors are persisted with job status for `/status` and admin replay.
+4. **Ops surface**: `/healthz` checks RPC, balances, escrow owner, and block freshness; `/metrics` exports queue + tx latency; optional rate limiting/IP allowlist guard write endpoints.
+
+```mermaid
+flowchart LR
+  Clients --> Relayer
+  Relayer --> Queue[(Tx Queue)]
+  Relayer --> Chain
+  Relayer --> API
+```
+
 ## What it does today
 - Accepts `/commit` and `/claim` payloads and enqueues them in a durable queue (Postgres via `RM_DATABASE_URL`, SQLite fallback) that retries with backoff + fee bumps before submitting transactions. The default entrypoint runs in queue mode.
 - Accepts `/lock-batches` payloads, computes Poseidon batch roots (BATCH_SIZE=256, depth 8), and submits `lockBatches` for commit locks; optional ingest pushes `batch_roots`/`batch_counts` to the backend for proof generation.

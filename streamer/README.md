@@ -2,6 +2,20 @@
 
 FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS. It keeps odds up to date via CLOB WS + optional RTDS, pulls FX from Binance (WS first, REST fallbacks), applies worsen% to display prices, caches in Redis, and republishes to frontend clients. Haircut/rake are config inputs for downstream pricing (not applied here).
 
+## High-Level Architecture
+1. **Startup**: resolve env presets, configure logging, connect Redis, build `StreamState`, and start two long-lived workers: `DataStreamer` (CLOB WS + REST + RTDS) and `PriceStreamer` (Binance WS + REST fallbacks).
+2. **Ingest and normalize**: CLOB ticks and REST snapshots are normalized, merged, and throttled; display prices are worsened server-side and FX staleness is attached before publishing.
+3. **Publish and fan-out**: latest ticks are stored in Redis hashes and published to Redis pubsub channels; SSE/WS endpoints subscribe to pubsub and optionally replay cached payloads/history.
+4. **Health and ops**: `/healthz`, `/dashboard`, and `/metrics` expose staleness, WS health, FX source, and subscription counts for operators.
+
+```mermaid
+flowchart LR
+  Clients --> Streamer
+  Streamer --> Redis
+  Streamer --> Polymarket
+  Streamer --> FX[FX Sources]
+```
+
 ## Features
 - Polymarket CLOB websocket ingestion with per-market subscriptions and asset refcounts; unsubscribes upstream when the last client disconnects.
 - Goldsky subgraph passthrough for markets, trades/activity, positions, open-interest, PnL, and market-data so analytics data is reachable via the same service.
@@ -10,13 +24,13 @@ FastAPI service that streams Polymarket market data plus ZEN/USD FX over SSE/WS.
 - SSE/WS fanout (`/stream`) and per-outcome history (`/history`), cached in Redis and signed optionally.
 - Worsen% applied server-side; haircut/rake are config values used by backend pricing. Structured logs at INFO call out source and fallback decisions.
 - Connection pooling: one WS per path is shared across subscribers, with periodic HTTP refresh to rehydrate stale data and automatic reconnect to WS.
-- Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services. The API uses `RM_FX_FEED_URL` (default `/fx/zen-usd`) to fetch FX.
+- Network defaults: frontend consumers target Horizen Testnet by default (chain id `2651420`). Align CORS origins and streamer host with your frontend origin (e.g., `https://revealmarket.xyz`), and keep pricing chain/env vars in sync across services. The API pricing fetcher is pinned to the streamer FX endpoint (`/fx/zen-usd`).
   - Presets: `RM_ENVIRONMENT=local` uses `http://localhost:8100` + localhost CORS; `RM_ENVIRONMENT=prod` pins `https://stream.revealmarket.xyz` + prod CORS union into middleware so both local + prod origins are allowed without extra overrides. Presets override `STREAMER_PUBLIC_BASE_URL`, `STREAMER_INTERNAL_BASE_URL`, and `STREAMER_CORS_ALLOW_ORIGINS` at startup. Wildcard CORS is disallowed in prod.
 
 ## Current implementation snapshot
-- **State & subscriptions** – `StreamState` tracks active SSE/WS clients, Redis handles cache/history, and asset refcounts ensure upstream WS only stays subscribed when needed. Placeholders swap to real `clobTokenIds` once REST discovery succeeds.
+- **State & subscriptions** – `StreamState` tracks active SSE/WS clients, Redis cache/history handles, and asset refcounts ensure upstream WS only stays subscribed when needed. Placeholders swap to real `clobTokenIds` once REST discovery succeeds.
 - **FX pipeline** – Single WS connection for ZEN/USDT with staleness timers; when stale or failed, REST falls back to Binance then CryptoCompare with jump bounds. Gauges expose source + staleness; `/fx/*` responds with `stale=true` when applicable and `/healthz` reports status.
-- **Market data** – CLOB WS + RTDS merge into a throttled publish path with dedupe; Redis-backed history is bounded by `STREAMER_HISTORY_LIMIT`/`TTL`. `/history` and `/clob/*` read the cached payloads, not upstream, so API/clients survive upstream hiccups.
+- **Market data** – CLOB WS + REST polling (and optional RTDS) merge into a throttled publish path with dedupe; latest ticks are cached as Redis hashes and emitted over pubsub, while history is bounded by `STREAMER_HISTORY_LIMIT`/`TTL`. `/history` and `/clob/*` read the cached payloads, not upstream, so API/clients survive upstream hiccups.
 - **Security & access** – Optional HMAC signing (`STREAMER_SIGNING_SECRET`), bearer-style `STREAMER_ACCESS_TOKEN` for `/stream`/`/stream/ws`, and `STREAMER_CONTROL_TOKEN` for subscription control endpoints. CORS hosts/allowed methods/headers are enforced via middleware presets per `RM_ENVIRONMENT`.
 - **Metrics/ops** – `/metrics` exposes FX source/staleness/WS health, tick counts, stream deliveries/drops, ingest drops, and per-market staleness gauges. `/dashboard` surfaces last-seen timestamps and stale lists for quick checks. Docker healthcheck uses `python -m app.healthcheck`.
 

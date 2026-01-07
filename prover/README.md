@@ -12,6 +12,18 @@ The service now boots a rapidsnark-backed pipeline by default:
 
 If the compiled artifacts are missing (for example, on a brand-new clone), the service refuses to start so you never return mocked data by accident. Generate the Circom assets (below) or download the hosted archive via `PROVER_ARTIFACTS_URL`; the `prover/artifacts` submodule is an optional mirror.
 
+## High-Level Architecture
+1. **Request handling**: validate payloads, enforce request size limits, and gate on artifact readiness; optionally stream responses over SSE.
+2. **Proof pipeline**: build witness inputs, run the Node or C++ witness generator, execute `rapidsnark`, then parse proof + public signals into Solidity calldata.
+3. **Ops envelope**: concurrency is bounded with a semaphore, temp directories are cleaned per job, and `/healthz` + `/metrics` expose readiness and latency.
+
+```mermaid
+flowchart LR
+  Clients[Worker/Hedger] --> Prover
+  Prover --> Proofs
+  Prover --> Artifacts
+```
+
 ## Prerequisites
 
 - Node.js ≥ 18 plus the Circom witness artifacts generated via `prover/circuits/generate_keys.sh`, installed from the hosted archive (`PROVER_ARTIFACTS_URL`), or imported from the optional `prover/artifacts` mirror, which produces:
@@ -109,10 +121,14 @@ Keep the compiled artifacts mounted read-only so the prover never touches mocked
 | --- | --- | --- |
 | `/healthz` | GET | Returns status, backend mode, circuit hash, uptime, and last heartbeat/proof timestamps. Returns HTTP 503 when `ready=false`. |
 | `/heartbeat` | GET | Lightweight liveness check used by Docker. |
+| `/metrics` | GET | Prometheus-formatted counters/gauges (latency, proofs, artifacts). |
+| `/metrics/expvar` | GET | expvar view of runtime counters (debug/ops). |
 | `/api/v1/proofs/settlement` | POST | Accepts the settlement payload and responds with Groth16 proof data. |
 
 Streaming responses are supported by passing `?stream=1` or an `Accept: text/event-stream` header. Events include `accepted`, `proof`, `error`, and `cancelled`.
 If `PROVER_SHARED_SECRET` is set, include `X-Prover-Secret` on requests or the service will return HTTP 401.
+
+Debug endpoints are exposed under `/debug/pprof/*` for profiling when running in trusted environments.
 
 **Request body** mirrors `settlementProofRequest` (one payload per batch root):
 

@@ -2,6 +2,16 @@
 
 This directory hosts the reference circuit and helper scripts needed to generate the Groth16 proving/verification keys consumed by both the `prover` microservice and the Solidity verifier. The Go service boots a rapidsnark-backed prover using the artifacts produced here and refuses to start when they’re missing, guaranteeing that every proof is generated with the real circuit.
 
+## High-Level Architecture
+
+```mermaid
+flowchart LR
+  Circuit[settlement.circom] --> Keys[generate_keys.sh]
+  Keys --> Build[build artifacts]
+  Build --> Prover
+  Build --> Contracts
+```
+
 > **Prerequisites**
 >
 > - Node ≥ 18 plus `curl`/`tar` (the script auto-downloads the circom binary, circomlib source, and uses `npx snarkjs@0.7.4` if missing)

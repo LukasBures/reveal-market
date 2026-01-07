@@ -5,6 +5,19 @@ This directory now namespaces chain-specific workspaces:
 - `zen/` – Reveal Market contracts targeting the Horizen/ZEN appchain (Foundry workspace with `src/`, `test/`, `script/`, `lib/`, docs, cache, run scripts, etc.).
 - `polygon/` – Polygon hedging LP vault (self-contained Foundry workspace with its own `lib/`, `src/`, `test/`, and run scripts).
 
+## High-Level Architecture
+
+1. **Zen workspace**: core Reveal Market commit/reveal contracts (MarketFactory, RevealMarket, ProtocolPool, RelayerEscrow, Verifier) plus Poseidon-based batch settlement.
+2. **Polygon workspace**: LP vault and hedging executor used to fund off-chain hedges; independent deployment and tests.
+3. **Shared tooling**: repo-level scripts (`contracts/run_tests.sh`, error selector generator) and per-workspace deploy/run scripts keep CI and ops consistent.
+
+```mermaid
+flowchart TD
+  Contracts --> Zen[Zen Workspace]
+  Contracts --> Polygon[Polygon Workspace]
+  Contracts --> Tooling[Shared Tooling]
+```
+
 Notes
 - CI/build tooling runs each workspace separately (see `.github/workflows/cicd.yml` and `contracts/run_tests.sh`).
 - Keep deployment artifacts (verifying keys, last deploy JSON) scoped per chain under their respective workspace.
