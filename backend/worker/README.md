@@ -116,6 +116,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_SCHEMA_VERSION_KEY` | Redis key where `propagate_schema_revision` stores the current Alembic revision. |
 | `RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`, `RM_HEARTBEAT_MAX_RETRIES`, `RM_HEARTBEAT_RETRY_BACKOFF_SECONDS` | Heartbeat publishing behavior. |
 | `RM_BATCH_STATS_KEY`, `RM_BATCH_STATS_TTL_SECONDS` | Where batch stats live in Redis. |
+| `RM_WORKER_MEMORY_LOG_ENABLED`, `RM_WORKER_MEMORY_LOG_EVERY_N_PAGES`, `RM_WORKER_MEMORY_TRIM_THRESHOLD_MB`, `RM_WORKER_MEMORY_ABORT_THRESHOLD_MB` | Emit per-page memory snapshots in `worker.sync.page` logs, trim memory on pressure, and optionally abort a sync tick when RSS crosses the threshold. |
 
 ### Polymarket ingestion
 
@@ -125,6 +126,7 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_POLYMARKET_TIMEOUT_SECONDS` | HTTP timeout per request. |
 | `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_MAX_PAGES` | Pagination controls. |
 | `RM_POLYMARKET_COMMIT_BATCH_SIZE` | Commit after this many markets are processed (0 = commit every page). |
+| `RM_POLYMARKET_USE_EVENTS_ENDPOINT` | Toggle Gamma `/events` pagination (set false to use `/markets` and reduce payload size). |
 | `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Sorting/filtering toggles. |
 | `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER` | Additional Gamma filters recommended by Polymarket; defaults to active-only, non-archived markets. |
 | `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
@@ -150,6 +152,18 @@ All environment variables begin with `RM_`. Notable groups:
 | `RM_RESOLVED_RETENTION_DRY_RUN` | Dry-run guard; retention deletions are currently forced to dry-run. |
 | `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky resolution fetches. |
 | `RM_MAINTENANCE_POLL_SECONDS`, `RM_MAINTENANCE_LEASE_KEY` | Cadence and Redis lease key for the retention/backfill maintenance loop. |
+
+### Closed-market reconcile
+
+| Variable | Description |
+| --- | --- |
+| `RM_CLOSED_MARKETS_RECONCILE_ENABLED` | Toggle for low-frequency refresh of closed markets with commitments. |
+| `RM_CLOSED_MARKETS_RECONCILE_INTERVAL_SECONDS` | Minimum seconds between reconcile runs (0 disables). |
+| `RM_CLOSED_MARKETS_RECONCILE_BATCH_SIZE` | Markets fetched per reconcile batch. |
+| `RM_CLOSED_MARKETS_RECONCILE_MAX_MARKETS` | Maximum markets to reconcile per maintenance tick. |
+| `RM_CLOSED_MARKETS_RECONCILE_STALE_SECONDS` | Refresh markets whose `source_updated_at` exceeds this age. |
+| `RM_CLOSED_MARKETS_RECONCILE_FETCH_CONCURRENCY` | Max concurrent Gamma fetches during reconcile. |
+| `RM_CLOSED_MARKETS_RECONCILE_LAST_KEY` | Redis key storing the last reconcile timestamp. |
 
 ### On-chain reads & backfills
 

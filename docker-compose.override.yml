@@ -48,10 +48,6 @@ services:
           memory: 1G
 
   api:
-    # Override prod-like defaults so local runs get verbose logs + live code reloading.
-    environment:
-      RM_ENVIRONMENT: local
-      LOG_LEVEL: INFO
     # Bind-mount source directories so edits on the host immediately reflect in the container.
     volumes:
       - ./backend/api/app:/app/app
@@ -61,14 +57,6 @@ services:
       - "127.0.0.1:8000:8000"
 
   worker:
-    environment:
-      RM_ENVIRONMENT: local
-      LOG_LEVEL: INFO
-      # Mirror production heartbeat cadence so diagnostics fire once per minute.
-      RM_POLL_INTERVAL_SECONDS: 300
-      RM_POLYMARKET_COMMIT_BATCH_SIZE: 5000
-      # Keep migrations enabled so a fresh database gets the schema before the worker starts syncing.
-      RM_RUN_MIGRATIONS_ON_STARTUP: "true"
     volumes:
       - ./backend/worker/app:/worker/app
       - ./backend/shared:/worker/shared
@@ -77,9 +65,6 @@ services:
 
   hedger:
     profiles: ["hedger"]
-    environment:
-      HEDGER_ENVIRONMENT: dev
-      HEDGER_LOG_LEVEL: DEBUG
     volumes:
       - ./hedger/app:/hedger/app
       - ./backend/shared:/hedger/shared

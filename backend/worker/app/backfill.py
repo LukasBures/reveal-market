@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from shared.logging import get_logger
 from shared.onchain import get_async_web3, to_checksum
@@ -22,10 +22,16 @@ async def backfill_market_addresses(
     web3 = get_async_web3(rpc_url)
     factory = web3.eth.contract(address=to_checksum(factory_address), abi=MARKET_FACTORY_ABI)
     count = 0
+    skipped_missing_id = 0
     markets = await get_markets_missing_address(session)
     for market in markets:
+        onchain_id = getattr(market, "onchain_market_id", None)
+        if onchain_id in (None, 0):
+            skipped_missing_id += 1
+            continue
         try:
-            address = await factory.functions.marketAddress(int(market.onchain_market_id or 0)).call()
+            onchain_id_int = int(cast(int | str, onchain_id))
+            address = await factory.functions.marketAddress(onchain_id_int).call()
             market.market_address = address
             session.add(market)
             await session.flush()
@@ -37,6 +43,11 @@ async def backfill_market_addresses(
                 extra={"market_id": market.event_id, "onchain_id": market.onchain_market_id, "error": str(exc)},
             )
             continue
+    if skipped_missing_id:
+        logger.info(
+            "backfill.market_address.skipped",
+            extra={"reason": "missing_onchain_id", "count": skipped_missing_id},
+        )
     return count
 
 
@@ -52,6 +63,7 @@ async def backfill_market_params(
     web3 = get_async_web3(rpc_url)
     factory = web3.eth.contract(address=to_checksum(factory_address), abi=MARKET_FACTORY_ABI)
     count = 0
+    skipped_missing_id = 0
     markets = await get_markets_for_sync(session)
     for market in markets:
         onchain_id = getattr(market, "onchain_market_id", None)
@@ -67,10 +79,7 @@ async def backfill_market_params(
                 )
                 continue
         if onchain_id is None:
-            logger.warning(
-                "backfill.market_params.skipped",
-                extra={"market_id": market.event_id, "reason": "missing_onchain_id"},
-            )
+            skipped_missing_id += 1
             continue
         try:
             params = await factory.functions.getMarketParams(int(onchain_id)).call()
@@ -120,4 +129,9 @@ async def backfill_market_params(
                     "rake_bps": rake_bps,
                 },
             )
+    if skipped_missing_id:
+        logger.warning(
+            "backfill.market_params.skipped",
+            extra={"reason": "missing_onchain_id", "count": skipped_missing_id},
+        )
     return count

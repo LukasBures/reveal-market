@@ -109,6 +109,29 @@ class Settings(BaseSettings):
         ge=0,
         description="Commit after this many markets are processed (0 = commit every page).",
     )
+    polymarket_use_events_endpoint: bool = Field(
+        default=True,
+        description="Use Gamma /events pagination (false uses /markets to reduce payload size).",
+    )
+    worker_memory_log_enabled: bool = Field(
+        default=False,
+        description="Emit per-page memory snapshots in worker.sync.page logs.",
+    )
+    worker_memory_log_every_n_pages: int = Field(
+        default=25,
+        ge=1,
+        description="Log memory snapshots every N pages when enabled.",
+    )
+    worker_memory_trim_threshold_mb: int = Field(
+        default=0,
+        ge=0,
+        description="If >0, trigger GC/malloc_trim when RSS exceeds this threshold (MB).",
+    )
+    worker_memory_abort_threshold_mb: int = Field(
+        default=0,
+        ge=0,
+        description="If >0, stop the sync tick when RSS exceeds this threshold (MB).",
+    )
     polymarket_max_pages: int | None = Field(default=None, ge=1)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
@@ -136,6 +159,39 @@ class Settings(BaseSettings):
         description="How often to run maintenance loops (0 disables).",
     )
     maintenance_lease_key: str = Field(default="reveal_market_worker:maintenance_lease")
+    closed_markets_reconcile_enabled: bool = Field(
+        default=True,
+        description="Enable low-frequency refresh of closed markets that have commitments.",
+    )
+    closed_markets_reconcile_interval_seconds: int = Field(
+        default=3600,
+        ge=0,
+        description="Minimum seconds between closed-market reconcile runs (0 disables).",
+    )
+    closed_markets_reconcile_batch_size: int = Field(
+        default=25,
+        ge=1,
+        description="Markets to fetch per closed-market reconcile batch.",
+    )
+    closed_markets_reconcile_max_markets: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum markets to reconcile per maintenance tick.",
+    )
+    closed_markets_reconcile_stale_seconds: int = Field(
+        default=21600,
+        ge=0,
+        description="Refresh markets whose source_updated_at is older than this threshold.",
+    )
+    closed_markets_reconcile_fetch_concurrency: int = Field(
+        default=5,
+        ge=1,
+        description="Max concurrent Gamma fetches during closed-market reconcile.",
+    )
+    closed_markets_reconcile_last_key: str = Field(
+        default="reveal_market_worker:closed_markets_reconcile_last",
+        description="Redis key storing last closed-market reconcile timestamp.",
+    )
     api_base_url: str | None = Field(
         default_factory=lambda: str(PRESET.get("api_internal_base_url", "http://localhost:8000"))
     )

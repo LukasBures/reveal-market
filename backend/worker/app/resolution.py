@@ -381,10 +381,10 @@ async def apply_resolution(
         )
 
     await shared_repository.upsert_resolution(session, record_payload)
-    cache_payload = {
-        **record_payload,
-        "checkedAt": checked_at_dt.isoformat(),
-    }
+    cache_payload = dict(record_payload)
+    checked_at_iso = checked_at_dt.isoformat()
+    cache_payload["checked_at"] = checked_at_iso
+    cache_payload["checkedAt"] = checked_at_iso
     block_ts = cache_payload.get("block_timestamp")
     if isinstance(block_ts, datetime):
         cache_payload["block_timestamp"] = block_ts.isoformat()

@@ -62,6 +62,67 @@ def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
     return params
 
 
+_GAMMA_EVENT_ALLOWED_FIELDS = {
+    "event_id",
+    "ticker",
+    "slug",
+    "title",
+    "description",
+    "resolution_source",
+    "start_date",
+    "end_date",
+    "image",
+    "icon",
+    "active",
+    "closed",
+    "archived",
+    "new",
+    "featured",
+    "restricted",
+    "liquidity",
+    "volume",
+    "open_interest",
+    "sort_by",
+    "created_at_raw",
+    "updated_at_raw",
+    "competitive",
+    "volume_1wk",
+    "volume_1mo",
+    "volume_1yr",
+    "enable_order_book",
+    "liquidity_clob",
+    "neg_risk",
+    "neg_risk_market_id",
+}
+_GAMMA_EVENT_KEY_MAP = {
+    "startDate": "start_date",
+    "endDate": "end_date",
+    "resolutionSource": "resolution_source",
+    "createdAt": "created_at_raw",
+    "updatedAt": "updated_at_raw",
+}
+
+
+def _trim_gamma_events(events: Any) -> list[dict[str, Any]] | None:
+    """Reduce Gamma event payloads to the fields our DB schema accepts."""
+
+    if not isinstance(events, list):
+        return None
+    trimmed: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        slim: dict[str, Any] = {}
+        for key, value in event.items():
+            target_key = _GAMMA_EVENT_KEY_MAP.get(key, key)
+            if target_key not in _GAMMA_EVENT_ALLOWED_FIELDS:
+                continue
+            slim[target_key] = value
+        if slim:
+            trimmed.append(slim)
+    return trimmed or None
+
+
 class MarketPayload(BaseModel):
     """Internal representation of a Polymarket market the worker can persist."""
 
@@ -164,8 +225,9 @@ class MarketPayload(BaseModel):
         )
         orders_opened_at = _extract_timestamp_candidate(raw.get("acceptingOrdersTimestamp"))
         featured = True if raw.get("featured") is True else False
+        trimmed_events = _trim_gamma_events(raw.get("events"))
         resolution_source = _clean_string(raw.get("resolutionSource")) or _extract_resolution_source_from_events(
-            raw.get("events")
+            trimmed_events
         )
         market_maker = _clean_string(raw.get("marketMakerAddress"))
         enable_order_book = raw.get("enableOrderBook") if isinstance(raw.get("enableOrderBook"), bool) else None
@@ -224,11 +286,8 @@ class MarketPayload(BaseModel):
             "spread": None,
             "volume": None,
         }
-        gamma_events = []
+        gamma_events = trimmed_events or []
         open_interest = _coerce_float(raw.get("openInterest") or raw.get("open_interest"))
-        for event in raw.get("events") or []:
-            if isinstance(event, dict):
-                gamma_events.append(event)
         if open_interest is not None and not gamma_events:
             gamma_events.append({"open_interest": open_interest})
 
@@ -374,6 +433,28 @@ class AsyncPolymarketClient:
         ):
             markets.extend(page)
         return markets
+
+    async def fetch_market_by_id(self, market_id: str) -> MarketPayload | None:
+        """Fetch a single market by id using the Gamma markets endpoint."""
+        market_id = str(market_id)
+        params: dict[str, Any] = {"id": market_id}
+        request_callable = partial(self._request_page, self._client, self._markets_url, params.copy())
+        response = await self._send_with_retry(request_callable)
+        payload = orjson.loads(response.content) if orjson is not None else response.json()
+        records = _extract_page_records(payload)
+        if not records:
+            return None
+        matched = None
+        for record in records:
+            if str(record.get("id")) == market_id:
+                matched = record
+                break
+        record = matched or records[0]
+        try:
+            return MarketPayload.from_gamma(record)
+        except (ValidationError, ValueError) as exc:
+            logger.warning("skipping polymarket record for id=%s: %s", market_id, exc)
+            return None
 
     async def fetch_events_markets(
         self,
@@ -578,7 +659,7 @@ class AsyncPolymarketClient:
                 event_category = event.get("category")
                 event_series = event.get("series")
                 raw_events = event.get("events")
-                event_metadata = raw_events if isinstance(raw_events, list) and raw_events else None
+                event_metadata = _trim_gamma_events(raw_events)
                 if event_metadata is None:
                     event_metadata = [
                         {
@@ -1093,7 +1174,7 @@ def _extract_resolution_source_from_events(events: Any) -> str | None:
         return None
     for event in events:
         if isinstance(event, dict):
-            candidate = _clean_string(event.get("resolutionSource"))
+            candidate = _clean_string(event.get("resolution_source") or event.get("resolutionSource"))
             if candidate:
                 return candidate
     return None

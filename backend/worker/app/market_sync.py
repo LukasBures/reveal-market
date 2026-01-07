@@ -1184,9 +1184,16 @@ async def _sync_market(
     await _record_factory_state(session, db_market, market)
     if db_market is not None:
         # Clear stale relationship collections to avoid reusing deleted instances without triggering lazy loads.
-        for rel_key in ("outcomes_rel", "tags_rel", "clob_tokens_rel"):
+        relationship_resets: dict[str, list[Any] | None] = {
+            "outcomes_rel": [],
+            "tags_rel": [],
+            "clob_tokens_rel": [],
+            "gamma_events_rel": [],
+            "gamma_metadata_rel": None,
+        }
+        for rel_key, value in relationship_resets.items():
             try:
-                set_committed_value(db_market, rel_key, [])
+                set_committed_value(db_market, rel_key, value)
             except Exception:
                 if logger.isEnabledFor(logging.DEBUG):
                     log_event(
