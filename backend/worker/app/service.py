@@ -525,7 +525,6 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             event="worker.fetch.begin",
             message="starting polymarket fetch",
             page_size=runtime.settings.polymarket_page_size,
-            max_pages=runtime.settings.polymarket_max_pages,
         )
         attempts = max(1, runtime.settings.polymarket_sync_max_attempts)
         backoff = max(runtime.settings.polymarket_sync_retry_backoff_seconds, 0.0)
@@ -585,7 +584,6 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                 async with session_scope() as session:
                     async for page in fetcher(
                         page_size=runtime.settings.polymarket_page_size,
-                        max_pages=runtime.settings.polymarket_max_pages,
                         order=runtime.settings.polymarket_order,
                         ascending=runtime.settings.polymarket_sort_ascending,
                         closed=closed_param,

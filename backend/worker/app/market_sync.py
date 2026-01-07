@@ -844,6 +844,20 @@ async def _record_factory_state(
     )
 
 
+def _factory_event_changed(
+    previous: dict[str, Any] | None,
+    current: shared_models.Market | None,
+) -> bool:
+    if current is None:
+        return False
+    if previous is None:
+        return True
+    for key in ("factory", "market_address", "oracle", "rake_bps"):
+        if previous.get(key) != getattr(current, key, None):
+            return True
+    return False
+
+
 def _markets_match(
     existing,
     source_updated_at: datetime | None,
@@ -967,9 +981,17 @@ async def _sync_market(
         if state is not None and state.detached:
             existing = await shared_repository.get_market_by_event_id(session, market.event_id)
             state = inspect(existing) if existing is not None else None
-        if existing is not None and state is not None and state.expired_attributes:
-            await session.refresh(existing)
+    if existing is not None and state is not None and state.expired_attributes:
+        await session.refresh(existing)
     previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
+    factory_snapshot: dict[str, Any] | None = None
+    if existing is not None:
+        factory_snapshot = {
+            "factory": getattr(existing, "factory", None),
+            "market_address": getattr(existing, "market_address", None),
+            "oracle": getattr(existing, "oracle", None),
+            "rake_bps": getattr(existing, "rake_bps", None),
+        }
     payload = market.model_dump()
     if payload.get("closed") is None:
         payload["closed"] = False
@@ -1181,7 +1203,8 @@ async def _sync_market(
             )
     else:
         gamma_counts = {"metadata": 0, "events": 0}
-    await _record_factory_state(session, db_market, market)
+    if _factory_event_changed(factory_snapshot, db_market):
+        await _record_factory_state(session, db_market, market)
     if db_market is not None:
         # Clear stale relationship collections to avoid reusing deleted instances without triggering lazy loads.
         relationship_resets: dict[str, list[Any] | None] = {

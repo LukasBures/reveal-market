@@ -195,7 +195,6 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
 
     monkeypatch.setattr(runtime_module, "polymarket_client", DummyClient(), raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_page_size", 25, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "polymarket_max_pages", 4, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_order", "updatedAt", raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_sort_ascending", False, raising=False)
     monkeypatch.setattr(runtime_module.settings, "polymarket_only_open_markets", True, raising=False)
@@ -204,7 +203,6 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
 
     markets = await runtime_module.polymarket_client.fetch_events_markets(
         page_size=runtime_module.settings.polymarket_page_size,
-        max_pages=runtime_module.settings.polymarket_max_pages,
         order=runtime_module.settings.polymarket_order,
         ascending=runtime_module.settings.polymarket_sort_ascending,
         closed=False if runtime_module.settings.polymarket_only_open_markets is True else None,
@@ -213,7 +211,6 @@ async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch
 
     assert markets == []
     assert captured["page_size"] == 25
-    assert captured["max_pages"] == 4
     assert captured["order"] == "updatedAt"
     assert captured["ascending"] is False
     assert captured["closed"] is False
@@ -241,7 +238,6 @@ async def test_fetch_markets_from_polymarket_prefers_events_when_enabled(monkeyp
 
     markets = await runtime_module.polymarket_client.fetch_events_markets(
         page_size=runtime_module.settings.polymarket_page_size,
-        max_pages=runtime_module.settings.polymarket_max_pages,
         order=runtime_module.settings.polymarket_order,
         ascending=runtime_module.settings.polymarket_sort_ascending,
         closed=False if runtime_module.settings.polymarket_only_open_markets is True else None,

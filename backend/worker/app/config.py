@@ -132,7 +132,6 @@ class Settings(BaseSettings):
         ge=0,
         description="If >0, stop the sync tick when RSS exceeds this threshold (MB).",
     )
-    polymarket_max_pages: int | None = Field(default=None, ge=1)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_only_open_markets: bool | None = Field(default=None)

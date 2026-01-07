@@ -4,6 +4,23 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ---
 
+## High-Level Architecture
+
+1. **Startup**: load settings, validate required envs, configure logging, build clients (Gamma, optional CLOB, Goldsky, prover), connect Redis, optionally run Alembic migrations, and publish the current schema revision tag.
+2. **Ingestion tick**: acquire a Redis lease, paginate Gamma (events by default), normalize into `MarketPayload`, upsert markets + normalized tables, apply Goldsky resolution snapshots, enqueue proof jobs, invalidate cache tags, and publish heartbeats + batch stats.
+3. **Cache priming**: call the API to warm `/markets`, category, and suggest caches, then record prime results alongside the sync stats.
+4. **Background loops**: proof queue worker, settlement queue worker, lock-batches automation, and a maintenance loop for retention/backfills/closed-market reconciliation (each with Redis leases where applicable).
+
+```mermaid
+flowchart LR
+  Gamma[Polymarket Gamma/CLOB] --> Worker
+  Goldsky --> Worker
+  Worker --> Postgres
+  Worker --> Redis
+  Worker --> Prover
+  Worker --> API
+```
+
 ## 1. Responsibilities
 
 | Domain | Duties |
@@ -23,13 +40,13 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 ## Current implementation snapshot
 
-- **Startup** – Configures logging, builds clients (Polymarket, optional CLOB, Goldsky, prover), connects to Redis, optionally runs Alembic migrations, and broadcasts schema revision to Redis.
-- **Ingestion loop** – `process_once` fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies resolutions via Goldsky.
+- **Startup** – Configures logging, builds clients (Gamma, optional CLOB, Goldsky, prover), connects Redis, optionally runs Alembic migrations, and publishes the schema revision tag.
+- **Ingestion loop** – `process_once` acquires a Redis lease, fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies Goldsky resolutions.
 - **Cache governance** – Invalidates Redis tags for market list/detail/resolution, primes homepage/categories/suggest caches, writes schema tags, and publishes batch stats + heartbeats to Redis.
-- **Resolution + proofs** – Persists payout vectors in Postgres + Redis; proof generation runs when the prover is configured (`RM_PROVER_BASE_URL`) and commitments/settlements are present; resolved markets expire from cache 12 hours after `resolved_at`.
-- **Retention** – Reports metrics on resolved markets beyond `RM_RESOLVED_RETENTION_SECONDS` (deletion disabled); retention runner executes each loop.
-- **On-chain backfills** – When `RM_FACTORY_ADDRESS` + `RM_RPC_URL` are configured, backfills missing `market_address` values via MarketFactory.
-- **Resilience** – Redis optional for background work (bypass on outage); Polymarket sync retries with exponential backoff; runtime is async-first (asyncpg + async HTTP) with tests covering mocked external deps.
+- **Resolution + proofs** – Persists payout vectors in Postgres + Redis; proof jobs are enqueued into Redis with dedupe and processed by a background worker when the prover is configured (`RM_PROVER_BASE_URL`), caching receipts in Redis for the API.
+- **Settlement + lock-batches** – Optional loops build Poseidon batch roots from commitments, submit `lockBatches` (direct RPC or relayer), and process settlement queue jobs when enabled.
+- **Maintenance** – A background maintenance loop handles retention reporting, missing-resolution backfills, and closed-market reconciles under a Redis lease.
+- **Resilience** – Redis is optional for background work (bypass on outage); Polymarket sync retries with exponential backoff; runtime is async-first (asyncpg + async HTTP) with tests covering mocked external deps.
 
 ---
 
@@ -48,21 +65,25 @@ Long-running service that keeps Postgres, Redis, and on-chain state synchronized
 
 1. **Startup** (`app.service.run_worker`):
    - Configure logging via `app.logging_config`.
-   - Build runtime clients (Polymarket, optional CLOB, Goldsky, prover) in `app.runtime`.
+   - Build runtime clients (Gamma, optional CLOB, Goldsky, prover) in `app.runtime`.
    - Connect to Redis (heartbeat + cache invalidation).
    - Optionally run Alembic migrations (`app.schema.ensure_schema`) and broadcast the latest revision key.
 2. **Main loop**:
    - `process_once()` in `app.service`:
-     - Fetch Polymarket markets (with retry) directly via the async Gamma client (`app.polymarket.AsyncPolymarketClient`).
+     - Acquire the Redis sync lease to avoid concurrent Gamma pagination.
+     - Fetch Polymarket markets (with retry) via `app.polymarket.AsyncPolymarketClient`.
      - For each market, `app.market_sync.sync_market()` upserts rows and calls `app.resolution.apply_resolution`.
      - Optionally backfill missing `market_address` values via MarketFactory when RPC/factory settings are present.
-     - Run `cleanup_resolved_markets` to report retention candidates (deletion currently disabled).
-     - Publish heartbeats, resolution cache updates, and targeted invalidations.
+     - Run retention reporting, enqueue proof jobs, and publish heartbeats/resolution cache updates/targeted invalidations.
    - `prime_markets_cache()` warms the homepage payload.
-   - `prime_featured_views()` hits `/categories` and `/markets/suggest` for “featured” cohorts.
+   - `prime_featured_views()` hits `/categories` and `/markets/suggest` for featured cohorts.
    - `record_batch_stats()` writes batch stats JSON to Redis for dashboards.
    - Sleep for `RM_POLL_INTERVAL_SECONDS` minus loop runtime.
-3. **Health**: Docker/compose call `python -m app.healthcheck` (simple DB ping) so orchestrators only start the loop when Postgres is reachable.
+3. **Background loops**:
+   - Proof queue worker processes Redis jobs and stores receipts.
+   - Settlement queue worker and lock-batches loop submit on-chain updates when enabled.
+   - Maintenance loop handles retention/backfills/closed-market reconcile under a Redis lease.
+4. **Health**: Docker/compose call `python -m app.healthcheck` (simple DB ping) so orchestrators only start the loop when Postgres is reachable.
 
 ---
 
@@ -83,11 +104,14 @@ backend/worker/
 │   ├── cache_ops.py       # Cache invalidation + resolution cache writes
 │   ├── prime.py           # Cache priming for homepage/categories/suggestions
 │   ├── metrics.py         # Prometheus counters + cache invalidation reporting
+│   ├── database.py        # Async SQLAlchemy engine/session helpers
 │   ├── main.py            # Thin re-export/CLI wrapper around `run_worker`
 │   ├── polymarket.py      # Gamma client + MarketPayload normalizer
 │   ├── onchain.py         # Manual on-chain helpers (not wired into loop)
 │   ├── backfill.py        # Market address backfill via MarketFactory
+│   ├── prover_client.py   # Prover HTTP client
 │   ├── config.py          # Pydantic settings (RM_* vars)
+│   ├── schema.py          # Migration helpers + schema revision tagging
 │   ├── healthcheck.py     # Container health entrypoint
 │   └── logging_config.py  # Shared log formatter
 ├── tests/                 # Pytests (mocks for HTTP, Redis, on-chain)
@@ -124,7 +148,7 @@ All environment variables begin with `RM_`. Notable groups:
 | --- | --- |
 | `RM_POLYMARKET_API_BASE` | Base URL for Gamma API. |
 | `RM_POLYMARKET_TIMEOUT_SECONDS` | HTTP timeout per request. |
-| `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_MAX_PAGES` | Pagination controls. |
+| `RM_POLYMARKET_PAGE_SIZE` | Pagination controls. |
 | `RM_POLYMARKET_COMMIT_BATCH_SIZE` | Commit after this many markets are processed (0 = commit every page). |
 | `RM_POLYMARKET_USE_EVENTS_ENDPOINT` | Toggle Gamma `/events` pagination (set false to use `/markets` and reduce payload size). |
 | `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Sorting/filtering toggles. |
@@ -243,7 +267,6 @@ docker compose up prover
 
 Tips:
 - Use `docker compose up worker` when testing the full stack with the API + frontend.
-- Set `RM_POLYMARKET_MAX_PAGES=1` to reduce blast radius during local iterations.
 - For deterministic tests, mock HTTP with `respx` or `httpx.MockTransport`.
 
 ---
