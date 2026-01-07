@@ -664,7 +664,7 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
 
     assert total == 1
     assert summary.markets_created == 1
-    assert len(summary.changed_events) == 1
+    assert summary.changed_events_total + len(summary.changed_events) == 1
     assert gap_count == 0
     assert latency_ms >= 0
     assert _fetch_counter("success") == before + 1
@@ -794,7 +794,7 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     assert attempts["count"] == 2
     assert total == 1
     assert summary.markets_created == 1
-    assert len(summary.changed_events) == 1
+    assert summary.changed_events_total + len(summary.changed_events) == 1
     assert gap_count == 0
     assert _fetch_counter("success") == before_success + 1
 

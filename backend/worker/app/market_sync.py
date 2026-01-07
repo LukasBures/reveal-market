@@ -88,6 +88,10 @@ class SyncSummary:
     changed_conditions: set[str] = field(default_factory=set)
     changed_categories: set[str] = field(default_factory=set)
     changed_group_slugs: set[str] = field(default_factory=set)
+    changed_events_total: int = 0
+    changed_conditions_total: int = 0
+    changed_categories_total: int = 0
+    changed_group_slugs_total: int = 0
     resolution_cache_updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = field(default_factory=list)
     stats_dirty: bool = False
@@ -110,9 +114,9 @@ class SyncSummary:
     def to_stats(self, markets_processed: int, latency_ms: float, cache_invalidations: int) -> dict[str, Any]:
         return {
             "markets_processed": markets_processed,
-            "markets_changed": len(self.changed_events),
-            "resolutions_changed": len(self.changed_conditions),
-            "categories_changed": len(self.changed_categories),
+            "markets_changed": self.changed_events_total + len(self.changed_events),
+            "resolutions_changed": self.changed_conditions_total + len(self.changed_conditions),
+            "categories_changed": self.changed_categories_total + len(self.changed_categories),
             "latency_ms": round(latency_ms, 2),
             "markets_created": self.markets_created,
             "markets_updated": self.markets_updated,

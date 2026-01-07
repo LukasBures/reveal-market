@@ -291,9 +291,43 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             total_fetched = 0
             gap_count = 0
             try:
+                only_open = runtime.settings.polymarket_only_open_markets is True
+                closed_param = False if only_open else None
+                commit_batch_size = max(runtime.settings.polymarket_commit_batch_size, 0)
+                commit_pending = 0
+
+                async def _flush_sync_batch(summary: SyncSummary) -> None:
+                    if not (
+                        summary.changed_events
+                        or summary.changed_conditions
+                        or summary.changed_categories
+                        or summary.changed_group_slugs
+                        or summary.resolution_cache_updates
+                        or summary.proof_jobs
+                    ):
+                        return
+
+                    summary.changed_events_total += len(summary.changed_events)
+                    summary.changed_conditions_total += len(summary.changed_conditions)
+                    summary.changed_categories_total += len(summary.changed_categories)
+                    summary.changed_group_slugs_total += len(summary.changed_group_slugs)
+
+                    if redis_client is not None:
+                        cache_report = await invalidate_cache_tags(redis_client, summary)
+                        summary.cache_invalidations += cache_report.total
+                        await persist_resolution_cache_updates(redis_client, summary)
+                        await enqueue_proof_jobs(redis_client, summary)
+                        summary.proof_jobs = []
+                    else:
+                        await persist_resolution_cache_updates(redis_client, summary)
+
+                    summary.changed_events = set()
+                    summary.changed_conditions = set()
+                    summary.changed_categories = set()
+                    summary.changed_group_slugs = set()
+                    summary.resolution_cache_updates = []
+
                 async with session_scope() as session:
-                    only_open = runtime.settings.polymarket_only_open_markets is True
-                    closed_param = False if only_open else None
                     async for page in runtime.polymarket_client.fetch_events_paginated(
                         page_size=runtime.settings.polymarket_page_size,
                         max_pages=runtime.settings.polymarket_max_pages,
@@ -350,9 +384,17 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         flush_start = time.perf_counter()
                         await session.flush()
                         flush_ms = (time.perf_counter() - flush_start) * 1000
-                        commit_start = time.perf_counter()
-                        await session.commit()
-                        commit_ms = (time.perf_counter() - commit_start) * 1000
+                        commit_pending += filtered_count
+                        commit_ms = 0.0
+                        committed = False
+                        pending_markets = commit_pending
+                        if commit_batch_size == 0 or commit_pending >= commit_batch_size:
+                            commit_start = time.perf_counter()
+                            await session.commit()
+                            commit_ms = (time.perf_counter() - commit_start) * 1000
+                            committed = True
+                            commit_pending = 0
+                            await _flush_sync_batch(summary)
                         expunge_start = time.perf_counter()
                         session.expunge_all()  # keep identity map small between pages
                         expunge_ms = (time.perf_counter() - expunge_start) * 1000
@@ -374,6 +416,9 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             upsert_ms=round(delta_upsert, 2),
                             normalized_ms=round(delta_normalized, 2),
                             resolution_ms=round(delta_resolution, 2),
+                            commit_pending=pending_markets,
+                            commit_batch_size=commit_batch_size,
+                            committed=committed,
                         )
                         if redis_client is not None:
                             now = time.monotonic()
@@ -383,6 +428,21 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                                 interim_stats["polymarket_ok"] = True
                                 await publish_heartbeat(redis_client, interim_stats)
                                 last_heartbeat = now
+                    if commit_pending > 0:
+                        commit_start = time.perf_counter()
+                        await session.commit()
+                        commit_ms = (time.perf_counter() - commit_start) * 1000
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.sync.commit",
+                            message="committed remaining polymarket batch",
+                            commit_pending=commit_pending,
+                            commit_ms=round(commit_ms, 2),
+                            commit_batch_size=commit_batch_size,
+                        )
+                        commit_pending = 0
+                    await _flush_sync_batch(summary)
                 break
             except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
                 last_exc = exc
@@ -486,8 +546,8 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
     summary.proofs_generated = 0
     summary.settlement_txs = 0
     cache_report = await invalidate_cache_tags(redis_client, summary)
-    summary.cache_invalidations = cache_report.total
-    stats = summary.to_stats(total_fetched, latency_ms, cache_report.total)
+    summary.cache_invalidations += cache_report.total
+    stats = summary.to_stats(total_fetched, latency_ms, summary.cache_invalidations)
     stats["resolution_gaps"] = gap_count
     stats["polymarket_ok"] = True
 
@@ -500,14 +560,14 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         created=summary.markets_created,
         updated=summary.markets_updated,
         deleted=summary.markets_deleted,
-        resolutions=len(summary.changed_conditions),
+        resolutions=summary.changed_conditions_total + len(summary.changed_conditions),
         resolutions_backfilled=summary.resolutions_backfilled,
         proofs=summary.proofs_generated,
         lock_batches=summary.lock_batches_submitted,
         gamma_metadata_updates=summary.gamma_metadata_updates,
         gamma_events_written=summary.gamma_events_written,
         latency_ms=round(latency_ms, 2),
-        cache_invalidations=cache_report.total,
+        cache_invalidations=summary.cache_invalidations,
         market_errors=summary.failed_markets,
         active_markets=stats.get("active_markets"),
         total_markets=stats.get("total_markets"),

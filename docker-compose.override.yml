@@ -59,12 +59,6 @@ services:
       - ./backend/migrations:/app/migrations
     ports:
       - "127.0.0.1:8000:8000"
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
 
   worker:
     environment:
@@ -72,6 +66,7 @@ services:
       LOG_LEVEL: INFO
       # Mirror production heartbeat cadence so diagnostics fire once per minute.
       RM_POLL_INTERVAL_SECONDS: 300
+      RM_POLYMARKET_COMMIT_BATCH_SIZE: 5000
       # Keep migrations enabled so a fresh database gets the schema before the worker starts syncing.
       RM_RUN_MIGRATIONS_ON_STARTUP: "true"
     volumes:
@@ -79,12 +74,6 @@ services:
       - ./backend/shared:/worker/shared
       # Mount migrations for parity with the API container (worker can run cleanup scripts).
       - ./backend/migrations:/worker/migrations
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
 
   hedger:
     profiles: ["hedger"]

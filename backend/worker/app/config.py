@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     polymarket_api_base: AnyHttpUrl = Field(default=cast(AnyHttpUrl, "https://gamma-api.polymarket.com"))
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
     polymarket_page_size: int = Field(default=100, ge=1, le=250)
+    polymarket_commit_batch_size: int = Field(
+        default=3000,
+        ge=0,
+        description="Commit after this many markets are processed (0 = commit every page).",
+    )
     polymarket_max_pages: int | None = Field(default=None, ge=1)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)

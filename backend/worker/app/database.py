@@ -34,7 +34,8 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
     session = SessionLocal()
     try:
         yield session
-        await session.commit()
+        if session.in_transaction():
+            await session.commit()
     except Exception:
         await session.rollback()
         raise
