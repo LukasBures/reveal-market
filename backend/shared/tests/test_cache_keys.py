@@ -31,3 +31,8 @@ def test_markets_list_cache_key_versioned_and_normalized():
 def test_proof_receipt_cache_key_prefixed():
     key = cache_keys.proof_receipt_cache_key("0xabc")
     assert key.startswith("v1:proofs:receipt:")
+
+
+def test_market_stats_cache_key_prefixed():
+    key = cache_keys.market_stats_cache_key("evt-123")
+    assert key == "v1:market:stats:evt-123"

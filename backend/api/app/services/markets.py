@@ -30,9 +30,10 @@ from app.runtime import (
 from app.services.cache_client import get_cache_client
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from shared.cache_async import add_tag, get_json, get_schema_tag, invalidate_tag, set_json
+from shared.cache_async import add_tag, get_json, get_json_many, get_schema_tag, invalidate_tag, set_json
 from shared.cache_keys import (
     group_cache_key,
+    market_stats_cache_key,
     markets_list_cache_key,
 )
 from shared.categories import canonical_category_from_slug
@@ -321,6 +322,55 @@ def safe_float(value: Any) -> float | None:
     return None if numeric != numeric else numeric
 
 
+def safe_int(value: Any) -> int | None:
+    """Coerce values to int while ignoring invalid inputs."""
+
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _apply_market_stats(target: schemas.MarketResponse | schemas.MarketSibling, stats: dict[str, Any]) -> None:
+    if not stats:
+        return
+    value_map = {
+        "best_bid": safe_float,
+        "best_ask": safe_float,
+        "spread": safe_float,
+        "volume": safe_float,
+        "open_interest": safe_float,
+        "liquidity_usd": safe_float,
+        "volume_24h_usd": safe_float,
+        "orderbook_volume_usd": safe_float,
+        "trades_quantity": safe_int,
+    }
+    for field, converter in value_map.items():
+        raw = stats.get(field)
+        if raw is None:
+            continue
+        parsed = converter(raw)
+        if parsed is not None and hasattr(target, field):
+            setattr(target, field, parsed)
+
+
+async def _fetch_market_stats(cache: Redis | None, event_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if cache is None or not event_ids:
+        return {}
+    key_map = {event_id: market_stats_cache_key(event_id) for event_id in event_ids if event_id}
+    if not key_map:
+        return {}
+    raw = await get_json_many(cache, list(key_map.values()))
+    stats: dict[str, dict[str, Any]] = {}
+    for event_id, key in key_map.items():
+        payload = raw.get(key)
+        if isinstance(payload, dict):
+            stats[event_id] = payload
+    return stats
+
+
 def _group_slug_expression():
     return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug)
 
@@ -407,28 +457,100 @@ async def load_group_aggregates(session: AsyncSession, slugs: set[str]) -> dict[
 
     if not slugs:
         return {}
+    aggregates: dict[str, dict[str, float | None]] = {}
+    cache = await get_cache_client()
+    if cache is None:
+        group_expr = _group_slug_expression()
+        total_volume_expr = _total_volume_expression()
+        stmt = (
+            select(
+                group_expr.label("group_slug"),
+                func.sum(models.Market.volume_24h_usd),
+                func.sum(models.Market.liquidity_usd),
+                func.sum(total_volume_expr),
+            )
+            .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+            .where(group_expr.in_(list(slugs)))
+            .group_by(group_expr)
+        )
+        result = await session.execute(stmt)
+        for slug, volume_sum, liquidity_sum, total_sum in result:
+            if not slug:
+                continue
+            aggregates[slug] = {
+                "volume_24h_usd": safe_float(volume_sum),
+                "liquidity_usd": safe_float(liquidity_sum),
+                "volume_total": safe_float(total_sum),
+            }
+        return aggregates
+
     group_expr = _group_slug_expression()
-    total_volume_expr = _total_volume_expression()
     stmt = (
         select(
+            models.Market.event_id,
             group_expr.label("group_slug"),
-            func.sum(models.Market.volume_24h_usd),
-            func.sum(models.Market.liquidity_usd),
-            func.sum(total_volume_expr),
+            models.Market.volume_24h_usd,
+            models.Market.liquidity_usd,
+            models.Market.orderbook_volume_usd,
+            models.MarketGammaMetadata.volume,
+            models.MarketGammaMetadata.volume_clob,
         )
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
         .where(group_expr.in_(list(slugs)))
-        .group_by(group_expr)
     )
-    aggregates: dict[str, dict[str, float | None]] = {}
+    slug_map: dict[str, list[str]] = {}
+    fallback: dict[str, dict[str, float | None]] = {}
+    event_ids: list[str] = []
     result = await session.execute(stmt)
-    for slug, volume_sum, liquidity_sum, total_sum in result:
-        if not slug:
+    for event_id, slug, volume_24h_usd, liquidity_usd, orderbook_volume_usd, volume_total, volume_clob in result:
+        if not slug or not event_id:
+            continue
+        event_id = str(event_id)
+        slug_map.setdefault(slug, []).append(event_id)
+        event_ids.append(event_id)
+        fallback[event_id] = {
+            "volume_24h_usd": safe_float(volume_24h_usd),
+            "liquidity_usd": safe_float(liquidity_usd),
+            "volume_total": safe_float(volume_total) or safe_float(volume_clob) or safe_float(orderbook_volume_usd),
+        }
+
+    stats_map = await _fetch_market_stats(cache, event_ids)
+
+    def _sum_values(values: Iterable[float | None]) -> float | None:
+        total = 0.0
+        has_value = False
+        for value in values:
+            if value is None:
+                continue
+            total += float(value)
+            has_value = True
+        return total if has_value else None
+
+    for slug, events in slug_map.items():
+        volume_values: list[float | None] = []
+        liquidity_values: list[float | None] = []
+        total_values: list[float | None] = []
+        for event_id in events:
+            stats = stats_map.get(event_id)
+            fallback_values = fallback.get(event_id, {})
+            volume_value = safe_float(stats.get("volume_24h_usd")) if stats else None
+            liquidity_value = safe_float(stats.get("liquidity_usd")) if stats else None
+            total_value = None
+            if stats:
+                total_value = safe_float(stats.get("volume"))
+                if total_value is None:
+                    total_value = safe_float(stats.get("orderbook_volume_usd"))
+            volume_values.append(volume_value if volume_value is not None else fallback_values.get("volume_24h_usd"))
+            liquidity_values.append(
+                liquidity_value if liquidity_value is not None else fallback_values.get("liquidity_usd")
+            )
+            total_values.append(total_value if total_value is not None else fallback_values.get("volume_total"))
+        if not events:
             continue
         aggregates[slug] = {
-            "volume_24h_usd": safe_float(volume_sum),
-            "liquidity_usd": safe_float(liquidity_sum),
-            "volume_total": safe_float(total_sum),
+            "volume_24h_usd": _sum_values(volume_values),
+            "liquidity_usd": _sum_values(liquidity_values),
+            "volume_total": _sum_values(total_values),
         }
     return aggregates
 
@@ -480,6 +602,10 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         ).scalars()
         meta_map = {row.market_id: row for row in meta_rows}
 
+    cache = await get_cache_client()
+    event_ids = [record.event_id for record in markets if isinstance(record.event_id, str)]
+    stats_map = await _fetch_market_stats(cache, event_ids)
+
     siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None, float | None]] = []
     for record in markets:
         meta = meta_map.get(record.id)
@@ -498,6 +624,10 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         if any(p is not None for p in prices_raw):
             outcome_prices = [float(p) for p in prices_raw if p is not None]
 
+        stats = stats_map.get(record.event_id) if isinstance(record.event_id, str) else None
+        liquidity_value = safe_float(stats.get("liquidity_usd")) if stats else None
+        volume_value = safe_float(stats.get("volume_24h_usd")) if stats else None
+
         sibling = schemas.MarketSibling(
             event_id=record.event_id,
             title=record.title,
@@ -505,8 +635,8 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
             group_item_threshold=threshold,
             group_position=position,
             outcome_prices=outcome_prices,
-            liquidity_usd=safe_float(record.liquidity_usd),
-            volume_24h_usd=safe_float(record.volume_24h_usd),
+            liquidity_usd=liquidity_value if liquidity_value is not None else safe_float(record.liquidity_usd),
+            volume_24h_usd=volume_value if volume_value is not None else safe_float(record.volume_24h_usd),
         )
         siblings_raw.append(
             (
@@ -692,6 +822,9 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
     if not id_map:
         return
     market_ids = list(id_map.keys())
+    event_ids = [target.event_id for target in id_map.values() if isinstance(getattr(target, "event_id", None), str)]
+    cache = await get_cache_client()
+    stats_map = await _fetch_market_stats(cache, event_ids)
 
     outcome_rows = (
         await session.execute(
@@ -872,6 +1005,10 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
                 target.open_interest = float(event_meta.open_interest)
             except (TypeError, ValueError):
                 target.open_interest = target.open_interest if hasattr(target, "open_interest") else None
+        if isinstance(getattr(target, "event_id", None), str):
+            stats = stats_map.get(target.event_id)
+            if stats:
+                _apply_market_stats(target, stats)
 
 
 def attach_resolution_to_market(

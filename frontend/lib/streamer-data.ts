@@ -16,6 +16,11 @@ type OrderbookAggregate = {
 };
 
 const { streamerPublic, streamerInternal } = resolveUrlConfig();
+const DEFAULT_STREAMER_REVALIDATE_SECONDS = 15;
+const isServer = typeof window === "undefined";
+const streamerFetchOptions = isServer
+  ? { cache: "force-cache" as const, next: { revalidate: DEFAULT_STREAMER_REVALIDATE_SECONDS } }
+  : { cache: "no-store" as const };
 
 const getStreamerBase = (preferInternal = false) => {
   if (preferInternal) return streamerInternal || streamerPublic;
@@ -46,7 +51,7 @@ export async function fetchOrderbookAggregates(tokenIds: string[]): Promise<Reco
     params.set("ids", batch.join(","));
     const url = `${base}/data/subgraph/markets?${params.toString()}`;
     try {
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch(url, streamerFetchOptions);
       if (!res.ok) {
         logger.warn("streamer.orderbook.fetch_failed", { status: res.status, url });
         continue;
@@ -85,7 +90,7 @@ export async function fetchOpenInterest(conditionId: string): Promise<number | u
   params.set("market_id", normalized);
   const url = `${base}/data/subgraph/open-interest?${params.toString()}`;
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, streamerFetchOptions);
     if (!res.ok) {
       logger.warn("streamer.oi.fetch_failed", { status: res.status, url });
       return undefined;
@@ -116,7 +121,7 @@ export async function fetchMarketTokens(conditionId: string, { first = 50 }: { f
   params.set("first", String(Math.max(1, Math.min(200, first))));
   const url = `${base}/data/subgraph/market-data?${params.toString()}`;
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, streamerFetchOptions);
     if (!res.ok) {
       logger.warn("streamer.marketdata.fetch_failed", { status: res.status, url });
       return [];
@@ -156,7 +161,7 @@ export async function fetchMarketActivity(
   params.set("first", String(Math.max(1, Math.min(100, limit))));
   const url = `${base}/data/subgraph/activity?${params.toString()}`;
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, streamerFetchOptions);
     if (!res.ok) {
       logger.warn("streamer.activity.fetch_failed", { status: res.status, url });
       return [];

@@ -491,9 +491,17 @@ async def collect_market_changes_with_summary(
         )
         for market_id, count in (await session.execute(commit_stmt)).all():
             commitment_counts[int(market_id)] = int(count or 0)
-    prefetched_state = await _prefetch_normalized_state(
-        session, [record.id for record in existing_records.values() if record.id is not None]
-    )
+    prefetch_ids: list[int] = []
+    for market in markets:
+        existing = existing_records.get(market.event_id)
+        market_id = getattr(existing, "id", None) if existing is not None else None
+        if market_id is None:
+            continue
+        incoming_hash = getattr(market, "content_hash", None)
+        existing_hash = getattr(existing, "content_hash", None)
+        if incoming_hash is None or existing_hash is None or incoming_hash != existing_hash:
+            prefetch_ids.append(market_id)
+    prefetched_state = await _prefetch_normalized_state(session, sorted(set(prefetch_ids)))
     total_markets = len(markets)
     allow_resolution_fetch: dict[str, bool] = {}
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None

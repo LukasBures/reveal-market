@@ -6,7 +6,14 @@ import logging
 
 import httpx
 import pytest
-from app.polymarket import AsyncPolymarketClient, MarketPayload, fetch_clob_markets, merge_clob_markets
+from app.polymarket import (
+    AsyncPolymarketClient,
+    MarketPayload,
+    _build_market_hash_payload,
+    _compute_market_hash,
+    fetch_clob_markets,
+    merge_clob_markets,
+)
 
 
 @pytest.mark.asyncio
@@ -105,6 +112,46 @@ async def test_polymarket_client_parses_stringified_arrays():
     assert market.outcome_prices == [0.12, 0.88]
     assert market.uma_resolution_status == "pending"
     assert market.clob_token_ids == ["abc", "def"]
+
+
+def test_market_hash_ignores_volatile_stats():
+    base = MarketPayload(
+        event_id="evt-hash",
+        title="Hash Market",
+        slug="hash-market",
+        category="news",
+        outcomes=["Yes", "No"],
+        outcome_prices=[0.5, 0.5],
+        best_bid=0.1,
+        best_ask=0.2,
+        spread=0.1,
+        volume=100.0,
+        open_interest=50.0,
+        liquidity_usd=200.0,
+        volume_24h_usd=20.0,
+        orderbook_volume_usd=80.0,
+        trades_quantity=5,
+    )
+    baseline_hash = _compute_market_hash(_build_market_hash_payload(base))
+    updated = base.model_copy(
+        update={
+            "best_bid": 0.9,
+            "best_ask": 0.95,
+            "spread": 0.05,
+            "volume": 300.0,
+            "open_interest": 75.0,
+            "liquidity_usd": 400.0,
+            "volume_24h_usd": 60.0,
+            "orderbook_volume_usd": 120.0,
+            "trades_quantity": 12,
+        }
+    )
+    updated_hash = _compute_market_hash(_build_market_hash_payload(updated))
+    assert updated_hash == baseline_hash
+
+    changed = base.model_copy(update={"title": "Hash Market Updated"})
+    changed_hash = _compute_market_hash(_build_market_hash_payload(changed))
+    assert changed_hash != baseline_hash
 
 
 @pytest.mark.asyncio

@@ -1355,19 +1355,10 @@ def _build_market_hash_payload(market: MarketPayload) -> dict[str, Any]:
         "enable_order_book": market.enable_order_book,
         "clob_token_ids": market.clob_token_ids,
         "image_variants": market.image_variants,
-        "liquidity_usd": market.liquidity_usd,
-        "volume_24h_usd": market.volume_24h_usd,
-        "orderbook_volume_usd": market.orderbook_volume_usd,
-        "trades_quantity": market.trades_quantity,
         "group_slug": market.group_slug,
         "group_position": market.group_position,
         "group_item_title": market.group_item_title,
         "group_item_threshold": market.group_item_threshold,
-        "best_bid": market.best_bid,
-        "best_ask": market.best_ask,
-        "spread": market.spread,
-        "open_interest": market.open_interest,
-        "volume": market.volume,
     }
 
 

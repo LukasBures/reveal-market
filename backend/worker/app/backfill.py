@@ -16,14 +16,17 @@ async def backfill_market_addresses(
     rpc_url: str,
     factory_address: str,
     get_markets_missing_address: Any,
+    limit: int | None = None,
 ) -> int:
     """Populate market_address for markets missing it by querying the factory."""
 
+    if limit is not None and limit <= 0:
+        return 0
     web3 = get_async_web3(rpc_url)
     factory = web3.eth.contract(address=to_checksum(factory_address), abi=MARKET_FACTORY_ABI)
     count = 0
     skipped_missing_id = 0
-    markets = await get_markets_missing_address(session)
+    markets = await get_markets_missing_address(session, limit=limit)
     for market in markets:
         onchain_id = getattr(market, "onchain_market_id", None)
         if onchain_id in (None, 0):
@@ -57,14 +60,17 @@ async def backfill_market_params(
     rpc_url: str,
     factory_address: str,
     get_markets_for_sync: Any,
+    limit: int | None = None,
 ) -> int:
     """Populate on-chain factory params (rake, ids, factory) for markets missing them."""
 
+    if limit is not None and limit <= 0:
+        return 0
     web3 = get_async_web3(rpc_url)
     factory = web3.eth.contract(address=to_checksum(factory_address), abi=MARKET_FACTORY_ABI)
     count = 0
     skipped_missing_id = 0
-    markets = await get_markets_for_sync(session)
+    markets = await get_markets_for_sync(session, limit=limit)
     for market in markets:
         onchain_id = getattr(market, "onchain_market_id", None)
         market_address = getattr(market, "market_address", None)

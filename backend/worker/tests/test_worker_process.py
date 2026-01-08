@@ -667,6 +667,74 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_markets_stops_on_updated_at_cutoff(monkeypatch):
+    ts_new = datetime(2026, 1, 3, tzinfo=UTC)
+    ts_old = datetime(2026, 1, 1, tzinfo=UTC)
+    payload_new = MarketPayload(event_id="evt-new", title="New", source_updated_at=ts_new)
+    payload_old = MarketPayload(event_id="evt-old", title="Old", source_updated_at=ts_old)
+
+    async def _fake_events_paginated(self, **_kwargs):
+        yield [payload_new]
+        yield [payload_old]
+        yield [MarketPayload(event_id="evt-too-old", title="Too old", source_updated_at=ts_old)]
+
+    @contextlib.asynccontextmanager
+    async def dummy_session_scope():
+        class DummySession:
+            async def flush(self):
+                return None
+
+            async def commit(self):
+                return None
+
+            def expunge_all(self):
+                return None
+
+        yield DummySession()
+
+    async def fake_collect(session, page, redis_client, summary):
+        summary.markets_created += len(page)
+        return summary
+
+    async def async_none(*_args, **_kwargs):
+        return None
+
+    async def async_zero(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
+    monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
+    monkeypatch.setattr(worker_service, "apply_retention_cleanup_async", async_none, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_missing_resolutions_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
+    monkeypatch.setattr(
+        runtime_module,
+        "polymarket_client",
+        type("Dummy", (), {"fetch_events_paginated": _fake_events_paginated})(),
+        raising=False,
+    )
+    monkeypatch.setattr(runtime_module.settings, "polymarket_order", "updatedAt", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sort_ascending", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_updated_at_cutoff_enabled", True, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_updated_at_cutoff_grace_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_seconds", 0, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_retry_backoff_max_seconds", 0, raising=False)
+    dummy_redis = DummyRedis()
+    dummy_redis.store[runtime_module.settings.polymarket_updated_at_cutoff_key] = str(
+        datetime(2026, 1, 2, tzinfo=UTC).timestamp()
+    )
+
+    summary, total, _, _ = await worker_service._sync_polymarket_feed(dummy_redis)
+
+    assert total == 2
+    assert summary.markets_created == 2
+    assert dummy_redis.store[runtime_module.settings.polymarket_updated_at_cutoff_key] == str(ts_new.timestamp())
+
+
+@pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     async def always_fail(self, **_kwargs):
         if False:  # pragma: no cover - ensure this is an async generator

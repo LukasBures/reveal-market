@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import app.server as api_main
 from app import models
 from shared import models as shared_models
-from shared.cache_keys import resolution_cache_key
+from shared.cache_async import set_json
+from shared.cache_keys import market_stats_cache_key, resolution_cache_key
 from sqlalchemy import select
 
 
@@ -66,6 +68,58 @@ def test_market_metadata_enrichment_applies_description_and_tokens(client, db_se
     assert enriched["description"] == "Detailed narrative from Polymarket."
     assert enriched["resolution_source"] == "https://example.com/source"
     assert enriched["clob_token_ids"] == ["A", "B"]
+
+
+def test_market_stats_cache_overrides_db_values(client, db_session):
+    market = _make_market(
+        "evt-stats",
+        "Stats Market",
+        category="news",
+        liquidity_usd=10.0,
+        volume_24h_usd=5.0,
+        orderbook_volume_usd=3.0,
+    )
+    db_session.add(market)
+    db_session.flush()
+    db_session.add(
+        shared_models.MarketGammaMetadata(
+            market_id=market.id,
+            best_bid=0.1,
+            best_ask=0.2,
+            spread=0.1,
+            volume=100.0,
+        )
+    )
+    db_session.commit()
+
+    cache_payload = {
+        "best_bid": 0.9,
+        "best_ask": 0.95,
+        "spread": 0.05,
+        "volume": 250.0,
+        "open_interest": 42.0,
+        "liquidity_usd": 99.0,
+        "volume_24h_usd": 88.0,
+        "orderbook_volume_usd": 77.0,
+        "trades_quantity": 12,
+    }
+    asyncio.run(
+        set_json(client.app.cache_client, market_stats_cache_key(market.event_id), cache_payload, ttl_seconds=60)
+    )
+
+    response = client.get("/markets")
+    assert response.status_code == 200
+    payload = {item["event_id"]: item for item in response.json()}
+    enriched = payload["evt-stats"]
+    assert enriched["best_bid"] == cache_payload["best_bid"]
+    assert enriched["best_ask"] == cache_payload["best_ask"]
+    assert enriched["spread"] == cache_payload["spread"]
+    assert enriched["volume"] == cache_payload["volume"]
+    assert enriched["open_interest"] == cache_payload["open_interest"]
+    assert enriched["liquidity_usd"] == cache_payload["liquidity_usd"]
+    assert enriched["volume_24h_usd"] == cache_payload["volume_24h_usd"]
+    assert enriched["orderbook_volume_usd"] == cache_payload["orderbook_volume_usd"]
+    assert enriched["trades_quantity"] == cache_payload["trades_quantity"]
 
 
 def test_category_allowlist_filters_markets(monkeypatch, client, db_session):

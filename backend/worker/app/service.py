@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from shared import cache_async as shared_cache
 from shared import models as shared_models
 from shared import repository_async
+from shared.cache_keys import market_stats_cache_key
 from shared.logging import log_event, start_heartbeat_logger
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
@@ -42,6 +43,7 @@ from .settlement import run_lock_batches_jobs, run_settlement_jobs
 logger = runtime.logger
 
 _LAST_CLOSED_RECONCILE_TS: float | None = None
+_LAST_POLYMARKET_UPDATED_AT_TS: float | None = None
 
 
 class MemoryStats(TypedDict, total=False):
@@ -62,6 +64,37 @@ class MemoryStats(TypedDict, total=False):
 class MemoryPressureStats(TypedDict):
     market_payload_objects: int
     market_orm_objects: int
+
+
+def _build_market_stats_payload(market: MarketPayload) -> dict[str, Any]:
+    return {
+        "best_bid": market.best_bid,
+        "best_ask": market.best_ask,
+        "spread": market.spread,
+        "volume": market.volume,
+        "open_interest": market.open_interest,
+        "liquidity_usd": market.liquidity_usd,
+        "volume_24h_usd": market.volume_24h_usd,
+        "orderbook_volume_usd": market.orderbook_volume_usd,
+        "trades_quantity": market.trades_quantity,
+    }
+
+
+async def _persist_market_stats(redis_client: Redis | None, markets: list[MarketPayload]) -> int:
+    if redis_client is None:
+        return 0
+    ttl_seconds = runtime.settings.market_stats_ttl_seconds
+    if ttl_seconds <= 0:
+        return 0
+    payloads: dict[str, dict[str, Any]] = {}
+    for market in markets:
+        event_id = getattr(market, "event_id", None)
+        if not event_id:
+            continue
+        payloads[market_stats_cache_key(str(event_id))] = _build_market_stats_payload(market)
+    if not payloads:
+        return 0
+    return await shared_cache.set_json_many(redis_client, payloads, ttl_seconds=ttl_seconds)
 
 
 def _calculate_sleep(start_time: float) -> float:
@@ -293,6 +326,80 @@ def _parse_timestamp(value: str | None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_timestamp(value: datetime | None) -> float | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.timestamp()
+
+
+def _order_supports_updated_at_cutoff() -> bool:
+    if not runtime.settings.polymarket_updated_at_cutoff_enabled:
+        return False
+    if runtime.settings.polymarket_sort_ascending:
+        return False
+    order = runtime.settings.polymarket_order or ""
+    return str(order).lower() in {"updatedat", "updated_at"}
+
+
+async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float | None:
+    if not _order_supports_updated_at_cutoff():
+        return None
+    last_ts: float | None = None
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get(runtime.settings.polymarket_updated_at_cutoff_key)
+            last_ts = _parse_timestamp(raw)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.fetch.cutoff_read_failed",
+                message="failed to read polymarket updatedAt cutoff timestamp",
+                error=str(exc),
+            )
+            last_ts = None
+    else:
+        global _LAST_POLYMARKET_UPDATED_AT_TS
+        last_ts = _LAST_POLYMARKET_UPDATED_AT_TS
+    if last_ts is None:
+        return None
+    grace = max(runtime.settings.polymarket_updated_at_cutoff_grace_seconds, 0)
+    return last_ts - grace if grace else last_ts
+
+
+async def _record_polymarket_updated_at(redis_client: Redis | None, last_seen_ts: float | None) -> None:
+    if last_seen_ts is None or not _order_supports_updated_at_cutoff():
+        return
+    if redis_client is not None:
+        try:
+            await redis_client.set(runtime.settings.polymarket_updated_at_cutoff_key, str(last_seen_ts))
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.fetch.cutoff_write_failed",
+                message="failed to write polymarket updatedAt cutoff timestamp",
+                error=str(exc),
+            )
+            return
+    else:
+        global _LAST_POLYMARKET_UPDATED_AT_TS
+        _LAST_POLYMARKET_UPDATED_AT_TS = last_seen_ts
+
+
+def _page_updated_at_bounds(markets: list[MarketPayload]) -> tuple[float | None, float | None]:
+    timestamps: list[float] = []
+    for market in markets:
+        ts = _to_timestamp(getattr(market, "source_updated_at", None))
+        if ts is not None:
+            timestamps.append(ts)
+    if not timestamps:
+        return None, None
+    return min(timestamps), max(timestamps)
 
 
 async def _should_run_closed_reconcile(redis_client: Redis | None) -> bool:
@@ -531,6 +638,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         backoff_max = max(runtime.settings.polymarket_sync_retry_backoff_max_seconds, 0.0)
         attempt = 0
         last_exc: Exception | None = None
+        cutoff_ts = await _get_polymarket_updated_at_cutoff(redis_client)
         while attempt < attempts:
             attempt += 1
             last_exc = None
@@ -538,6 +646,8 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             summary = SyncSummary()
             total_fetched = 0
             gap_count = 0
+            stop_reason: str | None = None
+            last_seen_ts: float | None = None
             try:
                 only_open = runtime.settings.polymarket_only_open_markets is True
                 closed_param = False if only_open else None
@@ -613,6 +723,13 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         )
                         if filtered_count == 0:
                             continue
+                        page_min_ts, page_max_ts = _page_updated_at_bounds(page)
+                        if page_max_ts is not None:
+                            last_seen_ts = max(last_seen_ts or page_max_ts, page_max_ts)
+                        cutoff_hit = cutoff_ts is not None and page_min_ts is not None and page_min_ts < cutoff_ts
+                        stats_written = 0
+                        if redis_client is not None:
+                            stats_written = await _persist_market_stats(redis_client, page)
                         process_start = time.perf_counter()
                         timing_before = (
                             summary.timing_match_ms,
@@ -688,6 +805,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                                             **_count_memory_pressure_objects(),
                                         )
                                         stop_due_to_memory = True
+                                        stop_reason = "memory"
                         log_event(
                             logger,
                             logging.INFO,
@@ -708,9 +826,25 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             commit_pending=pending_markets,
                             commit_batch_size=commit_batch_size,
                             committed=committed,
+                            market_stats_written=stats_written or None,
                             **memory_stats,
                         )
+                        if cutoff_hit and stop_reason is None:
+                            stop_reason = "updated_at_cutoff"
+                            log_event(
+                                logger,
+                                logging.INFO,
+                                event="worker.fetch.cutoff_hit",
+                                message="stopping pagination at updatedAt cutoff",
+                                page=page_no,
+                                total=total_fetched,
+                                cutoff_ts=cutoff_ts,
+                                page_min_ts=page_min_ts,
+                                page_max_ts=page_max_ts,
+                            )
                         if stop_due_to_memory:
+                            break
+                        if stop_reason == "updated_at_cutoff":
                             break
                         if redis_client is not None:
                             now = time.monotonic()
@@ -750,6 +884,8 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                     await _flush_sync_batch(summary)
                     if stop_due_to_memory:
                         break
+                if stop_reason != "memory":
+                    await _record_polymarket_updated_at(redis_client, last_seen_ts)
                 break
             except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
                 last_exc = exc
@@ -1151,34 +1287,38 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
                                 count=backfilled,
                             )
                         if runtime.settings.factory_address and runtime.settings.rpc_url:
-                            address_updates = await backfill_market_addresses(
-                                session,
-                                rpc_url=str(runtime.settings.rpc_url),
-                                factory_address=str(runtime.settings.factory_address),
-                                get_markets_missing_address=repository_async.list_markets_missing_address,
-                            )
-                            if address_updates:
-                                log_event(
-                                    logger,
-                                    logging.INFO,
-                                    event="worker.resolution.backfill_addresses",
-                                    message="backfilled market addresses",
-                                    count=address_updates,
+                            factory_limit = max(runtime.settings.factory_backfill_limit, 0)
+                            if factory_limit > 0:
+                                address_updates = await backfill_market_addresses(
+                                    session,
+                                    rpc_url=str(runtime.settings.rpc_url),
+                                    factory_address=str(runtime.settings.factory_address),
+                                    get_markets_missing_address=repository_async.list_markets_missing_address,
+                                    limit=factory_limit,
                                 )
-                            params_updates = await backfill_market_params(
-                                session,
-                                rpc_url=str(runtime.settings.rpc_url),
-                                factory_address=str(runtime.settings.factory_address),
-                                get_markets_for_sync=repository_async.list_markets_for_factory_sync,
-                            )
-                            if params_updates:
-                                log_event(
-                                    logger,
-                                    logging.INFO,
-                                    event="worker.market_params.backfill",
-                                    message="backfilled market factory params",
-                                    count=params_updates,
+                                if address_updates:
+                                    log_event(
+                                        logger,
+                                        logging.INFO,
+                                        event="worker.resolution.backfill_addresses",
+                                        message="backfilled market addresses",
+                                        count=address_updates,
+                                    )
+                                params_updates = await backfill_market_params(
+                                    session,
+                                    rpc_url=str(runtime.settings.rpc_url),
+                                    factory_address=str(runtime.settings.factory_address),
+                                    get_markets_for_sync=repository_async.list_markets_for_factory_sync,
+                                    limit=factory_limit,
                                 )
+                                if params_updates:
+                                    log_event(
+                                        logger,
+                                        logging.INFO,
+                                        event="worker.market_params.backfill",
+                                        message="backfilled market factory params",
+                                        count=params_updates,
+                                    )
                         gap_count = await log_resolution_gaps_async(session)
                     cache_report = await invalidate_cache_tags(redis_client, summary)
                     summary.cache_invalidations = cache_report.total

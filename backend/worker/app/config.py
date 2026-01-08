@@ -150,6 +150,16 @@ class Settings(BaseSettings):
     polymarket_sync_lease_key: str = Field(default="reveal_market_worker:polymarket_sync_lease")
     polymarket_sync_lease_ttl_seconds: int = Field(default=120, ge=5)
     polymarket_sync_lease_jitter_seconds: float = Field(default=2.0, ge=0)
+    polymarket_updated_at_cutoff_enabled: bool = Field(
+        default=True,
+        description="Stop pagination once updatedAt is older than the last successful sync marker.",
+    )
+    polymarket_updated_at_cutoff_key: str = Field(default="reveal_market_worker:polymarket_sync_updated_at")
+    polymarket_updated_at_cutoff_grace_seconds: int = Field(
+        default=60,
+        ge=0,
+        description="Grace window subtracted from the last updatedAt cutoff to avoid missing ties.",
+    )
     poll_interval_seconds: int = Field(default=300, ge=1)
     poll_interval_jitter_seconds: float = Field(default=3.0, ge=0)
     maintenance_poll_seconds: float = Field(
@@ -177,6 +187,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Maximum markets to reconcile per maintenance tick.",
     )
+    factory_backfill_limit: int = Field(
+        default=200,
+        ge=0,
+        description="Maximum markets to backfill per maintenance tick (0 disables backfills).",
+    )
     closed_markets_reconcile_stale_seconds: int = Field(
         default=21600,
         ge=0,
@@ -200,6 +215,11 @@ class Settings(BaseSettings):
     markets_cache_order_by: str | None = Field(default="volume")
     markets_cache_prime_pages: int = Field(default=5, ge=1, le=1000)
     markets_cache_ttl_seconds: int = Field(default=300, ge=1)
+    market_stats_ttl_seconds: int = Field(
+        default=900,
+        ge=0,
+        description="TTL for per-market stats stored in Redis (0 disables writes).",
+    )
     cache_prime_timeout_seconds: float = Field(default=5.0, gt=0)
     category_cache_limit: int = Field(default=18, ge=1, le=250)
     suggest_cache_limit: int = Field(default=5, ge=1, le=25)

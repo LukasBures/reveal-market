@@ -417,14 +417,22 @@ async def update_commitment_tx_hash(session: AsyncSession, old_hash: str, new_ha
     return updated
 
 
-async def list_markets_missing_address(session: AsyncSession) -> list[models.Market]:
+async def list_markets_missing_address(session: AsyncSession, *, limit: int | None = None) -> list[models.Market]:
     """Return markets that are missing a contract address."""
 
-    stmt = select(models.Market).where(models.Market.market_address.is_(None))
+    stmt = (
+        select(models.Market)
+        .where(models.Market.market_address.is_(None))
+        .where(models.Market.onchain_market_id.is_not(None))
+        .where(models.Market.onchain_market_id != 0)
+        .order_by(models.Market.id.asc())
+    )
+    if limit and limit > 0:
+        stmt = stmt.limit(limit)
     return list((await session.scalars(stmt)).all())
 
 
-async def list_markets_for_factory_sync(session: AsyncSession) -> list[models.Market]:
+async def list_markets_for_factory_sync(session: AsyncSession, *, limit: int | None = None) -> list[models.Market]:
     """Return markets that should be mirrored against on-chain factory params."""
 
     stmt = (
@@ -439,7 +447,10 @@ async def list_markets_for_factory_sync(session: AsyncSession) -> list[models.Ma
                 models.Market.onchain_market_id.is_(None),
             )
         )
+        .order_by(models.Market.id.asc())
     )
+    if limit and limit > 0:
+        stmt = stmt.limit(limit)
     return list((await session.scalars(stmt)).all())
 
 

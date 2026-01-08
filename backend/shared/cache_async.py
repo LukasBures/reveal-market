@@ -5,7 +5,7 @@ import importlib.util
 import inspect
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from threading import Lock
 from typing import Any, Protocol, cast
 
@@ -177,6 +177,73 @@ async def get_json(client: Redis | None, key: str) -> Any:
         return None
 
 
+async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, Any]:
+    """Fetch and JSON-decode multiple keys from Redis."""
+
+    results: dict[str, Any] = {}
+    if not keys:
+        return results
+    if client is None:
+        stats = get_stats_client()
+        for _ in keys:
+            stats.record_miss()
+        return results
+    if not hasattr(client, "mget"):
+        for key in keys:
+            value = await get_json(client, key)
+            if value is not None:
+                results[key] = value
+        return results
+    try:
+        payloads = await client.mget(list(keys))
+    except RedisError as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.mget.error",
+            message="redis MGET failed",
+            key_count=len(keys),
+            error=str(exc),
+        )
+        get_stats_client().record_error()
+        return results
+    stats = get_stats_client()
+    for key, payload_raw in zip(keys, payloads, strict=False):
+        if payload_raw is None:
+            stats.record_miss()
+            continue
+        if isinstance(payload_raw, bytes):
+            payload = payload_raw
+        elif isinstance(payload_raw, str):
+            payload = payload_raw.encode()
+        else:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="cache.mget.invalid_type",
+                message="redis MGET returned unexpected type",
+                key=key,
+                value_type=type(payload_raw).__name__,
+            )
+            stats.record_error()
+            continue
+        try:
+            data = _json_loads(payload)
+            results[key] = data
+            stats.record_hit()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="cache.mget.decode_error",
+                message="redis payload was not valid JSON",
+                key=key,
+                error=str(exc),
+            )
+            stats.record_error()
+    return results
+
+
 async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None = None) -> None:
     """Serialize value as JSON and store it."""
 
@@ -216,6 +283,48 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
             key=key,
             error=str(exc),
         )
+
+
+async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seconds: int | None = None) -> int:
+    """Serialize and store multiple values, returning the count written."""
+
+    if client is None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.set_many.disabled",
+                message="cache client unavailable, skipping multi-set",
+                key_count=len(items),
+            )
+        return 0
+    if not items:
+        return 0
+    if not hasattr(client, "pipeline"):
+        for key, value in items.items():
+            await set_json(client, key, value, ttl_seconds)
+        return len(items)
+    try:
+        pipe = client.pipeline()
+        for key, value in items.items():
+            payload = _json_dumps(value)
+            if ttl_seconds:
+                pipe.set(key, payload, ex=ttl_seconds)
+            else:
+                pipe.set(key, payload)
+        await pipe.execute()
+        return len(items)
+    except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
+        get_stats_client().record_error()
+        log_event(
+            logger,
+            logging.WARNING,
+            event="cache.set_many.error",
+            message="redis pipeline SET failed",
+            key_count=len(items),
+            error=str(exc),
+        )
+        return 0
 
 
 async def delete(client: Redis | None, key: str) -> None:
