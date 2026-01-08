@@ -26,8 +26,12 @@ const PRESETS: Record<string, ModePreset> = {
 };
 
 const resolveMode = () => {
-  const modeEnv = (process.env.RM_ENVIRONMENT ?? "local").toLowerCase();
-  return modeEnv.includes("prod") ? "prod" : "local";
+  const modeEnv = (process.env.RM_ENVIRONMENT ?? process.env.NEXT_PUBLIC_RM_ENVIRONMENT ?? "").toLowerCase();
+  if (modeEnv) {
+    return modeEnv.includes("prod") ? "prod" : "local";
+  }
+  const nodeEnv = (process.env.NODE_ENV ?? "").toLowerCase();
+  return nodeEnv === "production" ? "prod" : "local";
 };
 
 const assertValidUrl = (value: string, label: string): string => {

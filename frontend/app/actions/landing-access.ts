@@ -19,7 +19,7 @@ const resolveSiteUrl = () => {
   return config.siteUrl;
 };
 
-const isProdLike = () => (process.env.RM_ENVIRONMENT ?? "").toLowerCase().includes("prod");
+const isProdLike = () => resolveUrlConfig().mode === "prod";
 
 const shouldUseSecureCookie = (): boolean => {
   const siteUrl = resolveSiteUrl();
