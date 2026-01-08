@@ -15,10 +15,10 @@
 
 # Primary model used by Codex. Default differs by OS; non-Windows defaults here.
 # Linux/macOS default: "gpt-5-codex"; Windows default: "gpt-5".
-model = "gpt-5.1-codex"
+model = "gpt-5.2-codex"
 
 # Model used by the /review feature (code reviews). Default: "gpt-5-codex".
-review_model = "gpt-5.1-codex"
+review_model = "gpt-5.2-codex"
 
 # Provider id selected from [model_providers]. Default: "openai".
 model_provider = "openai"
@@ -34,7 +34,7 @@ model_provider = "openai"
 ################################################################################
 
 # Reasoning effort: minimal | low | medium | high (default: medium)
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 
 # Reasoning summary: auto | concise | detailed | none (default: auto)
 model_reasoning_summary = "auto"
@@ -68,6 +68,40 @@ model_reasoning_summary_format = "none"
 # experimental_compact_prompt_file = "/absolute/or/relative/path/to/compact_prompt.txt"
 
 ################################################################################
+# Authentication & Login
+################################################################################
+
+# Where to persist CLI login credentials: file (default) | keyring | auto
+cli_auth_credentials_store = "file"
+
+# Base URL for ChatGPT auth flow (not OpenAI API). Default:
+chatgpt_base_url = "https://chatgpt.com/backend-api/"
+
+# Restrict ChatGPT login to a specific workspace id. Default: unset.
+# forced_chatgpt_workspace_id = ""
+
+# Force login mechanism when Codex would normally auto-select. Default: unset.
+# Allowed values: chatgpt | api
+# forced_login_method = "chatgpt"
+
+################################################################################
+# Project Documentation Controls
+################################################################################
+
+# Max bytes from AGENTS.md to embed into first-turn instructions. Default: 32768
+project_doc_max_bytes = 32768
+
+# Ordered fallbacks when AGENTS.md is missing at a directory level. Default: []
+project_doc_fallback_filenames = []
+
+################################################################################
+# MCP (Model Context Protocol) Credentials
+################################################################################
+
+# Preferred store for MCP OAuth credentials: auto (default) | file | keyring
+mcp_oauth_credentials_store = "auto"
+
+################################################################################
 # Approval & Sandbox
 ################################################################################
 
@@ -76,13 +110,13 @@ model_reasoning_summary_format = "none"
 # - on-failure: auto-run in sandbox; prompt only on failure for escalation
 # - on-request: model decides when to ask (default)
 # - never: never prompt (risky)
-approval_policy = "on-request"
+approval_policy = "never"
 
 # Filesystem/network sandbox policy for tool calls:
 # - read-only (default)
 # - workspace-write
 # - danger-full-access (no sandbox; extremely risky)
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 
 # Extra settings used only when sandbox_mode = "workspace-write".
 [sandbox_workspace_write]
@@ -157,84 +191,23 @@ windows_wsl_setup_acknowledged = false
 # hide_rate_limit_model_nudge = true
 
 ################################################################################
-# Authentication & Login
-################################################################################
-
-# Where to persist CLI login credentials: file (default) | keyring | auto
-cli_auth_credentials_store = "file"
-
-# Base URL for ChatGPT auth flow (not OpenAI API). Default:
-chatgpt_base_url = "https://chatgpt.com/backend-api/"
-
-# Restrict ChatGPT login to a specific workspace id. Default: unset.
-# forced_chatgpt_workspace_id = ""
-
-# Force login mechanism when Codex would normally auto-select. Default: unset.
-# Allowed values: chatgpt | api
-# forced_login_method = "chatgpt"
-
-################################################################################
-# Project Documentation Controls
-################################################################################
-
-# Max bytes from AGENTS.md to embed into first-turn instructions. Default: 32768
-project_doc_max_bytes = 32768
-
-# Ordered fallbacks when AGENTS.md is missing at a directory level. Default: []
-project_doc_fallback_filenames = []
-
-################################################################################
-# Tools (legacy toggles kept for compatibility)
-################################################################################
-
-[tools]
-# Enable web search tool (alias: web_search_request). Default: false
-web_search = false
-
-# Enable the view_image tool so the agent can attach local images. Default: true
-view_image = true
-
-# (Alias accepted) You can also write:
-# web_search_request = false
-
-################################################################################
 # Centralized Feature Flags (preferred)
 ################################################################################
 
 [features]
 # Leave this table empty to accept defaults. Set explicit booleans to opt in/out.
-unified_exec = false
-streamable_shell = false
-rmcp_client = false
-apply_patch_freeform = false
+unified_exec = true
+shell_snapshot = true
+apply_patch_freeform = true
 view_image_tool = true
-web_search_request = false
-experimental_sandbox_command_assessment = false
-ghost_commit = false
-enable_experimental_windows_sandbox = false
-
-################################################################################
-# Experimental toggles (legacy; prefer [features])
-################################################################################
-
-# Use experimental unified exec tool. Default: false
-experimental_use_unified_exec_tool = false
-
-# Use experimental Rust MCP client (enables OAuth for HTTP MCP). Default: false
-experimental_use_rmcp_client = false
-
-# Include apply_patch via freeform editing path (affects default tool set). Default: false
-experimental_use_freeform_apply_patch = false
-
-# Enable model-based sandbox command assessment. Default: false
-experimental_sandbox_command_assessment = false
+web_search_request = true
+remote_models = true
+undo = true
+experimental_windows_sandbox = false
 
 ################################################################################
 # MCP (Model Context Protocol) servers
 ################################################################################
-
-# Preferred store for MCP OAuth credentials: auto (default) | file | keyring
-mcp_oauth_credentials_store = "auto"
 
 # Define MCP servers under this table. Leave empty to disable.
 [mcp_servers]

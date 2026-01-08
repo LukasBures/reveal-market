@@ -21,7 +21,7 @@ const GA_ORIGINS = [
 ];
 
 const styleSrc = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"];
-const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com"];
+const fontSrc = ["'self'", "data:", "https://fonts.gstatic.com", "https://fonts.reown.com"];
 const WALLET_PROVIDER_ORIGINS = [
   // Base RPC + optional providers
   "https://mainnet.base.org",
@@ -58,6 +58,7 @@ const WALLET_PROVIDER_WS = [
   "wss://*.walletconnect.com",
   "wss://*.walletconnect.org",
   "wss://metamask-sdk.api.cx.metamask.io",
+  "wss://www.walletlink.org",
 ];
 
 const walletFrameOrigins = [
