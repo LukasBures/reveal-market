@@ -48,4 +48,4 @@ networks:
   default:
     name: reveal-market
     driver_opts:
-      com.docker.network.bridge.name: br-reveal-market
+      com.docker.network.bridge.name: br-reveal
