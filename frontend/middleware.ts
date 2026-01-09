@@ -14,6 +14,8 @@ const PUBLIC_PATHS = [
   "/icons",
   "/site.webmanifest",
   "/opengraph-image",
+  "/apple-touch-icon.png",
+  "/safari-pinned-tab.svg",
 ];
 
 export function middleware(request: NextRequest) {
@@ -24,6 +26,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/api") ||
     pathname.startsWith("/static") ||
     pathname.startsWith("/favicon") ||
+    pathname === "/apple-touch-icon.png" ||
+    pathname === "/safari-pinned-tab.svg" ||
     pathname.startsWith("/robots.txt") ||
     pathname.startsWith("/sitemap.xml")
   ) {
@@ -67,5 +71,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|icons|site.webmanifest).*)"],
+  matcher: ["/((?!_next/static|_next/image|icons|site.webmanifest|apple-touch-icon\\.png|safari-pinned-tab\\.svg).*)"],
 };
