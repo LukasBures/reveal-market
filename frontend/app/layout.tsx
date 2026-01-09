@@ -38,7 +38,7 @@ const SEARCH_URL = absoluteUrl("/markets/search");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
-const SHOULD_SUPPRESS_LIT_WARNING = !IS_PRODUCTION;
+const SHOULD_SUPPRESS_LIT_WARNING = true;
 const isBrowserResolvableHost = (hostname: string) => {
   const normalized = hostname.toLowerCase();
   // Treat dotted domains or IPv6 literals as routable; skip bare Docker hostnames like "api".
@@ -151,11 +151,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
-        <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
-        <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
-        <link rel="shortcut icon" href="/icons/favicon.ico" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-        <link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#2735d2" />
+        <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#2735d2" />
         <meta name="apple-mobile-web-app-title" content="Reveal Market" />
         <link rel="manifest" href="/site.webmanifest" />
         <script

@@ -159,9 +159,7 @@ const nextConfig = (phase) => {
         { protocol: 'https', hostname: '*.cloudfront.net' },
       ],
     },
-    experimental: {
-      typedRoutes: true,
-    },
+    typedRoutes: true,
     eslint: {
       ignoreDuringBuilds: true,
     },

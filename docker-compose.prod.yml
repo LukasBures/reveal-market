@@ -46,6 +46,6 @@ volumes:
 
 networks:
   default:
-    name: reveal-market
+    name: reveal-market-prod
     driver_opts:
-      com.docker.network.bridge.name: br-reveal
+      com.docker.network.bridge.name: br-reveal-prod

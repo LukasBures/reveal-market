@@ -35,7 +35,12 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       const host = window.location?.hostname ?? "";
       return host === "localhost" || host === "127.0.0.1";
     })();
-    if (isLocalhost) {
+    const isTestEnv =
+      process.env.NODE_ENV === "test" ||
+      process.env.VITEST === "true" ||
+      process.env.VITEST === "1" ||
+      Boolean(process.env.VITEST_WORKER_ID);
+    if (isLocalhost && !isTestEnv) {
       return;
     }
 
