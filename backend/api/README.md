@@ -301,7 +301,7 @@ Add new tests under `backend/api/tests` following the `test_*.py` convention. Us
 2. Provide environment:
    - Postgres reachable via `RM_DATABASE_URL`
    - Redis reachable via `RM_REDIS_URL`
-   - Worker publishing schema revision/heartbeats (so `/health` stays green)
+   - Worker publishing schema revision/heartbeats (so `/healthz` stays green)
 3. Configure ingress to set `X-Forwarded-Proto`/`X-Forwarded-For` if you rely on access logs.
 4. Expose `/metrics` behind auth if deploying on the public internet.
 5. Run `python -m app.healthcheck` as the container `HEALTHCHECK` command (already wired in Dockerfile).

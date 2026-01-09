@@ -7,7 +7,6 @@ const DISALLOW = [
   "/api/*",
   "/app/api",
   "/app/api/*",
-  "/health",
   "/healthz",
   "/api/healthz",
   "/app/api/healthz",

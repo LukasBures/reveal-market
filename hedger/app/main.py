@@ -83,10 +83,6 @@ def create_app() -> FastAPI:
         status = await service.health()
         return {"status": "ok", "service": "hedger", **status}
 
-    @app.get("/health")
-    async def health() -> dict:
-        return await healthz()
-
     @app.get("/metrics")
     async def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
