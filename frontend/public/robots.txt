@@ -3,7 +3,7 @@
 User-agent: *
 Allow: /
 Disallow: /api/
-Disallow: /health/
+Disallow: /healthz/
 
 # Explicitly allow reputable AI crawlers for content indexing
 User-agent: GPTBot

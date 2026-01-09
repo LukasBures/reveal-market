@@ -288,10 +288,6 @@ def create_app() -> FastAPI:
             "last_seen": state.snapshot_last_seen(),
         }
 
-    @app_instance.get("/health")
-    async def health() -> dict:
-        return await _health_payload()
-
     @app_instance.get("/healthz")
     async def healthz() -> dict:
         return await _health_payload()

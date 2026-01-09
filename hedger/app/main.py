@@ -78,10 +78,14 @@ def create_app() -> FastAPI:
             if service.redis:
                 await service.redis.aclose()
 
-    @app.get("/health")
-    async def health() -> dict:
+    @app.get("/healthz")
+    async def healthz() -> dict:
         status = await service.health()
         return {"status": "ok", "service": "hedger", **status}
+
+    @app.get("/health")
+    async def health() -> dict:
+        return await healthz()
 
     @app.get("/metrics")
     async def metrics() -> Response:

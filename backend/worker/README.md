@@ -303,7 +303,7 @@ uv run --project . --extra dev ruff check backend/worker
 | --- | --- |
 | Logging | `logging_config.setup_logging("reveal_market.worker")` emits `timestamp | LEVEL | logger | file:line | event | request_id`. Key events: `worker.fetch.*`, `worker.persist.*`, `worker.heartbeat.*`, `worker.cache.*`, `worker.schema.*`. Use `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES` to tune output. |
 | Metrics | `RETENTION_*`, `CACHE_INVALIDATION_COUNTER`, `worker_polymarket_fetch_total`, `worker_polymarket_retry_total`, plus Prometheus counters exported by the API (worker updates hit those indirectly). If you need direct worker metrics, wrap the loop with `prometheus_client` exposition. |
-| Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency, market_errors, and a `polymarket_ok` flag. API `/health` uses this to flag worker outages. Alert when the key is stale past `RM_HEARTBEAT_TTL_SECONDS`. |
+| Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency, market_errors, and a `polymarket_ok` flag. API `/healthz` uses this to flag worker outages. Alert when the key is stale past `RM_HEARTBEAT_TTL_SECONDS`. |
 | Batch stats | Stored at `RM_BATCH_STATS_KEY` with TTL; use `redis-cli GET reveal_market_worker:batch_stats | jq` for quick diagnostics. |
 
 ---
@@ -343,7 +343,7 @@ uv run --project . --extra dev ruff check backend/worker
 | Issue | Diagnosis steps | Resolution |
 | --- | --- | --- |
 | Worker loops but markets never change | Inspect logs for `worker.market.skip_update`; likely Polymarket payloads have unchanged `source_updated_at`. Force refresh by clearing `content_hash` or verifying upstream data. |
-| `/health` reports missing heartbeat | Check Redis for `RM_HEARTBEAT_KEY`. If absent, ensure worker can connect to Redis and that `_run_with_retries` isn’t repeatedly failing. |
+| `/healthz` reports missing heartbeat | Check Redis for `RM_HEARTBEAT_KEY`. If absent, ensure worker can connect to Redis and that `_run_with_retries` isn’t repeatedly failing. |
 | Cache never warms | Confirm `RM_API_BASE_URL` points to the reachable API and that `RM_PRIME_MARKETS_CACHE_ENABLED=true`. Review `worker.cache.prime_failed` logs for HTTP errors. |
 | Retention never deletes | Expected today: deletion is disabled and only metrics are emitted. Re-enable deletions in `cleanup_resolved_markets` (or implement archival) if you need data pruning. |
 | Market address backfill missing | Look for `worker.resolution.backfill_addresses`; ensure `RM_FACTORY_ADDRESS` + `RM_RPC_URL` are set and reachable. |

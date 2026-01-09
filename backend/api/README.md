@@ -9,7 +9,7 @@ FastAPI service that powers every customer-facing surface: curated market feeds,
 1. **Startup wiring**: `app.server.create_app` loads settings, configures logging/CORS/security middleware, initializes Goldsky (when configured), runs migrations, validates the on-chain verifier circuit hash (when RPC + verifier config are present), records the schema revision tag, and starts background tasks (cache refresh, quote sweeps, relayer queue processing, API heartbeat metrics).
 2. **Request flow**: HTTP request enters middleware (request ID, structured logs, rate limiting, security headers) then hits route handlers. Cacheable endpoints read/write Redis JSON keys with tags; cache misses fall back to async SQLAlchemy queries before shaping responses.
 3. **Pricing and trade**: `/pricing/quote` fetches FX from the streamer, signs the QUOTE_V1 digest, and stores quotes in Postgres; `/trade/commit` validates quotes, signs CommitAuth payloads, and forwards to the relayer (or Redis queue fallback).
-4. **Observability**: `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. `/metrics` exports Prometheus counters, and a Redis heartbeat publishes rolling request stats.
+4. **Observability**: `/healthz` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. `/metrics` exports Prometheus counters, and a Redis heartbeat publishes rolling request stats.
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,7 @@ flowchart LR
 | Market discovery | `/markets`, `/categories/{slug}`, `/markets/suggest` (all Redis-backed) |
 | Market detail & settlement | `/markets/{event_id}` and `/resolution/{condition_id}` with sync invalidation from the worker |
 | Trade + relayer | `/pricing/quote`, `/pricing/preview`, `/pricing/submit`, `/trade/commit`, `/positions`, `/claim/bundles`, `/trade/claim`, `/trade/status`, relayer ingest hooks |
-| Health/metrics | `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exposes Prometheus counters |
+| Health/metrics | `/healthz` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exposes Prometheus counters |
 | Security surface | Trusted hosts, strict CORS/CSP/HSTS headers, `SecurityHeadersMiddleware` |
 | Observability | Structured logs + request IDs, Prometheus instrumentation, cache hit/miss counters |
 
@@ -40,7 +40,7 @@ flowchart LR
 - **Lifespan** – Runs Alembic migrations, validates on-chain verifier circuit hash when configured, records the schema revision tag, configures logging/CORS/security headers, builds async Postgres/Redis clients, and starts background loops (cache refresh, quote sweeps, relayer queue, API heartbeat).
 - **Caching** – List/detail/resolution payloads cached in Redis JSON with schema + logical tags; startup and interval hydrators repopulate `/markets`, categories, and suggest. Clean bypass when Redis is down (no tag pollution).
 - **Search & detail** – Market payloads are normalized tables (outcomes/tags/clob tokens/Gamma metadata); legacy JSON columns removed. `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event}` are async + cache-tagged; search uses indexed Postgres vectors (no cache).
-- **Health/metrics** – `/health` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` remain probe-friendly.
+- **Health/metrics** – `/healthz` fans out to DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks; `/metrics` exports Prometheus HTTP/cache/rate-limit counters. `/live`/`/ready` remain probe-friendly.
 - **Signed pricing** - `/pricing/quote` ignores client FX, pulls FX from the streamer endpoint (hard-pinned in `app.pricing`), enforces stake caps, signs QUOTE_V1 digest (chain id, market, wallet, outcome, stake_wei, fx_scaled 1e8, expiry, quoteId) with `RM_PRICING_SIGNER_PRIVATE_KEY`, and persists quotes in Postgres; `/pricing/preview` returns unsigned previews; `/pricing/submit` revalidates digest/expiry/FX drift and marks quotes consumed.
 - **Trade + relayer** - `/trade/commit` consumes a quote, builds CommitAuth signatures, forwards to the relayer (with Redis queue fallback), and records commitment snapshots; `/positions`, `/claim/bundles`, `/trade/claim`, and `/trade/status` expose claim/settlement state; relayer ingest hooks can push commitments plus settlement roots/counts from `lockBatches` so proofs can be generated per batch.
 - **Rate limiting** - Async Redis-backed middleware with trusted proxy allowlist plus in-memory fallback; disabled by default.
@@ -129,7 +129,7 @@ All values use the `RM_` prefix (example: `RM_DATABASE_URL`). Defaults live in `
 
 | Variable | Description |
 | --- | --- |
-| `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Control how `/health` checks the upstream feed. |
+| `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Control how `/healthz` checks the upstream feed. |
 | `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_MARKET_IMPLEMENTATION_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_CIRCUIT_HASH`, `RM_WALLET_ADDRESS`, `RM_WALLET_PRIVATE_KEY` | Required only for `/markets/onchain` or when the API needs to interact with on-chain data. When `RM_RPC_URL`, `RM_VERIFIER_ADDRESS`, and `RM_CIRCUIT_HASH` are set, startup validates the on-chain verifier hash matches the configured circuit. |
 | `RM_POLYGON_RPC_URL`, `RM_POLYGON_CTF_ADDRESS`, `RM_POLYMARKET_CLOB_HOST` | Optional overrides for Polygon + CLOB integrations. |
 
@@ -261,14 +261,14 @@ curl -H "accept: application/json" http://localhost:8000/markets
 | Surface | How to use |
 | --- | --- |
 | Metrics | `GET /metrics` (Prometheus format, includes HTTP latencies, cache hit counters, instrumented by `prometheus_fastapi_instrumentator`). |
-| Health | `GET /health` or run `python -m app.healthcheck`. The HTTP endpoint aggregates DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. |
+| Health | `GET /healthz` or run `python -m app.healthcheck`. The HTTP endpoint aggregates DB, Redis, worker heartbeat, Polymarket, pricing signer, schema revision, and CORS/FX CORS checks. |
 | Logs | Structured via `logging_config.setup_logging()`. Configure with `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`. |
 | Profiling slow queries | Set `RM_DATABASE_ECHO=true` or attach `SQLALCHEMY_SILENCE_UBER_WARNING=1` for verbose output. |
 
 Operational best practices:
 - Keep Redis and Postgres close to the API to minimize cache/query latency.
 - Monitor cache hit ratio (`markets_cache_requests_total`) to ensure warm paths stay hot.
-- Alert when `/health` returns `degraded` or `error` to catch upstream outages early.
+- Alert when `/healthz` returns `degraded` or `error` to catch upstream outages early.
 
 ---
 
@@ -313,7 +313,7 @@ Add new tests under `backend/api/tests` following the `test_*.py` convention. Us
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/health` returns `degraded: worker` | Worker heartbeat key missing or expired. | Ensure worker publishes heartbeats (`RM_HEARTBEAT_KEY`) and Redis is reachable. |
+| `/healthz` returns `degraded: worker` | Worker heartbeat key missing or expired. | Ensure worker publishes heartbeats (`RM_HEARTBEAT_KEY`) and Redis is reachable. |
 | `/markets` always cache-miss | Worker not publishing `RM_SCHEMA_VERSION_KEY`, causing repeated schema-tag invalidation. | Verify worker logs `worker.schema.version_cached` and that Redis stores the revision. |
 | Requests hang at startup | Migrations running or DB unreachable. | Check logs for `worker.schema.synced` / `alembic` output, ensure Postgres credentials are correct. |
 | 403 errors behind ingress | TrustedHost mismatch. | Set `RM_ALLOWED_HOSTS` to include the ingress hostname or `*` for testing. |

@@ -48,7 +48,7 @@ def test_app(monkeypatch):
 
 def test_health_endpoint_reports_fx(test_app):
     client, _ = test_app
-    resp = client.get("/health")
+    resp = client.get("/healthz")
     assert resp.status_code == 200
     payload = resp.json()
     assert "fx_zen_usd" in payload
@@ -129,7 +129,7 @@ def test_health_status_stale(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/health")
+        resp = client.get("/healthz")
         assert resp.json()["status"] == "stale"
 
 
@@ -159,7 +159,7 @@ def test_health_status_degraded(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/health")
+        resp = client.get("/healthz")
         assert resp.json()["status"] == "degraded"
 
 

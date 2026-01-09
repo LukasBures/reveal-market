@@ -63,7 +63,7 @@ if [[ "${MODE_ENV,,}" == *prod* ]]; then
 else
   DEFAULT_API_BASE="${RM_API_BASE_URL:-http://localhost:8000}"
 fi
-CHECK_URL="${DEFAULT_API_BASE%/}/health"
+CHECK_URL="${DEFAULT_API_BASE%/}/healthz"
 API_TIMEOUT="${FRONTEND_API_CHECK_TIMEOUT:-2}"
 STRICT_API_CHECK="${FRONTEND_REQUIRE_API:-false}"
 

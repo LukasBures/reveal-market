@@ -119,7 +119,7 @@ Useful scripts:
 
 Tip: The repo root `Makefile` surfaces higher-level commands (`make frontend`, etc.) if you prefer a single entry point.
 
-> **Tests & backend dependency:** `npm run test` mocks fetch in most suites; `frontend/run_tests.sh` runs lint/test/build. For CI parity, start the backend stack (or point `RM_API_BASE_URL` at staging) and set `FRONTEND_REQUIRE_API=true` to enforce the `/health` check.
+> **Tests & backend dependency:** `npm run test` mocks fetch in most suites; `frontend/run_tests.sh` runs lint/test/build. For CI parity, start the backend stack (or point `RM_API_BASE_URL` at staging) and set `FRONTEND_REQUIRE_API=true` to enforce the `/healthz` check.
 
 ### Wallet connections
 
@@ -207,7 +207,7 @@ If you introduce new components, test at these breakpoints:
   1. `npm run lint`
   2. `npm run test`
   3. Manually inspect `/`, `/categories/politics`, `/markets/<eventId>` in responsive mode.
-  4. For CI parity run `./frontend/run_tests.sh` with the backend reachable; set `FRONTEND_REQUIRE_API=true` to enforce the `/health` check.
+  4. For CI parity run `./frontend/run_tests.sh` with the backend reachable; set `FRONTEND_REQUIRE_API=true` to enforce the `/healthz` check.
 
 CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
@@ -219,7 +219,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 - **Data freshness without jank** – `useFeaturedMarkets` (React Query) hydrates the featured grid with server data, then silently reconciles when `/markets` fetches a fresher batch. Category pages piggyback on the same hook, and proofs rely on offset-based pagination to avoid overfetching.
 - **Image & grid density** – Market cards show a compact square thumbnail beside metadata, and `MarketGrid` caps at three columns on desktop so the layout matches the marketing requirements while still collapsing to one/two columns on smaller screens.
 - **Preconnect hints** – `app/layout.tsx` emits `<link rel="preconnect">` tags for Google Fonts + the configured API origin, shaving DNS + TLS round trips.
-- **Backend-aware builds** – SSR fetches hit the API; for CI/MVP runs keep the backend reachable (or point `RM_API_BASE_URL` at staging). Use `FRONTEND_REQUIRE_API=true` to enforce a `/health` check locally.
+- **Backend-aware builds** – SSR fetches hit the API; for CI/MVP runs keep the backend reachable (or point `RM_API_BASE_URL` at staging). Use `FRONTEND_REQUIRE_API=true` to enforce a `/healthz` check locally.
 - **Speed validation** – After visual QA, run `npm run lint && npm run test && npm run build`, then Lighthouse/Chrome traces focusing on LCP (<1.2s), CLS (<0.02), and smooth main-thread (<50ms/interaction).
 
 ## Streaming & FX
@@ -233,7 +233,7 @@ CI runs these scripts automatically via the repo’s GitHub Actions workflow.
 
 - **Env vars**: Mostly preset by `RM_ENVIRONMENT`; optional overrides include `RM_API_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL`/`STREAMER_INTERNAL_URL`, `NEXT_PUBLIC_SITE_URL`, wallet provider keys, and analytics keys. Ensure `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` + `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` are set for escrow/claim flows.
 - **TLS**: Terminate at Caddy/Nginx; streamer and API are HTTP internally. Ensure the streamer host is whitelisted in CSP if embedded.
-- **Health**: API `/health` (or `/healthz`), streamer `/healthz`; keep the backend reachable for CI/MVP runs and consider `FRONTEND_REQUIRE_API=true` for local checks.
+- **Health**: API `/healthz`, streamer `/healthz`; keep the backend reachable for CI/MVP runs and consider `FRONTEND_REQUIRE_API=true` for local checks.
 - **Cache warmup**: Optional—preload featured markets via `/markets?limit=20` and FX via `/pricing/fx` to prime CDN/cache layers after deploy.
 - **Smoke**: Run `npm run lint && npm run test && npm run build`; for live pricing, confirm `MainNav` shows FX and a market detail page receives live price ticks.
 
@@ -268,7 +268,7 @@ Docker images rely on `next build` + `next start --turbo` by default; see the re
 
 | Symptom | Fix |
 | ------- | ---- |
-| `Unable to reach backend` during build | Ensure the API answers `/health` at the configured base or point `RM_API_BASE_URL` at staging; set `FRONTEND_REQUIRE_API=true` if you want `run_tests.sh` to enforce it. |
+| `Unable to reach backend` during build | Ensure the API answers `/healthz` at the configured base or point `RM_API_BASE_URL` at staging; set `FRONTEND_REQUIRE_API=true` if you want `run_tests.sh` to enforce it. |
 | WalletConnect QR modal missing | Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and restart the dev server. |
 | Trade/escrow buttons disabled | Check for chain mismatch and confirm `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` + `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` are set. |
 | Streamer/FX blocked on HTTPS | Use HTTPS/WSS streamer URLs or set `NEXT_PUBLIC_DISABLE_STREAMER_WS=true` to force REST/SSE fallback. |

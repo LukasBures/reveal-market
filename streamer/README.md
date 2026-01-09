@@ -56,7 +56,7 @@ uv run --project streamer uvicorn app.main:app --reload --port 8100
 ```
 
 ## Endpoints
-- `GET /health` / `GET /healthz` – service + feed status (stale flags, FX age).
+- `GET /healthz` – service + feed status (stale flags, FX age).
 - `GET /dashboard` – subscriptions, last-seen/published timestamps, FX status, and stale market list for quick ops checks.
 - `GET /subscriptions` – current asset + symbol subscriptions (non-mutating).
 - `GET/POST/DELETE /control/subscriptions` – ops control for subscriptions; requires `x-control-token` when enabled.

@@ -7,7 +7,7 @@ The Hedger keeps RevealMarket economically neutral while preserving privacy. It 
 2. **Commit ingestion**: `/admin/commits` validates FX freshness and optional signed quotes, enforces per-commit caps, updates exposure ledgers, and emits hedge instructions plus risk breaches.
 3. **Hedging execution**: hedges quote and submit Polymarket orders, enforce slippage caps, borrow/repay from the LP vault, and record fills + utilization metrics.
 4. **Settlement**: builds prover payloads from stored commits, requests proofs from the prover, persists receipts, and marks markets resolved (on-chain submission is not wired yet).
-5. **Ops**: `/health`, `/metrics`, and `/admin/*` endpoints expose exposure snapshots, risk reports, positions, bridge actions, and settlement triggers.
+5. **Ops**: `/healthz`, `/metrics`, and `/admin/*` endpoints expose exposure snapshots, risk reports, positions, bridge actions, and settlement triggers.
 
 ```mermaid
 flowchart LR
@@ -66,6 +66,6 @@ Useful env vars (defaults live in `app/config.py`):
 - Network defaults: Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`). Keep signer/treasury addresses and pricing chain id aligned with this network when running end-to-end demos.
 
 API docs and metrics during local runs:
-- Health: `http://localhost:8090/health`
+- Health: `http://localhost:8090/healthz`
 - Admin: `http://localhost:8090/admin/exposures`, `.../risk`, `.../positions`
 - Metrics: `http://localhost:8090/metrics`
