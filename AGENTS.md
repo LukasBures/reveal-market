@@ -42,6 +42,7 @@
 - API + frontend ship strong CSP/HSTS/COOP/Permissions-Policy headers. Whitelist new domains before referencing external assets.
 - Default chain is Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`). Keep frontend/backend/contract envs aligned when switching networks.
 - Streamer presets pin public/internal hosts and CORS origins; align `STREAMER_PUBLIC_BASE_URL`/`NEXT_PUBLIC_PRICE_STREAMER_URL` with your frontend origin (HTTPS for WSS) and keep CORS lists tight even in dev.
+- `RM_ENVIRONMENT=local|prod` presets override streamer public/internal URLs and CORS lists; wildcard CORS is disallowed in prod.
 
 ## Agent-Specific Instructions
 - Review `TODO.md`, `backend/TODO.md`, `backend/worker/TODO.md`, `contracts/TODO.md`, `contracts/zen/TODO.md`, `frontend/TODO.md`, `streamer/TODO.md`, `relayer/TODO.md`, `hedger/TODO.md`, and `prover/TODO.md` before large tasks; they capture prioritized work.
@@ -73,6 +74,7 @@
 - **Testing** – Vitest + Testing Library cover hero CTA, DocsNav, MainNav, DocsLayout, featured markets pagination, search suggestions, and market cards. Keep tests updated when components change.
 - **Data fetching** – `lib/api.ts` only fetches from FastAPI. Server actions (`app/actions/markets.ts`) power “Load more”, keeping cache tags intact. `/app/api/markets/suggest` proxies suggestions so client keystrokes never hit the backend twice.
 - **Live ops badge** – The homepage no longer surfaces worker heartbeats or sync badges; data freshness stays internal even though structured logs still emit `fetchFeaturedMarkets:*` events for observability.
+- **Wallet config** – Connect Wallet uses Wagmi + WalletConnect; set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` before running `npm run dev` so the QR modal works.
 
 ### Streamer (FastAPI SSE/WS)
 - **Architecture** – `app/main.py` builds FastAPI with preset CORS origins/hosts, starts `DataStreamer` (Polymarket CLOB WS + RTDS + REST fallback) and `PriceStreamer` (Binance FX WS with REST/crypto-compare fallback), and exposes `/stream`/`/stream/ws`/`/history`/`/fx/*` plus `/metrics`.

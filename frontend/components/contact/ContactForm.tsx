@@ -30,6 +30,15 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       return;
     }
 
+    const isLocalhost = (() => {
+      if (typeof window === "undefined") return false;
+      const host = window.location?.hostname ?? "";
+      return host === "localhost" || host === "127.0.0.1";
+    })();
+    if (isLocalhost) {
+      return;
+    }
+
     const renderTurnstile = () => {
       const turnstile = (window as unknown as { turnstile?: Turnstile }).turnstile;
       if (!turnstile || !containerRef.current) return;

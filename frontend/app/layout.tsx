@@ -38,6 +38,7 @@ const SEARCH_URL = absoluteUrl("/markets/search");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
+const SHOULD_SUPPRESS_LIT_WARNING = !IS_PRODUCTION;
 const isBrowserResolvableHost = (hostname: string) => {
   const normalized = hostname.toLowerCase();
   // Treat dotted domains or IPv6 literals as routable; skip bare Docker hostnames like "api".
@@ -139,6 +140,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>
+        {SHOULD_SUPPRESS_LIT_WARNING ? (
+          <Script id="lit-warnings" strategy="beforeInteractive">
+            {`
+              globalThis.litIssuedWarnings ??= new Set();
+              globalThis.litIssuedWarnings.add('dev-mode');
+            `}
+          </Script>
+        ) : null}
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}

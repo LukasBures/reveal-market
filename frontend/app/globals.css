@@ -36,10 +36,14 @@ body {
   scrollbar-gutter: stable both-edges;
 }
 
-img,
+img:not([data-nimg]),
 video {
   max-width: 100%;
   height: auto;
+}
+
+img[data-nimg] {
+  max-width: none;
 }
 
 body::before {

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 
 const footerLinks = [
   { href: "/about", label: "About" } as const,
@@ -15,14 +14,12 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 text-sm text-slate-300 md:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Link href="/" className="inline-flex items-center gap-3 text-white">
-            <Image
+            <img
               src="/brand/reveal-logo-wordmark.svg"
               alt="Reveal Market logo"
               width={240}
               height={64}
-              priority
-              className="select-none"
-              style={{ width: "240px", height: "auto", maxWidth: "100%" }}
+              className="h-auto w-[240px] max-w-full select-none"
             />
           </Link>
           <p className="text-base text-slate-200">

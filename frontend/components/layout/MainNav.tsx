@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
@@ -123,14 +122,12 @@ export function MainNav() {
             className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <Image
+            <img
               src="/brand/reveal-logo-wordmark.svg"
               alt="Reveal Market"
               width={200}
               height={56}
-              priority
-              className="select-none"
-              style={{ width: "200px", height: "auto", maxWidth: "100%" }}
+              className="h-auto w-[200px] max-w-full select-none"
               draggable={false}
             />
           </a>
@@ -140,14 +137,12 @@ export function MainNav() {
             className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <Image
+            <img
               src="/brand/reveal-logo-wordmark.svg"
               alt="Reveal Market"
               width={200}
               height={56}
-              priority
-              className="select-none"
-              style={{ width: "200px", height: "auto", maxWidth: "100%" }}
+              className="h-auto w-[200px] max-w-full select-none"
               draggable={false}
             />
           </Link>

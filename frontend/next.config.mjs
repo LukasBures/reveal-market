@@ -13,6 +13,7 @@ const PROD_API_BASE = "https://api.revealmarket.xyz";
 const PROD_STREAMER_BASE = "https://stream.revealmarket.xyz";
 const PROD_STREAMER_WS = PROD_STREAMER_BASE.replace(/^http/i, "ws");
 const DISABLE_MINIFY = process.env.NEXT_DISABLE_MINIFY === "true";
+const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
 const GA_ORIGINS = [
   "https://www.googletagmanager.com",
@@ -91,6 +92,7 @@ const nextConfig = (phase) => {
   const shouldMinify = !(DISABLE_MINIFY && isProd);
 
   const scriptSrc = ["'self'", "'unsafe-inline'"];
+  scriptSrc.push(TURNSTILE_ORIGIN);
   if (isDev) {
     // React Fast Refresh relies on eval-like constructs in dev. Restrict to the dev server phase
     // so production CSP stays strict even if NODE_ENV is mis-set.
@@ -105,6 +107,7 @@ const nextConfig = (phase) => {
     PROD_API_BASE,
     PROD_STREAMER_BASE,
     PROD_STREAMER_WS,
+    TURNSTILE_ORIGIN,
     ...WALLET_PROVIDER_ORIGINS,
     ...WALLET_PROVIDER_WS,
     ...rpcOrigins,
@@ -124,7 +127,7 @@ const nextConfig = (phase) => {
     "img-src 'self' data: https: blob:",
     `font-src ${fontSrc.join(" ")}`,
     `connect-src ${connectSrc.join(" ")}`,
-    `frame-src 'self' ${walletFrameOrigins.join(" ")}`,
+    `frame-src 'self' ${walletFrameOrigins.join(" ")} ${TURNSTILE_ORIGIN}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
