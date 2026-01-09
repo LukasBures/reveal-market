@@ -374,6 +374,10 @@ disable_next_telemetry() {
   if [[ ! -d "${ROOT_DIR}/frontend" ]]; then
     return
   fi
+  if [[ "${NEXT_TELEMETRY_DISABLED:-}" == "1" ]]; then
+    log_step "Next.js telemetry disabled via env"
+    return
+  fi
   if ! command -v npx >/dev/null 2>&1; then
     log_warn "Skipping Next.js telemetry disable (npx not found)."
     return
@@ -397,6 +401,7 @@ export COMPOSE_DOCKER_CLI_BUILD=1
 export COMPOSE_PARALLEL_LIMIT="${PARALLEL_BUILDS}"
 export APK_REPO_URL
 export APK_FALLBACK_URL
+export NEXT_TELEMETRY_DISABLED=1
 
 RUN_BUILD="true"
 RUN_PRUNE="false"

@@ -49,55 +49,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...categorySlugs.map((slug) => createEntry(`/categories/${slug}`, 0.7, "weekly")),
   ];
 
-  const pushMarketEntries = (markets: any[]) => {
-    entries.push(
-      ...markets
-        .filter((market) => typeof (market?.event_id ?? market?.eventId) === "string")
-        .map((market) =>
-          createEntry(
-            `/markets/${market.event_id ?? market.eventId}`,
-            0.9,
-            "hourly",
-            market.updated_at ?? market.updatedAt ?? now,
-          ),
-        ),
-    );
-  };
-
-  const candidates = Array.from(
-    new Set(
-      [
-        API_BASE_OVERRIDE,
-        urls.apiBaseUrl?.replace(/\/$/, ""),
-        DEFAULT_API_BASE.replace(/\/$/, ""),
-        process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, ""),
-        "http://localhost:8000",
-        "http://api.localhost",
-      ].filter(Boolean) as string[],
-    ),
-  );
-
-  for (const base of candidates) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
-      const response = await fetch(`${base}/markets?limit=200`, {
-        next: { revalidate: 60 * 30 },
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (!response.ok) {
-        console.warn("Sitemap markets fetch returned non-200", response.status, base);
-        continue;
-      }
-      const payload = await response.json();
-      const markets = Array.isArray(payload) ? payload : payload?.items ?? [];
-      pushMarketEntries(markets);
-      break;
-    } catch (error) {
-      console.warn("Failed to build dynamic sitemap entries", base, error);
-    }
-  }
-
   return entries;
 }

@@ -19,6 +19,7 @@ import { fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "
 
 const resolvedEnv = getServerEnv();
 export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
+const IS_BUILD_TIME = process.env.NEXT_PHASE === "phase-production-build";
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
@@ -365,6 +366,14 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
 
 export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
   if (maybeShortCircuitOffline("fetchFeaturedMarkets")) {
+    return [];
+  }
+  if (IS_BUILD_TIME) {
+    logger.info("fetchFeaturedMarkets:skipped_build", {
+      limit,
+      category: options?.category,
+      searchQuery: options?.searchQuery,
+    });
     return [];
   }
   try {
