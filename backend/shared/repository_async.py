@@ -372,21 +372,48 @@ async def list_commitments_for_wallet(
 
 
 async def list_commitments_with_settlement(
-    session: AsyncSession, wallet_address: str
+    session: AsyncSession,
+    wallet_address: str,
+    *,
+    market_filter: str | None = None,
+    winning_only: bool = False,
 ) -> list[tuple[models.Commitment, models.Market, models.Settlement | None]]:
-    """Return commitments joined with market + optional settlement."""
+    """Return commitments joined with market + optional settlement.
+
+    When market_filter is provided, it matches either the event_id or market_address.
+    Set winning_only=True to only return rows where settlement.winning_outcome_id matches
+    the commitment outcome (settlement is required in that case).
+    """
 
     stmt = (
         select(models.Commitment, models.Market, models.Settlement)
         .join(models.Market, models.Market.id == models.Commitment.market_id)
-        .join(
+    )
+    if winning_only:
+        stmt = stmt.join(models.Settlement, models.Settlement.market_id == models.Commitment.market_id)
+        stmt = stmt.where(
+            models.Settlement.winning_outcome_id.is_not(None),
+            models.Settlement.winning_outcome_id == models.Commitment.outcome_id,
+        )
+    else:
+        stmt = stmt.join(
             models.Settlement,
             models.Settlement.market_id == models.Commitment.market_id,
             isouter=True,
         )
-        .where(models.Commitment.user_address == wallet_address.lower())
-        .order_by(models.Commitment.created_at.desc())
-    )
+
+    stmt = stmt.where(models.Commitment.user_address == wallet_address.lower())
+    if market_filter:
+        market_filter_lower = market_filter.lower()
+        stmt = stmt.where(
+            or_(
+                models.Market.event_id == market_filter,
+                func.lower(models.Market.event_id) == market_filter_lower,
+                func.lower(models.Market.market_address) == market_filter_lower,
+            )
+        )
+
+    stmt = stmt.order_by(models.Commitment.created_at.desc())
     rows = await session.execute(stmt)
     return [(commitment, market, settlement) for commitment, market, settlement in rows.all()]
 

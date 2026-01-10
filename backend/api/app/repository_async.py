@@ -72,9 +72,15 @@ async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
 
 
 async def list_commitments_with_settlement(
-    session: AsyncSession, wallet_address: str
+    session: AsyncSession,
+    wallet_address: str,
+    *,
+    market_filter: str | None = None,
+    winning_only: bool = False,
 ) -> list[tuple[shared_models.Commitment, shared_models.Market, shared_models.Settlement | None]]:
-    return await shared_repository_async.list_commitments_with_settlement(session, wallet_address)
+    return await shared_repository_async.list_commitments_with_settlement(
+        session, wallet_address, market_filter=market_filter, winning_only=winning_only
+    )
 
 
 async def get_commitment_with_path_for_wallet(

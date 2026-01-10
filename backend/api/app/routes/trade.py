@@ -15,7 +15,7 @@ from typing import Any, cast
 import httpx
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from shared import models
 from shared.logging import log_event
 from shared.merkle import build_merkle_path, build_merkle_root_and_paths
@@ -1747,6 +1747,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
 @router.get("/claim/bundles", response_model=schemas.ClaimBundlesResponse, tags=["trade"])
 async def list_claim_bundles(
     wallet: str,
+    market_id: str | None = Query(default=None, description="Optional market/event id to scope bundle lookup"),
     wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> schemas.ClaimBundlesResponse:
@@ -1757,9 +1758,25 @@ async def list_claim_bundles(
     if not wallet_signature:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
     _verify_wallet_signature(wallet, wallet_signature)
-    rows = await repository_async.list_commitments_with_settlement(session, wallet)
+
+    # Start with winning rows to avoid walking all commitments for large wallets.
+    rows = await repository_async.list_commitments_with_settlement(
+        session, wallet, market_filter=market_id, winning_only=True
+    )
+    # If nothing is returned and a market was specified, widen the query so we can backfill settlement data.
+    base_rows = rows
+    if not rows and market_id:
+        base_rows = await repository_async.list_commitments_with_settlement(
+            session, wallet, market_filter=market_id, winning_only=False
+        )
+    elif not rows:
+        # No winners and no specific market requested.
+        return schemas.ClaimBundlesResponse(bundles=[])
+    else:
+        base_rows = rows
+
     needs_refresh = False
-    for _commitment, market, settlement in rows:
+    for _commitment, market, settlement in base_rows:
         if (
             getattr(market, "resolution_status", None) is not None
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
@@ -1771,7 +1788,9 @@ async def list_claim_bundles(
             if refreshed is not None:
                 needs_refresh = True
     if needs_refresh:
-        rows = await repository_async.list_commitments_with_settlement(session, wallet)
+        rows = await repository_async.list_commitments_with_settlement(
+            session, wallet, market_filter=market_id, winning_only=True
+        )
     await _sync_claimed_commitments(session, rows)
     claim_deadline_candidates: set[str] = set()
     for commitment, market, settlement in rows:
@@ -1979,8 +1998,11 @@ async def ingest_settlement(payload: schemas.SettlementIngestRequest, session: A
         "circuit_hash": payload.circuit_hash,
     }
     await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
-    if payload.winning_outcome_id is not None and not market.resolved_at:
-        market.resolved_at = datetime.now(tz=UTC)
+    if payload.winning_outcome_id is not None:
+        if not market.resolved_at:
+            market.resolved_at = datetime.now(tz=UTC)
+        market.status = models.MarketStatusEnum.SETTLED.value
+        market.resolution_status = models.ResolutionStatusEnum.FINAL.value
         session.add(market)
     await session.flush()
     return schemas.SettlementIngestResponse(market_id=market.event_id, updated=True)
