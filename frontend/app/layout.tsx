@@ -136,7 +136,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const hasLandingAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
   const gateEnabled = isLandingGateEnabled();
   const isPublicRoute = requestHeaders.get("x-rm-public-path") === "1";
-  const showProtectedApp = !gateEnabled || hasLandingAccess || isPublicRoute;
+  // The landing page itself ("/") should still require the access code when the gate is enabled.
+  const showProtectedApp = !gateEnabled || hasLandingAccess;
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>
