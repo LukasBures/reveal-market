@@ -1,51 +1,54 @@
 # Polygon Contracts Workspace
 
-This workspace contains the Polygon hedging LP vault used to fund hedging on Polymarket. It is self-contained with its own dependencies under `contracts/polygon/lib/` (OpenZeppelin v5.0.0 and forge-std v1.9.1).
+Foundry workspace for the Polygon hedging LP vault. Contracts live under `contracts/polygon/src` and are independent from the Horizen/Zen stack.
 
-## High-Level Architecture
+## Components
 
-1. **BaseLpVault** holds USDC, mints ERC20 shares, and allows a designated hedger to borrow/repay within utilization caps.
-2. **HedgeStrategyExecutor** validates EIP-712 orders, enforces caps/whitelists, and calls the vault to fund hedges.
-3. **Owner controls** pause/unpause, update hedger/signer/limits, and adjust utilization guardrails.
+- **BaseLpVault** – ERC20 share vault over USDC (6 decimals). Supports deposit/withdraw/redeem, hedger-only borrow/repay, utilization cap, pause, and strict accounting (rejects deflationary tokens). Price-per-share and utilization are surfaced for monitoring.
+- **HedgeStrategyExecutor** – EIP-712 order executor that validates nonces/expiry/notional + slippage caps, enforces receiver whitelist, and borrows from the vault to fund hedges. Owner/hedger roles are configurable; pausable.
 
-```mermaid
-flowchart TD
-  User --> BaseLpVault
-  Hedger --> HedgeStrategyExecutor --> BaseLpVault
-  Owner --> BaseLpVault
-  Owner --> HedgeStrategyExecutor
+Ownable2Step is used for admin transfers; pausing protects both contracts.
+
+## Project Structure
+
 ```
-
-## Structure
-- `src/BaseLpVault.sol` – ERC20 share token vault over USDC (6 decimals) with hedger-controlled borrow/repay, pause, utilization cap, and strict accounting.
-- `src/HedgeStrategyExecutor.sol` – EIP-712 order executor that acts as the vault hedger, enforces nonces/expiry/notional+slippage caps, and borrows USDC to whitelisted receivers.
-- `test/BaseLpVault.t.sol` – Comprehensive Forge tests covering deposits/withdrawals/redemptions, utilization limits, price-per-share math, hedger access control, deflationary token guards, zero-address rejection, pause behavior, and event emission.
-- `test/HedgeStrategyExecutor.t.sol` – Tests the EIP-712 path, replay protection, caps, pause, and whitelist enforcement.
-- `run_local.sh` – Build, test, gas snapshot check (optional fuzz/coverage when run with `full`).
-- `run_tests.sh` – Thin wrapper to run the local pipeline.
-- `foundry.toml` / `foundry.lock` – Workspace configuration and pinned deps.
+contracts/polygon/
+├── src/
+│   ├── BaseLpVault.sol
+│   └── HedgeStrategyExecutor.sol
+├── test/
+│   ├── BaseLpVault.t.sol
+│   └── HedgeStrategyExecutor.t.sol
+├── script/          # deploy scripts if added
+├── run_local.sh     # build + tests + gas snapshot (fuzz/coverage on `full`)
+├── run_tests.sh     # wrapper around run_local.sh
+├── foundry.toml
+└── foundry.lock
+```
 
 ## Usage
+
 ```bash
 cd contracts/polygon
-forge test            # run all tests
-./run_local.sh        # build + tests + gas snapshot check
-./run_local.sh full   # plus fuzz + coverage (best-effort)
+forge fmt
+forge build
+forge test
+./run_local.sh        # build + tests + gas snapshot
+./run_local.sh full   # add fuzz + coverage where configured
 ```
 
-## Notes
-- USDC decimals are enforced at construction; any other asset reverts.
-- All external mutations are `nonReentrant` and `whenNotPaused`; hedger-only functions are gated by `hedger`.
-- Deflationary/fee-on-transfer assets are rejected via transfer-in amount checks.
-- Total assets are `idle + utilized`; withdrawals are limited to idle capital so hedger utilization cannot break redemptions.
-- `maxUtilizationBps` caps utilization (default 100%); owner can reduce this to limit hedger risk.
-- This workspace is independent of the Zen Poseidon batch settlement circuit; batching changes do not apply here.
+## Behaviors to Know
 
-## Deployment / Runbook (Polygon)
+- Vault enforces USDC decimals at construction; other assets revert.
+- All external mutations are `nonReentrant` and `whenNotPaused`. Hedger-only methods enforce the configured hedger.
+- Utilization = borrowed / total assets; withdrawals are limited to idle capital so hedger utilization cannot block redemptions. `maxUtilizationBps` caps utilization (owner adjustable).
+- Hedge executor validates EIP-712 signatures, nonces, expiry, notional caps, slippage, and whitelisted receivers before borrowing.
+- Deflationary/fee-on-transfer tokens are rejected via transfer-in amount checks.
 
-- **Chain**: Polygon PoS (Chain ID 137). Configure RPC + gas params via Foundry/forge env (`POLYGON_RPC_URL`, `ETHERSCAN_API_KEY` for verification if desired).
-- **Contracts**: `BaseLpVault` (USDC 6 decimals), `HedgeStrategyExecutor`. Owner is `Ownable2Step`; transfer ownership using `transferOwnership` then `acceptOwnership`.
-- **Verifier/keys**: If wiring to on-chain verifiers, set the verifying key addresses and guardian/hedger roles at deploy time. Keep admin keys in a secure wallet and script ownership transfers (e.g., `forge script script/Deploy.s.sol --rpc-url ... --broadcast`).
-- **Pause/guards**: Before go-live set `maxUtilizationBps`, whitelist receivers, and test pause/unpause. Hedger-only functions are protected; ensure guardian can pause in incident response.
-- **Monitoring**: Subscribe to `Deposit`, `Withdraw`, `Borrowed`, `Repaid`, and pause/ownership events for indexers. Track vault share price and utilization; alert on utilization spikes or pauses.
-- **CI/Smoke**: `./run_local.sh` (or `run_tests.sh`) must pass before deploy. Include a dry-run deploy script against Polygon testnet with `--fork-url` to validate gas and configs.
+## Deployment Notes
+
+- Target chain: Polygon PoS (chain id 137). Provide RPC via Foundry env (`POLYGON_RPC_URL`); use `ETHERSCAN_API_KEY` for verification if desired.
+- Ownership is two-step; script ownership transfers and guardian pause flows before production. Set `maxUtilizationBps`, hedger, signer, and receiver whitelist pre-launch.
+- Monitor `Deposit`, `Withdraw`, `Borrowed`, `Repaid`, pause/unpause, and ownership events for ops dashboards.
+
+CI/compose calls `contracts/run_tests.sh` and `contracts/polygon/run_local.sh`; keep gas snapshots current when changing logic.

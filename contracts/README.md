@@ -1,58 +1,46 @@
 # Contracts Monorepo
 
-This directory now namespaces chain-specific workspaces:
+Two Foundry workspaces live under `contracts/`:
 
-- `zen/` – Reveal Market contracts targeting the Horizen/ZEN appchain (Foundry workspace with `src/`, `test/`, `script/`, `lib/`, docs, cache, run scripts, etc.).
-- `polygon/` – Polygon hedging LP vault (self-contained Foundry workspace with its own `lib/`, `src/`, `test/`, and run scripts).
+- `zen/` – Reveal Market core contracts for the Horizen appchain (MarketFactory, RevealMarket, ProtocolPool, RelayerEscrow, Verifier) with Poseidon-based batch settlement.
+- `polygon/` – LP vault and hedging executor for Polygon-based hedging flows (BaseLpVault, HedgeStrategyExecutor).
 
-## High-Level Architecture
+Repo-level scripts orchestrate both workspaces and keep error selectors/verifier caches in sync.
 
-1. **Zen workspace**: core Reveal Market commit/reveal contracts (MarketFactory, RevealMarket, ProtocolPool, RelayerEscrow, Verifier) plus Poseidon-based batch settlement.
-2. **Polygon workspace**: LP vault and hedging executor used to fund off-chain hedges; independent deployment and tests.
-3. **Shared tooling**: repo-level scripts (`contracts/run_tests.sh`, error selector generator) and per-workspace deploy/run scripts keep CI and ops consistent.
+## Layout & Tooling
 
-```mermaid
-flowchart TD
-  Contracts --> Zen[Zen Workspace]
-  Contracts --> Polygon[Polygon Workspace]
-  Contracts --> Tooling[Shared Tooling]
-```
+- **Workspace split**: Each workspace has its own `foundry.toml`, `lib/`, `src/`, `test/`, `script/`, and cache. Run commands from within the workspace unless using the orchestrators below.
+- **Shared scripts**: `contracts/run_tests.sh` runs both workspaces sequentially; `contracts/run_local.sh` shells into each workspace runner. `scripts/generate_error_selectors.py` writes `contracts/cache/errors.json` from Solidity custom errors.
+- **Artifacts**: Verifier metadata (`settlement-vk.json`) and circuit hashes (`settlement_hashes.json`) live under `contracts/cache/` and are generated from `prover/circuits/build` via `prover/circuits/export_artifacts.sh`. Keep these aligned with the prover and on-chain verifier.
 
-Notes
-- CI/build tooling runs each workspace separately (see `.github/workflows/cicd.yml` and `contracts/run_tests.sh`).
-- Keep deployment artifacts (verifying keys, last deploy JSON) scoped per chain under their respective workspace.
-- Shared patterns (e.g., Verifier, MarketFactory) can be duplicated per chain; avoid cross-chain remappings.
-- Horizen Testnet defaults: chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`. Update `script/Deploy.s.sol` envs accordingly when targeting other networks.
-
-## What’s implemented today
-
-- **Zen workspace** – Fixed-ticket commit/reveal flow with `RelayerEscrow`, `ProtocolPool`, `MarketFactory` (EIP-1167 clones), `RevealMarket`, and Groth16 `Verifier`. Commitments use Poseidon leaves and are locked in depth-8 batch roots (BATCH_SIZE=256); settlement uses `verifyAndSettleBatched` to sum per-batch proofs and enforces circuit hash + pool top-up limits. Tests cover authorization, deadlines, rake, surplus handling, cap enforcement, batch roots, and verifier wiring.
-- **Polygon workspace** – LP vault and hedging contracts for Base/Polymarket integration (self-contained Foundry project) with its own scripts/tests; keep artifacts isolated from Zen to avoid address collisions.
-- **Artifacts & vk caches** – `cache/` holds generated verifier metadata (`settlement-vk.json`) synced with prover exports; the circuit hash is field-reduced in `settlement_hashes.json`. `contracts/run_tests.sh` calls each workspace runner, while CI uses `contracts/zen/run_local.sh` and `contracts/polygon/run_local.sh` (no `full` by default).
-- **Error selector generation** – `scripts/generate_error_selectors.py` produces `contracts/cache/errors.json` so backend/frontend decoders stay aligned with Solidity custom errors; run it when Solidity errors change.
-
-## Development & testing
+## Quick Commands
 
 ```bash
-# Run both workspaces sequentially (build + tests + gas snapshot + fuzz when requested)
-./run_tests.sh
+# Run both workspaces (build + tests; gas snapshot checks; fuzz/coverage when requested)
+./contracts/run_tests.sh
+./contracts/run_local.sh          # same as above; pass "full" to enable fuzz/coverage in each workspace
 
 # Zen only
-cd zen
-forge fmt
-forge build
-forge test -vvv
+cd contracts/zen
+forge fmt && forge build && forge test -vvv
+./run_local.sh        # build + tests + gas snapshot
+./run_local.sh full   # add fuzz + coverage
 
 # Polygon only
-cd polygon
-forge fmt
-forge test
+cd contracts/polygon
+forge fmt && forge build && forge test
+./run_local.sh        # build + tests + gas snapshot
+./run_local.sh full   # add fuzz + coverage
 ```
 
-Use `run_local.sh full` inside a workspace for the CI-equivalent pipeline (build → tests → gas snapshot, plus fuzz/coverage when `full` is passed).
+## Notes by Workspace
 
-## Deploy/useful scripts
+- **Zen**: Fixed ticket commit/reveal with Poseidon leaves and depth-8 Merkle trees (BATCH_SIZE=256). MarketFactory deploys EIP-1167 clones, registers them with RelayerEscrow/ProtocolPool, and stores circuit hash/verifier. Settlement uses `verifyAndSettleBatched` (or `verifyAndSettle` for single-batch). Authorization signer + commit nonce/expiry enforced on commits. Rake skimmed at commit; protocol liability cap enforced from ProtocolPool. Escape hatch allows refunds after commit deadline. Claim pays ERC20 directly to users.
+- **Polygon**: BaseLpVault (USDC 6 decimals) mints shares and lets a hedger borrow/repay within utilization caps; HedgeStrategyExecutor validates EIP-712 orders, caps notional/slippage, and calls the vault. Owner uses Ownable2Step; pause/unpause + utilization guardrails are available.
 
-- `zen/run_deploy.sh` reads `.env` for RPC, chain id, deployer key, collateral token, oracle, authorization signer, and verifier inputs; `zen/scripts/create_market.sh` reads `.env` for factory/verifier addresses plus circuit hash, ticket size, max commitments, protocol cap, and commit deadline. Keep envs per chain.
-- `run_local.sh` in each workspace wraps Forge commands with sensible defaults; CI uses the same scripts.
-- After regenerating proving keys, re-export `settlement-vk.json` and update the verifier address/circuit hash across backend/worker/prover envs.
+## Deploy/Runbook Reminders
+
+- Horizen defaults: chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`. Update `script/Deploy.s.sol`/`.env` values when changing networks.
+- After regenerating proving keys, update `contracts/cache/settlement-vk.json` and circuit hashes, redeploy verifier as needed, and align backend/prover envs (`RM_CIRCUIT_HASH`, on-chain verifier).
+- `scripts/create_market.sh` in `zen/` expects factory/verifier/circuit hash/ticket size/commit cap/protocol cap/deadline and prints JSON payloads for audit.
+- Error selectors: rerun `scripts/generate_error_selectors.py` after adding/modifying Solidity custom errors; backend/frontend decoders depend on it.

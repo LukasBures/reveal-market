@@ -1,370 +1,64 @@
-# Reveal Market Worker Service
+# Reveal Market Worker
 
-Long-running service that keeps Postgres, Redis, and on-chain state synchronized with Polymarket. The worker is responsible for fetching markets, persisting updates, generating resolution snapshots, priming caches, emitting heartbeats, and optionally backfilling on-chain addresses/snapshots.
-
----
-
-## High-Level Architecture
-
-1. **Startup**: load settings, validate required envs, configure logging, build clients (Gamma, optional CLOB, Goldsky, prover), connect Redis, optionally run Alembic migrations, and publish the current schema revision tag.
-2. **Ingestion tick**: acquire a Redis lease, paginate Gamma (events by default), normalize into `MarketPayload`, upsert markets + normalized tables, apply Goldsky resolution snapshots, enqueue proof jobs, invalidate cache tags, and publish heartbeats + batch stats.
-3. **Cache priming**: call the API to warm `/markets`, category, and suggest caches, then record prime results alongside the sync stats.
-4. **Background loops**: proof queue worker, settlement queue worker, lock-batches automation, and a maintenance loop for retention/backfills/closed-market reconciliation (each with Redis leases where applicable).
-
-```mermaid
-flowchart LR
-  Gamma[Polymarket Gamma/CLOB] --> Worker
-  Goldsky --> Worker
-  Worker --> Postgres
-  Worker --> Redis
-  Worker --> Prover
-  Worker --> API
-```
-
-## 1. Responsibilities
-
-| Domain | Duties |
-| --- | --- |
-| Data ingestion | Poll Polymarket Gamma APIs, normalize payloads (`MarketPayload`), and upsert rows using shared SQLAlchemy models. Normalized tables (`market_outcomes`, `market_tags`, `market_clob_tokens`, `market_gamma_metadata/events`, `gamma_raw`) replace legacy JSON columns. |
-| Resolution tracking | Use Goldsky subgraph data to persist payout vectors in Postgres + Redis and update market status (`settled`). |
-| Cache governance | Invalidate per-market cache entries, publish schema revisions, prime `/markets`, `/categories/{slug}`, `/markets/suggest`. |
-| Operational signals | Publish Redis heartbeats, batch stats, Prometheus counters (`worker.*`), plus proof queue depth gauge and DLQ counter. |
-| Retention | Track retention candidates and emit metrics; deletion is currently disabled (dry-run forced). |
-| Commitments & Merkle | Consume commitments/settlements recorded by the API/relayer (no direct ingestion), rebuild Poseidon Merkle roots/paths for 256-ticket batches (depth 8), submit `lockBatches` when RPC + oracle signer are configured (relayer mode only works if the relayer key is the oracle), and keep prover payloads aligned with on-chain batch roots. |
-| On-chain backfills | Backfill missing `market_address` via MarketFactory and hydrate settlement snapshots from chain when RPC/factory settings are present. |
-| Proof receipts | When configured, call the `prover` microservice to mint Groth16-compatible proof receipts and cache them in Redis for downstream APIs. |
-
-> The `prover` container emits real Groth16 receipts (`rapidsnark` + the Circom artifacts under `prover/circuits/build`) and fails hard if the artifacts are missing. Mount fresh proving/verifying keys generated via `prover/circuits/generate_keys.sh` before sharing proofs with downstream systems.
-
----
-
-## Current implementation snapshot
-
-- **Startup** – Configures logging, builds clients (Gamma, optional CLOB, Goldsky, prover), connects Redis, optionally runs Alembic migrations, and publishes the schema revision tag.
-- **Ingestion loop** – `process_once` acquires a Redis lease, fetches Gamma `/events` (active/non-archived defaults) with retries/backoff and rate limiting, normalizes payloads, upserts markets/outcomes/tags/clob tokens/Gamma metadata, and applies Goldsky resolutions.
-- **Cache governance** – Invalidates Redis tags for market list/detail/resolution, primes homepage/categories/suggest caches, writes schema tags, and publishes batch stats + heartbeats to Redis.
-- **Resolution + proofs** – Persists payout vectors in Postgres + Redis; proof jobs are enqueued into Redis with dedupe and processed by a background worker when the prover is configured (`RM_PROVER_BASE_URL`), caching receipts in Redis for the API.
-- **Settlement + lock-batches** – Optional loops build Poseidon batch roots from commitments, submit `lockBatches` (direct RPC or relayer), and process settlement queue jobs when enabled.
-- **Maintenance** – A background maintenance loop handles retention reporting, missing-resolution backfills, and closed-market reconciles under a Redis lease.
-- **Resilience** – Redis is optional for background work (bypass on outage); Polymarket sync retries with exponential backoff; runtime is async-first (asyncpg + async HTTP) with tests covering mocked external deps.
-
----
-
-## Operational Notes
-
-- Startup validates required env vars in prod-like environments (DB/Redis URLs always, Polymarket base URL, and feature-specific secrets for prover/settlement/relayer). Ensure the corresponding `RM_` envs are set before booting containers; defaults are for local only.
-- The runtime is async-first end to end: asyncpg + greenlet back SQLAlchemy, CLOB/Gamma fetchers are async with configurable retries, and unit tests rely on `aiosqlite` for in-memory DBs when patching `SessionLocal`.
-- Polymarket ingestion now retries with exponential backoff (`RM_POLYMARKET_SYNC_MAX_ATTEMPTS`/`RM_POLYMARKET_SYNC_RETRY_*`) so transient errors do not drop a tick; tests often override backoffs to keep runs fast.
-- Resolution sync stays lean: unused change flags were removed while keeping the persisted payload + cache content identical, so heartbeats and invalidations still reflect real state changes without extra bookkeeping.
-- Redis remains optional for background work; when it is unavailable the worker keeps writing to Postgres and simply skips cache writes/invalidations instead of failing the sync loop.
-- Pricing quotes and signatures are handled by the API; the worker does not touch quote issuance or verification—keep API + streamer healthy for trading flows. On-chain commits are relayed via `commitOnBehalf` → `commitWithAuthorization`.
-
----
-
-## 2. Architecture Overview
-
-1. **Startup** (`app.service.run_worker`):
-   - Configure logging via `app.logging_config`.
-   - Build runtime clients (Gamma, optional CLOB, Goldsky, prover) in `app.runtime`.
-   - Connect to Redis (heartbeat + cache invalidation).
-   - Optionally run Alembic migrations (`app.schema.ensure_schema`) and broadcast the latest revision key.
-2. **Main loop**:
-   - `process_once()` in `app.service`:
-     - Acquire the Redis sync lease to avoid concurrent Gamma pagination.
-     - Fetch Polymarket markets (with retry) via `app.polymarket.AsyncPolymarketClient`.
-     - For each market, `app.market_sync.sync_market()` upserts rows and calls `app.resolution.apply_resolution`.
-     - Optionally backfill missing `market_address` values via MarketFactory when RPC/factory settings are present.
-     - Run retention reporting, enqueue proof jobs, and publish heartbeats/resolution cache updates/targeted invalidations.
-   - `prime_markets_cache()` warms the homepage payload.
-   - `prime_featured_views()` hits `/categories` and `/markets/suggest` for featured cohorts.
-   - `record_batch_stats()` writes batch stats JSON to Redis for dashboards.
-   - Sleep for `RM_POLL_INTERVAL_SECONDS` minus loop runtime.
-3. **Background loops**:
-   - Proof queue worker processes Redis jobs and stores receipts.
-   - Settlement queue worker and lock-batches loop submit on-chain updates when enabled.
-   - Maintenance loop handles retention/backfills/closed-market reconcile under a Redis lease.
-4. **Health**: Docker/compose call `python -m app.healthcheck` (simple DB ping) so orchestrators only start the loop when Postgres is reachable.
-
----
-
-## 3. Source Layout
+Async service that keeps Postgres/Redis in sync with Polymarket and primes the API caches. It runs as a single loop with Redis leases to avoid duplicate ingestion when multiple replicas are deployed.
 
 ```
-backend/worker/
-├── app/
-│   ├── service.py         # Async worker loop, heartbeats, orchestration
-│   ├── runtime.py         # Settings + client builders (Polymarket, CLOB, Goldsky, prover)
-│   ├── (fetcher removed; ingestion calls AsyncPolymarketClient directly)
-│   ├── market_sync.py     # Market persistence, retention, resolution backfill
-│   ├── resolution.py      # Resolution fetch/refresh and ledger upserts
-│   ├── proofs.py          # Settlement proof orchestration + persistence
-│   ├── proof_builder.py   # Build per-batch prover payloads from commitments/settlements
-│   ├── settlement.py      # Settlement snapshots, claim payloads, tx submission
-│   ├── merkle.py          # Poseidon Merkle root/path helpers (depth 8, batch size 256)
-│   ├── cache_ops.py       # Cache invalidation + resolution cache writes
-│   ├── prime.py           # Cache priming for homepage/categories/suggestions
-│   ├── metrics.py         # Prometheus counters + cache invalidation reporting
-│   ├── database.py        # Async SQLAlchemy engine/session helpers
-│   ├── main.py            # Thin re-export/CLI wrapper around `run_worker`
-│   ├── polymarket.py      # Gamma client + MarketPayload normalizer
-│   ├── onchain.py         # Manual on-chain helpers (not wired into loop)
-│   ├── backfill.py        # Market address backfill via MarketFactory
-│   ├── prover_client.py   # Prover HTTP client
-│   ├── config.py          # Pydantic settings (RM_* vars)
-│   ├── schema.py          # Migration helpers + schema revision tagging
-│   ├── healthcheck.py     # Container health entrypoint
-│   └── logging_config.py  # Shared log formatter
-├── tests/                 # Pytests (mocks for HTTP, Redis, on-chain)
-├── pyproject.toml
-├── uv.lock
-├── poetry.lock
-└── run.py                 # Local bootstrap (calls main.run_worker)
+Polymarket Gamma (+optional CLOB/Goldsky) --> Worker --> Postgres
+                                                |          |
+                                                +--> Redis (caches/heartbeats/batch stats)
+                                                +--> Prover (optional)
 ```
 
----
+## Responsibilities
 
-## 4. Configuration Cheat Sheet
+- **Ingestion**: Poll Gamma `/events` with retry/backoff + rate limiting, normalize to `MarketPayload`, and upsert markets/outcomes/tags/clob tokens/Gamma metadata via shared SQLAlchemy models. Defaults to active, non-archived markets; optional CLOB enrichment hooks remain.
+- **Resolutions**: Optional Goldsky client fetches payout vectors; `apply_resolution` persists to Postgres and writes resolution cache entries when configured. Resolved markets age out of cache after 12h.
+- **Cache governance**: Invalidates Redis tags for list/detail/resolution keys, primes homepage/category/suggest caches through the API, writes schema revision tags, and publishes heartbeats + batch stats to Redis.
+- **Proofs/settlement (optional)**: Builds Poseidon Merkle roots/paths for commitments (BATCH_SIZE=256, MERKLE_DEPTH=8), queues prover jobs to `RM_PROVER_BASE_URL`, caches receipts, and contains helpers to submit `lockBatches`/settlements when RPC + signer config exist.
+- **Maintenance**: Retention reporting (deletes disabled), backfill of missing `market_address` via MarketFactory when RPC/factory are set, closed-market reconcile under a Redis lease.
+- **Resilience**: Async HTTP + asyncpg; Redis is optional for background work—when down, ingestion still writes to Postgres and skips cache writes/invalidations. Sync lease prevents concurrent pagination across replicas.
 
-All environment variables begin with `RM_`. Notable groups:
+## Lifecycle
 
-### Core runtime
+1. Startup (`app.service.run_worker`): load settings, configure logging, build clients (Gamma, optional CLOB, Goldsky, prover), connect Redis, optionally run Alembic migrations, record schema revision tag, and publish initial heartbeat.
+2. Main loop (`process_once`): acquire Redis lease, fetch Gamma pages, upsert markets/resolutions, backfill addresses, enqueue proof jobs, invalidate caches, prime featured caches, write batch stats, and publish heartbeat. Sleep for `RM_POLL_INTERVAL_SECONDS` minus loop runtime (with jitter).
+3. Background loops: proof queue worker, settlement queue/lock-batches loop (when enabled), maintenance loop (retention/backfill), plus memory logging and batch stats emission.
+4. Health: Docker uses `python -m app.healthcheck` (DB ping). Heartbeats/batch stats in Redis include latest sync timestamp for dashboards.
 
-| Variable | Description |
-| --- | --- |
-| `RM_DATABASE_URL` | Postgres DSN (same DB as the API). |
-| `RM_DATABASE_POOL_SIZE`, `RM_DATABASE_MAX_OVERFLOW`, `RM_DATABASE_POOL_TIMEOUT` | SQLAlchemy pool sizing/tuning for the worker. |
-| `RM_REDIS_URL` | Redis URI used for cache invalidation, schema tags, heartbeat storage. |
-| `RM_POLL_INTERVAL_SECONDS` | How often to pull Polymarket (default 300s). |
-| `RM_POLL_INTERVAL_JITTER_SECONDS` | Random jitter added to the sleep interval so multiple workers don’t align (default 3s). |
-| `RM_RUN_MIGRATIONS_ON_STARTUP` | If true, apply Alembic migrations before syncing. |
-| `RM_SCHEMA_VERSION_KEY` | Redis key where `propagate_schema_revision` stores the current Alembic revision. |
-| `RM_HEARTBEAT_KEY`, `RM_HEARTBEAT_TTL_SECONDS`, `RM_HEARTBEAT_MAX_RETRIES`, `RM_HEARTBEAT_RETRY_BACKOFF_SECONDS` | Heartbeat publishing behavior. |
-| `RM_BATCH_STATS_KEY`, `RM_BATCH_STATS_TTL_SECONDS` | Where batch stats live in Redis. |
-| `RM_WORKER_MEMORY_LOG_ENABLED`, `RM_WORKER_MEMORY_LOG_EVERY_N_PAGES`, `RM_WORKER_MEMORY_TRIM_THRESHOLD_MB`, `RM_WORKER_MEMORY_ABORT_THRESHOLD_MB` | Emit per-page memory snapshots in `worker.sync.page` logs, trim memory on pressure, and optionally abort a sync tick when RSS crosses the threshold. |
+## Configuration (not exhaustive)
 
-### Polymarket ingestion
+- **Core**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_POLL_INTERVAL_SECONDS`, `RM_POLL_INTERVAL_JITTER_SECONDS`, `RM_RUN_MIGRATIONS_ON_STARTUP`, `RM_HEARTBEAT_KEY/TTL`, `RM_BATCH_STATS_KEY/TTL`.
+- **Gamma ingest**: `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, `RM_POLYMARKET_PAGE_SIZE`, `RM_POLYMARKET_USE_EVENTS_ENDPOINT`, `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER`, `RM_POLYMARKET_ONLY_OPEN_MARKETS`, order/sort flags, retry/backoff settings, `RM_POLYMARKET_SYNC_LEASE_*`, `RM_POLYMARKET_RATE_LIMIT_*`.
+- **Cache priming**: `RM_API_BASE_URL`, `RM_PRIME_MARKETS_CACHE_ENABLED`, `RM_MARKETS_CACHE_LIMIT/OFFSET/TTL`, `RM_CACHE_PRIME_TIMEOUT_SECONDS`, `RM_FEATURED_CATEGORIES`, `RM_FEATURED_SUGGEST_QUERIES`.
+- **Resolutions**: `RM_GOLDSKY_SUBGRAPH_URL`, `RM_GOLDSKY_API_KEY`, `RM_RESOLUTION_FETCH_MAX_ATTEMPTS/BACKOFF_*`.
+- **Proofs/settlement** (optional): `RM_PROVER_BASE_URL`, `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_CIRCUIT_HASH`, `RM_LOCK_BATCHES_USE_RELAYER`, `RM_SETTLEMENT_*`.
+- **Retention/backfill**: `RM_RESOLVED_RETENTION_SECONDS`, `RM_RESOLVED_RETENTION_DRY_RUN` (deletes forced to dry-run), maintenance poll/lease settings, closed-market reconcile toggles.
 
-| Variable | Description |
-| --- | --- |
-| `RM_POLYMARKET_API_BASE` | Base URL for Gamma API. |
-| `RM_POLYMARKET_TIMEOUT_SECONDS` | HTTP timeout per request. |
-| `RM_POLYMARKET_PAGE_SIZE` | Pagination controls. |
-| `RM_POLYMARKET_COMMIT_BATCH_SIZE` | Commit after this many markets are processed (0 = commit every page). |
-| `RM_POLYMARKET_USE_EVENTS_ENDPOINT` | Toggle Gamma `/events` pagination (set false to use `/markets` and reduce payload size). |
-| `RM_POLYMARKET_ORDER`, `RM_POLYMARKET_SORT_ASCENDING`, `RM_POLYMARKET_ONLY_OPEN_MARKETS` | Sorting/filtering toggles. |
-| `RM_POLYMARKET_ACTIVE_FILTER`, `RM_POLYMARKET_ARCHIVED_FILTER` | Additional Gamma filters recommended by Polymarket; defaults to active-only, non-archived markets. |
-| `RM_POLYMARKET_MAX_RETRIES`, `RM_POLYMARKET_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_RETRY_BACKOFF_MAX_SECONDS` | Retry behavior for API calls. |
-| `RM_POLYMARKET_SYNC_MAX_ATTEMPTS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_SECONDS`, `RM_POLYMARKET_SYNC_RETRY_BACKOFF_MAX_SECONDS` | Exponential backoff applied when the entire fetch loop fails before a sync cycle completes. |
-| `RM_POLYMARKET_SYNC_LEASE_KEY`, `RM_POLYMARKET_SYNC_LEASE_TTL_SECONDS`, `RM_POLYMARKET_SYNC_LEASE_JITTER_SECONDS` | Redis lease used to ensure only one worker paginates Gamma at a time; TTL + jitter reduce stampedes when multiple workers run. |
-| `RM_POLYMARKET_RATE_LIMIT_REQUESTS`, `RM_POLYMARKET_RATE_LIMIT_WINDOW_SECONDS` | Sliding-window rate limiter applied before each Gamma request. |
+Full defaults live in `app/config.py`.
 
-### Cache priming
-
-| Variable | Description |
-| --- | --- |
-| `RM_API_BASE_URL` | Base HTTP URL used when the worker calls the API to warm caches. |
-| `RM_PRIME_MARKETS_CACHE_ENABLED` | Toggle for priming `/markets`. |
-| `RM_MARKETS_CACHE_LIMIT`, `RM_MARKETS_CACHE_OFFSET`, `RM_MARKETS_CACHE_TTL_SECONDS`, `RM_CACHE_PRIME_TIMEOUT_SECONDS` | Control the warmed payload + TTL. |
-| `RM_CATEGORY_CACHE_LIMIT`, `RM_SUGGEST_CACHE_LIMIT` | Limits for featured priming. |
-| `RM_FEATURED_CATEGORIES`, `RM_FEATURED_SUGGEST_QUERIES` | CSV lists used for featured cache priming. |
-
-### Retention & summarization
-
-| Variable | Description |
-| --- | --- |
-| `RM_RESOLVED_RETENTION_SECONDS` | Age threshold used for retention reporting (deletion currently disabled). |
-| `RM_RESOLVED_RETENTION_DRY_RUN` | Dry-run guard; retention deletions are currently forced to dry-run. |
-| `RM_RESOLUTION_FETCH_MAX_ATTEMPTS`, `RM_RESOLUTION_FETCH_BACKOFF_SECONDS`, `RM_RESOLUTION_FETCH_BACKOFF_MAX_SECONDS` | Retry controls for Goldsky resolution fetches. |
-| `RM_MAINTENANCE_POLL_SECONDS`, `RM_MAINTENANCE_LEASE_KEY` | Cadence and Redis lease key for the retention/backfill maintenance loop. |
-
-### Closed-market reconcile
-
-| Variable | Description |
-| --- | --- |
-| `RM_CLOSED_MARKETS_RECONCILE_ENABLED` | Toggle for low-frequency refresh of closed markets with commitments. |
-| `RM_CLOSED_MARKETS_RECONCILE_INTERVAL_SECONDS` | Minimum seconds between reconcile runs (0 disables). |
-| `RM_CLOSED_MARKETS_RECONCILE_BATCH_SIZE` | Markets fetched per reconcile batch. |
-| `RM_CLOSED_MARKETS_RECONCILE_MAX_MARKETS` | Maximum markets to reconcile per maintenance tick. |
-| `RM_CLOSED_MARKETS_RECONCILE_STALE_SECONDS` | Refresh markets whose `source_updated_at` exceeds this age. |
-| `RM_CLOSED_MARKETS_RECONCILE_FETCH_CONCURRENCY` | Max concurrent Gamma fetches during reconcile. |
-| `RM_CLOSED_MARKETS_RECONCILE_LAST_KEY` | Redis key storing the last reconcile timestamp. |
-
-### On-chain reads & backfills
-
-| Variable | Description |
-| --- | --- |
-| `RM_RPC_URL` | RPC endpoint used for MarketFactory address backfills and settlement snapshot hydration. |
-| `RM_FACTORY_ADDRESS` | MarketFactory address used to backfill `market_address` when missing. |
-
-### Lock-batches automation (optional)
-
-| Variable | Description |
-| --- | --- |
-| `RM_LOCK_BATCHES_USE_RELAYER` | Route lock submissions through the relayer API instead of direct RPC. |
-| `RM_LOCK_BATCHES_POLL_SECONDS` | Poll interval for the lock-batches background loop (0 disables). |
-| `RM_LOCK_BATCHES_MAX_PER_TICK` | Maximum markets to attempt locking per lock-batches tick. |
-| `RM_LOCK_BATCHES_RELAYER_POLL_SECONDS`, `RM_LOCK_BATCHES_RELAYER_MAX_ATTEMPTS` | Polling settings when the relayer queue returns a job id. |
-| `RM_LOCK_BATCHES_GAS_LIMIT`, `RM_LOCK_BATCHES_GAS_PRICE_GWEI`, `RM_LOCK_BATCHES_MAX_PRIORITY_FEE_GWEI` | Gas overrides for lock-batches transactions (direct RPC mode). |
-
-### Settlement automation (optional)
-
-| Variable | Description |
-| --- | --- |
-| `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` | Signer key for settlement transactions. |
-| `RM_SETTLEMENT_RPC_URL` | Optional RPC override for settlement submission (defaults to `RM_RPC_URL`). |
-| `RM_SETTLEMENT_GAS_PRICE_GWEI`, `RM_SETTLEMENT_MAX_PRIORITY_FEE_GWEI` | Gas overrides for settlement submission. |
-| `RM_SETTLEMENT_QUEUE_KEY`, `RM_SETTLEMENT_QUEUE_POLL_SECONDS`, `RM_SETTLEMENT_QUEUE_MAX_CONCURRENCY`, `RM_SETTLEMENT_QUEUE_DEAD_LETTER_KEY` | Redis-backed queue tuning for settlement jobs. |
-
-### Relayer claim queue (optional)
-
-| Variable | Description |
-| --- | --- |
-| `RM_RELAYER_BASE_URL` | Relayer base URL used to build `/claim` payload targets. |
-| `RM_RELAYER_HTTP_TIMEOUT_SECONDS` | HTTP timeout for relayer requests. |
-| `RM_RELAYER_QUEUE_ENABLED` | Enable Redis-backed claim queue for relayer handoff. |
-| `RM_RELAYER_QUEUE_KEY` | Redis key for relayer claim jobs. |
-
-### Goldsky subgraph
-
-| Variable | Description |
-| --- | --- |
-| `RM_GOLDSKY_SUBGRAPH_URL` | Goldsky GraphQL endpoint that indexes Horizen events. |
-| `RM_GOLDSKY_API_KEY` | API key required for private Goldsky projects (leave blank for public endpoints). |
-| `RM_GOLDSKY_TIMEOUT_SECONDS` | HTTP timeout for Goldsky GraphQL requests. |
-
-### Prover integration
-
-| Variable | Description |
-| --- | --- |
-| `RM_PROVER_BASE_URL` | Base URL for the `prover` container (defaults to `http://prover:8085` in docker-compose). |
-| `RM_PROVER_TIMEOUT_SECONDS` | HTTP timeout when calling the prover service. |
-| `RM_PROVER_SHARED_SECRET` | Optional shared secret; when set, the worker sends `X-Prover-Secret` to the prover. |
-| `RM_PROOF_CACHE_PREFIX` / `RM_PROOF_CACHE_TTL_SECONDS` | Redis key namespace + TTL for cached proof receipts. |
-| `RM_PROOF_QUEUE_KEY` / `RM_PROOF_QUEUE_DEDUPE_KEY` | Redis list/set used for background proof jobs so ingestion doesn’t block. |
-| `RM_PROOF_QUEUE_POLL_SECONDS` | Sleep between queue polls; defaults to 1s. |
-| `RM_PROOF_QUEUE_MAX_DEPTH` | Backpressure cap for proof queue length. |
-| `RM_PROOF_QUEUE_MAX_CONCURRENCY` | Max concurrent proof jobs the background worker processes. |
-| `RM_PROOF_QUEUE_DEAD_LETTER_KEY` | Redis list where malformed/failed proof jobs are stored for inspection. |
-
----
-
-## 5. Local Development
+## Running & Testing
 
 ```bash
 cd backend/worker
 uv sync --extra dev --no-install-project
+uv run python -m app.main          # or: uv run python -m app.service
 
-# Copy settings and edit (Postgres/Redis typically come from `docker compose up postgres redis`)
-cp ../.env.example .env.worker
-export SETTINGS_FILE=.env.worker
-
-# Run once-off sync (Ctrl+C to stop)
-LOG_LEVEL=DEBUG uv run --project . python run.py
-
-# Optional: start the prover locally (required for proof generation)
-docker compose up prover
+# Tests (pytest -n 4)
+uv run pytest
+# repo root: ./backend/run_tests.sh
 ```
 
-Tips:
-- Use `docker compose up worker` when testing the full stack with the API + frontend.
-- For deterministic tests, mock HTTP with `respx` or `httpx.MockTransport`.
+Docker/compose: `./run_local.sh worker` (or `./run_local.sh` for the full stack).
 
----
+## File Map
 
-## 6. Testing & Tooling
-
-```bash
-cd backend
-./run_tests.sh              # worker + api suites via uv
-
-# Worker only
-cd backend/worker
-uv run --project . --extra dev pytest -q
-```
-
-The shared `./backend/run_tests.sh` wrapper enables four pytest workers per suite by default; override via `PYTEST_WORKER_COUNT=<n>` when you need more (or fewer) concurrent jobs.
-
-Coverage highlights:
-- `tests/test_polymarket_client.py`: payload normalization, pagination filters, retry/backoff behaviour.
-- `tests/test_worker_process.py`: cache priming, retention metrics, heartbeats, schema propagation.
-- `tests/test_merkle_and_payload.py`: Poseidon Merkle root/path construction + per-batch prover payload validation.
-
-Pre-commit helpers:
-
-```bash
-uv run --project . --extra dev ruff check backend/worker
-```
-
----
-
-## 7. Observability
-
-| Signal | Implementation |
-| --- | --- |
-| Logging | `logging_config.setup_logging("reveal_market.worker")` emits `timestamp | LEVEL | logger | file:line | event | request_id`. Key events: `worker.fetch.*`, `worker.persist.*`, `worker.heartbeat.*`, `worker.cache.*`, `worker.schema.*`. Use `LOG_LEVEL`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_MAX_BYTES` to tune output. |
-| Metrics | `RETENTION_*`, `CACHE_INVALIDATION_COUNTER`, `worker_polymarket_fetch_total`, `worker_polymarket_retry_total`, plus Prometheus counters exported by the API (worker updates hit those indirectly). If you need direct worker metrics, wrap the loop with `prometheus_client` exposition. |
-| Heartbeat | Redis key `RM_HEARTBEAT_KEY` contains the timestamp, markets processed/changed, resolutions changed, latency, market_errors, and a `polymarket_ok` flag. API `/healthz` uses this to flag worker outages. Alert when the key is stale past `RM_HEARTBEAT_TTL_SECONDS`. |
-| Batch stats | Stored at `RM_BATCH_STATS_KEY` with TTL; use `redis-cli GET reveal_market_worker:batch_stats | jq` for quick diagnostics. |
-
----
-
-## 8. Deployment & Ops Checklist
-
-1. Build image via `docker/worker/Dockerfile` or `make worker`. The Dockerfile copies migrations so `_ensure_schema` succeeds.
-2. Provide runtime dependencies:
-   - Same Postgres as the API.
-   - Redis reachable via `RM_REDIS_URL`.
-   - Optional: access to RPC endpoints when on-chain backfills or settlement automation are enabled.
-3. Configure Kubernetes/Docker health check: `CMD ["python", "-m", "app.healthcheck"]`.
-4. Mount secrets (RPC URLs, private keys) via secret manager or encrypted env vars—never bake them into images.
-5. Scale: multiple workers are supported with the Gamma sync lease, but confirm idempotency for proof/settlement queues and cache invalidations before running more than one writer.
-6. Alert on:
-   - Heartbeat staleness (`timestamp` older than TTL)
-   - `worker.fetch.error` spikes
-   - Retention errors (`worker.retention.cleanup` missing for >N minutes)
-   - Cache priming failures (`worker.cache.prime_failed`, `worker.cache.featured_failed`)
-7. Keep batch stats (`RM_BATCH_STATS_KEY`) available for dashboards and alerting.
-
----
-
-## 9. Runbooks (Prod)
-
-- **Required env vars (prod)**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_POLYMARKET_API_BASE`, `RM_HEARTBEAT_KEY`, `RM_SCHEMA_VERSION_KEY`, `RM_PROVER_BASE_URL`, `RM_RPC_URL`, `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` (plus `RM_SETTLEMENT_RPC_URL` when `RM_RPC_URL` is unset). Optional wiring: lock-batches via `RM_LOCK_BATCHES_USE_RELAYER` + `RM_RELAYER_BASE_URL`, relayer claims via `RM_RELAYER_QUEUE_ENABLED` + `RM_RELAYER_BASE_URL`. Tuning: `RM_POLYMARKET_*` (fetch/retry/rate limit), `RM_RESOLUTION_FETCH_*`, `RM_MARKETS_CACHE_*`, `RM_HEARTBEAT_*`, relayer timeouts (`RM_RELAYER_HTTP_TIMEOUT_SECONDS`), DB pool knobs `RM_DATABASE_POOL_SIZE`/`RM_DATABASE_MAX_OVERFLOW`/`RM_DATABASE_POOL_TIMEOUT`.
-- **Startup (local)**: `cd backend/worker && uv sync --extra dev --no-install-project`; set `SETTINGS_FILE=.env.worker`; `LOG_LEVEL=DEBUG uv run --project . python run.py`. In Docker: `docker compose up worker` (or full stack via `./run_local.sh`).
-- **Operational toggles**: relayer claims (`RM_RELAYER_QUEUE_ENABLED=true` + `RM_RELAYER_BASE_URL`), cache priming (`RM_PRIME_MARKETS_CACHE_ENABLED=true`, featured categories/queries lists).
-- **Release strategy**: Prefer canary/blue-green. Ensure migrations are backward-compatible; keep `RM_RUN_MIGRATIONS_ON_STARTUP=true` so the worker applies them once then publishes schema tags. Rollback by redeploying prior image; migrations should have downgrade paths if reversal is needed.
-- **Rollback**: Redeploy previous image/config; clear schema tag cache if needed (`DEL RM_SCHEMA_VERSION_KEY`); invalidate schema-tagged caches (`schema:*`) if you reverted a migration.
-- **Health/alerts**: Alert on heartbeat staleness (`RM_HEARTBEAT_KEY` TTL), `worker.fetch.error`, `worker.cache.prime_failed/featured_failed`, `worker.resolution.gaps`, `worker.proof.failed`. Heartbeat payload contains `polymarket_ok`, `redis_available`, `markets_changed`, `resolutions_changed`, `latency_ms`, `market_errors`.
-
----
-
-## 10. Troubleshooting
-
-| Issue | Diagnosis steps | Resolution |
-| --- | --- | --- |
-| Worker loops but markets never change | Inspect logs for `worker.market.skip_update`; likely Polymarket payloads have unchanged `source_updated_at`. Force refresh by clearing `content_hash` or verifying upstream data. |
-| `/healthz` reports missing heartbeat | Check Redis for `RM_HEARTBEAT_KEY`. If absent, ensure worker can connect to Redis and that `_run_with_retries` isn’t repeatedly failing. |
-| Cache never warms | Confirm `RM_API_BASE_URL` points to the reachable API and that `RM_PRIME_MARKETS_CACHE_ENABLED=true`. Review `worker.cache.prime_failed` logs for HTTP errors. |
-| Retention never deletes | Expected today: deletion is disabled and only metrics are emitted. Re-enable deletions in `cleanup_resolved_markets` (or implement archival) if you need data pruning. |
-| Market address backfill missing | Look for `worker.resolution.backfill_addresses`; ensure `RM_FACTORY_ADDRESS` + `RM_RPC_URL` are set and reachable. |
----
-
-## 11. Handy Commands
-
-```bash
-# Run a single sync then exit (useful for debugging)
-python - <<'PY'
-import asyncio
-from app.service import process_once
-
-asyncio.run(process_once())
-PY
-
-# Inspect heartbeat payload
-redis-cli GET reveal_market_worker:heartbeat | jq
-
-# Tail worker logs inside Docker
-docker logs -f reveal-worker
-```
-
-Keep the worker lean: reuse shared helpers, avoid blocking calls inside the DB transaction, and emit structured events for every meaningful branch so operations can react quickly.
+- `app/service.py` – main loop, heartbeats, orchestration
+- `app/polymarket.py` – Gamma client + payload normalizer (tenacity retries, rate limiting)
+- `app/market_sync.py` / `app/resolution.py` – persistence + resolution handling
+- `app/cache_ops.py` / `app/prime.py` – cache invalidation + priming
+- `app/proofs.py` / `app/proof_builder.py` – proof queue + payload assembly
+- `app/settlement.py` / `app/merkle.py` – settlement snapshots, lock-batches helpers, Poseidon trees
+- `app/backfill.py` – MarketFactory address backfills
+- `app/runtime.py` – settings + client singletons
+- `app/schema.py` – migration helpers + schema tagging
+- `app/healthcheck.py` – Docker health entrypoint

@@ -1,16 +1,14 @@
-# Backend MVP Checklist
+# Backend TODO (API + shared)
 
-This list tracks the remaining backend work needed to ship the MVP. Items are ordered by risk.
+Remaining work specific to the FastAPI service and shared backend modules.
 
-## Critical before MVP launch
-- Lock down internal and mutation endpoints with auth (API key/JWT or network allowlist). Cover: `/markets` POST/PATCH, `/pricing/quotes/{id}`, `/proofs`, `/treasury/snapshots`, `/markets/onchain`, `/clob/orderbook`, `/commitments/sync`, `/settlements/ingest`, `/metrics`, `/healthz/heartbeats`.
-- Quote issuance hardening: decide whether to keep API auto-create in prod; if disabled, require `market_id` exists in DB and block on-chain auto-create.
-- Bind quotes and trade endpoints (`/trade/commit`, `/positions`, `/trade/claim`) to authenticated wallet identity (signed payload or session). Persist auth context in the quote ledger and use it for caps.
-- Ensure `RM_RELAYER_WEBHOOK_SECRET` is set in prod and protect `/commitments/sync` + `/settlements/ingest` with internal auth or network allowlists.
-- Rate limiting: enable Redis-backed limits for `/pricing/quote` and `/trade/commit` in prod, configure trusted proxies, and avoid in-memory fallback in production.
-- FX configuration alignment: keep `RM_FX_FEED_URL` aligned to the streamer endpoint and ensure CORS/health checks reflect the configured host.
+## Critical
+- **Auth hardening**: Protect mutation/admin routes with auth or network allowlists (pricing/quote, trade/commit, relayer ingest hooks, cache/markets admin paths, `/metrics`, `/healthz/heartbeats`). Ensure `RM_RELAYER_WEBHOOK_SECRET` and any bearer tokens are enforced in production.
+- **Rate limiting**: Enable Redis-backed rate limits for `/pricing/quote` and `/trade/commit` in prod with trusted proxy configuration; avoid in-memory fallback outside local.
+- **Market auto-deploy controls**: Decide policy for auto-creating markets during commit; add env guard for production and ensure deploy lock errors surface clearly in observability.
+- **FX + CORS alignment**: Add smoke checks/alerts when FX host/CORS/allowed hosts diverge from frontend origin; include FX freshness in health probes.
 
-## Post-MVP / nice-to-have
-- Quote audit endpoints (list/search) behind admin auth.
-- Circuit hash/verifier alignment checks in proof receipts.
-- On-chain mirroring/automation for factory events and settlement.
+## Nice to have
+- Quote/commit audit endpoints behind admin auth (searchable quote ledger with expiry/status).
+- Circuit hash/verifier alignment check exposed in proof receipts/health when RPC/verifier config is present.
+- Refine cache hydration during Redis outages (optional background requeue once Redis recovers).

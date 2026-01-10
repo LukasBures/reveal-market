@@ -1,97 +1,65 @@
-# Reveal Relayer (Python)
+# Reveal Relayer
 
-Minimal HTTP relayer that submits `commitOnBehalf` and `claim` transactions to the Reveal Market contracts. Runs as a FastAPI service with Web3 + EOA signer.
+FastAPI + Web3 service that signs and submits `commitOnBehalf`, `claim`, and `lockBatches` transactions to the Reveal Market contracts. A durable queue (SQLite by default, Postgres when `RM_DATABASE_URL` is provided) handles retries and fee bumps so RPC hiccups don’t lose jobs.
 
-## High-Level Architecture
-1. **Startup**: load env config, create Web3 client + relayer account, build `RelayerService`, and start the `TxQueue` worker (SQLite by default, Postgres when `RM_DATABASE_URL` is set).
-2. **Request flow**: `/commit`, `/claim`, and `/lock-batches` validate payloads, enqueue jobs (default) or execute immediately, and optionally forward ingest metadata to the API.
-3. **Queue processing**: the worker reserves jobs, applies fee bumps per retry, and submits transactions with optional preflight (`eth_call`/`estimate_gas`). Results and errors are persisted with job status for `/status` and admin replay.
-4. **Ops surface**: `/healthz` checks RPC, balances, escrow owner, and block freshness; `/metrics` exports queue + tx latency; optional rate limiting/IP allowlist guard write endpoints.
-
-```mermaid
-flowchart LR
-  Clients --> Relayer
-  Relayer --> Queue[(Tx Queue)]
-  Relayer --> Chain
-  Relayer --> API
+```
+Clients -> Relayer API -> Queue -> Web3 RPC -> RevealMarket/RelayerEscrow
+                        \-> optional ingest -> Backend
 ```
 
-## What it does today
-- Accepts `/commit` and `/claim` payloads and enqueues them in a durable queue (Postgres via `RM_DATABASE_URL`, SQLite fallback) that retries with backoff + fee bumps before submitting transactions. The default entrypoint runs in queue mode.
-- Accepts `/lock-batches` payloads, computes Poseidon batch roots (BATCH_SIZE=256, depth 8), and submits `lockBatches` for commit locks; optional ingest pushes `batch_roots`/`batch_counts` to the backend for proof generation.
-- Healthcheck `/healthz` reports RPC connectivity, latest block age, relayer/escrow addresses, balances/allowances, and owner checks; `/metrics` exports HTTP latency, tx outcomes/latency, and queue depth/outcomes; `/status` returns job state.
-- Optional ingest hooks push commitment/settlement metadata to the backend when `RELAYER_API_BASE_URL` is set. Admin endpoints list/replay/purge dead-lettered jobs when auth is enabled.
+## How it works
 
-## Requirements
-- Python 3.12
-- `uv` (package manager): `pip install uv` or download from https://github.com/astral-sh/uv
-- RPC: Horizen Testnet `https://horizen-testnet.rpc.caldera.xyz/http` (default)
+- **Startup**: load env (`config.load_config`), configure logging, build Web3 client + relayer account, create `RelayerService`, initialize `TxQueue` (SQLite path or Postgres DSN), and optional in-memory rate limiter/IP allowlist.
+- **Queue**: `TxQueue` stores jobs with status/attempts/tx hash. A background worker pops pending jobs, bumps gas per retry, optionally drops expired commits, and records results. Dead-lettered jobs can be replayed or purged via admin routes.
+- **Endpoints** (all guarded by bearer/IP/rate-limit when configured):
+  - `GET /healthz` – RPC connectivity, block freshness, balances/allowances, escrow owner check, queue stats.
+  - `POST /commit` – validate CommitAuth payload, enqueue or send immediately, optional ingest to backend.
+  - `POST /claim` – validate claim payload, enqueue or send immediately, optional ingest to backend.
+  - `POST /lock-batches` – build Poseidon batch roots (BATCH_SIZE=256, MERKLE_DEPTH=8), enqueue or send; optional ingest of batch roots/counts.
+  - `POST /status` – lookup job state/attempts/tx hash.
+  - `GET /metrics` – Prometheus metrics (HTTP, queue depth/outcomes, tx latency).
+  - Admin: `/admin/queue/deadletter` (list), `/admin/queue/deadletter/{id}/replay`, `/admin/queue/deadletter/{id}` (delete).
+- **Auth & abuse controls**: bearer token (recommended), optional IP allowlist and in-memory sliding-window rate limiter, optional `x-forwarded-for` trust.
+- **Logging/metrics**: structured logs for every request and queue attempt; Prometheus counters/gauges for queue depth, deadletter depth, tx outcomes, and latency.
 
-## Config (env vars)
-- `RELAYER_PRIVATE_KEY`: hex EOA key used to sign txs.
-- `RELAYER_ESCROW_ADDRESS`: deployed `RelayerEscrow` address.
-- `RPC_URL`: JSON-RPC endpoint (e.g., Horizen testnet).
-- `CHAIN_ID`: matching chain ID (e.g., `2651420`).
-- `RELAYER_HOST`: bind host (e.g., `0.0.0.0`).
-- `RELAYER_PORT`: bind port (e.g., `8088`).
-- `RELAYER_BEARER_TOKEN`: required unless `RELAYER_ALLOW_INSECURE_AUTH=true`; used for `Authorization: Bearer <token>` on `/commit`, `/claim`, `/status`, and `/admin/*`.
-- `RELAYER_ALLOW_INSECURE_AUTH` (default `false`): set to `true` to allow unauthenticated access in local dev.
-- `RELAYER_MAX_BLOCK_AGE_SECONDS` (default `60`): mark health degraded if the latest block is older.
-- `RELAYER_MIN_BALANCE_WEI` (default `0`): mark health degraded when relayer ETH balance is below this.
-- `RELAYER_MAX_RETRIES` (default `3`), `RELAYER_RETRY_BACKOFF_SECONDS` (default `0.5`), `RELAYER_TX_TIMEOUT_SECONDS` (default `120`): tx retry/backoff + receipt wait tuning.
-- `RELAYER_HTTP_TIMEOUT_SECONDS` (default `10`): RPC HTTP request timeout.
-- `RELAYER_PREFLIGHT_MODE` (default `none`): set to `call`, `estimate`, or `both` to run `eth_call`/`estimate_gas` checks before sending.
-- Abuse protection: `RELAYER_RATE_LIMIT_REQUESTS` (default `30`, set `0` to disable), `RELAYER_RATE_LIMIT_WINDOW_SECONDS` (default `60`), `RELAYER_IP_ALLOWLIST` (comma-separated IPs/CIDRs), `RELAYER_TRUST_X_FORWARDED_FOR` (default `false`).
-- Queue + bumping: prefer Postgres via `RM_DATABASE_URL` (e.g., `postgresql+psycopg2://user:<REDACTED>@host:5432/db` or `postgresql://...`); fallback SQLite path via `RELAYER_QUEUE_DB_PATH` (default `relayer_queue.db`). Tuning: `RELAYER_QUEUE_POLL_SECONDS` (default `1`), `RELAYER_QUEUE_MAX_ATTEMPTS` (default `5`), `RELAYER_FEE_BUMP_PERCENT` (default `0.15` bump per retry).
-- Token health thresholds: `RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI`, `RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI`.
-- Backend ingest (optional): `RELAYER_API_BASE_URL`, `RELAYER_API_BEARER_TOKEN`, `RELAYER_API_TIMEOUT_SECONDS` (default `10`).
+## Configuration (env)
 
-## Install & Run (local)
+- **RPC**: `RPC_URL`, `CHAIN_ID`, `RELAYER_PRIVATE_KEY` (EOA), `RELAYER_ESCROW_ADDRESS`.
+- **Server**: `RELAYER_HOST` (default `0.0.0.0`), `RELAYER_PORT` (default `8088`).
+- **Auth**: `RELAYER_BEARER_TOKEN` (required unless `RELAYER_ALLOW_INSECURE_AUTH=true`), `RELAYER_IP_ALLOWLIST` (CSV IPs/CIDRs), `RELAYER_TRUST_X_FORWARDED_FOR`.
+- **Queue**: `RM_DATABASE_URL` (Postgres DSN) or `RELAYER_QUEUE_DB_PATH` (SQLite path, default `relayer_queue.db`), `RELAYER_QUEUE_POLL_SECONDS`, `RELAYER_QUEUE_MAX_ATTEMPTS`, `RELAYER_FEE_BUMP_PERCENT`, `RELAYER_TX_TIMEOUT_SECONDS`.
+- **Rate limit**: `RELAYER_RATE_LIMIT_REQUESTS`, `RELAYER_RATE_LIMIT_WINDOW_SECONDS` (set requests=0 to disable).
+- **Tx safety**: `RELAYER_PREFLIGHT_MODE` (`none|call|estimate|both`), `RELAYER_MAX_RETRIES`, `RELAYER_RETRY_BACKOFF_SECONDS`, `RELAYER_HTTP_TIMEOUT_SECONDS`, `RELAYER_MAX_BLOCK_AGE_SECONDS`, `RELAYER_MIN_BALANCE_WEI`, `RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI`, `RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI`.
+- **Backend ingest (optional)**: `RELAYER_API_BASE_URL`, `RELAYER_API_BEARER_TOKEN`, `RELAYER_API_TIMEOUT_SECONDS`.
+
+Defaults live in `src/relayer/config.py`.
+
+## Running & Testing
+
 ```bash
 cd relayer
 uv sync --group dev
 PYTHONPATH=src uv run uvicorn relayer.main:app --reload --host 0.0.0.0 --port 8088
-# or: make run
+
+# Tests
+PYTHONPATH=src uv run pytest   # or: ./run_tests.sh
 ```
 
-## Docker
-```bash
-docker build -t reveal-relayer -f docker/relayer/Dockerfile .
-docker run --rm -p 8088:8088 \
-  -e RELAYER_PRIVATE_KEY=0x... \
-  -e RELAYER_ESCROW_ADDRESS=0x... \
-  -e RPC_URL=https://horizen-testnet.rpc.caldera.xyz/http \
-  reveal-relayer
-```
+Docker: `docker compose up relayer` (uses `docker/relayer/Dockerfile`).
 
-## API
-- `GET /healthz` — status + addresses.
-- `GET /metrics` — Prometheus scrape target.
-- `POST /status` — body: `{jobId}`; returns queue state, attempts, and tx hash when available.
-- `POST /commit` — body: `user, market, commitment, nonce, expiry, chain_id, ticket_value_wei, signature` plus optional ingest fields; queue mode returns `202 Accepted` with `{jobId, status: queued}`.
-- `POST /claim` — body: `market, user, ticket_id, outcome_id, amount, salt, merkle_proof[]` plus optional ingest fields; queue mode returns `202 Accepted` with `{jobId, status: queued}`.
-- `POST /lock-batches` — body: `market, tickets[]` plus optional `relayer_sig`; each ticket includes `ticket_id, outcome_id, amount, user, salt` (or precomputed `leaf`). Requires `event_id` or `market_id` for ingest; queue mode returns `202 Accepted` with `{jobId, status: queued}`. Batches must be contiguous (no ticket gaps); roots are Poseidon-based.
-- Admin (auth if bearer set): `GET /admin/queue/deadletter` lists dead-lettered jobs; `POST /admin/queue/deadletter/{id}/replay` resets to pending; `DELETE /admin/queue/deadletter/{id}` purges.
+## File Map
 
-## Tests
-```bash
-cd relayer
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=src uv run pytest
-# or: make test
-```
+- `src/relayer/main.py` – load config, build Web3 + service, initialize queue/rate limiter, create FastAPI app.
+- `src/relayer/app.py` – routes, auth/abuse guards, metrics middleware.
+- `src/relayer/service.py` – tx builders + validation for commit/claim/lock-batches, optional backend ingest.
+- `src/relayer/queue.py` – durable queue, retries, deadletter handling.
+- `src/relayer/security.py` – bearer/IP allowlist/rate limiter helpers.
+- `src/relayer/poseidon.py` – Poseidon hash helpers for batch roots.
+- `src/relayer/abi.py` – contract ABIs; keep in sync with deployed contracts.
 
-## Rate-limit smoke test
-```bash
-cd relayer
-RELAYER_BEARER_TOKEN=<REDACTED>
-```
-The script sends expired `/commit` payloads and expects a `429` after the configured limit.
+## Operational Tips
 
-## Notes
-- Service uses a durable queue with automatic fee bumping; set `RM_DATABASE_URL` to a Postgres instance to persist across restarts (mount a volume if using SQLite).
-- Gas funding: ensure the relayer EOA is funded on the target network; health exposes ETH balance, collateral token balances/allowances, and block freshness.
-- Contracts must match the deployed ABI (commit/claim paths). Update `abi.py` if needed.
-- Queue mode is the default in `relayer.main`; to run synchronous commits/claims, construct the app without a `TxQueue`.
-- Rate limiting and allowlists are enforced in-memory per relayer instance; configure upstream proxies for global limits.
-- Logs are structured JSON with timestamp/level/event fields and tx metadata for observability.
-- `lockBatches` is `onlyOracle`; relayer submissions only succeed if the relayer key matches the market oracle address.
+- Fund the relayer EOA and ensure `RelayerEscrow` owner matches expectations; `/healthz` reports balances/allowances and owner check.
+- Queue mode is default; to run synchronously, construct the app without `TxQueue` (not the default in `main.py`).
+- `lockBatches` succeeds only if the relayer key is the oracle (`onlyOracle`); otherwise expect on-chain reverts.
+- When using SQLite, mount a volume if you need queue durability across restarts; prefer Postgres in production.

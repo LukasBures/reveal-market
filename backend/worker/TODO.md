@@ -1,12 +1,11 @@
-# Worker TODO (MVP)
+# Worker TODO
 
-## MVP blockers
-- [ ] Proof pipeline monitoring: add explicit alerts for missing commitments/settlements so proof jobs do not silently skip markets. (backend/worker/app/proofs.py, backend/worker/app/settlement.py)
-- [ ] MarketFactory mirroring: consider streaming factory events (Goldsky) instead of per-market backfills so rake/signer/oracle changes are captured immediately.
+Focused follow-ups for the ingestion/priming/proof worker.
 
-## MVP recommended
-- [ ] Retention behavior: decide whether to re-enable deletes or document/implement archival/backpressure; keep cache tags consistent on delete. (backend/worker/app/market_sync.py)
+## MVP-critical
+- **Monitoring & alerts**: Add explicit alerts for stalled Gamma sync, missing heartbeats, and proof/settlement queue gaps so markets cannot silently skip proof generation.
+- **Factory mirroring**: Stream factory events (Goldsky or RPC) for rake/signer/oracle/cap changes instead of relying solely on backfill, and record deltas in the ledger.
 
-## Notes
-- Proof generation requires `RM_PROVER_BASE_URL` and existing commitments.
-- Retention cleanup currently forces dry-run metrics regardless of `RM_RESOLVED_RETENTION_DRY_RUN`.
+## Operational
+- **Retention policy**: Decide whether to keep retention as metrics-only or enable deletes/archival; if enabling deletes, ensure cache tags and batch stats stay consistent.
+- **Proof queue visibility**: Expose queue depth + oldest job age in `/metrics` and health to catch prover outages quickly.
