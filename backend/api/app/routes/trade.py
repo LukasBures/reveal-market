@@ -1777,6 +1777,11 @@ async def list_claim_bundles(
 
     needs_refresh = False
     for _commitment, market, settlement in base_rows:
+        if getattr(market, "resolution_status", None) == models.ResolutionStatusEnum.FINAL.value:
+            refreshed = await _maybe_backfill_settlement(session, market)
+            if refreshed is not None and refreshed is not settlement:
+                settlement = refreshed
+                needs_refresh = True
         if (
             getattr(market, "resolution_status", None) is not None
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
