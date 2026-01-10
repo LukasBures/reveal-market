@@ -385,9 +385,8 @@ async def list_commitments_with_settlement(
     the commitment outcome (settlement is required in that case).
     """
 
-    stmt = (
-        select(models.Commitment, models.Market, models.Settlement)
-        .join(models.Market, models.Market.id == models.Commitment.market_id)
+    stmt = select(models.Commitment, models.Market, models.Settlement).join(
+        models.Market, models.Market.id == models.Commitment.market_id
     )
     if winning_only:
         stmt = stmt.join(models.Settlement, models.Settlement.market_id == models.Commitment.market_id)
