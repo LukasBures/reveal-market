@@ -9,7 +9,7 @@ import {
   submitTrade,
   type TradeCommitResponse,
 } from "@/lib/pricing-client";
-import { fetchTradeStatus } from "@/lib/api";
+import { fetchPositions, fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useChainId, useConnection } from "wagmi";
 import { formatTime, normalizeTxHash } from "@/lib/formatters";
@@ -97,6 +97,7 @@ export function StakeQuoteCard({
   const previewKeyRef = useRef<string | null>(null);
   const previewInFlightRef = useRef(false);
   const lastPreviewAtRef = useRef(0);
+  const [escrowBalanceZen, setEscrowBalanceZen] = useState<number | null>(null);
   const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
@@ -159,6 +160,34 @@ export function StakeQuoteCard({
       setSelectedOutcome(0);
     }
   }, [outcomeOptions, selectedOutcome]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEscrowBalanceZen(null);
+    if (!address) return undefined;
+    const loadEscrow = async () => {
+      try {
+        const resp = await fetchPositions(address);
+        if (cancelled) return;
+        const escrowRaw = resp.escrowBalance ?? null;
+        if (escrowRaw === null || escrowRaw === undefined) {
+          setEscrowBalanceZen(null);
+          return;
+        }
+        const escrowNumber = typeof escrowRaw === "string" ? Number(escrowRaw) : Number(escrowRaw);
+        const escrowZen = Number.isFinite(escrowNumber) ? escrowNumber / 1e18 : null;
+        setEscrowBalanceZen(escrowZen);
+      } catch {
+        if (!cancelled) {
+          setEscrowBalanceZen(null);
+        }
+      }
+    };
+    loadEscrow();
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   const statusNormalized = (marketStatus ?? "").toLowerCase();
   const settledStates = ["settled", "resolved", "closed", "cancelled", "canceled", "voided"];
@@ -468,10 +497,13 @@ export function StakeQuoteCard({
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
   const escrowInsufficient = useMemo(() => {
-    if (!txError) return false;
-    const normalized = txError.toLowerCase();
-    return normalized.includes("insufficient_escrow_balance") || normalized.includes("insufficient escrow balance");
-  }, [txError]);
+    const balanceKnown = Number.isFinite(escrowBalanceZen);
+    const insufficientBalance = balanceKnown ? Number(escrowBalanceZen) < stakeZen : false;
+    const normalizedError = txError?.toLowerCase() ?? "";
+    const errorIndicatesInsufficient =
+      normalizedError.includes("insufficient_escrow_balance") || normalizedError.includes("insufficient escrow balance");
+    return insufficientBalance || errorIndicatesInsufficient;
+  }, [escrowBalanceZen, stakeZen, txError]);
   const submitBlockedReason =
     (escrowInsufficient ? "Deposit to escrow" : null) ??
     tradingReason ??
