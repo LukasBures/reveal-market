@@ -20,7 +20,7 @@ Clients -> FastAPI -> Redis (caches/heartbeats) -> Postgres (source of truth)
 - **Markets/resolutions**: `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event_id}`, `/resolution/{condition_id}` pull from normalized tables (outcomes, tags, clob tokens, Gamma metadata). Resolved markets drop from cache 12h after `resolved_at`.
 - **Search**: Indexed Postgres queries for full-text search and pagination (intentionally not cached).
 - **Pricing**: `/pricing/preview` (unsigned) and `/pricing/quote` (signed QUOTE_V1 digest) fetch FX from the streamer endpoint, ignore client-supplied FX, enforce per-quote/user/market caps, and persist quotes with expiry. `/pricing/submit` revalidates digest/expiry and optional FX drift.
-- **Trade/relayer**: `/trade/commit` consumes a quote, builds CommitAuth signatures, and forwards to the relayer (Redis queue fallback). `/trade/status` polls queue results; claim/bundle endpoints surface settlement/claim state.
+- **Trade/relayer**: `/trade/commit` consumes a quote, builds CommitAuth signatures, and forwards to the relayer (Redis queue fallback). `/trade/status` polls queue results; `/trade/claim` + `/claim/bundles` surface settlement/claim state; `/positions` returns user positions and escrow balance when available.
 - **Proofs/treasury/meta**: `/proofs` exposes prover receipts stored by the worker; treasury/meta routes provide version/config metadata.
 - **Health**: `/healthz` checks Postgres, Redis, worker heartbeat, Polymarket reachability, pricing signer, schema revision tag, and CORS/FX CORS. `/metrics` exposes Prometheus counters/gauges/histograms.
 

@@ -24,7 +24,7 @@ Batch constants: `BATCH_SIZE = 256`, `MERKLE_DEPTH = 8` (Poseidon trees). Settle
 
 - **Commit authorization**: `keccak256(abi.encodePacked(address(market), marketId, commitment, user, nonce, expiry, ticketValue, block.chainid))` signed by `authorizationSigner`. Nonces/expiries enforced; commit value must equal fixed ticket size.
 - **Public signals** (10): `[merkleRoot, marketId, winningOutcomeId, totalEscrowNet, totalLiability, rakeBps, poolTotalYes, poolTotalNo, circuitHash, padding(0)]`.
-- **Commitment leaf (Poseidon)**: `leaf = Poseidon(Poseidon(ticketId, outcomeId), Poseidon(amount, Poseidon(user, salt)))`, stored as `bytes32(uint256(leaf))`.
+- **Commitment leaf (Poseidon)**: `leaf = Poseidon(Poseidon(ticketId, outcomeId), Poseidon(Poseidon(amount, payout), Poseidon(user, salt)))` (see `_computeLeaf`); stored as `bytes32(uint256(leaf))`.
 
 ## Admin Controls
 

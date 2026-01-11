@@ -18,12 +18,16 @@ flowchart LR
   Frontend --> Streamer
   API --> Postgres
   API --> Redis
+  API --> Streamer
   Worker --> Postgres
   Worker --> Redis
   Worker --> Polymarket
   Streamer --> Polymarket
   Streamer --> FX[FX Sources]
+  Streamer --> Redis
   API --> Relayer --> Chain
+  Hedger --> Postgres
+  Hedger --> Redis
   Hedger --> Chain
   Worker --> Prover
 ```
