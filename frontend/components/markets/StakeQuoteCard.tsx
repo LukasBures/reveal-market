@@ -467,7 +467,13 @@ export function StakeQuoteCard({
       : "shadow-[0_20px_60px_rgba(244,63,94,0.25)] ring-1 ring-rose-400/30";
   const stakeOutOfRange =
     !Number.isFinite(stakeZen) || stakeZen < MIN_STAKE_ZEN || stakeZen > effectiveMaxStake || capExhausted;
+  const escrowInsufficient = useMemo(() => {
+    if (!txError) return false;
+    const normalized = txError.toLowerCase();
+    return normalized.includes("insufficient_escrow_balance") || normalized.includes("insufficient escrow balance");
+  }, [txError]);
   const submitBlockedReason =
+    (escrowInsufficient ? "Deposit to escrow" : null) ??
     tradingReason ??
     (!address ? "Connect wallet" : null) ??
     (!marketId ? "Market unavailable" : null) ??
@@ -568,6 +574,8 @@ export function StakeQuoteCard({
       } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
         setTxError("Quote already consumed. Requesting a new one.");
         setRefreshNonce((prev) => prev + 1);
+      } else if (normalized.includes("insufficient_escrow_balance")) {
+        setTxError("Insufficient escrow balance. Deposit more in the dashboard.");
       } else {
         if (typeof console !== "undefined") {
           console.error("[trade] submit failed", err);
@@ -804,12 +812,21 @@ export function StakeQuoteCard({
             tradingDisabled ||
             capExhausted ||
             chainMismatch ||
+            escrowInsufficient ||
             txLoading ||
             txPending
           }
           onClick={handleTrade}
           className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] transition ${
-            fxStale || fxUnavailable || !address || tradingDisabled || capExhausted || chainMismatch || txLoading || txPending
+            fxStale ||
+            fxUnavailable ||
+            !address ||
+            tradingDisabled ||
+            capExhausted ||
+            chainMismatch ||
+            escrowInsufficient ||
+            txLoading ||
+            txPending
               ? "cursor-not-allowed bg-white/20 text-white/60"
               : "bg-emerald-500 text-white hover:bg-emerald-400"
           }`}
@@ -841,6 +858,20 @@ export function StakeQuoteCard({
         )}
         {error && error !== "Market settled" && <p className="text-xs text-rose-300">{error}</p>}
         {txError && <p className="text-xs text-rose-300">{txError}</p>}
+        {escrowInsufficient && (
+          <p className="text-xs text-emerald-200">
+            Deposit to escrow in the{" "}
+            <a
+              className="underline hover:text-emerald-100"
+              href="https://revealmarket.xyz/dashboard"
+              target="_blank"
+              rel="noreferrer"
+            >
+              dashboard
+            </a>{" "}
+            to continue trading.
+          </p>
+        )}
         {stakeError && <p className="text-xs text-rose-300">{stakeError}</p>}
         {fxStale && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">

@@ -60,7 +60,13 @@ function FxStatusPill({ fxStream }: { fxStream: ReturnType<typeof useFxStream> }
   const parts = [fxStream.wsConnected ? "WS" : "REST", fxStream.status.toUpperCase()];
   if (fxRate) parts.push(`@ ${fxRate}`);
   if (fxAgeSeconds !== null) parts.push(`${fxAgeSeconds}s`);
-  return <span className={`rounded-full px-3 py-1 text-[11px] ${className}`}>{parts.join(" ")}</span>;
+  return (
+    <span
+      className={`inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-mono tabular-nums ${className}`}
+    >
+      {parts.join(" ")}
+    </span>
+  );
 }
 
 function LastTickPill({ lastUpdated }: { lastUpdated?: string | null }) {
