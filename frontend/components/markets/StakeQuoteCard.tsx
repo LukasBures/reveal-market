@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPricingQuoteWithMeta,
@@ -893,14 +894,9 @@ export function StakeQuoteCard({
         {escrowInsufficient && (
           <p className="text-xs text-emerald-200">
             Deposit to escrow in the{" "}
-            <a
-              className="underline hover:text-emerald-100"
-              href="https://revealmarket.xyz/dashboard"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Link className="underline hover:text-emerald-100" href="/dashboard">
               dashboard
-            </a>{" "}
+            </Link>{" "}
             to continue trading.
           </p>
         )}
