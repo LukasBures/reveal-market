@@ -328,10 +328,6 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
                   marketStatus={market.status}
                   isResolved={market.resolution?.resolved ?? null}
                 />
-                <p className="text-sm text-slate-300">
-                  Private while live; fixed ticket size applies. Settlement receipts are published so you can verify the
-                  outcome before claiming.
-                </p>
               </div>
             </div>
           </div>
