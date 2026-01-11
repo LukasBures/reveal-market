@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     )
     max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
     cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")
+    cache_ttl_seconds: int = Field(default=3600, ge=0, description="TTL for latest tick hashes (0 disables)")
     pubsub_prefix: str = Field(default="streamer:stream", description="Redis pubsub channel prefix for streams")
     history_prefix: str = Field(default="streamer:history", description="Redis key prefix for tick history")
     history_limit: int = Field(default=500, ge=10, description="Max history entries per outcome")

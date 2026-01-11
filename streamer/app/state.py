@@ -234,6 +234,8 @@ class StreamState:
         if self.settings.signing_secret:
             mapping["sig"] = self._sign_payload(mapping)
         await self.redis.hset(key, mapping=mapping)
+        if self.settings.cache_ttl_seconds > 0:
+            await self.redis.expire(key, self.settings.cache_ttl_seconds)
         await self.redis.publish(channel, json.dumps(mapping))
         self.last_seen[market_id] = now
         self.last_published[market_id] = now
