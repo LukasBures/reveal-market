@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { fetchProofReceipts } from "@/lib/api";
 import { buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
@@ -82,9 +83,9 @@ export default async function ProofsPage({
       </div>
       <div className="mx-auto max-w-7xl px-4 pb-16 text-sm text-slate-300 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         Need help verifying an outcome?{" "}
-        <a href="/contact" className="text-brand-300 underline">
+        <Link href="/contact" className="text-brand-300 underline">
           Contact the team
-        </a>
+        </Link>
         .
       </div>
       <JsonLd data={breadcrumbs} id="proofs-breadcrumbs" />

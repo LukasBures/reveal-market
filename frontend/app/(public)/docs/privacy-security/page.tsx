@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
 import { docsMetadata } from "@/lib/seo";
@@ -43,9 +44,9 @@ export default function PrivacySecurityPage() {
       </p>
       <p className="text-slate-200">
         For access questions, incident reports, or compliance needs, reach out via the{" "}
-        <a href="/contact" className="text-brand-300 underline">
+        <Link href="/contact" className="text-brand-300 underline">
           contact form
-        </a>
+        </Link>
         .
       </p>
       <DocsStructuredData slug="privacy-security" />
