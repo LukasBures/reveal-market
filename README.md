@@ -45,15 +45,16 @@ flowchart LR
 
 Additional docs live in each directory’s README.
 
-### Component documentation + TODOs
-- Backend API – [`backend/api/README.md`](backend/api/README.md) / [`backend/TODO.md`](backend/TODO.md)
-- Worker – [`backend/worker/README.md`](backend/worker/README.md) / [`backend/TODO.md`](backend/TODO.md)
-- Frontend – [`frontend/README.md`](frontend/README.md) / [`frontend/TODO.md`](frontend/TODO.md)
-- Contracts (Zen) – [`contracts/zen/README.md`](contracts/zen/README.md) / [`contracts/zen/TODO.md`](contracts/zen/TODO.md)
-- Streamer – [`streamer/README.md`](streamer/README.md) / [`streamer/TODO.md`](streamer/TODO.md)
-- Hedger – [`hedger/README.md`](hedger/README.md) / [`hedger/TODO.md`](hedger/TODO.md)
-- Relayer – [`relayer/README.md`](relayer/README.md) / [`relayer/TODO.md`](relayer/TODO.md)
-- Prover – [`prover/README.md`](prover/README.md) / [`prover/TODO.md`](prover/TODO.md)
+### Component documentation
+- Backend API – [`backend/api/README.md`](backend/api/README.md)
+- Worker – [`backend/worker/README.md`](backend/worker/README.md)
+- Frontend – [`frontend/README.md`](frontend/README.md)
+- Contracts (Zen) – [`contracts/zen/README.md`](contracts/zen/README.md)
+- Contracts (Polygon) – [`contracts/polygon/README.md`](contracts/polygon/README.md)
+- Streamer – [`streamer/README.md`](streamer/README.md)
+- Hedger – [`hedger/README.md`](hedger/README.md)
+- Relayer – [`relayer/README.md`](relayer/README.md)
+- Prover – [`prover/README.md`](prover/README.md)
 
 ---
 
@@ -192,3 +193,16 @@ Environment variables follow the `RM_` prefix (see each service README). Securit
 - **Strategic Investors** – Access diligence packets (contracts, backend, frontend), roadmap briefs, and treasury participation details via the contact form on the site.
 
 Let’s build prediction markets institutions actually trust. The prover bundled in this repo boots a Groth16 pipeline (Node witness generator + `rapidsnark`) and halts startup if the compiled assets under `prover/circuits/build` are missing or invalid. Run `prover/circuits/generate_keys.sh` to refresh `settlement_final.zkey` and `settlement_js/` before claiming production-grade zk support.
+
+## TODO references
+
+- Repository TODO – [`TODO.md`](TODO.md)
+- Backend API – [`backend/TODO.md`](backend/TODO.md)
+- Worker – [`backend/worker/TODO.md`](backend/worker/TODO.md)
+- Frontend – [`frontend/TODO.md`](frontend/TODO.md)
+- Contracts (shared) – [`contracts/TODO.md`](contracts/TODO.md)
+- Contracts (Zen) – [`contracts/zen/TODO.md`](contracts/zen/TODO.md)
+- Streamer – [`streamer/TODO.md`](streamer/TODO.md)
+- Hedger – [`hedger/TODO.md`](hedger/TODO.md)
+- Relayer – [`relayer/TODO.md`](relayer/TODO.md)
+- Prover – [`prover/TODO.md`](prover/TODO.md)
