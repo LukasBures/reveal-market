@@ -22,3 +22,8 @@ Cross-service items that remain open after aligning docs with the live implement
 ## Performance Follow-ups
 - Streamer: batch Redis writes and reuse HTTP clients to reduce CPU per tick; align worker count with CPU limits.
 - Worker/API: consider bulk upserts and DB-side ordering to cut cache-miss latency; tune DB pool sizes after observing prod load.
+
+## Deployment & CI/CD Hardening
+- Build images in CI and push to private GHCR with SHA tags/digests; deploy pulls only pinned digests and consumes a published manifest instead of rebuilding.
+- Put deploy in a concurrency group (cancel-in-progress) and use an atomic promote/lock so mid-deploy cancels never leave half-applied state.
+- Serve prover-required assets from versioned, immutable storage keyed by commit (not the live frontend); verify checksums and fall back to the last known-good version on missing artifacts.
