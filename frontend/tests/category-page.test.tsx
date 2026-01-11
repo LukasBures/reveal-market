@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
-import CategoryPage from "@/app/categories/[category]/page";
-import { CategoryMarkets } from "@/app/categories/[category]/CategoryMarkets";
+import CategoryPage from "@/app/(public)/categories/[category]/page";
+import { CategoryMarkets } from "@/app/(public)/categories/[category]/CategoryMarkets";
 import { fetchFeaturedMarkets } from "@/lib/api";
 
 const featuredClientMock = vi.hoisted(() => vi.fn(() => <div data-testid="featured-client" />));

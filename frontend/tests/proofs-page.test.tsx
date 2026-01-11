@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ProofsPage from "@/app/proofs/page";
+import ProofsPage from "@/app/(app)/proofs/page";
 
 const fetchProofReceiptsMock = vi.hoisted(() => vi.fn());
 

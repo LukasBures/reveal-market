@@ -3,24 +3,18 @@ import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
-import { cookies, headers } from "next/headers";
-
+import { cookies } from "next/headers";
 import "./globals.css";
 
+import { absoluteUrl } from "@/lib/seo";
+import { serverEnv } from "@/lib/serverEnv";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
-import { absoluteUrl } from "@/lib/seo";
-import { logger } from "@/lib/logging";
-import { LandingGate } from "@/components/landing/LandingGate";
-import {
-  LANDING_ACCESS_COOKIE_NAME,
-  isLandingGateEnabled,
-} from "@/lib/access-gate";
-import { serverEnv } from "@/lib/serverEnv";
+import { LANDING_ACCESS_COOKIE_NAME, isLandingGateEnabled } from "@/lib/access-gate";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 const font = Manrope({
   subsets: ["latin"],
@@ -34,7 +28,7 @@ const displayFont = localFont({
 });
 
 const SITE_URL = absoluteUrl("/");
-const SEARCH_URL = absoluteUrl("/markets/search");
+const SEARCH_URL = absoluteUrl("/search");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
@@ -88,8 +82,7 @@ export const metadata: Metadata = {
     default: "Reveal Market",
     template: "%s | Reveal Market",
   },
-  description:
-    "Invite-only prediction markets that keep entries private while events play out and publish clear settlement receipts.",
+  description: "Private prediction markets that keep entries private while events play out and publish clear settlement receipts.",
   keywords: ["reveal market", "prediction markets", "private markets", "institutional trading"],
   robots: {
     index: true,
@@ -107,8 +100,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Reveal Market",
-    description:
-      "Invite-only prediction markets where your entries stay private until outcomes settle and receipts post.",
+    description: "Private prediction markets where your entries stay private until outcomes settle and receipts post.",
     url: SITE_URL,
     siteName: "Reveal Market",
     images: [
@@ -127,17 +119,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  logger.info("Rendering RootLayout", {
-    route: "app/layout",
-    nodeEnv: process.env.NODE_ENV,
-  });
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-  const hasLandingAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
   const gateEnabled = isLandingGateEnabled();
-  const isPublicRoute = requestHeaders.get("x-rm-public-path") === "1";
-  // The landing page itself ("/") should still require the access code when the gate is enabled.
-  const showProtectedApp = !gateEnabled || hasLandingAccess;
+  let initialHasAccess = true;
+  if (gateEnabled) {
+    const cookieStore = await cookies();
+    initialHasAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
+  }
+
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>
@@ -153,6 +141,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {API_ORIGIN ? <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" /> : null}
         <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+        <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="32x32" />
+        <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="16x16" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
@@ -170,20 +160,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
         />
       </head>
-      <body className="text-white antialiased" suppressHydrationWarning>
+      <body
+        className="text-white antialiased px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
+        suppressHydrationWarning
+      >
         <AppProviders>
-          {showProtectedApp ? (
-            <>
-              <HeartbeatClient />
-              <div className="flex min-h-screen flex-col">
-                <MainNav />
-                <main className="flex-1">{children}</main>
-                <Footer />
-              </div>
-            </>
-          ) : (
-            <LandingGate />
-          )}
+          <HeartbeatClient />
+          <div className="flex min-h-screen flex-col">
+            <MainNav initialHasAccess={initialHasAccess} gateEnabled={gateEnabled} />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </div>
         </AppProviders>
         {SHOULD_LOAD_GA ? (
           <>

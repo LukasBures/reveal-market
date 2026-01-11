@@ -36,8 +36,8 @@ export function PriceBanner({
   };
 
   return (
-    <div className="border-t border-white/5 bg-black/60 px-4 py-2 text-xs text-white/80">
-      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-end gap-2 md:gap-3">
+    <div className="border-t border-white/5 bg-black/60 text-xs text-white/80">
+      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-end gap-2 px-4 py-2 md:gap-3">
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
           {wrongNetwork ? (
             <>
@@ -61,7 +61,9 @@ export function PriceBanner({
               )}
               {fxStale && <span className="text-amber-300 text-[11px] uppercase tracking-[0.2em]">FX stale</span>}
               {fxError && <span className="text-rose-300 text-[11px] uppercase tracking-[0.2em]">FX unavailable</span>}
-              {showLive && <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>}
+              {showLive && (
+                <span className="text-emerald-300 text-[11px] uppercase tracking-[0.2em]">Live pricing</span>
+              )}
             </>
           )}
         </div>

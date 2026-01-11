@@ -114,7 +114,7 @@ export function SearchMarketsClient({
         params.delete("status");
       }
       const queryString = params.toString();
-      const nextUrl = (queryString ? `/markets/search?${queryString}` : "/markets/search") as Route;
+      const nextUrl = (queryString ? `/search?${queryString}` : "/search") as Route;
       if (mode === "push") {
         router.push(nextUrl);
       } else {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
@@ -11,10 +12,10 @@ import { PriceBanner } from "@/components/layout/PriceBanner";
 import { resolveUrlConfig } from "@/lib/env-presets";
 import { formatZenUsd } from "@/lib/fx";
 
-const navLinks = [
-  { href: "/markets/search", label: "Search" },
-  { href: "/proofs", label: "Proofs" },
-] as const;
+type MainNavProps = {
+  initialHasAccess?: boolean;
+  gateEnabled?: boolean;
+};
 
 const resolvedUrls = resolveUrlConfig();
 const resolvedSiteUrl = (resolvedUrls.siteUrl ?? "").trim();
@@ -29,12 +30,11 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
  * Top navigation with logo, menu links, and Connect Wallet CTA.
  * Sticks to the viewport top so users can access nav/actions while scrolling.
  */
-export function MainNav() {
+export function MainNav({ initialHasAccess = false, gateEnabled = false }: MainNavProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [apiWarning, setApiWarning] = useState<string | null>(null);
   const [streamerWarning, setStreamerWarning] = useState<string | null>(null);
   const pathname = usePathname();
-  const isProofsRoute = pathname?.startsWith("/proofs");
   const { fx, error: fxError, status } = useFxStream(FX_DEFAULT_PATH);
   const fxStale = status === "stale";
   const fxValue = formatZenUsd(fx?.zen_usd);
@@ -110,53 +110,107 @@ export function MainNav() {
     };
   }, [warningsEnabled]);
 
+  const isLanding = pathname === "/";
+  const hasAccess = gateEnabled ? Boolean(initialHasAccess) : true;
+
+  const showLandingMinimal = gateEnabled && isLanding && !hasAccess;
+  if (showLandingMinimal) {
+    return (
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
+        <div className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
+          <Link
+            href="/"
+            className="flex flex-shrink-0 items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
+            onClick={() => setIsMobileMenuOpen(false)}
+          >
+            <div className="relative aspect-[25/7] w-[160px] sm:w-[200px]">
+              <Image
+                src="/brand/reveal-logo-wordmark.svg"
+                alt="Reveal Market"
+                fill
+                sizes="(min-width: 640px) 200px, 160px"
+                priority
+                className="select-none object-contain"
+              />
+            </div>
+          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href="https://x.com/RevealMarket"
+              target="_blank"
+              rel="noreferrer"
+              className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300 md:inline-flex"
+            >
+              Request access
+            </a>
+            <a
+              href="https://x.com/RevealMarket"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            >
+              Request
+            </a>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
-      <div className="absolute inset-y-0 right-8 hidden w-40 bg-brand-500/10 blur-3xl lg:block" aria-hidden="true" />
-      <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+      <div className="relative mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-4" data-testid="main-nav">
         {externalHomeHref ? (
           <a
             href={externalHomeHref}
-            className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
+            className="flex flex-shrink-0 items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <img
-              src="/brand/reveal-logo-wordmark.svg"
-              alt="Reveal Market"
-              width={200}
-              height={56}
-              className="h-auto w-[200px] max-w-full select-none"
-              draggable={false}
-            />
+            <div className="relative aspect-[25/7] w-[160px] sm:w-[200px]">
+              <Image
+                src="/brand/reveal-logo-wordmark.svg"
+                alt="Reveal Market"
+                fill
+                sizes="(min-width: 640px) 200px, 160px"
+                priority
+                className="select-none object-contain"
+              />
+            </div>
           </a>
         ) : (
           <Link
             href={internalHomeHref}
-            className="flex items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
+            className="flex flex-shrink-0 items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
             onClick={() => setIsMobileMenuOpen(false)}
           >
-            <img
-              src="/brand/reveal-logo-wordmark.svg"
-              alt="Reveal Market"
-              width={200}
-              height={56}
-              className="h-auto w-[200px] max-w-full select-none"
-              draggable={false}
-            />
+            <div className="relative aspect-[25/7] w-[160px] sm:w-[200px]">
+              <Image
+                src="/brand/reveal-logo-wordmark.svg"
+                alt="Reveal Market"
+                fill
+                sizes="(min-width: 640px) 200px, 160px"
+                priority
+                className="select-none object-contain"
+              />
+            </div>
           </Link>
         )}
-        <nav className="hidden items-center gap-8 text-base font-semibold tracking-wide text-white/80 md:flex">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-            >
-              {link.label}
-            </Link>
-          ))}
+        <nav className="hidden flex-1 items-center justify-center gap-8 text-base font-semibold tracking-wide text-white/80 md:flex">
+          <Link
+            href="/search"
+            className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          >
+            Search
+          </Link>
+          <Link
+            href="/proofs"
+            className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          >
+            Proofs
+          </Link>
           <Link
             href="/dashboard"
             className="rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
@@ -175,15 +229,9 @@ export function MainNav() {
             Menu
             <span className="relative h-1.5 w-1.5 rounded-full bg-accent-400 shadow-[0_0_10px_rgba(123,240,94,0.8)]" />
           </button>
-          {isProofsRoute ? (
-            <span className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-300">
-              Wallet optional
-            </span>
-          ) : (
-            <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
-              <ConnectWalletButton />
-            </div>
-          )}
+          <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
+            <ConnectWalletButton />
+          </div>
         </div>
       </div>
       {isMobileMenuOpen ? (
@@ -191,16 +239,20 @@ export function MainNav() {
           <div className="md:hidden">
             <div className="mx-4 mb-4 rounded-2xl border border-white/10 bg-black/80 p-4 text-sm text-white/80">
               <nav className="flex flex-col gap-3">
-                {navLinks.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
+                <Link
+                  href="/search"
+                  className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  Search
+                </Link>
+                <Link
+                  href="/proofs"
+                  className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  Proofs
+                </Link>
                 <Link
                   href="/dashboard"
                   className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"

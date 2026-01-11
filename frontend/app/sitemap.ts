@@ -3,6 +3,8 @@ import { DEFAULT_API_BASE } from "@/lib/api";
 import { resolveUrlConfig } from "@/lib/env-presets";
 import { categorySlugs } from "@/lib/slugs";
 
+export const revalidate = 3600;
+
 const urls = resolveUrlConfig();
 const BASE_URL = urls.siteUrl;
 const API_BASE_OVERRIDE = (urls.apiBaseInternal || DEFAULT_API_BASE).replace(/\/$/, "");

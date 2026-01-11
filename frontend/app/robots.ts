@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
 import { resolveUrlConfig } from "@/lib/env-presets";
 
+export const revalidate = 3600;
+
 const { siteUrl } = resolveUrlConfig();
 const DISALLOW = [
   "/api",

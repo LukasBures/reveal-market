@@ -1,39 +1,27 @@
 import { within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, beforeEach, afterEach, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import RootLayout from "@/app/layout";
 
-const mockCookies = vi.fn();
-const mockHeaders = vi.fn();
-
-vi.mock("next/headers", () => ({
-  cookies: () => mockCookies(),
-  headers: () => mockHeaders(),
-}));
-
-vi.mock("@/components/providers/AppProviders", () => ({
-  AppProviders: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@/components/landing/LandingGate", () => ({
-  LandingGate: () => <div data-testid="landing-gate" />,
-}));
-
-vi.mock("@/components/providers/HeartbeatClient", () => ({
-  HeartbeatClient: () => <div data-testid="heartbeat" />,
-}));
+const mainNavSpy = vi.fn();
+const cookieStoreMock = { get: vi.fn() };
 
 vi.mock("@/components/layout/MainNav", () => ({
-  MainNav: () => <div data-testid="main-nav">Nav</div>,
+  MainNav: (props: unknown) => {
+    mainNavSpy(props);
+    return null;
+  },
 }));
 
-vi.mock("@/components/layout/Footer", () => ({
-  Footer: () => <div data-testid="footer">Footer</div>,
-}));
-
-const originalEnv = process.env.LANDING_ACCESS_CODE;
+vi.mock("next/headers", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("next/headers");
+  return {
+    ...actual,
+    cookies: () => Promise.resolve(cookieStoreMock),
+  };
+});
 
 const renderLayout = async (children: ReactNode) => {
   const ui = await RootLayout({ children });
@@ -42,67 +30,45 @@ const renderLayout = async (children: ReactNode) => {
   return within(doc.body);
 };
 
-describe("RootLayout gate", () => {
+describe("RootLayout", () => {
   beforeEach(() => {
-    mockCookies.mockReset();
-    mockHeaders.mockReset();
-    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
+    cookieStoreMock.get.mockReset();
+    mainNavSpy.mockClear();
+    process.env.LANDING_ACCESS_CODE = "secret-code";
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.LANDING_ACCESS_CODE;
-    } else {
-      process.env.LANDING_ACCESS_CODE = originalEnv;
-    }
+    delete process.env.LANDING_ACCESS_CODE;
   });
 
-  it("renders the app shell when the gate is disabled", async () => {
-    process.env.LANDING_ACCESS_CODE = "";
-    mockCookies.mockReturnValue({ get: vi.fn() });
-
+  it("renders children with global scaffolding", async () => {
     const view = await renderLayout(<>Child content</>);
 
-    expect(view.getByTestId("main-nav")).toBeInTheDocument();
     expect(view.getByText("Child content")).toBeInTheDocument();
-    expect(view.queryByText(/Private beta/i)).not.toBeInTheDocument();
   });
 
-  it("shows the landing gate when access is required and no cookie is set", async () => {
-    process.env.LANDING_ACCESS_CODE = "rm125";
-    mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
-    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
+  it("passes denied access to MainNav when the gate is configured and cookie missing", async () => {
+    cookieStoreMock.get.mockReturnValue(undefined);
 
-    const view = await renderLayout(<>Hidden content</>);
+    await renderLayout(<div />);
 
-    expect(view.getByTestId("landing-gate")).toBeInTheDocument();
-    expect(view.queryByTestId("main-nav")).not.toBeInTheDocument();
-    expect(view.queryByText("Hidden content")).not.toBeInTheDocument();
+    expect(mainNavSpy).toHaveBeenCalledWith(expect.objectContaining({ initialHasAccess: false }));
   });
 
-  it("allows the main app through when the cookie exists", async () => {
-    process.env.LANDING_ACCESS_CODE = "rm125";
-    mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue({ value: "granted" }) });
-    mockHeaders.mockReturnValue({ get: vi.fn().mockReturnValue(null) });
+  it("passes granted access to MainNav when the gate cookie is present", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: "granted" });
 
-    const view = await renderLayout(<>Welcome in</>);
+    await renderLayout(<div />);
 
-    expect(view.getByTestId("main-nav")).toBeInTheDocument();
-    expect(view.getByText("Welcome in")).toBeInTheDocument();
-    expect(view.queryByTestId("landing-gate")).not.toBeInTheDocument();
+    expect(mainNavSpy).toHaveBeenCalledWith(expect.objectContaining({ initialHasAccess: true }));
   });
 
-  it("allows public routes through even without a cookie", async () => {
-    process.env.LANDING_ACCESS_CODE = "rm125";
-    mockCookies.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
-    mockHeaders.mockReturnValue({
-      get: vi.fn((key: string) => (key === "x-rm-public-path" ? "1" : null)),
-    });
+  it("defaults to access granted when the gate is disabled", async () => {
+    delete process.env.LANDING_ACCESS_CODE;
+    cookieStoreMock.get.mockReturnValue(undefined);
 
-    const view = await renderLayout(<>Public content</>);
+    await renderLayout(<div />);
 
-    expect(view.getByTestId("main-nav")).toBeInTheDocument();
-    expect(view.getByText("Public content")).toBeInTheDocument();
-    expect(view.queryByTestId("landing-gate")).not.toBeInTheDocument();
+    expect(mainNavSpy).toHaveBeenCalledWith(expect.objectContaining({ initialHasAccess: true }));
   });
 });

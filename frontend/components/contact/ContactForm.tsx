@@ -203,7 +203,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="w-full rounded-full bg-white px-4 py-3 text-center text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+        className="w-full rounded-full bg-brand-500 px-5 py-3 text-center text-sm font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {status === "submitting" ? "Sending..." : "Send message"}
       </button>

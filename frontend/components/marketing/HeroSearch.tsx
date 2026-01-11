@@ -165,9 +165,9 @@ export function HeroSearch({ initialSearch = "" }: Props) {
       <button
         type="submit"
         disabled={isPending}
-        className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-brand-500 px-3 py-1 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 disabled:opacity-50 sm:px-4"
+        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-50 sm:right-4 sm:px-5 sm:tracking-[0.35em]"
       >
-        {isPending ? "…" : "Go"}
+        {isPending ? "…" : "Search"}
       </button>
       {suggestionsVisible && (
         <div

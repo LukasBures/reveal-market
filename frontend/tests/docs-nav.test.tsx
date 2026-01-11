@@ -15,13 +15,10 @@ describe("DocsNav", () => {
   it("highlights the current route and renders all sections", () => {
     render(<DocsNav />);
 
-    expect(screen.getByText("Investor Overview")).toHaveClass("bg-white/15");
-    expect(screen.getByText("Execution Roadmap")).toBeInTheDocument();
-
-    ["Vision", "Roadmap", "Tokenomics", "Infrastructure", "Legal & FAQ"].forEach((label) => {
+    expect(screen.getByText("Overview")).toHaveClass("bg-white/15");
+    ["Start Here", "Trust & Access"].forEach((label) => {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     });
-
-    expect(screen.getByRole("link", { name: /Connect With The Team/i })).toHaveAttribute("href", "/contact");
+    expect(screen.getByRole("link", { name: /Contact us/i })).toHaveAttribute("href", "/contact");
   });
 });

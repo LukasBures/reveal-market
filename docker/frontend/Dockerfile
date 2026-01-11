@@ -55,7 +55,8 @@ ENV NEXT_DISABLE_MINIFY=${NEXT_DISABLE_MINIFY}
 # Optional: if you use this in next.config.mjs
 # ENV RUNNING_IN_DOCKER=true
 
-RUN npm run build
+# Reuse npm cache and Next build cache between runs to speed up rebuilds.
+RUN --mount=type=cache,target=/root/.npm --mount=type=cache,target=/app/frontend/.next/cache npm run build
 
 # 3) Runtime stage
 FROM ${NODE_IMAGE} AS runner

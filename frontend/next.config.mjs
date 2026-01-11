@@ -150,7 +150,7 @@ const nextConfig = (phase) => {
     output: 'standalone',
     productionBrowserSourceMaps: false,
     images: {
-      unoptimized: true,
+      unoptimized: false,
       remotePatterns: [
         { protocol: 'https', hostname: 'images.revealmarket.xyz' },
         { protocol: 'https', hostname: 'cdn.revealmarket.xyz' },

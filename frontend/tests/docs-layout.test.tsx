@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import DocsLayout from "@/app/docs/layout";
+import DocsLayout from "@/app/(public)/docs/layout";
 
 describe("DocsLayout", () => {
   it("wraps children and renders navigation", () => {

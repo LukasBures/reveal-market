@@ -20,6 +20,7 @@
 html {
   width: 100%;
   overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
 }
 
 body {
@@ -32,8 +33,7 @@ body {
   letter-spacing: 0.01em;
   position: relative;
   overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-gutter: stable both-edges;
+  overflow-y: auto;
 }
 
 img:not([data-nimg]),
@@ -75,6 +75,16 @@ body::after {
   opacity: 0.25;
   mix-blend-mode: screen;
   pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  body::after {
+    background-size: auto, auto, 0;
+    opacity: 0.12;
+  }
+  body::before {
+    opacity: 0.85;
+  }
 }
 
 .landing-noise {
@@ -124,6 +134,29 @@ a {
   color: inherit;
 }
 
+/* Smooth, minimal scrollbar to avoid layout shift between pages */
+@supports (scrollbar-color: auto) {
+  html {
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* WebKit scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+}
+
 .line-clamp-2 {
   display: -webkit-box;
   line-clamp: 2;
@@ -156,12 +189,6 @@ a {
 
 .text-glow {
   text-shadow: 0 0 30px rgba(56, 189, 248, 0.35);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .fade-up {
-    animation: fadeUp 0.65s ease-out both;
-  }
 }
 
 .wolf-aura {
@@ -198,6 +225,12 @@ a {
   width: 380px;
   height: 380px;
   background: radial-gradient(circle, rgba(124, 132, 255, 0.7), transparent 65%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-up {
+    animation: fadeUp 0.65s ease-out both;
+  }
 }
 
 .aurora-divider {

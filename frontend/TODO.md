@@ -1,6 +1,6 @@
 # Frontend MVP Checklist (critical)
 
-Investor-facing gaps that must ship for the MVP. Each item should be validated with `npm run test`, manual QA on `/`, `/markets/search`, `/markets/<eventId>`, `/dashboard`, and Lighthouse on mobile + desktop.
+Investor-facing gaps that must ship for the MVP. Each item should be validated with `npm run test`, manual QA on `/`, `/search`, `/markets/<eventId>`, `/dashboard`, and Lighthouse on mobile + desktop.
 
 - None at the moment; see `MVP.md` for cross-service blockers.
 

@@ -222,7 +222,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
             <button
               type="submit"
               disabled={isFiltering}
-              className="rounded-full border border-white/20 px-4 py-2 font-semibold uppercase tracking-[0.3em] text-white transition hover:border-brand-400 disabled:opacity-40"
+              className="rounded-full bg-brand-500 px-5 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400 disabled:opacity-40 sm:tracking-[0.3em]"
             >
               {isFiltering ? "Filtering…" : "Apply filters"}
             </button>
@@ -230,7 +230,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
               type="button"
               onClick={handleClearFilters}
               disabled={!hasDraftFilters || isFiltering}
-              className="rounded-full border border-white/10 px-4 py-2 font-semibold uppercase tracking-[0.3em] text-slate-300 transition hover:border-white/30 disabled:opacity-40"
+              className="rounded-full border border-white/15 bg-white/5 px-5 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white transition hover:border-white/40 disabled:opacity-40 sm:tracking-[0.3em]"
             >
               Clear
             </button>
@@ -255,7 +255,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
             type="button"
             onClick={() => loadMore()}
             disabled={isLoadingMore}
-            className="rounded-full border border-white/20 px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full border border-white/20 bg-white/5 px-6 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isLoadingMore ? "Loading…" : "Load more receipts"}
           </button>

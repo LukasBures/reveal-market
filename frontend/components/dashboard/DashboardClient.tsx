@@ -104,14 +104,14 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
         {!isCancelled ? (
           <div className="pointer-events-none absolute inset-0 bg-[length:220%_140%] bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.18)_35%,rgba(123,240,94,0)_70%)] opacity-70 mix-blend-screen animate-[statusFlow_4.2s_linear_infinite]" />
         ) : null}
-        <div className="relative flex flex-col gap-2 overflow-x-hidden overflow-y-visible md:flex-row md:items-center md:justify-between md:gap-3 md:overflow-x-auto md:pb-1">
+        <div className="relative flex flex-col items-stretch gap-2 overflow-x-hidden overflow-y-visible md:flex-row md:items-stretch md:justify-between md:gap-3 md:overflow-x-auto md:pb-1">
           {stages.map((stage, idx) => {
             const stageState = idx < currentIndex ? "complete" : idx === currentIndex ? "current" : "upcoming";
             return (
               <Fragment key={stage.key}>
                 <div
                   className={clsx(
-                    "flex min-w-0 flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors md:min-w-[140px] md:flex-1",
+                    "flex min-w-0 flex-col gap-0.5 self-stretch rounded-lg border px-3 py-2 text-left transition-colors md:min-w-[140px] md:flex-1 h-full",
                     stageState === "complete"
                       ? bubbleCompleteClass
                       : stageState === "current"
@@ -120,13 +120,13 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
                   )}
                 >
                   <span className="text-[11px] uppercase tracking-[0.2em]">{stage.label}</span>
-                  <span className="text-[11px] text-slate-300">{stage.description}</span>
+                  <span className="text-[11px] text-slate-300 leading-snug min-h-[34px]">{stage.description}</span>
                 </div>
                 {idx < stages.length - 1 ? (
-                  <div className="hidden items-center gap-1 md:flex md:flex-1 md:justify-center">
+                  <div className="hidden items-center gap-2 md:flex md:flex-1 md:justify-center">
                     <div
                       className={clsx(
-                        "h-[2px] w-12 rounded-full bg-gradient-to-r transition-colors md:w-full",
+                        "h-[2px] w-10 rounded-full bg-gradient-to-r transition-colors md:w-full",
                         currentIndex > idx ? connectorActiveClass : "from-white/15 via-white/10 to-white/15",
                       )}
                     />
@@ -135,11 +135,11 @@ function PositionStatusFlow({ status, claimable, resolutionReason }: PositionSta
                         "h-4 w-4",
                         currentIndex > idx ? (isCancelled ? "text-rose-200" : "text-emerald-200") : "text-slate-500",
                       )}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                      fill="none"
                       aria-hidden
                     >
-                      <path d="M7 4l6 6-6 6" />
+                      <path d="M6 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
                 ) : null}
