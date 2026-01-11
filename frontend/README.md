@@ -13,7 +13,7 @@ Browser -> Next.js (SSR + RSC) -> FastAPI backend
 - **App Router**: `app/layout.tsx` sets global providers (React Query, Wagmi, analytics), nav, and metadata. Routes include `/` (featured markets), `/search`, `/markets/[eventId]`, `/dashboard`, `/proofs`, `/docs/*`, `/contact`, and API proxies under `app/api/*` (suggestions, contact).
 - **Data layer**: `lib/api.ts` centralizes backend calls with cache tags that mirror worker invalidation; server actions in `app/actions/` reuse these fetchers for pagination and load-more UX. `lib/seo.ts` holds canonical metadata used by docs/legal pages.
 - **Streaming hooks**: `usePriceStream`/`useLiveOutcomePrices` connect to `/stream` WS/SSE with history seeding and HTTP fallback; `useFxStream` keeps a single FX WS alive with stale guards and HTTP fallback.
-- **Trading flow**: Stake panel enforces fixed ticket size and caps, pulls `/pricing/preview` + `/pricing/quote`, submits `/trade/commit`, and polls `/trade/status`. Dashboard handles approvals, deposits/withdrawals, positions, and claims against the relayer escrow.
+- **Trading flow**: Stake panel enforces the fixed 0.1 ZEN ticket and cap checks, pulls `/pricing/preview` + `/pricing/quote`, submits `/trade/commit`, and polls `/trade/status`. Dashboard handles approvals, deposits/withdrawals, positions, and claims against the relayer escrow.
 - **Security/SEO**: `next.config.mjs` sets CSP/HSTS/COOP/Permissions-Policy and strict image/script origins; sitemap/robots generated from App Router metadata. GA origins only allowed in production.
 
 ## Environment
