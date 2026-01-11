@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import dynamic from "next/dynamic";
+import dynamicImport from "next/dynamic";
 import { fetchGroupedMarkets } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
@@ -14,7 +14,9 @@ import { formatDateTime } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
 import { JsonLd } from "@/components/seo/JsonLd";
 
-const MarketDetailMetadataPanel = dynamic(
+export const dynamic = "force-dynamic";
+
+const MarketDetailMetadataPanel = dynamicImport(
   () =>
     import("@/components/markets/MarketDetailMetadata").then((mod) => ({
       default: mod.MarketDetailMetadata,

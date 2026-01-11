@@ -20,6 +20,7 @@ import { fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "
 const resolvedEnv = getServerEnv();
 export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
 const IS_BUILD_TIME = process.env.NEXT_PHASE === "phase-production-build";
+const IS_BROWSER = typeof window !== "undefined";
 
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
@@ -27,7 +28,19 @@ const DEFAULT_CLOSES_WITHIN_HOURS = 24;
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
   const message = error instanceof Error ? error.message : String(error ?? "unknown");
   const payload = meta ? { ...meta, error: message } : { error: message };
-  logger.error(`${scope}:error`, payload);
+  const normalized = message.toLowerCase();
+  const isFetchFailure = normalized.includes("fetch failed") || normalized.includes("failed to fetch");
+  const event = isFetchFailure ? "unreachable" : "error";
+  const clientWarn = typeof (logger as any).clientWarn === "function" ? (logger as any).clientWarn : null;
+  if (IS_BROWSER && clientWarn) {
+    clientWarn(`${scope}:${event}`, payload);
+    return;
+  }
+  const serverLogger =
+    typeof (logger as any)[event === "error" ? "error" : "warn"] === "function"
+      ? (logger as any)[event === "error" ? "error" : "warn"]
+      : logger.warn;
+  serverLogger(`${scope}:${event}`, payload);
 };
 
 const maybeShortCircuitOffline = (_scope: string) => false;
@@ -446,7 +459,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     });
 
     if (!response.ok) {
-      logger.error("fetchFeaturedMarkets:failed", {
+      logger.warn("fetchFeaturedMarkets:failed", {
         status: response.status,
         endpoint: url.toString(),
         baseUrl: DEFAULT_API_BASE,
@@ -578,7 +591,7 @@ async function fetchMarketStatsFrom(
     });
 
     if (!response.ok) {
-      logger.error(`${scope}:failed`, { status: response.status, endpoint, baseUrl });
+      logger.warn(`${scope}:failed`, { status: response.status, endpoint, baseUrl });
       return null;
     }
 

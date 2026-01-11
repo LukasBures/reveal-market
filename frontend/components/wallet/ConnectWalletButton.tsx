@@ -274,15 +274,6 @@ export function ConnectWalletButton() {
     }
   }, [chainMismatch]);
 
-  const handleConnect = (connector?: Connector) => {
-    if (!connector) {
-      console.warn("Connector unavailable for selected wallet option.");
-      return;
-    }
-    setAutoCloseOnConnect(true);
-    connect({ connector });
-  };
-
   const handleSwitchChain = () => {
     const switchFn = switchChainAsync ?? switchChain;
     if (!switchFn) {
@@ -309,6 +300,18 @@ export function ConnectWalletButton() {
     setSelectedOption(null);
     setAcceptedTerms(false);
     setAutoCloseOnConnect(!isConnected);
+  };
+  const handleConnect = (connector?: Connector, option?: ConnectorOption | null) => {
+    if (!connector) {
+      console.warn("Connector unavailable for selected wallet option.");
+      return;
+    }
+    setAutoCloseOnConnect(true);
+    connect({ connector });
+    // Close the selection modal when launching WalletConnect so the QR/modal isn't obstructed.
+    if (option?.connectorId === "walletConnect") {
+      closeModal();
+    }
   };
 
   useEffect(() => {
@@ -486,7 +489,7 @@ export function ConnectWalletButton() {
                   <button
                     type="button"
                     disabled={isConnecting || !acceptedTerms}
-                    onClick={() => handleConnect(connectorsById[selectedOption.connectorId])}
+                    onClick={() => handleConnect(connectorsById[selectedOption.connectorId], selectedOption)}
                     className="w-full rounded-2xl bg-brand-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isConnecting ? "Connecting…" : `Connect with ${selectedOption.label}`}

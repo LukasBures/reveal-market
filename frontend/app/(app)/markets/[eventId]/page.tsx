@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import dynamic from "next/dynamic";
+import dynamicImport from "next/dynamic";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
@@ -15,6 +15,8 @@ import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
 import { formatDateTime } from "@/lib/formatters";
 import { JsonLd } from "@/components/seo/JsonLd";
 
+export const dynamic = "force-dynamic";
+
 const humanizeGroupSlug = (slug?: string | null): string | undefined => {
   if (!slug) return undefined;
   return slug
@@ -24,7 +26,7 @@ const humanizeGroupSlug = (slug?: string | null): string | undefined => {
     .join(" ");
 };
 
-const MarketDetailMetadataPanel = dynamic(
+const MarketDetailMetadataPanel = dynamicImport(
   () =>
     import("@/components/markets/MarketDetailMetadata").then((mod) => ({
       default: mod.MarketDetailMetadata,

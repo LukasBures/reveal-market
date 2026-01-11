@@ -37,11 +37,23 @@ log_step() {
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
-ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
+FALLBACK_ENV_FILE="${ROOT_DIR}/.env"
+# Resolve env file to seed (ENV_FILE override > .env.local > .env)
+if [[ -n "${ENV_FILE:-}" ]]; then
+  ENV_FILE="${ENV_FILE}"
+elif [[ -f "${DEFAULT_ENV_FILE}" ]]; then
+  ENV_FILE="${DEFAULT_ENV_FILE}"
+elif [[ -f "${FALLBACK_ENV_FILE}" ]]; then
+  ENV_FILE="${FALLBACK_ENV_FILE}"
+else
+  ENV_FILE="${DEFAULT_ENV_FILE}"
+fi
 FRONTEND_ENV_FILE="${ROOT_DIR}/frontend/.env.local"
 if [[ -f "${ENV_FILE}" ]]; then
   log_info "Seeding frontend env from ${ENV_FILE} -> ${FRONTEND_ENV_FILE}"
-  cp "${ENV_FILE}" "${FRONTEND_ENV_FILE}"
+  cp -f "${ENV_FILE}" "${FRONTEND_ENV_FILE}"
+else
+  log_warn "No env file found at ${ENV_FILE}; frontend/.env.local will not be seeded"
 fi
 export ENV_FILE
 export FRONTEND_ENV_FILE
