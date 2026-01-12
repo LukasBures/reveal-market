@@ -648,14 +648,6 @@ async def collect_market_changes_with_summary(
             if db_market.id is not None:
                 commitment_count = commitment_counts.get(int(db_market.id), 0)
             if commitment_count <= 0:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.proof.skipped_no_activity",
-                    message="skipping proof job because no Reveal commitments recorded",
-                    event_id=db_market.event_id,
-                    market_id=db_market.id,
-                )
                 continue
             if not getattr(db_market, "market_address", None):
                 log_event(

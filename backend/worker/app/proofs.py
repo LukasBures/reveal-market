@@ -389,13 +389,6 @@ async def maybe_generate_settlement_proof(
                 return False
             commitments_count = await shared_repository.count_commitments(session, numeric_market_id)
             if commitments_count <= 0:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.proof.no_commitments",
-                    message="skipping proof because no local commitments recorded",
-                    market_id=market_identifier,
-                )
                 return False
             if market_record:
                 market_event_id = market_event_id or getattr(market_record, "event_id", None)
