@@ -497,16 +497,6 @@ export function DashboardClient() {
     };
   }, [positions, marketDetails]);
 
-  useEffect(() => {
-    if (!address) return;
-    const hasClaimable = positions.some((p) => p.claimable);
-    if (!hasClaimable) return;
-    if (!bundlesRequested && !bundlesLoading) {
-      setBundlesRequested(true);
-      void fetchBundlesWithUi(address);
-    }
-  }, [address, positions, bundlesRequested, bundlesLoading, fetchBundlesWithUi]);
-
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
@@ -661,10 +651,13 @@ export function DashboardClient() {
           market?.title ??
           (outcomes.length > 1 ? outcomes.join("/") : p.market_id);
         const potentialZen =
-          typeof p.potential_payout_zen === "number" && Number.isFinite(p.potential_payout_zen)
-            ? p.potential_payout_zen
-            : null;
-        const potentialWeiFromPosition = normalizeWei((p as any).potential_payout_wei);
+          typeof p.payout_zen === "number" && Number.isFinite(p.payout_zen)
+            ? p.payout_zen
+            : typeof p.potential_payout_zen === "number" && Number.isFinite(p.potential_payout_zen)
+              ? p.potential_payout_zen
+              : null;
+        const potentialWeiFromPosition =
+          normalizeWei((p as any).payout_wei) ?? normalizeWei((p as any).potential_payout_wei);
         const bundlePayoutWei = bundle ? normalizeWei((bundle as any).payoutWei ?? bundle.amountWei) : null;
         let toWinWei: bigint | null = null;
         if (bundlePayoutWei !== null) {

@@ -136,6 +136,8 @@ export type PositionRecord = {
   outcome_label?: string | null;
   stake_wei: number;
   stake_zen: number;
+  payout_wei?: number | string | null;
+  payout_zen?: number | null;
   tx_hash?: string | null;
   quote_id?: string | null;
   status: string;

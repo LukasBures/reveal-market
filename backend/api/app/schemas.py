@@ -390,6 +390,8 @@ class PositionRecord(BaseModel):
     outcome_id: int
     stake_wei: int
     stake_zen: float
+    payout_wei: int | None = None
+    payout_zen: float | None = None
     tx_hash: str | None = None
     quote_id: str | None = None
     status: str = "committed"
