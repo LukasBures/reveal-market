@@ -424,7 +424,7 @@ async def maybe_generate_settlement_proof(
             except Exception as persist_exc:
                 log_event(
                     logger,
-                    logging.DEBUG,
+                    logging.INFO,
                     event="worker.proof.snapshot_persist_failed",
                     message="failed to persist settlement snapshot",
                     error=str(persist_exc),
@@ -454,7 +454,7 @@ async def maybe_generate_settlement_proof(
             except Exception as refresh_exc:  # pragma: no cover - best-effort hydrate
                 log_event(
                     logger,
-                    logging.DEBUG,
+                    logging.INFO,
                     event="worker.proof.chain_hydrate_failed",
                     message="failed to backfill settlement from chain for proof payload",
                     market_id=market_identifier,
@@ -463,7 +463,7 @@ async def maybe_generate_settlement_proof(
         if not payloads:
             log_event(
                 logger,
-                logging.DEBUG,
+                logging.INFO,
                 event="worker.proof.incomplete",
                 message="skipping proof generation due to missing settlement fields",
                 error=str(exc),
@@ -473,7 +473,7 @@ async def maybe_generate_settlement_proof(
     if not payloads:
         log_event(
             logger,
-            logging.DEBUG,
+            logging.INFO,
             event="worker.proof.incomplete",
             message="skipping proof generation due to missing payload",
             event_id=market_snapshot.get("event_id"),

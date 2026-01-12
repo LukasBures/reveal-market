@@ -634,30 +634,38 @@ async def collect_market_changes_with_summary(
                 None,
                 shared_models.ResolutionStatusEnum.FINAL.value,
             ):
-                if logger.isEnabledFor(logging.DEBUG):
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        event="worker.proof.skipped_resolution_pending",
-                        message="skipping proof job because resolution not final",
-                        event_id=db_market.event_id,
-                        resolution_status=getattr(db_market, "resolution_status", None),
-                    )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.skipped_resolution_pending",
+                    message="skipping proof job because resolution not final",
+                    event_id=db_market.event_id,
+                    resolution_status=getattr(db_market, "resolution_status", None),
+                )
                 continue
             # Only proceed if the market had Reveal activity (commitments exist).
             commitment_count = 0
             if db_market.id is not None:
                 commitment_count = commitment_counts.get(int(db_market.id), 0)
             if commitment_count <= 0:
-                if logger.isEnabledFor(logging.DEBUG):
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        event="worker.proof.skipped_no_activity",
-                        message="skipping proof job because no Reveal commitments recorded",
-                        event_id=db_market.event_id,
-                        market_id=db_market.id,
-                    )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.skipped_no_activity",
+                    message="skipping proof job because no Reveal commitments recorded",
+                    event_id=db_market.event_id,
+                    market_id=db_market.id,
+                )
+                continue
+            if not getattr(db_market, "market_address", None):
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.skipped_missing_address",
+                    message="skipping proof job because market address is missing",
+                    event_id=db_market.event_id,
+                    market_id=db_market.id,
+                )
                 continue
             settlement = await session.scalar(
                 select(shared_models.Settlement).where(shared_models.Settlement.market_id == db_market.id)
@@ -678,37 +686,37 @@ async def collect_market_changes_with_summary(
                                 )
                             )
                 except Exception as exc:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        log_event(
-                            logger,
-                            logging.DEBUG,
-                            event="worker.proof.hydrate_failed",
-                            message="failed to hydrate settlement from chain",
-                            event_id=db_market.event_id,
-                            market_id=db_market.id,
-                            error=str(exc),
-                        )
-                if settlement is None or settlement_needs_refresh(settlement):
-                    if logger.isEnabledFor(logging.DEBUG):
-                        log_event(
-                            logger,
-                            logging.DEBUG,
-                            event="worker.proof.skipped_missing_settlement",
-                            message="skipping proof job because settlement snapshot is missing or incomplete",
-                            event_id=db_market.event_id,
-                            market_id=db_market.id,
-                        )
-                    continue
-            if settlement.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
-                if logger.isEnabledFor(logging.DEBUG):
                     log_event(
                         logger,
-                        logging.DEBUG,
-                        event="worker.proof.skipped_existing",
-                        message="skipping proof job because proof already generated",
+                        logging.INFO,
+                        event="worker.proof.hydrate_failed",
+                        message="failed to hydrate settlement from chain",
                         event_id=db_market.event_id,
                         market_id=db_market.id,
+                        market_address=getattr(db_market, "market_address", None),
+                        error=str(exc),
                     )
+                if settlement is None or settlement_needs_refresh(settlement):
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.proof.skipped_missing_settlement",
+                        message="skipping proof job because settlement snapshot is missing or incomplete",
+                        event_id=db_market.event_id,
+                        market_id=db_market.id,
+                        market_address=getattr(db_market, "market_address", None),
+                        has_commitments=bool(commitment_count),
+                    )
+                    continue
+            if settlement.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.skipped_existing",
+                    message="skipping proof job because proof already generated",
+                    event_id=db_market.event_id,
+                    market_id=db_market.id,
+                )
             else:
                 summary.proof_jobs.append(
                     (
