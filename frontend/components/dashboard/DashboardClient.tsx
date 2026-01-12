@@ -500,9 +500,17 @@ export function DashboardClient() {
   useEffect(() => {
     if (!address) return;
     const hasClaimable = positions.some((p) => p.claimable);
-    if (hasClaimable && !bundlesRequested && !bundlesLoading) {
+    if (!hasClaimable) return;
+    const lastSigKey = "dashboard:lastClaimSig";
+    const lastSig = localStorage.getItem(lastSigKey);
+    const recentlySigned = Boolean(lastSig);
+    if (!recentlySigned && !bundlesRequested && !bundlesLoading) {
       setBundlesRequested(true);
-      void fetchBundlesWithUi(address);
+      void fetchBundlesWithUi(address).then((bundles) => {
+        if (bundles.length) {
+          localStorage.setItem(lastSigKey, new Date().toISOString());
+        }
+      });
     }
   }, [address, positions, bundlesRequested, bundlesLoading, fetchBundlesWithUi]);
 
