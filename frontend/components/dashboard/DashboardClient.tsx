@@ -856,23 +856,6 @@ export function DashboardClient() {
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">No positions yet.</div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-400/50 bg-slate-900/50 px-4 py-3 shadow-[0_0_0_1px_rgba(248,113,113,0.35)]">
-            <div className="text-xs text-slate-300">
-              <p className="font-semibold text-white">Claim data</p>
-              <p className="text-slate-400">
-              Loading claim bundles requires a one-time wallet signature (no gas). Use it before claiming to avoid
-              unexpected pop-ups.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={triggerBundleLoad}
-            disabled={bundlesLoading || !address}
-            className="rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10"
-          >
-              {bundlesLoading ? "Loading…" : bundlesRequested ? "Refresh payout data" : "Load payout data"}
-          </button>
-        </div>
           {bundleError && (
             <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3 text-amber-100">
               {bundleError}
