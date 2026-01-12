@@ -497,6 +497,15 @@ export function DashboardClient() {
     };
   }, [positions, marketDetails]);
 
+  useEffect(() => {
+    if (!address) return;
+    const hasClaimable = positions.some((p) => p.claimable);
+    if (hasClaimable && !bundlesRequested && !bundlesLoading) {
+      setBundlesRequested(true);
+      void fetchBundlesWithUi(address);
+    }
+  }, [address, positions, bundlesRequested, bundlesLoading, fetchBundlesWithUi]);
+
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
@@ -666,7 +675,11 @@ export function DashboardClient() {
         }
         const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
         const toWinZen =
-          toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
+          toWinWei !== null
+            ? Number(toWinWei) / 1e18
+            : price && Number.isFinite(price) && price > 0
+              ? p.stake_zen / price
+              : null;
         const createdAtTs = parseDate(p.created_at);
         const closesAtTs = parseDate(p.closes_at);
         return { position: p, bundle, bundleKey, outcomeLabel, toWinZen, idx, marketTitle, createdAtTs, closesAtTs };
@@ -962,7 +975,9 @@ export function DashboardClient() {
                       </div>
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">To win</p>
-                        <p className="font-mono text-white">{toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : "—"}</p>
+                        <p className="font-mono text-white">
+                          {toWinZen !== null ? `${toWinZen.toFixed(3)} ZEN` : p.claimable ? "Load payout" : "—"}
+                        </p>
                         {p.claimable ? (
                           <span className="mt-1 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
                             Claimable
