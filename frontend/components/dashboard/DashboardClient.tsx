@@ -501,16 +501,9 @@ export function DashboardClient() {
     if (!address) return;
     const hasClaimable = positions.some((p) => p.claimable);
     if (!hasClaimable) return;
-    const lastSigKey = "dashboard:lastClaimSig";
-    const lastSig = localStorage.getItem(lastSigKey);
-    const recentlySigned = Boolean(lastSig);
-    if (!recentlySigned && !bundlesRequested && !bundlesLoading) {
+    if (!bundlesRequested && !bundlesLoading) {
       setBundlesRequested(true);
-      void fetchBundlesWithUi(address).then((bundles) => {
-        if (bundles.length) {
-          localStorage.setItem(lastSigKey, new Date().toISOString());
-        }
-      });
+      void fetchBundlesWithUi(address);
     }
   }, [address, positions, bundlesRequested, bundlesLoading, fetchBundlesWithUi]);
 
@@ -676,6 +669,8 @@ export function DashboardClient() {
         let toWinWei: bigint | null = null;
         if (bundlePayoutWei !== null) {
           toWinWei = bundlePayoutWei;
+        } else if (p.claimable) {
+          toWinWei = null;
         } else if (potentialWeiFromPosition !== null) {
           toWinWei = potentialWeiFromPosition;
         } else if (potentialZen !== null) {
