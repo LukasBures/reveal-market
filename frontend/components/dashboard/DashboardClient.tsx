@@ -655,10 +655,15 @@ export function DashboardClient() {
             ? p.potential_payout_zen
             : null;
         const potentialWeiFromPosition = normalizeWei((p as any).potential_payout_wei);
-        const toWinWei =
-          (bundle && normalizeWei(bundle.amountWei)) ||
-          potentialWeiFromPosition ||
-          (potentialZen !== null ? normalizeWei(Math.round(potentialZen * 1e18)) : null);
+        const bundlePayoutWei = bundle ? normalizeWei((bundle as any).payoutWei ?? bundle.amountWei) : null;
+        let toWinWei: bigint | null = null;
+        if (bundlePayoutWei !== null) {
+          toWinWei = bundlePayoutWei;
+        } else if (potentialWeiFromPosition !== null) {
+          toWinWei = potentialWeiFromPosition;
+        } else if (potentialZen !== null) {
+          toWinWei = normalizeWei(Math.round(potentialZen * 1e18));
+        }
         const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
         const toWinZen =
           toWinWei !== null ? Number(toWinWei) / 1e18 : price && Number.isFinite(price) && price > 0 ? p.stake_zen / price : null;
