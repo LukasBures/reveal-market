@@ -1009,11 +1009,11 @@ export function DashboardClient() {
                       <Link
                         className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
                         href={
-                          p.proof_request_id
-                          ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
-                          : p.merkle_root
+                          p.merkle_root
                             ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
-                            : "/proofs"
+                            : p.proof_request_id
+                              ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
+                              : "/proofs"
                         }
                       >
                         View proofs
