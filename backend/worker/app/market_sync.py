@@ -697,6 +697,20 @@ async def collect_market_changes_with_summary(
                         error=str(exc),
                     )
                 if settlement is None or settlement_needs_refresh(settlement):
+                    missing_parts = []
+                    if settlement is None:
+                        missing_parts.append("no_settlement")
+                    else:
+                        batch_roots = getattr(settlement, "batch_roots", None)
+                        merkle_root = getattr(settlement, "merkle_root", None)
+                        if not batch_roots and not merkle_root:
+                            missing_parts.append("roots")
+                        if settlement.winning_outcome_id is None:
+                            missing_parts.append("winner")
+                        if not getattr(settlement, "circuit_hash", None):
+                            missing_parts.append("circuit_hash")
+                        if settlement.total_escrow is None or settlement.total_liability is None:
+                            missing_parts.append("totals")
                     log_event(
                         logger,
                         logging.INFO,
@@ -706,6 +720,7 @@ async def collect_market_changes_with_summary(
                         market_id=db_market.id,
                         market_address=getattr(db_market, "market_address", None),
                         has_commitments=bool(commitment_count),
+                        missing=",".join(missing_parts) if missing_parts else None,
                     )
                     continue
             if settlement.proof_status == shared_models.SettlementProofStatus.GENERATED.value:

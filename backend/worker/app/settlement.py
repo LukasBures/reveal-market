@@ -312,7 +312,14 @@ async def _upsert_settlement_from_chain(
         phase_value = int(phase_value) if phase_value is not None else None
     except (TypeError, ValueError):
         phase_value = None
-    if winning_outcome_id is not None and (result_posted or (phase_value is not None and phase_value >= 2)):
+    # Accept winning_outcome_id when chain has posted, phase >= 2, or the market is already marked final off-chain.
+    # This lets us build a complete settlement snapshot as soon as the off-chain resolution is final, even if
+    # the on-chain result flag has not been set yet.
+    if winning_outcome_id is not None and (
+        result_posted
+        or (phase_value is not None and phase_value >= 2)
+        or getattr(market, "resolution_status", None) == shared_models.ResolutionStatusEnum.FINAL.value
+    ):
         payload["winning_outcome_id"] = winning_outcome_id
     return await shared_repository.upsert_settlement_snapshot(session, market.id, payload)
 
@@ -442,6 +449,13 @@ async def _maybe_post_result(web3: AsyncWeb3, account, contract, winning_outcome
             message="failed to check resultPosted",
             error=str(exc),
         )
+    log_event(
+        logger,
+        logging.INFO,
+        event="worker.settlement.post_result.begin",
+        message="posting winning outcome on-chain",
+        outcome_id=int(winning_outcome_id),
+    )
     tx_params: TxParams = {
         "from": account.address,
         "nonce": await web3.eth.get_transaction_count(account.address),

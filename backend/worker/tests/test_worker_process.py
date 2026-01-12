@@ -644,6 +644,10 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
+    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",

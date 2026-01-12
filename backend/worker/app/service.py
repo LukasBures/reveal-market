@@ -32,13 +32,15 @@ from .market_sync import (
     backfill_missing_resolutions_async,
     collect_market_changes_with_summary,
     log_resolution_gaps_async,
+    market_record_to_payload,
+    snapshot_market_record,
 )
 from .metrics import LEASE_SKIP_COUNTER, POLYMARKET_FETCH_COUNTER
 from .polymarket import MarketPayload, build_filters_from_settings
 from .prime import prime_featured_views, prime_markets_cache
 from .proofs import enqueue_proof_jobs, run_proof_queue_worker, run_prover_jobs, run_settlement_queue_worker
 from .schema import SchemaSyncResult, ensure_schema, propagate_schema_revision
-from .settlement import run_lock_batches_jobs, run_settlement_jobs
+from .settlement import run_lock_batches_jobs, run_settlement_jobs, settlement_needs_refresh
 
 logger = runtime.logger
 
@@ -108,6 +110,60 @@ def _calculate_sleep(start_time: float) -> float:
     if jitter > 0:
         sleep_for += random.uniform(0, jitter)  # noqa: S311 - non-crypto jitter
     return sleep_for
+
+
+async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
+    """
+    Enqueue proof jobs for finalized markets already in the database that may be
+    skipped by the open-only Polymarket fetch.
+    """
+
+    if redis_client is None:
+        return 0
+    try:
+        async with session_scope() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(shared_models.Market, shared_models.Settlement).where(
+                            shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                            shared_models.Settlement.market_id == shared_models.Market.id,
+                            shared_models.Settlement.proof_status
+                            != shared_models.SettlementProofStatus.GENERATED.value,
+                        )
+                    )
+                ).all()
+            )
+    except Exception:
+        return 0
+
+    if not rows:
+        return 0
+
+    summary = SyncSummary()
+    for market, settlement in rows:
+        if settlement_needs_refresh(settlement):
+            continue
+        if (settlement.commitments_count or 0) <= 0:
+            continue
+        try:
+            payload = market_record_to_payload(market)
+            snapshot = snapshot_market_record(market)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="worker.proof.backfill_payload_failed",
+                message="skipping backfill proof job due to snapshot/payload failure",
+                market_id=getattr(market, "event_id", None),
+                error=str(exc),
+            )
+            continue
+        summary.proof_jobs.append((snapshot, payload, market.condition_id))
+
+    if not summary.proof_jobs:
+        return 0
+    return await enqueue_proof_jobs(redis_client, summary)
 
 
 def _read_cgroup_value(path: str) -> int | None:
@@ -984,6 +1040,25 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
             message="enqueued proof jobs to background queue",
             enqueued=enqueued,
         )
+        # Backfill proof jobs for finalized markets that are no longer fetched (e.g., when only-open filter is on).
+        try:
+            backfill_enqueued = await _enqueue_backfill_proof_jobs(redis_client)
+            if backfill_enqueued:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.jobs_backfilled",
+                    message="enqueued backfill proof jobs for finalized markets",
+                    enqueued=backfill_enqueued,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.backfill_failed",
+                message="failed to enqueue backfill proof jobs",
+                error=str(exc),
+            )
     else:
         asyncio.create_task(_run_proofs_and_settlements(summary))
     summary.proofs_generated = 0

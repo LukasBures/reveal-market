@@ -381,7 +381,7 @@ async def maybe_generate_settlement_proof(
             if market_record is None:
                 log_event(
                     logger,
-                    logging.DEBUG,
+                    logging.INFO,
                     event="worker.proof.no_market_record",
                     message="skipping proof because market record missing",
                     market_id=market_identifier,
@@ -391,7 +391,7 @@ async def maybe_generate_settlement_proof(
             if commitments_count <= 0:
                 log_event(
                     logger,
-                    logging.DEBUG,
+                    logging.INFO,
                     event="worker.proof.no_commitments",
                     message="skipping proof because no local commitments recorded",
                     market_id=market_identifier,
@@ -468,6 +468,9 @@ async def maybe_generate_settlement_proof(
                 message="skipping proof generation due to missing settlement fields",
                 error=str(exc),
                 event_id=market_snapshot.get("event_id"),
+                market_id=market_identifier,
+                condition_id=normalized_condition,
+                missing_fields="winner/roots/totals/circuit_hash",
             )
             return False
     if not payloads:
@@ -477,6 +480,9 @@ async def maybe_generate_settlement_proof(
             event="worker.proof.incomplete",
             message="skipping proof generation due to missing payload",
             event_id=market_snapshot.get("event_id"),
+            market_id=market_identifier,
+            condition_id=normalized_condition,
+            missing_fields="payload",
         )
         return False
     first_payload = payloads[0]
