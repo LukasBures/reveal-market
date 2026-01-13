@@ -26,6 +26,12 @@ HEALTH_CHECKS = Counter(
     labelnames=["status"],
 )
 
+RPC_ERRORS = Counter(
+    "relayer_rpc_errors_total",
+    "RPC errors by label and error type",
+    labelnames=["label", "error_type"],
+)
+
 QUEUE_OUTCOMES = Counter(
     "relayer_queue_outcomes_total",
     "Queue outcomes by action and status",
@@ -40,6 +46,12 @@ QUEUE_DEPTH = Gauge(
 QUEUE_DEADLETTER_DEPTH = Gauge(
     "relayer_queue_deadletter_depth",
     "Number of deadletter queue jobs",
+)
+
+QUEUE_DEADLETTER_TOTAL = Counter(
+    "relayer_queue_deadletter_total",
+    "Total number of jobs moved to the deadletter queue",
+    labelnames=["action"],
 )
 
 QUEUE_OLDEST_BACKLOG_AGE_SECONDS = Gauge(

@@ -15,7 +15,7 @@ from web3.exceptions import TimeExhausted, TransactionNotFound, Web3Exception
 from web3.types import BlockData, TxParams, TxReceipt, Wei
 
 from .abi import CLAIM_ABI, COMMIT_ABI, LOCK_BATCHES_ABI
-from .metrics import HEALTH_CHECKS, TX_LATENCY, TX_OUTCOMES
+from .metrics import HEALTH_CHECKS, RPC_ERRORS, TX_LATENCY, TX_OUTCOMES
 from .poseidon import BATCH_SIZE, build_batch_root, compute_leaf, int_to_hex32
 
 logger = get_logger()
@@ -587,12 +587,20 @@ class RelayerService:
         rpc_timeout = 2.0
 
         async def _call(label: str, func, *args):
+            start = time.perf_counter()
             try:
                 return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=rpc_timeout)
             except (TimeoutError, Web3Exception, ValueError) as err:
                 if label not in issues:
                     issues.append(label)
-                logger.warning(f"relayer.health.{label}", error=str(err))
+                error_type = type(err).__name__
+                RPC_ERRORS.labels(label=label, error_type=error_type).inc()
+                logger.warning(
+                    f"relayer.health.{label}",
+                    error=str(err),
+                    error_type=error_type,
+                    duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                )
                 return None
 
         connected_result, block_data, relayer_balance_raw, token_address_raw, escrow_owner = await asyncio.gather(

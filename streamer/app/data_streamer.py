@@ -309,6 +309,15 @@ class DataStreamer:
             try:
                 await self._poll_rest()
                 self._record_clob_rest_poll(success=True)
+                logger.info(
+                    "REST poll succeeded",
+                    extra={
+                        "event": "clob.rest.success",
+                        "last_success": self.state.clob_rest_last_success.isoformat()
+                        if self.state.clob_rest_last_success
+                        else None,
+                    },
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - network path

@@ -12,7 +12,13 @@ from psycopg.rows import dict_row
 from structlog import get_logger
 from web3.exceptions import Web3Exception
 
-from .metrics import QUEUE_DEADLETTER_DEPTH, QUEUE_DEPTH, QUEUE_OLDEST_BACKLOG_AGE_SECONDS, QUEUE_OUTCOMES
+from .metrics import (
+    QUEUE_DEADLETTER_DEPTH,
+    QUEUE_DEADLETTER_TOTAL,
+    QUEUE_DEPTH,
+    QUEUE_OLDEST_BACKLOG_AGE_SECONDS,
+    QUEUE_OUTCOMES,
+)
 from .service import RelayerService, TxSendError
 
 logger = get_logger()
@@ -322,6 +328,7 @@ class TxQueue:
                     nonce=nonce_to_store,
                     **summary,
                 )
+                QUEUE_DEADLETTER_TOTAL.labels(action=row["action"]).inc()
             else:
                 logger.warning(
                     "queue.retry_scheduled",

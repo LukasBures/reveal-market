@@ -149,6 +149,11 @@ def create_app() -> FastAPI:
             "NEXT_PUBLIC_DISABLE_STREAMER_WS is enabled; websocket upgrades will be skipped",
             extra={"event": "stream.ws.disabled_env"},
         )
+    if not settings.rtds_enabled:
+        logger.warning(
+            "RTDS is disabled; streamer will rely on CLOB WS/REST only",
+            extra={"event": "stream.rtds.disabled"},
+        )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
