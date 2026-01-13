@@ -11,9 +11,11 @@ class DummyService:
     def __init__(self):
         self.commit_calls = 0
         self.claim_calls = 0
+        self.last_kwargs = None
 
     async def commit(self, payload, **kwargs):
         self.commit_calls += 1
+        self.last_kwargs = kwargs
         return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
 
     async def claim(self, payload, **kwargs):
@@ -24,9 +26,11 @@ class DummyService:
 class FlakyService:
     def __init__(self):
         self.commit_calls = 0
+        self.bump_factors = []
 
     async def commit(self, payload, **kwargs):
         self.commit_calls += 1
+        self.bump_factors.append(kwargs.get("bump_factor"))
         if self.commit_calls == 1:
             raise TxSendError("first attempt failed", nonce=7)
         return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 7}
@@ -80,6 +84,28 @@ async def test_queue_retry_then_succeed(tmp_path):
     assert second["status"] == "succeeded"
     assert second["txHash"] == "0xcommit"
     assert svc.commit_calls == 2
+    assert svc.bump_factors == [1.0, pytest.approx(1.15)]
+
+
+@pytest.mark.asyncio
+async def test_queue_uses_nonce_override_on_retry(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = await queue.enqueue("commit", {"payload": "x"})
+    result = await queue.process_job(job_id)
+    assert result["status"] == "succeeded"
+
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'pending', attempts = 1, nonce = 42 WHERE id = ?",
+            (job_id,),
+        )
+
+    result = await queue.process_job(job_id)
+    assert result["status"] == "succeeded"
+    assert svc.last_kwargs["nonce_override"] == 42
 
 
 @pytest.mark.asyncio

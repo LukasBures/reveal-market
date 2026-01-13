@@ -10,7 +10,7 @@ class _FailingFunction:
 
 
 class _FailingFunctions:
-    def COLLATERAL_TOKEN(self):
+    def COLLATERAL_TOKEN(self):  # noqa: N802
         return _FailingFunction()
 
     def owner(self):
