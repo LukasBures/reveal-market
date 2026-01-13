@@ -1687,8 +1687,9 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             tx_hash_value = None
         stake_wei = int(commitment.amount_wei)
         stake_zen = stake_wei / 1e18
-        payout_wei = int(getattr(commitment, "payout_wei", 0) or 0)
-        payout_zen = payout_wei / 1e18
+        base_payout_wei = int(getattr(commitment, "payout_wei", 0) or 0)
+        payout_wei: int | None = base_payout_wei
+        payout_zen: float | None = base_payout_wei / 1e18
         claimed = commitment.claimed_at is not None
         claimable = False
         status = "committed"
@@ -1701,6 +1702,12 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             status = "settled"
             if settlement.winning_outcome_id == commitment.outcome_id:
                 claimable = True
+            else:
+                payout_wei = 0
+                payout_zen = 0
+        elif settlement is None and market.resolved_at:
+            payout_wei = None
+            payout_zen = None
         if claimable and market.market_address:
             claim_deadline = claim_deadlines.get(market.market_address)
             if claim_deadline and now_ts > int(claim_deadline):

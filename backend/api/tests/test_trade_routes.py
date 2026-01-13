@@ -394,6 +394,45 @@ def test_positions_marks_claimed(client, db_session):
     assert pos["claimable"] is False
 
 
+def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="pos-loser", address="0x7777777777777777777777777777777777777777")
+    commitment_hex = "0x" + "77" * 32
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=200,
+            payout_wei=250,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=5,
+            market_id=market.id,
+            merkle_root="0x" + "99" * 32,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.NONE.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/positions?wallet={user.address}")
+    assert resp.status_code == 200
+    pos = resp.json()["positions"][0]
+    assert pos["status"] == "settled"
+    assert pos["claimable"] is False
+    assert pos["payout_wei"] == 0
+    assert pos["payout_zen"] == 0
+
+
 def test_sync_commitments_endpoint(client, db_session):
     market = _seed_market(db_session, event_id="sync-mkt", address="0x5555555555555555555555555555555555555555")
     payload = {

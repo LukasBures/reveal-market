@@ -659,6 +659,10 @@ export function DashboardClient() {
         const potentialWeiFromPosition =
           normalizeWei((p as any).payout_wei) ?? normalizeWei((p as any).potential_payout_wei);
         const bundlePayoutWei = bundle ? normalizeWei((bundle as any).payoutWei ?? bundle.amountWei) : null;
+        const hasResolution =
+          p.winning_outcome_id !== null && p.winning_outcome_id !== undefined && Number.isFinite(p.winning_outcome_id);
+        const isWinner = hasResolution && p.winning_outcome_id === p.outcome_id;
+        const settlementPending = !hasResolution && Boolean(p.resolved_at);
         let toWinWei: bigint | null = null;
         if (bundlePayoutWei !== null) {
           toWinWei = bundlePayoutWei;
@@ -669,11 +673,14 @@ export function DashboardClient() {
         } else if (potentialZen !== null) {
           toWinWei = normalizeWei(Math.round(potentialZen * 1e18));
         }
+        if (hasResolution && !isWinner) {
+          toWinWei = 0n;
+        }
         const price = market && Array.isArray(market.outcomePrices) ? market.outcomePrices[p.outcome_id] : null;
         const toWinZen =
           toWinWei !== null
             ? Number(toWinWei) / 1e18
-            : price && Number.isFinite(price) && price > 0
+            : !hasResolution && !settlementPending && price && Number.isFinite(price) && price > 0
               ? p.stake_zen / price
               : null;
         const createdAtTs = parseDate(p.created_at);
