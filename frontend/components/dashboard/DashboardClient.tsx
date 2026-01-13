@@ -152,6 +152,11 @@ function PositionStatusFlow({
     stages[
       Math.min(currentIndex + 1, stages.length - 1)
     ]?.label.toLowerCase() ?? stages[stages.length - 1].label;
+  const trimmedReason = resolutionReason?.trim();
+  const clippedReason =
+    trimmedReason && trimmedReason.length > 80
+      ? `${trimmedReason.slice(0, 77)}…`
+      : trimmedReason;
 
   return (
     <div
@@ -196,7 +201,10 @@ function PositionStatusFlow({
                       ? bubbleCompleteClass
                       : stageState === "current"
                       ? bubbleCurrentClass
-                      : "border-white/10 bg-white/5 text-slate-200"
+                      : "border-white/10 bg-white/5 text-slate-200",
+                    stageState === "current" && accent === "neutral"
+                      ? "opacity-85"
+                      : null
                   )}
                 >
                   <span className="text-[11px] uppercase tracking-[0.2em]">
@@ -248,9 +256,7 @@ function PositionStatusFlow({
       </div>
       <p className="mt-2 text-[11px] text-slate-400">
         {isCancelled
-          ? `Market cancelled${
-              resolutionReason ? ` — ${resolutionReason}` : ""
-            }.`
+          ? `Market cancelled${clippedReason ? ` — ${clippedReason}` : ""}.`
           : isFinal
           ? claimable
             ? "All phases cleared — claim is open."
@@ -1233,6 +1239,11 @@ export function DashboardClient() {
                                 ? "Load payout"
                                 : "—"}
                             </p>
+                            {p.claimable && toWinZen === null ? (
+                              <span className="mt-1 block text-[10px] italic text-slate-400">
+                                proof needed
+                              </span>
+                            ) : null}
                             {p.claimable ? (
                               <>
                                 <span className="mt-1 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
