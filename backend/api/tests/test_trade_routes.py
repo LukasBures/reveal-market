@@ -36,6 +36,10 @@ class _AsyncClientStub:
         return self.payload
 
 
+async def _streamer_price(*_args, **_kwargs):
+    return Decimal("0.5")
+
+
 def _seed_market(db_session, event_id: str = "mkt-test", address: str = "0x1111111111111111111111111111111111111111"):
     market = models.Market(
         event_id=event_id,
@@ -94,11 +98,14 @@ def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
         return FxQuoteResponse(zen_usd=Decimal("2"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
     deployed_address = "0x2222222222222222222222222222222222222222"
 
     async def _ensure_market(_session, _market_id, _expected):
@@ -133,6 +140,8 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(
         settings, "authorization_signer_private_key", SecretStr(auth_signer._private_key.hex()), raising=False
     )
@@ -143,6 +152,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("1.25"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
 
     async def _ensure_market(_session, _market_id, _expected):
         return market.id, market.market_address, 1

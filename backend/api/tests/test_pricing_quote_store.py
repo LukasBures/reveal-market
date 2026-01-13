@@ -16,6 +16,15 @@ def _mock_fx(monkeypatch, price: float = 2.5):
     monkeypatch.setattr("app.pricing.fetch_fx_quote", _fx_quote)
 
 
+def _mock_streamer_price(monkeypatch, price: float = 0.5):
+    async def _streamer(*_args, **_kwargs):
+        from decimal import Decimal
+
+        return Decimal(str(price))
+
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer)
+
+
 def _configure_signer():
     settings = get_settings()
     settings.pricing_chain_id = 1337
@@ -32,7 +41,10 @@ def _configure_signer():
 def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     settings = _configure_signer()
     _mock_fx(monkeypatch, price=1.5)
+    _mock_streamer_price(monkeypatch, price=0.5)
     settings.max_stake_zen = 0.1
+    settings.haircut_percent = 0.8
+    settings.pricing_edge_percent = 0.05
     settings.ticket_size_wei = int(Decimal("1e17"))
     import app.runtime as runtime
 

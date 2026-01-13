@@ -24,10 +24,67 @@ from web3 import Web3
 from app import models, repository_async, schemas
 from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
-from app.pricing import PricingEngine, fetch_fx_quote
+from app.pricing import PricingEngine, _coerce_price, fetch_fx_quote
 from app.runtime import logger, settings
 
 router = APIRouter()
+
+_STREAMER_TIMEOUT_SECONDS = 3.0
+
+
+async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decimal | None:
+    """Fetch the latest streamer price for a market/outcome (display_price preferred)."""
+
+    if not stream_market_id:
+        return None
+    from shared.env_presets import get_preset
+
+    preset_cfg = get_preset()
+    stream_base = str(preset_cfg.get("streamer_internal") or preset_cfg.get("streamer_public") or "")
+    if not stream_base:
+        return None
+    base = stream_base.rstrip("/")
+    url = f"{base}/data/clob/latest"
+    params = {"market_id": stream_market_id, "outcome": str(outcome_id)}
+    try:
+        async with httpx.AsyncClient(timeout=_STREAMER_TIMEOUT_SECONDS) as client:
+            resp = await client.get(url, params=params)
+        if resp.status_code != status.HTTP_200_OK:
+            return None
+        payload = resp.json() if resp.content else {}
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return None
+        if data.get("fx_stale") is True:
+            return None
+        return _coerce_price(data.get("display_price") or data.get("price"))
+    except Exception:
+        return None
+
+
+async def _fetch_db_price(session: AsyncSession, market_id: str, outcome_id: int) -> Decimal | None:
+    market = await repository_async.get_market_by_event_id(session, market_id)
+    if not market or not getattr(market, "id", None):
+        return None
+    stmt = select(shared_models.MarketOutcome.price).where(
+        shared_models.MarketOutcome.market_id == market.id,
+        shared_models.MarketOutcome.outcome_id == outcome_id,
+    )
+    price = (await session.execute(stmt)).scalar_one_or_none()
+    return _coerce_price(price)
+
+
+async def _resolve_outcome_price(session: AsyncSession, market_id: str, outcome_id: int) -> Decimal | None:
+    market = await repository_async.get_market_by_event_id(session, market_id)
+    stream_market_id = None
+    if market is not None:
+        stream_market_id = getattr(market, "condition_id", None) or None
+    if stream_market_id is None:
+        stream_market_id = market_id
+    price = await _fetch_streamer_price(stream_market_id, outcome_id)
+    if price is not None:
+        return price
+    return await _fetch_db_price(session, market_id, outcome_id)
 
 
 def _strip_0x(value: str | None) -> str:
@@ -318,6 +375,15 @@ async def pricing_quote(
             include_stake=True,
         )
 
+    price = None
+    if payload.market_id is not None:
+        price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
+    if price is None or price <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
+        )
+
     if zen_usd is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -332,18 +398,10 @@ async def pricing_quote(
     zen_usd_scaled = _scale_fx_value(zen_usd)
     engine = PricingEngine(settings)
     try:
-        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
+        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    try:
-        hedge_zen = Decimal(str(quote.hedge_usdc)) / Decimal(str(quote.zen_usd))
-        payout_zen = (
-            Decimal(str(quote.refund_zen)) + hedge_zen * Decimal(str(quote.displayed_odds_multiplier))
-        ).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"payout_compute_failed:{exc}"
-        ) from exc
+    payout_zen = quote.payout_zen
 
     expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
     expiry_ts = int(expires_at.timestamp())
@@ -519,6 +577,15 @@ async def pricing_quote_preview(
             include_stake=True,
         )
 
+    price = None
+    if payload.market_id is not None:
+        price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
+    if price is None or price <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
+        )
+
     if zen_usd is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -534,16 +601,10 @@ async def pricing_quote_preview(
     zen_usd_scaled = _scale_fx_value(zen_usd)
     engine = PricingEngine(settings)
     try:
-        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)))
+        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    try:
-        hedge_zen = Decimal(str(quote.hedge_usdc)) / Decimal(str(quote.zen_usd))
-        payout_zen = (
-            Decimal(str(quote.refund_zen)) + hedge_zen * Decimal(str(quote.displayed_odds_multiplier))
-        ).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
-    except Exception:
-        payout_zen = Decimal(str(payload.stake_zen))
+    payout_zen = quote.payout_zen
 
     # Preview response mirrors the signed payload but omits signature/persistence/expiry.
     expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)

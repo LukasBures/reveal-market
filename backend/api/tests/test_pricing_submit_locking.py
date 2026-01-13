@@ -16,6 +16,8 @@ def _configure_signer(monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
     return settings
@@ -27,6 +29,11 @@ def _mock_fx(monkeypatch, price: Decimal = Decimal("10")) -> None:
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
     monkeypatch.setattr("app.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
+
+
+async def _streamer_price(*_args, **_kwargs):
+    return Decimal("0.5")
 
 
 def _issue_quote(client):

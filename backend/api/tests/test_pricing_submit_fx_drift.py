@@ -10,6 +10,10 @@ from eth_account import Account
 from pydantic import SecretStr
 
 
+async def _streamer_price(*_args, **_kwargs):
+    return Decimal("0.5")
+
+
 @pytest.mark.asyncio
 async def test_pricing_submit_rejects_fx_drift(client, monkeypatch):
     signer = Account.create()
@@ -18,6 +22,8 @@ async def test_pricing_submit_rejects_fx_drift(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
     now_ts = datetime.now(tz=UTC)
@@ -29,6 +35,7 @@ async def test_pricing_submit_rejects_fx_drift(client, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("12"), stale=False, received_at=now_ts)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
 
     payload = {
         "stake_zen": 0.1,
@@ -59,6 +66,8 @@ async def test_pricing_submit_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
     now_ts = datetime.now(tz=UTC)
@@ -70,6 +79,7 @@ async def test_pricing_submit_rejects_stale_fx(client, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=True, received_at=now_ts)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
 
     payload = {
         "stake_zen": 0.1,

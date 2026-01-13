@@ -9,6 +9,10 @@ from app.schemas import FxQuoteResponse
 from pydantic import SecretStr
 
 
+async def _streamer_quote(*_args, **_kwargs):
+    return Decimal("0.5")
+
+
 class _AsyncClientSuccess:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -111,6 +115,8 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
@@ -119,6 +125,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
 
     quote_payload = {
         "stake_zen": 0.1,
@@ -154,6 +161,8 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
@@ -162,6 +171,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
 
     quote_payload = {
         "stake_zen": 0.1,
@@ -199,6 +209,8 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr("app.server.settings", settings, raising=False)
     now_ts = datetime.now(tz=UTC)
 
@@ -206,6 +218,7 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
         return FxQuoteResponse(zen_usd=Decimal("10"), stale=True, received_at=now_ts)
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
 
     payload = {
         "stake_zen": 0.1,
@@ -230,6 +243,8 @@ def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     market = models.Market(
         event_id="pending-market",
         title="Pending market",
@@ -240,6 +255,8 @@ def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch
     )
     db_session.add(market)
     db_session.commit()
+
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
 
     payload = {
         "stake_zen": 0.1,
@@ -266,6 +283,8 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "commit_cutoff_seconds", 300, raising=False)
     market = models.Market(
         event_id="cutoff-market",
@@ -278,6 +297,8 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
     )
     db_session.add(market)
     db_session.commit()
+
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
 
     payload = {
         "stake_zen": 0.1,
@@ -292,3 +313,44 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
     detail = resp.json()["detail"]
     assert detail["error"] == "market_near_resolution"
     assert detail["closes_at"]
+
+
+def test_pricing_quote_rejects_missing_price(client, monkeypatch):
+    import app.runtime as runtime
+    from eth_account import Account
+
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
+
+    async def _streamer_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_none)
+
+    async def _db_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.routes.pricing._fetch_db_price", _db_none)
+
+    quote_payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": "0x1111111111111111111111111111111111111111",
+        "outcome_id": 1,
+        "market_id": "mkt-price-missing",
+        "user_id": "user-missing",
+    }
+    resp = client.post("/pricing/quote", json=quote_payload)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "price_unavailable"

@@ -57,27 +57,36 @@ class PricingEngine:
 
     def __init__(self, settings: Settings):
         self.rake_percent = self._validate_percent(settings.rake_percent, "rake_percent")
-        self.haircut_percent = self._validate_percent(settings.haircut_percent, "haircut_percent")
+        self.haircut_percent = self._validate_percent(
+            settings.haircut_percent, "haircut_percent", max_value=Decimal("1")
+        )
         self.worsen_percent = self._validate_percent(settings.worsen_percent, "worsen_percent")
+        self.edge_percent = self._validate_percent(settings.pricing_edge_percent, "pricing_edge_percent")
 
     @property
     def total_monetization(self) -> Decimal:
         return self.rake_percent + self.haircut_percent + self.worsen_percent
 
-    def quote(self, stake_zen: Decimal, zen_usd: Decimal) -> PricingQuoteResponse:
+    def quote(self, stake_zen: Decimal, zen_usd: Decimal, price: Decimal) -> PricingQuoteResponse:
         if stake_zen <= 0:
             raise ValueError("stake_zen must be positive")
         if zen_usd <= 0:
             raise ValueError("zen_usd must be positive")
+        if price <= 0:
+            raise ValueError("price must be positive")
 
         displayed_multiplier = Decimal("1") - self.worsen_percent
         rake_zen = (stake_zen * self.rake_percent).quantize(Decimal("0.00000001"))
         refund_zen = (stake_zen - rake_zen).quantize(Decimal("0.00000001"))
         hedge_usdc = (stake_zen * zen_usd * (Decimal("1") - self.haircut_percent)).quantize(Decimal("0.00000001"))
         hedge_usdc = max(hedge_usdc, Decimal("0"))
-        # Payout is the refund plus hedged value adjusted by displayed odds.
-        hedge_zen = (hedge_usdc / zen_usd) if zen_usd != 0 else Decimal("0")
-        payout_zen = (refund_zen + hedge_zen * displayed_multiplier).quantize(Decimal("0.001"), rounding=ROUND_DOWN)
+        # Payout is based on odds with rake first, then haircut applied to the net stake.
+        net_stake = stake_zen - rake_zen
+        discounted = net_stake * (Decimal("1") - self.haircut_percent)
+        discounted = max(discounted, Decimal("0"))
+        payout_zen = (discounted / (price * (Decimal("1") + self.edge_percent))).quantize(
+            Decimal("0.001"), rounding=ROUND_DOWN
+        )
 
         return PricingQuoteResponse(
             stake_zen=stake_zen,
@@ -94,13 +103,13 @@ class PricingEngine:
         )
 
     @staticmethod
-    def _validate_percent(value: float, label: str) -> Decimal:
+    def _validate_percent(value: float, label: str, max_value: Decimal = MAX_PERCENT) -> Decimal:
         try:
             pct = Decimal(str(value))
         except InvalidOperation as exc:
             raise ValueError(f"{label} must be a decimal") from exc
-        if pct < 0 or pct >= MAX_PERCENT:
-            raise ValueError(f"{label} must be between 0 and {MAX_PERCENT} (exclusive)")
+        if pct < 0 or pct >= max_value:
+            raise ValueError(f"{label} must be between 0 and {max_value} (exclusive)")
         return pct
 
 
@@ -109,6 +118,13 @@ def _coerce_decimal(value) -> Decimal | None:
         return Decimal(str(value))
     except (TypeError, ValueError, InvalidOperation):
         return None
+
+
+def _coerce_price(value) -> Decimal | None:
+    price = _coerce_decimal(value)
+    if price is None or price <= 0:
+        return None
+    return price
 
 
 def _parse_received_at(payload: dict) -> datetime | None:

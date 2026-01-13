@@ -25,7 +25,7 @@ Goldsky subgraphs -> HTTP/WS proxies under /subgraph/*
 - `GET/POST/DELETE /control/subscriptions` – inspect/add/remove subscriptions (requires `x-control-token` when enabled).
 - **Streaming**: `GET /stream` (SSE) and `WS /stream/ws` for market ticks/books/trades/history. Params: `market_id`, optional `assets_ids` (preferred), `symbols` (RTDS), `max_events` (SSE only). Optional `x-access-token` when enabled.
 - **History/cache**: `GET /history` (recent ticks), `GET /clob/latest`, `GET /clob/book` for cached payloads.
-- **FX**: `GET /fx/zen-usd|zen-usdc|zen-usdt` (HTTP), `WS /fx/zen-usd` (+ aliases) for streaming FX (includes worsen% and raw price). `STREAMER_WORSEN_PERCENT` applied server-side; haircut/rake are configuration values but only worsen% affects streamer output.
+- **FX**: `GET /fx/zen-usd|zen-usdc|zen-usdt` (HTTP), `WS /fx/zen-usd` (+ aliases) for streaming FX (includes worsen% and raw price). `STREAMER_WORSEN_PERCENT` applied server-side; `STREAMER_HAIRCUT_PERCENT`/`STREAMER_RAKE_PERCENT` are configuration values but do not change streamer output or API payouts.
 - **Subgraph proxies**: HTTP under `/subgraph/{markets,trades,positions,open-interest,open-interest/global,pnl,activity,market-data}`; WS mirrors under `/subgraph/ws/*`. Aliased under `/data/subgraph/*`; CLOB cache/history under `/data/clob/*`; FX WS under `/data/fx/ws`; SSE stream under `/data/stream`.
 - **Metrics**: `GET /metrics` – Prometheus (FX source/staleness, WS health, tick counts, deliveries/drops, ingest drops, staleness gauges).
 
