@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.state import StreamState
 from app.config import Settings
+from app.state import StreamState
 
 
 def test_should_log_stale_markets_throttles_by_interval():

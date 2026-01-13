@@ -4,7 +4,6 @@ import asyncio
 from datetime import UTC, datetime
 
 import app.server as api_main
-import pytest
 from app import models
 
 

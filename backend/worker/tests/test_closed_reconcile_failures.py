@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-
-import logging
 
 import pytest
 from app import runtime
@@ -83,6 +82,4 @@ async def test_closed_reconcile_logs_failures(monkeypatch, caplog):
         result = await worker_service._reconcile_closed_markets(session, None)
     assert result["failed"] == 1
     assert result["missing"] == 2
-    assert any(
-        rec.__dict__.get("event") == "worker.maintenance.closed_reconcile.complete" for rec in caplog.records
-    )
+    assert any(rec.__dict__.get("event") == "worker.maintenance.closed_reconcile.complete" for rec in caplog.records)

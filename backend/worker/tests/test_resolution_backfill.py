@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
-from app import market_sync
-from app import runtime
+from app import market_sync, runtime
 from app.resolution import ResolutionOutcome
 from shared.models import Base, Market
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

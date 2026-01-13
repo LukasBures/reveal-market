@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 from relayer.service import RelayerService
 from web3.exceptions import Web3Exception
 
@@ -16,7 +15,7 @@ class _TimeoutEth:
 
 
 class _TimeoutFunctions:
-    def COLLATERAL_TOKEN(self):
+    def COLLATERAL_TOKEN(self):  # noqa: N802
         return self
 
     def owner(self):

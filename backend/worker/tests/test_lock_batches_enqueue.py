@@ -5,9 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import shared.models as shared_models
-from eth_account import Account
 from app import runtime
 from app.settlement import run_lock_batches_jobs
+from eth_account import Account
 from shared.models import Base, Commitment, Market
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 

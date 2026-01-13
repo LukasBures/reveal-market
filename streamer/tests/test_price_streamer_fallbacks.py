@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from app.config import Settings
 from app.price_streamer import PriceStreamer
-from app.state import StreamState, FxQuote
+from app.state import FxQuote, StreamState
 
 
 def test_fx_refresh_triggers_rest_when_ws_stale():

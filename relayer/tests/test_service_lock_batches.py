@@ -61,4 +61,3 @@ def test_build_batch_roots_rejects_duplicate_ticket_index():
     with pytest.raises(TxSendError) as exc:
         service._build_batch_roots(tickets)
     assert exc.value.kind == "invalid"
-
