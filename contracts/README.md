@@ -11,7 +11,7 @@ Repo-level scripts orchestrate both workspaces and keep error selectors/verifier
 
 - **Workspace split**: Each workspace has its own `foundry.toml`, `lib/`, `src/`, `test/`, `script/`, and cache. Run commands from within the workspace unless using the orchestrators below.
 - **Shared scripts**: `contracts/run_tests.sh` runs both workspaces sequentially; `contracts/run_local.sh` shells into each workspace runner. `scripts/generate_error_selectors.py` writes `contracts/cache/errors.json` from Solidity custom errors.
-- **Artifacts**: Verifier metadata (`settlement-vk.json`) and circuit hashes (`settlement_hashes.json`) live under `contracts/cache/` and are generated from `prover/circuits/build` via `prover/circuits/export_artifacts.sh`. Keep these aligned with the prover and on-chain verifier.
+- **Artifacts**: Verifier metadata (`settlement-vk.json`) lives under `contracts/cache/` (and `contracts/zen/cache/`) and is generated from `prover/circuits/build` via `prover/circuits/export_artifacts.sh`. Keep this aligned with the prover and on-chain verifier. Circuit hashes live in `prover/circuits/build/settlement_hashes.json`.
 
 ## Quick Commands
 

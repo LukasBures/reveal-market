@@ -13,18 +13,18 @@ Browser -> Next.js (SSR + RSC) -> FastAPI backend
 - **App Router**: `app/layout.tsx` sets global providers (React Query, Wagmi, analytics), nav, and metadata. Routes include `/` (featured markets), `/search`, `/markets/[eventId]`, `/dashboard`, `/proofs`, `/docs/*`, `/contact`, and API proxies under `app/api/*` (suggestions, contact).
 - **Data layer**: `lib/api.ts` centralizes backend calls with cache tags that mirror worker invalidation; server actions in `app/actions/` reuse these fetchers for pagination and load-more UX. `lib/seo.ts` holds canonical metadata used by docs/legal pages.
 - **Streaming hooks**: `usePriceStream`/`useLiveOutcomePrices` connect to `/stream` WS/SSE with history seeding and HTTP fallback; `useFxStream` keeps a single FX WS alive with stale guards and HTTP fallback.
-- **Trading flow**: Stake panel enforces the fixed 0.1 ZEN ticket and cap checks, pulls `/pricing/preview` + `/pricing/quote`, submits `/trade/commit`, and polls `/trade/status`. Dashboard handles approvals, deposits/withdrawals, positions, and claims against the relayer escrow.
+- **Trading flow**: Stake panel enforces the fixed ticket size (0.1 ZEN by default) plus backend caps, pulls `/pricing/preview` + `/pricing/quote`, submits `/trade/commit`, and polls `/trade/status`. Dashboard handles positions and claims against the relayer escrow; deposits/withdrawals are on-chain escrow actions and are not initiated by the API.
 - **Security/SEO**: `next.config.mjs` sets CSP/HSTS/COOP/Permissions-Policy and strict image/script origins; sitemap/robots generated from App Router metadata. GA origins only allowed in production.
 
 ## Environment
 
-Presets derive from `RM_ENVIRONMENT` (`local` → localhost:3000/8000/8100, `prod` → revealmarket.xyz/api/stream). Override only when deviating.
+Presets derive from `RM_ENVIRONMENT` (`local` → localhost:3000/8000/8100, `prod` → revealmarket.xyz/api/stream). Override only when deviating; when running in Docker, `STREAMER_PUBLIC_BASE_URL` and `STREAMER_INTERNAL_URL` are also honored.
 
 Common vars:
 
 - `RM_ENVIRONMENT` – preset switch.
 - `RM_API_BASE_URL` / `NEXT_PUBLIC_API_BASE_URL` – backend base URLs (SSR + client).
-- `NEXT_PUBLIC_PRICE_STREAMER_URL` / `STREAMER_INTERNAL_URL` – streamer base for WS/SSE.
+- `NEXT_PUBLIC_PRICE_STREAMER_URL` / `STREAMER_INTERNAL_URL` (Docker-only) – streamer base for WS/SSE.
 - `NEXT_PUBLIC_SITE_URL` / `RM_SITE_URL` – canonical site URL for metadata and sitemap.
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` – required for Connect Wallet modal.
 - `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_BLOCK_EXPLORER_URL` – target chain (defaults to Horizen Testnet 2651420).

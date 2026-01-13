@@ -61,4 +61,4 @@ Docker/compose: `./run_local.sh worker` (or `./run_local.sh` for the full stack)
 - `app/backfill.py` – MarketFactory address backfills
 - `app/runtime.py` – settings + client singletons
 - `app/schema.py` – migration helpers + schema tagging
-- `app/healthcheck.py` – Docker health entrypoint
+- `app/healthcheck.py` – Docker health entrypoint (DB ping)

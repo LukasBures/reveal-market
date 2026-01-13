@@ -19,13 +19,13 @@ Clients -> Relayer API -> Queue -> Web3 RPC -> RevealMarket/RelayerEscrow
   - `POST /status` – lookup job state/attempts/tx hash.
   - `GET /metrics` – Prometheus metrics (HTTP, queue depth/outcomes, tx latency).
   - Admin: `/admin/queue/deadletter` (list), `/admin/queue/deadletter/{id}/replay`, `/admin/queue/deadletter/{id}` (delete).
-- **Auth & abuse controls**: bearer token (recommended), optional IP allowlist and in-memory sliding-window rate limiter, optional `x-forwarded-for` trust.
+- **Auth & abuse controls**: bearer token required by default (unless `RELAYER_ALLOW_INSECURE_AUTH=true`), optional IP allowlist and in-memory sliding-window rate limiter, optional `x-forwarded-for` trust.
 - **Logging/metrics**: structured logs for every request and queue attempt; Prometheus counters/gauges for queue depth, deadletter depth, tx outcomes, and latency.
 
 ## Configuration (env)
 
 - **RPC**: `RPC_URL`, `CHAIN_ID`, `RELAYER_PRIVATE_KEY` (EOA), `RELAYER_ESCROW_ADDRESS`.
-- **Server**: `RELAYER_HOST` (default `0.0.0.0`), `RELAYER_PORT` (default `8088`).
+- **Server**: `RELAYER_HOST`, `RELAYER_PORT` (required by config loader; set defaults in your env files).
 - **Auth**: `RELAYER_BEARER_TOKEN` (required unless `RELAYER_ALLOW_INSECURE_AUTH=true`), `RELAYER_IP_ALLOWLIST` (CSV IPs/CIDRs), `RELAYER_TRUST_X_FORWARDED_FOR`.
 - **Queue**: `RM_DATABASE_URL` (Postgres DSN) or `RELAYER_QUEUE_DB_PATH` (SQLite path, default `relayer_queue.db`), `RELAYER_QUEUE_POLL_SECONDS`, `RELAYER_QUEUE_MAX_ATTEMPTS`, `RELAYER_FEE_BUMP_PERCENT`, `RELAYER_TX_TIMEOUT_SECONDS`.
 - **Rate limit**: `RELAYER_RATE_LIMIT_REQUESTS`, `RELAYER_RATE_LIMIT_WINDOW_SECONDS` (set requests=0 to disable).

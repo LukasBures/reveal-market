@@ -72,7 +72,7 @@ Docker/compose: `./run_local.sh hedger` brings up dependencies (Postgres/Redis) 
 - `app/vault.py` / `app/hedger_usdc.py` – LP vault client (on-chain) and borrow/repay helpers.
 - `app/settlement.py` – prover client + settlement recording.
 - `app/bridge.py` – bridge client for manual transfers.
-- `app/admin.py` – `/admin/*` routes; `app/healthcheck.py` – Docker health probe.
+- `app/admin.py` – `/admin/*` routes; `app/healthcheck.py` – Docker health probe (DB connectivity).
 
 ## Operational Notes
 
