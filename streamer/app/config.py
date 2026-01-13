@@ -112,7 +112,7 @@ class Settings(BaseSettings):
         default=300, ge=0, description="Minimum seconds between stale-market warnings when count is unchanged"
     )
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25, description="Percent worsen applied to displayed odds")
-    haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")
+    haircut_percent: float = Field(default=0.8, ge=0.6, lt=1, description="Percent haircut applied to hedging")
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")
     sse_heartbeat_seconds: int = Field(default=15, ge=1, description="SSE heartbeat interval")
     rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
