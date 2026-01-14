@@ -1153,8 +1153,6 @@ export function DashboardClient() {
                 !hasResolution &&
                 p.status !== "claimed" &&
                 p.status !== "cancelled";
-              const bundleReady =
-                bundle && (requestedBundleKeys.has(bundleKey) || !isWinner);
               const highlightMode =
                 p.status === "cancelled"
                   ? "cancelled"
@@ -1264,7 +1262,8 @@ export function DashboardClient() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                           {p.status === "settled" && p.claimable ? (
-                            bundleReady ? (
+                            bundle &&
+                            (requestedBundleKeys.has(bundleKey) || !isWinner) ? (
                               <button
                                 type="button"
                                 className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
