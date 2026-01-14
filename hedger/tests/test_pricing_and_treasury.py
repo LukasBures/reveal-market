@@ -9,20 +9,20 @@ from app.treasury_manager import TreasuryManager
 
 def test_pricing_quote_math():
     engine = PricingEngine(
-        haircut_percent=Decimal("0.12"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
+        haircut_percent=Decimal("0.8"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
     )
     quote = engine.quote_bet(Decimal("10"), Decimal("0.20"))
 
     assert quote.displayed_odds_multiplier == Decimal("0.97")
     assert quote.rake_zen == Decimal("0.20000000")
     assert quote.refund_zen == Decimal("9.80000000")
-    assert quote.hedge_usdc == Decimal("1.76000000")
-    assert quote.total_monetization == Decimal("0.17")
+    assert quote.hedge_usdc == Decimal("0.40000000")
+    assert quote.total_monetization == Decimal("0.85")
 
 
 def test_treasury_and_settlement_breakdown_win_flow():
     engine = PricingEngine(
-        haircut_percent=Decimal("0.10"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
+        haircut_percent=Decimal("0.8"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
     )
     treasury = TreasuryManager(lp_share_percent=Decimal("0.18"))
     processor = BetProcessorZen(engine, treasury)
@@ -45,7 +45,7 @@ def test_treasury_and_settlement_breakdown_win_flow():
 
 def test_treasury_and_settlement_breakdown_loss_flow():
     engine = PricingEngine(
-        haircut_percent=Decimal("0.10"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
+        haircut_percent=Decimal("0.8"), worsen_percent=Decimal("0.03"), rake_percent=Decimal("0.02")
     )
     treasury = TreasuryManager(lp_share_percent=Decimal("0.18"))
     processor = BetProcessorZen(engine, treasury)
