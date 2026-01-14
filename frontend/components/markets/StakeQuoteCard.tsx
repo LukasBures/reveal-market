@@ -34,6 +34,22 @@ const TICKET_SIZE_ZEN = 0.1;
 const PER_BET_CAP_ZEN = TICKET_SIZE_ZEN;
 const MIN_STAKE_ZEN = TICKET_SIZE_ZEN;
 const STAKE_RANGE_ERROR = `Stake must be exactly ${TICKET_SIZE_ZEN} ZEN (fixed ticket size)`;
+
+const formatPreStakeCap = (
+  remaining: number | null | undefined,
+  stake: number | null | undefined,
+  maxCap: number | null | undefined,
+): string => {
+  if (remaining === null || remaining === undefined || Number.isNaN(remaining)) {
+    return "n/a";
+  }
+  const stakeValue = typeof stake === "number" && !Number.isNaN(stake) ? stake : 0;
+  const preStake = Math.max(0, remaining + stakeValue);
+  if (typeof maxCap === "number" && !Number.isNaN(maxCap)) {
+    return `${Math.min(preStake, maxCap).toFixed(3)} ZEN`;
+  }
+  return `${preStake.toFixed(3)} ZEN`;
+};
 const QUOTE_REFRESH_INTERVAL_MS = 10_000;
 const PREVIEW_MIN_INTERVAL_MS = QUOTE_REFRESH_INTERVAL_MS;
 const PREVIEW_RETRY_INTERVAL_MS = 1_000;
@@ -884,13 +900,17 @@ export function StakeQuoteCard({
         {quote && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
             Caps — user:{" "}
-            {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
-              ? `${formatNumber(quote.remaining_user_stake_zen, 3)} ZEN`
-              : "n/a"}
+            {formatPreStakeCap(
+              quote.remaining_user_stake_zen,
+              quote.stake_zen,
+              quote.max_user_stake_per_market_zen,
+            )}
             , market:{" "}
-            {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
-              ? `${formatNumber(quote.remaining_market_stake_zen, 3)} ZEN`
-              : "n/a"}
+            {formatPreStakeCap(
+              quote.remaining_market_stake_zen,
+              quote.stake_zen,
+              quote.max_market_stake_zen,
+            )}
           </p>
         )}
         {error && error !== "Market settled" && <p className="text-xs text-rose-300">{error}</p>}

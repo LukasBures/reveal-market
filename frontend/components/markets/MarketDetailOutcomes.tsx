@@ -35,6 +35,22 @@ const formatZen = (value: number | undefined): string => {
   return `${value.toFixed(3)} ZEN`;
 };
 
+const formatPreStakeCap = (
+  remaining: number | null | undefined,
+  stake: number | null | undefined,
+  maxCap: number | null | undefined,
+): string => {
+  if (remaining === null || remaining === undefined || Number.isNaN(remaining)) {
+    return "n/a";
+  }
+  const stakeValue = typeof stake === "number" && !Number.isNaN(stake) ? stake : 0;
+  const preStake = Math.max(0, remaining + stakeValue);
+  if (typeof maxCap === "number" && !Number.isNaN(maxCap)) {
+    return `${Math.min(preStake, maxCap).toFixed(3)} ZEN`;
+  }
+  return `${preStake.toFixed(3)} ZEN`;
+};
+
 const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : hash);
 
 export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
@@ -807,13 +823,17 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                       {quote && (
                         <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
                           Caps — user:{" "}
-                          {quote.remaining_user_stake_zen !== null && quote.remaining_user_stake_zen !== undefined
-                            ? `${quote.remaining_user_stake_zen.toFixed(3)} ZEN`
-                            : "n/a"}
+                          {formatPreStakeCap(
+                            quote.remaining_user_stake_zen,
+                            quote.stake_zen,
+                            quote.max_user_stake_per_market_zen,
+                          )}
                           , market:{" "}
-                          {quote.remaining_market_stake_zen !== null && quote.remaining_market_stake_zen !== undefined
-                            ? `${quote.remaining_market_stake_zen.toFixed(3)} ZEN`
-                            : "n/a"}
+                          {formatPreStakeCap(
+                            quote.remaining_market_stake_zen,
+                            quote.stake_zen,
+                            quote.max_market_stake_zen,
+                          )}
                           {" · "}Max stake (API):{" "}
                           {quote.max_stake_zen !== null && quote.max_stake_zen !== undefined
                             ? `${quote.max_stake_zen.toFixed(3)} ZEN`
