@@ -429,6 +429,11 @@ export function createFxWebSocket(path = FX_DEFAULT_PATH): WebSocket | null {
 
 export { FX_DEFAULT_PATH, normalizeFxPath };
 
-export async function submitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {
-  return postTradeCommit(quoteId, maxFxDiffPercent, true);
+export async function submitTrade(
+  quoteId: string,
+  walletAddress: string,
+  walletSignature: string,
+  maxFxDiffPercent?: number,
+): Promise<TradeCommitResponse> {
+  return postTradeCommit(quoteId, maxFxDiffPercent, true, "Trade failed", walletAddress, walletSignature);
 }

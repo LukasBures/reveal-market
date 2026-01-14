@@ -12,7 +12,7 @@ import {
 } from "@/lib/pricing-client";
 import { fetchPositions, fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useChainId, useConnection } from "wagmi";
+import { useChainId, useConnection, useSignMessage } from "wagmi";
 import { formatTime, normalizeTxHash } from "@/lib/formatters";
 import { defaultChain } from "@/lib/wagmi";
 
@@ -103,6 +103,7 @@ export function StakeQuoteCard({
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
   const { address } = useConnection();
+  const { mutateAsync: signMessage } = useSignMessage();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
@@ -587,7 +588,10 @@ export function StakeQuoteCard({
         setTxError("Stake changed. Refresh the quote.");
         return;
       }
-      const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id);
+      const signature = await signMessage({
+        message: `commit:${issuedQuote.quote_id}:${address.toLowerCase()}`,
+      });
+      const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id, address, signature);
       const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;
       const respHash = resp.tx_hash || null;
       if (respHash || respJob) {

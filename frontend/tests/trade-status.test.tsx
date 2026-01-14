@@ -75,6 +75,7 @@ vi.mock("@/lib/api", () => ({
 describe("Trade status polling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hooks.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
   });
 
   it("polls trade status when tx hash is present", async () => {
