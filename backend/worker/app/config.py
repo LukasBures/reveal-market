@@ -277,6 +277,21 @@ class Settings(BaseSettings):
     proof_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     proof_queue_max_concurrency: int = Field(default=2, ge=1)
     proof_queue_max_depth: int = Field(default=1000, ge=1)
+    proof_failure_base_seconds: int = Field(
+        default=120,
+        ge=30,
+        description="Base backoff for proof generation failures (seconds)",
+    )
+    proof_failure_max_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description="Max backoff for proof generation failures (seconds)",
+    )
+    proof_failure_max_attempts: int = Field(
+        default=6,
+        ge=1,
+        description="Max consecutive proof failures before extended cooldown",
+    )
     settlement_queue_key: str = Field(default="reveal_market_worker:settlement_queue")
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
@@ -296,6 +311,41 @@ class Settings(BaseSettings):
     lock_batches_gas_limit: int = Field(default=800_000, ge=100_000)
     lock_batches_gas_price_gwei: float | None = Field(default=None, ge=0)
     lock_batches_max_priority_fee_gwei: float | None = Field(default=None, ge=0)
+    lock_batches_failure_base_seconds: int = Field(
+        default=300,
+        ge=30,
+        description="Base backoff for lock-batches failures (seconds)",
+    )
+    lock_batches_failure_max_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description="Max backoff for lock-batches failures (seconds)",
+    )
+    lock_batches_failure_max_attempts: int = Field(
+        default=6,
+        ge=1,
+        description="Max consecutive lock-batches failures before extended cooldown",
+    )
+    settlement_recovery_limit: int = Field(
+        default=50,
+        ge=1,
+        description="Max markets to inspect per recovery tick",
+    )
+    settlement_recovery_failure_base_seconds: int = Field(
+        default=300,
+        ge=30,
+        description="Base backoff for settlement recovery failures (seconds)",
+    )
+    settlement_recovery_failure_max_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description="Max backoff for settlement recovery failures (seconds)",
+    )
+    settlement_recovery_failure_max_attempts: int = Field(
+        default=6,
+        ge=1,
+        description="Max consecutive settlement recovery failures before extended cooldown",
+    )
     settlement_signer_private_key: SecretStr | None = Field(
         default=None, description="Private key for the oracle account that submits settlement transactions"
     )

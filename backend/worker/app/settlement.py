@@ -32,6 +32,7 @@ from .cache_ops import invalidate_cache_tags
 from .database import session_scope
 from .merkle import build_merkle_root_and_paths
 from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER
+from .retry import clear_failure, failure_key, record_failure, should_attempt
 
 logger = runtime.logger
 
@@ -315,6 +316,13 @@ async def _upsert_settlement_from_chain(
     # Accept winning_outcome_id when chain has posted, phase >= 2, or the market is already marked final off-chain.
     # This lets us build a complete settlement snapshot as soon as the off-chain resolution is final, even if
     # the on-chain result flag has not been set yet.
+    if winning_outcome_id is None and market.condition_id:
+        try:
+            resolution = await shared_repository.get_resolution_by_condition_id(session, market.condition_id)
+            if resolution and resolution.winning_outcome_id is not None:
+                winning_outcome_id = int(resolution.winning_outcome_id)
+        except Exception:
+            winning_outcome_id = None
     if winning_outcome_id is not None and (
         result_posted
         or (phase_value is not None and phase_value >= 2)
@@ -642,6 +650,9 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                 after_id = market.id
                 if submitted >= max_submissions:
                     break
+                retry_key = failure_key("reveal_market_worker:lock_batches:fail", market.id)
+                if not await should_attempt(redis_client, retry_key):
+                    continue
             if not market.market_address:
                 continue
             use_relayer_for_market = use_relayer
@@ -657,6 +668,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     error=str(exc),
                 )
                 LOCK_BATCHES_COUNTER.labels(outcome="chain_fetch_failed").inc()
+                await record_failure(
+                    redis_client,
+                    retry_key,
+                    base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                    max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                    max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                    logger=logger,
+                    event="worker.lock_batches.retry_scheduled",
+                    message="lock-batches retry scheduled after chain fetch failure",
+                    reason="chain_fetch_failed",
+                )
                 continue
 
             phase_value = snapshot.get("phase")
@@ -688,6 +710,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                         signer=account.address,
                     )
                     LOCK_BATCHES_COUNTER.labels(outcome="oracle_mismatch").inc()
+                    await record_failure(
+                        redis_client,
+                        retry_key,
+                        base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                        max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                        max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                        logger=logger,
+                        event="worker.lock_batches.retry_scheduled",
+                        message="lock-batches retry scheduled after oracle mismatch",
+                        reason="oracle_mismatch",
+                    )
                     continue
 
             if use_relayer_for_market and relayer_address and oracle_address:
@@ -703,12 +736,34 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     )
                     LOCK_BATCHES_COUNTER.labels(outcome="relayer_mismatch").inc()
                     if account is None:
+                        await record_failure(
+                            redis_client,
+                            retry_key,
+                            base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                            max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                            max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                            logger=logger,
+                            event="worker.lock_batches.retry_scheduled",
+                            message="lock-batches retry scheduled after relayer mismatch",
+                            reason="relayer_mismatch",
+                        )
                         continue
                     use_relayer_for_market = False
 
             commitments = await shared_repository.list_commitments_by_market(session, market.id)
             if not commitments:
                 LOCK_BATCHES_COUNTER.labels(outcome="no_commitments").inc()
+                await record_failure(
+                    redis_client,
+                    retry_key,
+                    base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                    max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                    max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                    logger=logger,
+                    event="worker.lock_batches.retry_scheduled",
+                    message="lock-batches retry scheduled after missing commitments",
+                    reason="no_commitments",
+                )
                 continue
             try:
                 batch_roots, batch_counts, total_count, _merkle_root = _build_batch_roots_from_commitments(commitments)
@@ -722,6 +777,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     error=str(exc),
                 )
                 LOCK_BATCHES_COUNTER.labels(outcome="invalid_commitments").inc()
+                await record_failure(
+                    redis_client,
+                    retry_key,
+                    base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                    max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                    max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                    logger=logger,
+                    event="worker.lock_batches.retry_scheduled",
+                    message="lock-batches retry scheduled after invalid commitments",
+                    reason=str(exc),
+                )
                 continue
 
             if onchain_commitments is not None and int(onchain_commitments) != total_count:
@@ -735,6 +801,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     local=total_count,
                 )
                 LOCK_BATCHES_COUNTER.labels(outcome="commitment_mismatch").inc()
+                await record_failure(
+                    redis_client,
+                    retry_key,
+                    base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                    max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                    max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                    logger=logger,
+                    event="worker.lock_batches.retry_scheduled",
+                    message="lock-batches retry scheduled after commitment mismatch",
+                    reason="commitment_mismatch",
+                )
                 continue
             if use_relayer_for_market:
                 missing_meta = [
@@ -757,6 +834,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     )
                     LOCK_BATCHES_COUNTER.labels(outcome="missing_metadata").inc()
                     if account is None:
+                        await record_failure(
+                            redis_client,
+                            retry_key,
+                            base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                            max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                            max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                            logger=logger,
+                            event="worker.lock_batches.retry_scheduled",
+                            message="lock-batches retry scheduled after missing relayer metadata",
+                            reason="missing_metadata",
+                        )
                         continue
                     use_relayer_for_market = False
 
@@ -843,6 +931,7 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                 if getattr(market, "event_id", None):
                     summary.changed_events.add(market.event_id)
                 LOCK_BATCHES_COUNTER.labels(outcome="submitted").inc()
+                await clear_failure(redis_client, retry_key)
             except Exception as exc:  # pragma: no cover - defensive
                 log_event(
                     logger,
@@ -853,6 +942,17 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                     error=str(exc),
                 )
                 LOCK_BATCHES_COUNTER.labels(outcome="failed").inc()
+                await record_failure(
+                    redis_client,
+                    retry_key,
+                    base_seconds=runtime.settings.lock_batches_failure_base_seconds,
+                    max_seconds=runtime.settings.lock_batches_failure_max_seconds,
+                    max_attempts=runtime.settings.lock_batches_failure_max_attempts,
+                    logger=logger,
+                    event="worker.lock_batches.retry_scheduled",
+                    message="lock-batches retry scheduled after submission failure",
+                    reason=str(exc),
+                )
                 continue
             await session.flush()
     summary.lock_batches_submitted += submitted

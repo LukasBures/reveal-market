@@ -60,12 +60,13 @@ def _build_batch_payloads(
     if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
         raise SettlementDataMissingError("batch roots/counts missing")
 
-    # Build batch commitment lookup.
+    # Build batch commitment lookup, preserving explicit leaf indexes.
     by_batch: dict[int, dict[int, Commitment]] = {}
-    for idx, commitment in enumerate(commitments):
-        leaf_index = commitment.leaf_index if commitment.leaf_index is not None else idx
-        batch_index = int(leaf_index) // BATCH_SIZE
-        rel_index = int(leaf_index) % BATCH_SIZE
+    for commitment in commitments:
+        if commitment.leaf_index is None:
+            raise SettlementDataMissingError("missing leaf_index")
+        batch_index = int(commitment.leaf_index) // BATCH_SIZE
+        rel_index = int(commitment.leaf_index) % BATCH_SIZE
         by_batch.setdefault(batch_index, {})[rel_index] = commitment
 
     payloads: list[dict[str, Any]] = []
@@ -84,50 +85,45 @@ def _build_batch_payloads(
         total_liability = 0
         tickets: list[dict[str, Any]] = []
 
-        for i in range(BATCH_SIZE):
-            if i < count:
-                batch_commitment = batch_commitments.get(i)
-                if batch_commitment is None or batch_commitment.leaf is None or batch_commitment.salt is None:
-                    raise SettlementDataMissingError("missing commitment data for batch")
-                leaf_bytes = bytes.fromhex(batch_commitment.leaf.removeprefix("0x"))
-                leaves[i] = leaf_bytes
-                amount = int(batch_commitment.amount_wei)
-                payout = int(getattr(batch_commitment, "payout_wei", 0) or 0)
-                if payout <= 0:
-                    raise SettlementDataMissingError("missing payout data for batch")
-                outcome_id = int(batch_commitment.outcome_id)
-                if outcome_id == 0:
-                    pool_yes += amount
-                elif outcome_id == 1:
-                    pool_no += amount
-                if outcome_id == int(settlement.winning_outcome_id):
-                    total_liability += payout
-                fallback_ticket_id = batch_index * BATCH_SIZE + i
-                tickets.append(
-                    {
-                        "ticketId": str(
-                            batch_commitment.leaf_index
-                            if batch_commitment.leaf_index is not None
-                            else fallback_ticket_id
-                        ),
-                        "outcomeId": str(outcome_id),
-                        "amount": str(amount),
-                        "payout": str(payout),
-                        "user": str(batch_commitment.user_address or "0x0"),
-                        "salt": str(batch_commitment.salt or "0x0"),
-                    }
-                )
-            else:
-                tickets.append(
-                    {
-                        "ticketId": "0",
-                        "outcomeId": "0",
-                        "amount": "0",
-                        "payout": "0",
-                        "user": "0",
-                        "salt": "0",
-                    }
-                )
+        for i in range(count):
+            batch_commitment = batch_commitments.get(i)
+            if batch_commitment is None or batch_commitment.leaf is None or batch_commitment.salt is None:
+                raise SettlementDataMissingError("missing commitment data for batch")
+            leaf_bytes = bytes.fromhex(batch_commitment.leaf.removeprefix("0x"))
+            leaves[i] = leaf_bytes
+            amount = int(batch_commitment.amount_wei)
+            payout = int(getattr(batch_commitment, "payout_wei", 0) or 0)
+            if payout <= 0:
+                raise SettlementDataMissingError("missing payout data for batch")
+            outcome_id = int(batch_commitment.outcome_id)
+            if outcome_id == 0:
+                pool_yes += amount
+            elif outcome_id == 1:
+                pool_no += amount
+            if outcome_id == int(settlement.winning_outcome_id):
+                total_liability += payout
+            tickets.append(
+                {
+                    "ticketId": str(batch_commitment.leaf_index),
+                    "outcomeId": str(outcome_id),
+                    "amount": str(amount),
+                    "payout": str(payout),
+                    "user": str(batch_commitment.user_address or "0x0"),
+                    "salt": str(batch_commitment.salt or "0x0"),
+                }
+            )
+
+        for _ in range(BATCH_SIZE - count):
+            tickets.append(
+                {
+                    "ticketId": "0",
+                    "outcomeId": "0",
+                    "amount": "0",
+                    "payout": "0",
+                    "user": "0",
+                    "salt": "0",
+                }
+            )
 
         if any(leaf is None for leaf in leaves):
             raise SettlementDataMissingError("batch leaves incomplete")

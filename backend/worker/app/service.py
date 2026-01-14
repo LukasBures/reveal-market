@@ -38,9 +38,21 @@ from .market_sync import (
 from .metrics import LEASE_SKIP_COUNTER, POLYMARKET_FETCH_COUNTER
 from .polymarket import MarketPayload, build_filters_from_settings
 from .prime import prime_featured_views, prime_markets_cache
-from .proofs import enqueue_proof_jobs, run_proof_queue_worker, run_prover_jobs, run_settlement_queue_worker
+from .proofs import (
+    enqueue_proof_jobs,
+    enqueue_settlement_job,
+    run_proof_queue_worker,
+    run_prover_jobs,
+    run_settlement_queue_worker,
+)
+from .retry import clear_failure, failure_key, record_failure, should_attempt
 from .schema import SchemaSyncResult, ensure_schema, propagate_schema_revision
-from .settlement import run_lock_batches_jobs, run_settlement_jobs, settlement_needs_refresh
+from .settlement import (
+    _upsert_settlement_from_chain,
+    run_lock_batches_jobs,
+    run_settlement_jobs,
+    settlement_needs_refresh,
+)
 
 logger = runtime.logger
 
@@ -164,6 +176,80 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
     if not summary.proof_jobs:
         return 0
     return await enqueue_proof_jobs(redis_client, summary)
+
+
+async def _recover_settlement_state(redis_client: Redis | None) -> int:
+    """Recover settlement snapshots missing roots or winners after interruptions."""
+
+    if redis_client is None:
+        return 0
+    limit = max(runtime.settings.settlement_recovery_limit, 1)
+    recovered = 0
+    retry_prefix = "reveal_market_worker:settlement_recover:fail"
+    try:
+        async with session_scope() as session:
+            stmt = (
+                select(shared_models.Market, shared_models.Settlement)
+                .join(shared_models.Settlement, shared_models.Settlement.market_id == shared_models.Market.id)
+                .where(shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value)
+                .where(
+                    or_(
+                        shared_models.Settlement.winning_outcome_id.is_(None),
+                        shared_models.Settlement.merkle_root.is_(None),
+                        shared_models.Settlement.merkle_root
+                        == "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    )
+                )
+                .order_by(shared_models.Market.resolved_at.asc().nulls_last(), shared_models.Market.id.asc())
+                .limit(limit)
+            )
+            rows = list((await session.execute(stmt)).all())
+            if not rows:
+                return 0
+            for market, settlement in rows:
+                retry_key = failure_key(retry_prefix, market.id)
+                if not await should_attempt(redis_client, retry_key):
+                    continue
+                try:
+                    if not market.market_address or not runtime.settings.rpc_url:
+                        raise RuntimeError("missing_market_address_or_rpc")
+                    refreshed = await _upsert_settlement_from_chain(session, market, force=True)
+                    if refreshed is not None:
+                        settlement = refreshed
+                    if settlement.winning_outcome_id is None and market.condition_id:
+                        resolution = await repository_async.get_resolution_by_condition_id(session, market.condition_id)
+                        if resolution and resolution.winning_outcome_id is not None:
+                            settlement.winning_outcome_id = int(resolution.winning_outcome_id)
+                            session.add(settlement)
+                    await session.flush()
+                    if not settlement_needs_refresh(settlement):
+                        await clear_failure(redis_client, retry_key)
+                        recovered += 1
+                except Exception as exc:
+                    await record_failure(
+                        redis_client,
+                        retry_key,
+                        base_seconds=runtime.settings.settlement_recovery_failure_base_seconds,
+                        max_seconds=runtime.settings.settlement_recovery_failure_max_seconds,
+                        max_attempts=runtime.settings.settlement_recovery_failure_max_attempts,
+                        logger=logger,
+                        event="worker.settlement.recover_retry",
+                        message="settlement recovery retry scheduled after failure",
+                        reason=str(exc),
+                    )
+            if recovered:
+                summary = SyncSummary()
+                for market, _settlement in rows:
+                    if getattr(market, "event_id", None):
+                        summary.changed_events.add(market.event_id)
+                    if getattr(market, "condition_id", None):
+                        summary.changed_conditions.add(market.condition_id.lower())
+                await invalidate_cache_tags(redis_client, summary)
+        if recovered:
+            await enqueue_settlement_job(redis_client)
+    except Exception:
+        return 0
+    return recovered
 
 
 def _read_cgroup_value(path: str) -> int | None:
@@ -1425,6 +1511,25 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
                     )
                 finally:
                     await _release_maintenance_lease(redis_client)
+            if redis_client is not None:
+                try:
+                    recovered = await _recover_settlement_state(redis_client)
+                    if recovered:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.settlement.recovered",
+                            message="recovered settlement snapshots",
+                            recovered=recovered,
+                        )
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.recover_failed",
+                        message="settlement recovery run failed",
+                        error=str(exc),
+                    )
             elapsed = time.monotonic() - loop_start
             sleep_for = max(interval - elapsed, 0)
             await asyncio.sleep(sleep_for)

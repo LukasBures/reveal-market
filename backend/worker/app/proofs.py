@@ -33,6 +33,7 @@ from .metrics import (
 from .polymarket import MarketPayload
 from .proof_builder import SettlementDataMissingError, build_prover_payload_async
 from .prover_client import ProverError
+from .retry import clear_failure, failure_key, record_failure, should_attempt
 from .settlement import _upsert_settlement_from_chain, run_settlement_jobs
 
 logger = runtime.logger
@@ -355,6 +356,10 @@ async def maybe_generate_settlement_proof(
     market_event_id = market_snapshot.get("event_id")
     market_address = market_snapshot.get("market_address")
     numeric_market_id = _as_int(market_identifier)
+    retry_key = failure_key("reveal_market_worker:proof:fail", str(market_identifier))
+
+    if not await should_attempt(redis_client, retry_key):
+        return False
 
     async def _notify_status_change() -> None:
         await _invalidate_market_cache(
@@ -465,6 +470,33 @@ async def maybe_generate_settlement_proof(
                 condition_id=normalized_condition,
                 missing_fields="winner/roots/totals/circuit_hash",
             )
+            await record_failure(
+                redis_client,
+                retry_key,
+                base_seconds=runtime.settings.proof_failure_base_seconds,
+                max_seconds=runtime.settings.proof_failure_max_seconds,
+                max_attempts=runtime.settings.proof_failure_max_attempts,
+                logger=logger,
+                event="worker.proof.retry_scheduled",
+                message="proof generation retry scheduled after incomplete settlement data",
+                reason="missing_settlement_fields",
+            )
+            if numeric_market_id is not None and runtime.settings.rpc_url:
+                try:
+                    async with session_scope() as session:
+                        market_record = await session.get(shared_models.Market, numeric_market_id)
+                        if market_record and getattr(market_record, "market_address", None):
+                            await _upsert_settlement_from_chain(session, market_record, force=True)
+                            await session.flush()
+                except Exception as exc:
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.proof.chain_refresh_failed",
+                        message="failed to refresh settlement snapshot during proof retry",
+                        market_id=numeric_market_id,
+                        error=str(exc),
+                    )
             return False
     if not payloads:
         log_event(
@@ -477,6 +509,33 @@ async def maybe_generate_settlement_proof(
             condition_id=normalized_condition,
             missing_fields="payload",
         )
+        await record_failure(
+            redis_client,
+            retry_key,
+            base_seconds=runtime.settings.proof_failure_base_seconds,
+            max_seconds=runtime.settings.proof_failure_max_seconds,
+            max_attempts=runtime.settings.proof_failure_max_attempts,
+            logger=logger,
+            event="worker.proof.retry_scheduled",
+            message="proof generation retry scheduled after missing payload",
+            reason="missing_payload",
+        )
+        if numeric_market_id is not None and runtime.settings.rpc_url:
+            try:
+                async with session_scope() as session:
+                    market_record = await session.get(shared_models.Market, numeric_market_id)
+                    if market_record and getattr(market_record, "market_address", None):
+                        await _upsert_settlement_from_chain(session, market_record, force=True)
+                        await session.flush()
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.chain_refresh_failed",
+                    message="failed to refresh settlement snapshot during proof retry",
+                    market_id=numeric_market_id,
+                    error=str(exc),
+                )
         return False
     first_payload = payloads[0]
     expected_circuit = await _get_prover_circuit_hash()
@@ -517,6 +576,17 @@ async def maybe_generate_settlement_proof(
                 market_id=market_identifier,
             )
             await _notify_status_change()
+            await record_failure(
+                redis_client,
+                retry_key,
+                base_seconds=runtime.settings.proof_failure_base_seconds,
+                max_seconds=runtime.settings.proof_failure_max_seconds,
+                max_attempts=runtime.settings.proof_failure_max_attempts,
+                logger=logger,
+                event="worker.proof.retry_scheduled",
+                message="proof generation retry scheduled after circuit hash mismatch",
+                reason="circuit_hash_mismatch",
+            )
             return False
     log_event(
         logger,
@@ -563,6 +633,17 @@ async def maybe_generate_settlement_proof(
                 event_id=market_snapshot.get("event_id"),
             )
             await _notify_status_change()
+            await record_failure(
+                redis_client,
+                retry_key,
+                base_seconds=runtime.settings.proof_failure_base_seconds,
+                max_seconds=runtime.settings.proof_failure_max_seconds,
+                max_attempts=runtime.settings.proof_failure_max_attempts,
+                logger=logger,
+                event="worker.proof.retry_scheduled",
+                message="proof generation retry scheduled after prover error",
+                reason=str(exc),
+            )
             return False
 
         proof_hash = None
@@ -683,6 +764,7 @@ async def maybe_generate_settlement_proof(
         )
 
     await _notify_status_change()
+    await clear_failure(redis_client, retry_key)
     for payload, response, _proof_hash in results:
         log_event(
             logger,
