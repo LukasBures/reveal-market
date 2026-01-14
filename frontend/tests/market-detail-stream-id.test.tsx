@@ -50,6 +50,7 @@ vi.mock("wagmi", () => ({
   useConnection: () => ({ address: undefined, connector: undefined, status: "disconnected" }),
   useChainId: () => 2651420,
   useSwitchChain: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
+  useSignMessage: () => ({ mutateAsync: vi.fn().mockResolvedValue("0xsig") }),
 }));
 
 vi.mock("@/lib/wagmi", () => ({

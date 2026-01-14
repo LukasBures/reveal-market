@@ -23,6 +23,7 @@ const hooks = vi.hoisted(() => ({
   useReadContract: vi.fn(),
   useWriteContract: vi.fn(),
   usePublicClient: vi.fn(),
+  useSignMessage: vi.fn(),
 }));
 
 const pricingMocks = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ vi.mock("wagmi", async () => {
     useReadContract: hooks.useReadContract,
     useWriteContract: hooks.useWriteContract,
     usePublicClient: hooks.usePublicClient,
+    useSignMessage: hooks.useSignMessage,
   };
 });
 

@@ -20,6 +20,7 @@ let switchChainMock: SwitchChainFn;
 vi.mock("wagmi", () => ({
   useConnection: () => accountState,
   useSwitchChain: () => ({ mutate: switchChainMock, isPending: false }),
+  useSignMessage: () => ({ mutateAsync: vi.fn().mockResolvedValue("0xsig") }),
 }));
 
 vi.mock("@/lib/wagmi", () => ({

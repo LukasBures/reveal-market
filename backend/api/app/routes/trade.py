@@ -1433,14 +1433,31 @@ def _verify_wallet_signature(wallet: str, signature: str) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
 
 
+def _verify_commit_signature(wallet: str, quote_id: str, signature: str) -> None:
+    """Verify that the signature was produced by the wallet for the commit scope."""
+
+    try:
+        recovered = Account.recover_message(
+            encode_defunct(text=f"commit:{quote_id}:{wallet.lower()}"),
+            signature=signature,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid_signature:{exc}") from exc
+    if recovered.lower() != wallet.lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
+
+
 @router.post("/trade/commit", response_model=schemas.TradeCommitResponse, tags=["trade"])
 async def trade_commit(
     payload: schemas.TradeCommitRequest,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> schemas.TradeCommitResponse:
     """Consume a pricing quote, build CommitAuth, and forward to the relayer."""
 
     db_quote, quote = await _get_quote(session, payload.quote_id)
+    if not wallet_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
     # Fail fast on config/quote errors before touching on-chain state.
     now = datetime.now(tz=UTC)
     auth_signer_key = _require_auth_signer()
@@ -1536,6 +1553,7 @@ async def trade_commit(
     salt_hex = "0x" + salt_bytes.hex()
     if not quote.wallet_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+    _verify_commit_signature(quote.wallet_address, str(quote.quote_id or ""), wallet_signature)
     user_address = Web3.to_checksum_address(str(quote.wallet_address))
     rake_bps = onchain_rake_bps
     if rake_bps is None and market_record and market_record.rake_bps is not None:

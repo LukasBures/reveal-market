@@ -340,6 +340,8 @@ const postTradeCommit = async (
   maxFxDiffPercent?: number,
   includeNullFxDiff = false,
   errorLabel = "Trade failed",
+  walletAddress?: string,
+  walletSignature?: string,
 ): Promise<TradeCommitResponse> => {
   const payload: Record<string, unknown> = {
     quote_id: quoteId,
@@ -349,9 +351,13 @@ const postTradeCommit = async (
         ? { max_fx_diff_percent: maxFxDiffPercent }
         : {}),
   };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (walletAddress && walletSignature) {
+    headers["X-Wallet-Signature"] = walletSignature;
+  }
   const res = await fetch(getEndpoint("/trade/commit"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -361,8 +367,20 @@ const postTradeCommit = async (
   return (await res.json()) as TradeCommitResponse;
 };
 
-export async function commitTrade(quoteId: string, maxFxDiffPercent?: number): Promise<TradeCommitResponse> {
-  return postTradeCommit(quoteId, maxFxDiffPercent, false, "Trade commit failed");
+export async function commitTrade(
+  quoteId: string,
+  walletAddress: string,
+  walletSignature: string,
+  maxFxDiffPercent?: number,
+): Promise<TradeCommitResponse> {
+  return postTradeCommit(
+    quoteId,
+    maxFxDiffPercent,
+    false,
+    "Trade commit failed",
+    walletAddress,
+    walletSignature,
+  );
 }
 
 export function createMarketStream(marketId: string, tokenIds?: string[]): EventSource {

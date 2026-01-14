@@ -1106,15 +1106,33 @@
         "summary": "Trade Commit",
         "description": "Consume a pricing quote, build CommitAuth, and forward to the relayer.",
         "operationId": "trade_commit_trade_commit_post",
+        "parameters": [
+          {
+            "name": "X-Wallet-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TradeCommitRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {

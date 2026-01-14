@@ -33,6 +33,7 @@ vi.mock("wagmi", async () => {
     useReadContract: hooks.useReadContract,
     useWriteContract: hooks.useWriteContract,
     usePublicClient: hooks.usePublicClient,
+    useSignMessage: () => ({ mutateAsync: vi.fn().mockResolvedValue("0xsig") }),
   };
 });
 

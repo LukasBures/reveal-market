@@ -19,6 +19,7 @@ vi.mock("wagmi", () => ({
   useConnection: () => ({ address: undefined, connector: undefined, status: "disconnected" }),
   useChainId: () => 2651420,
   useSwitchChain: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }),
+  useSignMessage: () => ({ mutateAsync: vi.fn().mockResolvedValue("0xsig") }),
   useReadContract: () => ({ data: undefined, isFetching: false, refetch: vi.fn() }),
   useWriteContract: () => ({ mutateAsync: vi.fn(), error: null }),
   usePublicClient: () => undefined,

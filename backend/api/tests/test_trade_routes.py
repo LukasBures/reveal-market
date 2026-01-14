@@ -191,7 +191,15 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     assert quote_resp.status_code == 200
     quote = quote_resp.json()
 
-    commit_resp = client.post("/trade/commit", json={"quote_id": quote["quote_id"]})
+    commit_signature = Account.sign_message(
+        encode_defunct(text=f"commit:{quote['quote_id']}:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    commit_resp = client.post(
+        "/trade/commit",
+        json={"quote_id": quote["quote_id"]},
+        headers={"X-Wallet-Signature": commit_signature},
+    )
     assert commit_resp.status_code == 200
     commit_body = commit_resp.json()
     assert commit_body["tx_hash"] == tx_hash

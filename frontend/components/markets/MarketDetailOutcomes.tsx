@@ -12,7 +12,7 @@ import {
 import { useLiveOutcomePrices } from "@/hooks/useLiveOutcomePrices";
 import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { useFxStream } from "@/hooks/useFxStream";
-import { useChainId, useConnection, useSwitchChain } from "wagmi";
+import { useChainId, useConnection, useSwitchChain, useSignMessage } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
 import { formatTime, normalizeTxHash } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
@@ -90,6 +90,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const tradingHaltedByStream = liveStore.status === "closed" || liveStore.status === "halted";
   const isTradable = !isResolved && !isLocked && !tradingHaltedByStream;
   const { address, connector } = useConnection();
+  const { mutateAsync: signMessage } = useSignMessage();
   const chainId = useChainId();
   const expectedChainId = defaultChain.id;
   const chainMismatch = Boolean(chainId && chainId !== expectedChainId);
@@ -411,7 +412,10 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
         setTxError("Quote missing identifier");
         return;
       }
-      const result = await commitTrade(signedQuote.quote_id);
+      const signature = await signMessage({
+        message: `commit:${signedQuote.quote_id}:${address.toLowerCase()}`,
+      });
+      const result = await commitTrade(signedQuote.quote_id, address, signature);
       setTxHash(result.tx_hash);
       setTxConfirmed(result.status === "committed");
       setTxError(null);
