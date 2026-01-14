@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
-
 from collections.abc import Awaitable
+from typing import Any
 
 from redis.asyncio import Redis
 from shared.logging import log_event
