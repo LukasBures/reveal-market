@@ -763,8 +763,8 @@ export function DashboardClient() {
     return positions.map((p, idx) => {
       const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
       const bundle = bundleLookup.get(bundleKey);
-      const bundleReady =
-        bundle && requestedBundleKeys.has(bundleKey);
+
+
       const market = p.market_summary ?? null;
       const outcomes = market?.outcomes ?? [];
       const outcomeLabel =
@@ -1153,6 +1153,8 @@ export function DashboardClient() {
                 !hasResolution &&
                 p.status !== "claimed" &&
                 p.status !== "cancelled";
+              const bundleReady =
+                bundle && (requestedBundleKeys.has(bundleKey) || !isWinner);
               const highlightMode =
                 p.status === "cancelled"
                   ? "cancelled"

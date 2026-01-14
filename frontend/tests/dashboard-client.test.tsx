@@ -168,11 +168,25 @@ describe("DashboardClient", () => {
     expect(screen.getAllByText(/claimable/i)[0]).toBeInTheDocument();
     expect(screen.getByText(/outcome: yes/i)).toBeInTheDocument();
 
-    const claimButton = screen.getAllByRole("button").find((btn) => btn.textContent?.trim().toLowerCase() === "claim");
+    const getPaymentButton = screen
+      .getAllByRole("button")
+      .find(
+        (btn) => btn.textContent?.trim().toLowerCase() === "get payment data",
+      );
+    expect(getPaymentButton).toBeTruthy();
+    fireEvent.click(getPaymentButton!);
+
+    await waitFor(() =>
+      expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1),
+    );
+
+    const claimButton = screen
+      .getAllByRole("button")
+      .find((btn) => btn.textContent?.trim().toLowerCase() === "claim");
     expect(claimButton).toBeTruthy();
     fireEvent.click(claimButton!);
     await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
-    expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2);
-    expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(2);
+    expect(hoisted.fetchPositions).toHaveBeenCalledTimes(1);
+    expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1);
   });
 });
