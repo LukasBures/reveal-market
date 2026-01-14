@@ -82,12 +82,75 @@
             },
             "title": "Bundles",
             "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "pendingMarkets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pendingmarkets"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           }
         },
         "required": [
           "bundles"
         ],
         "title": "ClaimBundlesResponse",
+        "type": "object"
+      },
+      "ClaimStatusResponse": {
+        "properties": {
+          "pendingMarkets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pendingmarkets"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ClaimStatusResponse",
         "type": "object"
       },
       "CommitmentTicket": {
@@ -3895,6 +3958,82 @@
           }
         },
         "summary": "List Claim Bundles",
+        "tags": [
+          "trade"
+        ]
+      }
+    },
+    "/claim/status": {
+      "get": {
+        "operationId": "claim_status_claim_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wallet",
+            "required": true,
+            "schema": {
+              "title": "Wallet",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional market/event id to scope status lookup",
+            "in": "query",
+            "name": "market_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional market/event id to scope status lookup",
+              "title": "Market Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Status",
         "tags": [
           "trade"
         ]

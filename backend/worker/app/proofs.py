@@ -409,7 +409,9 @@ async def maybe_generate_settlement_proof(
                 )
             ).scalar_one_or_none()
             if settlement_row:
-                settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
+                if settlement_row.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
+                    return False
+                settlement_row.proof_status = shared_models.SettlementProofStatus.GENERATING.value
                 session.add(settlement_row)
             await session.flush()
             await _notify_status_change()
@@ -445,7 +447,9 @@ async def maybe_generate_settlement_proof(
                                 )
                             ).scalar_one_or_none()
                             if settlement_row:
-                                settlement_row.proof_status = shared_models.SettlementProofStatus.REQUESTED.value
+                                if settlement_row.proof_status == shared_models.SettlementProofStatus.GENERATED.value:
+                                    return False
+                                settlement_row.proof_status = shared_models.SettlementProofStatus.GENERATING.value
                                 session.add(settlement_row)
                             await session.flush()
                             await _notify_status_change()
@@ -788,16 +792,25 @@ async def _process_proof_job(redis_client: Redis, job: dict[str, Any]) -> None:
         try:
             market_payload = MarketPayload.model_validate(payload_dict)
         except Exception as exc:
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.proof.queue_job_invalid",
-                message="dropping invalid proof job payload",
-                job_id=job_id,
-                error=str(exc),
+            snapshot = job.get("market_snapshot") or {}
+            event_id = snapshot.get("event_id") or ""
+            if not event_id:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.proof.queue_job_invalid",
+                    message="dropping invalid proof job payload",
+                    job_id=job_id,
+                    error=str(exc),
+                )
+                await _dead_letter(redis_client, job, "invalid_payload")
+                return
+            market_payload = MarketPayload(
+                event_id=event_id,
+                title=snapshot.get("title") or "Claim proof job",
+                condition_id=snapshot.get("condition_id") or job.get("condition_id"),
+                market_address=snapshot.get("market_address"),
             )
-            await _dead_letter(redis_client, job, "invalid_payload")
-            return
         snapshot = job.get("market_snapshot") or {}
         condition = job.get("condition_id")
         await maybe_generate_settlement_proof(

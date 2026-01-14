@@ -247,7 +247,7 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
             merkle_root=merkle_root,
             commitments_count=1,
             winning_outcome_id=0,
-            proof_status=models.SettlementProofStatus.NONE.value,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
             created_at=datetime.now(tz=UTC),
         )
     )
@@ -304,7 +304,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
             merkle_root=merkle_root,
             commitments_count=1,
             winning_outcome_id=1,
-            proof_status=models.SettlementProofStatus.NONE.value,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
             created_at=datetime.now(tz=UTC),
         )
     )
@@ -318,6 +318,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["bundles"]) == 1
+    assert body.get("status") is None
     bundle = body["bundles"][0]
     assert bundle["marketId"] == market.event_id
     assert bundle["ticketId"] == 0
@@ -357,7 +358,7 @@ def test_claim_bundles_skip_claimed_commitment(client, db_session):
             merkle_root=merkle_root,
             commitments_count=1,
             winning_outcome_id=1,
-            proof_status=models.SettlementProofStatus.NONE.value,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
             created_at=datetime.now(tz=UTC),
         )
     )
@@ -369,7 +370,52 @@ def test_claim_bundles_skip_claimed_commitment(client, db_session):
     ).signature.hex()
     resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
     assert resp.status_code == 200
-    assert resp.json()["bundles"] == []
+    body = resp.json()
+    assert body["bundles"] == []
+    assert body.get("status") is None
+
+
+def test_claim_status_pending(client, db_session):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="bundle-pending", address="0x9999999999999999999999999999999999999999")
+    market.resolution_status = models.ResolutionStatusEnum.FINAL.value
+    market.resolved_at = datetime.now(tz=UTC)
+    db_session.add(market)
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            payout_wei=250,
+            salt="0xbeef",
+            ticket_hash="0x" + "99" * 32,
+            leaf="0x" + "99" * 32,
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=10,
+            market_id=market.id,
+            merkle_root=None,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.PENDING.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    signature = Account.sign_message(
+        encode_defunct(text=f"claim-bundles:{user.address.lower()}"),
+        private_key=user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/claim/status?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert market.event_id in body.get("pendingMarkets", [])
 
 
 def test_positions_marks_claimed(client, db_session):
@@ -397,7 +443,7 @@ def test_positions_marks_claimed(client, db_session):
             merkle_root="0x" + "11" * 32,
             commitments_count=1,
             winning_outcome_id=1,
-            proof_status=models.SettlementProofStatus.NONE.value,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
             created_at=datetime.now(tz=UTC),
         )
     )
@@ -436,7 +482,7 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
             merkle_root="0x" + "99" * 32,
             commitments_count=1,
             winning_outcome_id=1,
-            proof_status=models.SettlementProofStatus.NONE.value,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
             created_at=datetime.now(tz=UTC),
         )
     )

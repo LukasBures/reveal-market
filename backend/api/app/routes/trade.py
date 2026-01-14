@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import secrets
@@ -16,6 +17,7 @@ import httpx
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from shared import cache_async as shared_cache
 from shared import models
 from shared.logging import log_event
 from shared.merkle import build_merkle_path, build_merkle_root_and_paths
@@ -107,6 +109,67 @@ def _parse_json_list(value: Any) -> list[Any]:
         except Exception:
             return []
     return []
+
+
+async def _resolve_awaitable(value: Awaitable[Any] | Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _enqueue_claim_proof_jobs(
+    session: AsyncSession, pending_markets: set[str], *, wallet: str | None = None
+) -> None:
+    if not pending_markets:
+        return
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    if not wallet:
+        return
+    try:
+        rows = await repository_async.list_commitments_with_settlement(
+            session, wallet, market_filter=None, winning_only=True
+        )
+    except Exception:
+        return
+    pending_lookup = {market_id for market_id in pending_markets}
+    for _commitment, market, _settlement in rows:
+        if not market.event_id or str(market.event_id) not in pending_lookup:
+            continue
+        job_id = f"claim:{market.event_id}"
+        try:
+            added = await _resolve_awaitable(cache.sadd(settings.proof_queue_dedupe_key, job_id))
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.claim.enqueue_dedupe_failed",
+                message="failed to dedupe claim proof enqueue",
+                job_id=job_id,
+                error=str(exc),
+            )
+            continue
+        if not added:
+            continue
+        job = {
+            "job_id": job_id,
+            "market_snapshot": {"event_id": market.event_id, "market_address": market.market_address},
+            "market_payload": {"event_id": market.event_id, "market_address": market.market_address},
+            "condition_id": getattr(market, "condition_id", None),
+        }
+        try:
+            await _resolve_awaitable(cache.rpush(settings.proof_queue_key, json.dumps(job, default=str)))
+        except Exception as exc:
+            await _resolve_awaitable(cache.srem(settings.proof_queue_dedupe_key, job_id))
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.claim.enqueue_failed",
+                message="failed to enqueue claim proof job",
+                job_id=job_id,
+                error=str(exc),
+            )
 
 
 async def _fetch_claimed_tickets(market_address: str, ticket_ids: list[int]) -> dict[int, bool]:
@@ -1691,6 +1754,8 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             continue
         if settlement.winning_outcome_id != commitment.outcome_id:
             continue
+        if settlement.proof_status != models.SettlementProofStatus.GENERATED.value:
+            continue
         if not _has_valid_roots(settlement):
             continue
         claim_deadline_candidates.add(market.market_address)
@@ -1784,7 +1849,12 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
     return schemas.PositionsResponse(positions=positions, escrow_balance_wei=escrow_balance)
 
 
-@router.get("/claim/bundles", response_model=schemas.ClaimBundlesResponse, tags=["trade"])
+@router.get(
+    "/claim/bundles",
+    response_model=schemas.ClaimBundlesResponse,
+    response_model_exclude_none=True,
+    tags=["trade"],
+)
 async def list_claim_bundles(
     wallet: str,
     market_id: str | None = Query(default=None, description="Optional market/event id to scope bundle lookup"),
@@ -1799,10 +1869,35 @@ async def list_claim_bundles(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
     _verify_wallet_signature(wallet, wallet_signature)
 
+    cache_client = await get_cache_client()
+    cache_key = f"claim:bundles:{wallet.lower()}:{market_id or 'all'}"
+    cached = await shared_cache.get_json(cache_client, cache_key)
+    if isinstance(cached, dict) and "bundles" in cached:
+        try:
+            return schemas.ClaimBundlesResponse.model_validate(cached)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.claim.cache_decode_failed",
+                message="failed to decode cached claim bundles",
+                cache_key=cache_key,
+                error=str(exc),
+            )
+
     # Start with winning rows to avoid walking all commitments for large wallets.
     rows = await repository_async.list_commitments_with_settlement(
-        session, wallet, market_filter=market_id, winning_only=True
+        session, wallet, market_filter=market_id, winning_only=False
     )
+    if not rows:
+        response = schemas.ClaimBundlesResponse(bundles=[])
+        await shared_cache.set_json(
+            cache_client,
+            cache_key,
+            response.model_dump(by_alias=True),
+            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
+        )
+        return response
     # If nothing is returned and a market was specified, widen the query so we can backfill settlement data.
     base_rows = rows
     if not rows and market_id:
@@ -1811,31 +1906,29 @@ async def list_claim_bundles(
         )
     elif not rows:
         # No winners and no specific market requested.
-        return schemas.ClaimBundlesResponse(bundles=[])
+        response = schemas.ClaimBundlesResponse(bundles=[])
+        await shared_cache.set_json(
+            cache_client,
+            cache_key,
+            response.model_dump(by_alias=True),
+            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
+        )
+        return response
     else:
         base_rows = rows
 
-    needs_refresh = False
+    pending_markets: set[str] = set()
     for _commitment, market, settlement in base_rows:
-        if getattr(market, "resolution_status", None) == models.ResolutionStatusEnum.FINAL.value:
-            refreshed = await _maybe_backfill_settlement(session, market)
-            if refreshed is not None and refreshed is not settlement:
-                settlement = refreshed
-                needs_refresh = True
         if (
             getattr(market, "resolution_status", None) is not None
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
             continue
-        has_roots = _has_valid_roots(settlement)
-        if settlement is None or not has_roots or settlement.winning_outcome_id is None:
-            refreshed = await _maybe_backfill_settlement(session, market)
-            if refreshed is not None:
-                needs_refresh = True
-    if needs_refresh:
-        rows = await repository_async.list_commitments_with_settlement(
-            session, wallet, market_filter=market_id, winning_only=True
-        )
+        if settlement is None or settlement.winning_outcome_id is None or not _has_valid_roots(settlement):
+            pending_markets.add(str(market.event_id))
+            continue
+        if settlement.proof_status != models.SettlementProofStatus.GENERATED.value:
+            pending_markets.add(str(market.event_id))
     await _sync_claimed_commitments(session, rows)
     claim_deadline_candidates: set[str] = set()
     for commitment, market, settlement in rows:
@@ -1847,12 +1940,16 @@ async def list_claim_bundles(
             continue
         if settlement.winning_outcome_id != commitment.outcome_id:
             continue
+        if settlement.proof_status != models.SettlementProofStatus.GENERATED.value:
+            continue
         if not _has_valid_roots(settlement):
             continue
         claim_deadline_candidates.add(market.market_address)
     claim_deadlines = await _fetch_claim_deadlines(list(claim_deadline_candidates))
     now_ts = int(time.time())
     bundles: list[schemas.ClaimBundle] = []
+    if pending_markets:
+        await _enqueue_claim_proof_jobs(session, pending_markets, wallet=wallet)
     for commitment, market, settlement in rows:
         if commitment.claimed_at is not None:
             continue
@@ -1865,6 +1962,8 @@ async def list_claim_bundles(
             or settlement.winning_outcome_id is None
             or settlement.winning_outcome_id != commitment.outcome_id
         ):
+            continue
+        if settlement.proof_status != models.SettlementProofStatus.GENERATED.value:
             continue
         if commitment.leaf_index is None or not market.market_address:
             continue
@@ -1887,7 +1986,77 @@ async def list_claim_bundles(
                 user=commitment.user_address,
             )
         )
-    return schemas.ClaimBundlesResponse(bundles=bundles)
+    if bundles:
+        response = schemas.ClaimBundlesResponse(bundles=bundles)
+        await shared_cache.set_json(
+            cache_client,
+            cache_key,
+            response.model_dump(by_alias=True),
+            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
+        )
+        return response
+    if pending_markets:
+        response = schemas.ClaimBundlesResponse(
+            bundles=[],
+            status="pending",
+            pendingMarkets=sorted(pending_markets),
+        )
+        await shared_cache.set_json(
+            cache_client,
+            cache_key,
+            response.model_dump(by_alias=True),
+            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
+        )
+        return response
+    response = schemas.ClaimBundlesResponse(bundles=[])
+    await shared_cache.set_json(
+        cache_client,
+        cache_key,
+        response.model_dump(by_alias=True),
+        ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
+    )
+    return response
+
+
+@router.get(
+    "/claim/status",
+    response_model=schemas.ClaimStatusResponse,
+    response_model_exclude_none=True,
+    tags=["trade"],
+)
+async def claim_status(
+    wallet: str,
+    market_id: str | None = Query(default=None, description="Optional market/event id to scope status lookup"),
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    session: AsyncSession = Depends(get_session),
+) -> schemas.ClaimStatusResponse:
+    if not wallet:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+    if not wallet_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+    _verify_wallet_signature(wallet, wallet_signature)
+
+    rows = await repository_async.list_commitments_with_settlement(
+        session, wallet, market_filter=market_id, winning_only=True
+    )
+    if not rows:
+        return schemas.ClaimStatusResponse(status="ready", pendingMarkets=[])
+    pending_markets: set[str] = set()
+    for _commitment, market, settlement in rows:
+        if (
+            getattr(market, "resolution_status", None) is not None
+            and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
+        ):
+            continue
+        if settlement is None or settlement.winning_outcome_id is None or not _has_valid_roots(settlement):
+            pending_markets.add(str(market.event_id))
+            continue
+        if settlement.proof_status != models.SettlementProofStatus.GENERATED.value:
+            pending_markets.add(str(market.event_id))
+    if pending_markets:
+        await _enqueue_claim_proof_jobs(session, pending_markets, wallet=wallet)
+        return schemas.ClaimStatusResponse(status="pending", pendingMarkets=sorted(pending_markets))
+    return schemas.ClaimStatusResponse(status="ready", pendingMarkets=[])
 
 
 @router.post("/trade/claim", response_model=schemas.TradeClaimResponse, tags=["trade"])

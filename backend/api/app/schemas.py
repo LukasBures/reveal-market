@@ -510,6 +510,14 @@ class ClaimBundle(BaseModel):
 
 class ClaimBundlesResponse(BaseModel):
     bundles: list[ClaimBundle]
+    status: str | None = None
+    pending_markets: list[str] | None = Field(default=None, alias="pendingMarkets")
+    error: str | None = None
+
+
+class ClaimStatusResponse(BaseModel):
+    status: str
+    pending_markets: list[str] | None = Field(default=None, alias="pendingMarkets")
 
 
 class QuoteRecord(BaseModel):

@@ -731,7 +731,12 @@ export async function fetchPositions(
 export async function fetchClaimBundles(
   wallet: string,
   signature: string,
-): Promise<{ bundles: ClaimBundle[]; error?: string }> {
+): Promise<{
+  bundles: ClaimBundle[];
+  status?: string;
+  pendingMarkets?: string[];
+  error?: string;
+}> {
   if (maybeShortCircuitOffline("fetchClaimBundles")) {
     return { bundles: [], error: "offline" };
   }
@@ -750,10 +755,50 @@ export async function fetchClaimBundles(
     }
     const payload = await response.json();
     const bundles = Array.isArray(payload?.bundles) ? (payload.bundles as ClaimBundle[]) : [];
-    return { bundles };
+    return {
+      bundles,
+      status: payload?.status,
+      pendingMarkets: Array.isArray(payload?.pendingMarkets)
+        ? (payload.pendingMarkets as string[])
+        : undefined,
+      error: payload?.error,
+    };
   } catch (error) {
     logOfflineAwareError("fetchClaimBundles", error);
     return { bundles: [], error: (error as Error).message };
+  }
+}
+
+export async function fetchClaimStatus(
+  wallet: string,
+  signature: string,
+): Promise<{ status: string; pendingMarkets?: string[]; error?: string }> {
+  if (maybeShortCircuitOffline("fetchClaimStatus")) {
+    return { status: "pending", error: "offline" };
+  }
+  const url = new URL(`${DEFAULT_API_BASE}/claim/status`);
+  url.searchParams.set("wallet", wallet);
+  try {
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: { "X-Wallet-Signature": signature },
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      const errorMessage = `Failed to fetch claim status (${response.status}): ${detail}`;
+      logger.error("fetchClaimStatus:failed", { status: response.status, endpoint: url.toString() });
+      return { status: "pending", error: errorMessage };
+    }
+    const payload = await response.json();
+    return {
+      status: payload?.status ?? "pending",
+      pendingMarkets: Array.isArray(payload?.pendingMarkets)
+        ? (payload.pendingMarkets as string[])
+        : undefined,
+    };
+  } catch (error) {
+    logOfflineAwareError("fetchClaimStatus", error);
+    return { status: "pending", error: (error as Error).message };
   }
 }
 

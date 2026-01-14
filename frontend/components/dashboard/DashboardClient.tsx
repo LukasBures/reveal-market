@@ -18,7 +18,7 @@ import {
 } from "wagmi";
 import type { Address, Hex } from "viem";
 import { erc20Abi, maxUint256 } from "viem";
-import { fetchPositions, fetchClaimBundles } from "@/lib/api";
+import { fetchPositions, fetchClaimBundles, fetchClaimStatus } from "@/lib/api";
 import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
@@ -420,6 +420,7 @@ export function DashboardClient() {
         setBundleError(null);
         setClaimMessage(null);
         setClaimTxHash(null);
+        setClaimMessage("Preparing...");
         const message = `claim-bundles:${wallet.toLowerCase()}`;
         const signature =
           bundleSignature && bundleSignature.length > 0
@@ -431,6 +432,9 @@ export function DashboardClient() {
         const res = await fetchClaimBundles(wallet, signature);
         const bundles = res.bundles || [];
         setClaimBundles(bundles);
+        if (res.status === "pending") {
+          setClaimMessage("Preparing...");
+        }
         if (res.error) {
           setBundleError(sanitizeUserActionError(res.error));
         }
@@ -601,12 +605,29 @@ export function DashboardClient() {
     setClaimTxHash(null);
     let bundle = bundleLookup.get(key);
     if (!bundle) {
-      setClaimMessage("Loading claim data for this ticket...");
+      setClaimMessage("Preparing...");
       setBundlesRequested(true);
       const bundles = await fetchBundlesWithUi(address);
       bundle = bundles.find((b) => `${b.marketId}:${b.ticketId}` === key);
     }
     if (!bundle) {
+      try {
+        const message = `claim-bundles:${address.toLowerCase()}`;
+        const signature =
+          bundleSignature && bundleSignature.length > 0
+            ? bundleSignature
+            : await signMessage({ message });
+        if (!bundleSignature) {
+          setBundleSignature(signature);
+        }
+        const status = await fetchClaimStatus(address, signature);
+        if (status.status === "pending") {
+          setClaimMessage("Preparing...");
+          return;
+        }
+      } catch {
+        // Fall through to default message below.
+      }
       setClaimMessage(
         "Claim data not available yet. Click “Load payout data” first."
       );

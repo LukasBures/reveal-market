@@ -143,6 +143,7 @@ class Settings(BaseSettings):
     cache_hydrate_page_size: int = Field(default=30, ge=1, le=250)
     cache_connect_retries: int = Field(default=3, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
+    claim_bundles_cache_ttl_seconds: int = Field(default=45, ge=5, description="Cache TTL for claim bundle responses")
     rate_limit_enabled: bool = Field(default=False)
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
@@ -210,6 +211,14 @@ class Settings(BaseSettings):
     )
     relayer_webhook_secret: str | None = Field(
         default=None, description="Shared secret for relayer/prover ingestion hooks"
+    )
+    proof_queue_key: str = Field(
+        default="reveal_market_worker:proof_queue",
+        description="Redis list key for proof generation jobs",
+    )
+    proof_queue_dedupe_key: str = Field(
+        default="reveal_market_worker:proof_queue_dedupe",
+        description="Redis set key for proof queue dedupe",
     )
     ticket_size_wei: int = Field(
         default=100_000_000_000_000_000, ge=1, description="Fixed ticket size (wei) used for commitWithAuthorization"

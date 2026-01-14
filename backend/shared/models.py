@@ -384,6 +384,8 @@ class CommitmentMerklePath(Base):
 
 class SettlementProofStatus(str, Enum):
     NONE = "none"
+    PENDING = "pending"
+    GENERATING = "generating"
     REQUESTED = "requested"
     GENERATED = "generated"
     FAILED = "failed"
@@ -401,7 +403,7 @@ class Settlement(Base):
     __tablename__ = "settlements"
     __table_args__ = (
         CheckConstraint(
-            "proof_status IN ('none','requested','generated','failed')",
+            "proof_status IN ('none','pending','generating','requested','generated','failed')",
             name="ck_settlements_proof_status",
         ),
         CheckConstraint(
