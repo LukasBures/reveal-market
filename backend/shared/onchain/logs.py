@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, cast
 
 from eth_utils import event_abi_to_log_topic
 from eth_utils.abi import ABIEvent
-from typing import cast
 from web3 import Web3
 from web3._utils.events import get_event_data
 
@@ -34,6 +34,7 @@ _EVENT_TOPIC_MAP.update(_build_event_topic_map(REVEAL_MARKET_ABI))
 _EVENT_TOPIC_MAP.update(_build_event_topic_map(RELAYER_ESCROW_ABI))
 _EVENT_TOPIC_MAP.update(_build_event_topic_map(ERC20_ABI))
 _EVENT_TOPIC_MAP.update(_build_event_topic_map(PROTOCOL_POOL_ABI))
+_LOGGER = logging.getLogger(__name__)
 
 
 def decode_known_logs(web3: Web3, receipt: Any) -> list[dict[str, Any]]:
@@ -57,6 +58,7 @@ def decode_known_logs(web3: Web3, receipt: Any) -> list[dict[str, Any]]:
                     "transactionHash": decoded_event.get("transactionHash"),
                 }
             )
-        except Exception:
+        except Exception as exc:
+            _LOGGER.debug("Failed to decode log", exc_info=exc)
             continue
     return decoded
