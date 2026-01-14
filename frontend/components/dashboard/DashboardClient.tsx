@@ -1264,7 +1264,7 @@ export function DashboardClient() {
                             ) : (
                               <button
                                 type="button"
-                                className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed"
+                                className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
                                 disabled={
                                   chainMismatch ||
                                   preparingBundles.has(bundleKey)
