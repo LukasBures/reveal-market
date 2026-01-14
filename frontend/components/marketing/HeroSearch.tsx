@@ -10,6 +10,8 @@ import { MarketArtwork } from "@/components/markets/MarketArtwork";
 const SUGGESTION_CACHE = new Map<string, { data: MarketSummary[]; expiresAt: number }>();
 const CACHE_LIMIT = 50;
 const CACHE_TTL_MS = 60_000;
+const SUGGEST_TIMEOUT_MS = 8000;
+const SUGGEST_RETRY_DELAY_MS = 400;
 
 type Props = {
   initialSearch?: string;
@@ -52,18 +54,29 @@ export function HeroSearch({ initialSearch = "" }: Props) {
       try {
         setLoadingSuggestions(true);
         const params = new URLSearchParams({ limit: "5", q: trimmed });
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch(`/api/markets/suggest?${params.toString()}`, {
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        });
-        clearTimeout(timeoutId);
-        if (!res.ok) {
-          setLoadingSuggestions(false);
-          return;
+        const fetchSuggestions = async () => {
+          const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
+          try {
+            const res = await fetch(`/api/markets/suggest?${params.toString()}`, {
+              signal: controller.signal,
+              headers: { Accept: "application/json" },
+            });
+            if (!res.ok) {
+              return [];
+            }
+            const payload = await res.json();
+            return Array.isArray(payload) ? payload.map(mapApiMarketToSummary) : [];
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        };
+        let mapped = await fetchSuggestions();
+        if (mapped.length === 0 && !controller.signal.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, SUGGEST_RETRY_DELAY_MS));
+          if (!controller.signal.aborted) {
+            mapped = await fetchSuggestions();
+          }
         }
-        const payload = await res.json();
-        const mapped = Array.isArray(payload) ? payload.map(mapApiMarketToSummary) : [];
         SUGGESTION_CACHE.set(cacheKey, { data: mapped, expiresAt: Date.now() + CACHE_TTL_MS });
         if (SUGGESTION_CACHE.size > CACHE_LIMIT) {
           const keys = Array.from(SUGGESTION_CACHE.keys());
