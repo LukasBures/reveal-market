@@ -280,7 +280,6 @@ export function DashboardClient() {
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
-  const [requestedBundleKeys, setRequestedBundleKeys] = useState<Set<string>>(() => new Set());
   const [preparingBundles, setPreparingBundles] = useState<Set<string>>(
     () => new Set()
   );
@@ -525,7 +524,6 @@ export function DashboardClient() {
       setPositions([]);
       setClaimBundles([]);
       setBundleSignature(null);
-      setRequestedBundleKeys(new Set());
       setPreparingBundles(new Set());
       setClaimMessage(null);
       setClaimTxHash(null);
@@ -713,11 +711,6 @@ export function DashboardClient() {
             : position
         )
       );
-      setRequestedBundleKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
@@ -1262,8 +1255,7 @@ export function DashboardClient() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                           {p.status === "settled" && p.claimable ? (
-                            bundle &&
-                            (requestedBundleKeys.has(bundleKey) || !isWinner) ? (
+                            bundle ? (
                               <button
                                 type="button"
                                 className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
