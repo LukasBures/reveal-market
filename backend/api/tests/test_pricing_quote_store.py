@@ -43,7 +43,7 @@ def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     _mock_fx(monkeypatch, price=1.5)
     _mock_streamer_price(monkeypatch, price=0.5)
     settings.max_stake_zen = 0.1
-    settings.haircut_percent = 0.8
+    settings.haircut_percent = 0.12
     settings.pricing_edge_percent = 0.05
     settings.ticket_size_wei = int(Decimal("1e17"))
     import app.runtime as runtime

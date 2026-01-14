@@ -98,7 +98,7 @@ def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
 
     async def _fx_quote(*_args, **_kwargs):
@@ -140,7 +140,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(
         settings, "authorization_signer_private_key", SecretStr(auth_signer._private_key.hex()), raising=False

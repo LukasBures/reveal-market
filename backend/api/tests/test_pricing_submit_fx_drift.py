@@ -22,7 +22,7 @@ async def test_pricing_submit_rejects_fx_drift(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
@@ -66,7 +66,7 @@ async def test_pricing_submit_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 

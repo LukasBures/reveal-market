@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     gas_price_gwei: float | None = Field(default=None, ge=0)
     max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25)
-    haircut_percent: float = Field(default=0.8, ge=0.6, lt=1)
+    haircut_percent: float = Field(default=0.12, ge=0, lt=1)
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     commit_cutoff_seconds: int = Field(default=300, ge=0)

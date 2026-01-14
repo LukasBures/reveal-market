@@ -115,7 +115,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
@@ -161,7 +161,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 100, raising=False)
     monkeypatch.setattr(settings, "max_market_stake_zen", 1000, raising=False)
@@ -209,7 +209,7 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr("app.server.settings", settings, raising=False)
     now_ts = datetime.now(tz=UTC)
@@ -243,7 +243,7 @@ def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     market = models.Market(
         event_id="pending-market",
@@ -283,7 +283,7 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "commit_cutoff_seconds", 300, raising=False)
     market = models.Market(
@@ -325,7 +325,7 @@ def test_pricing_quote_rejects_missing_price(client, monkeypatch):
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
-    monkeypatch.setattr(settings, "haircut_percent", 0.8, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
     monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
 
