@@ -16,9 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE settlements DROP CONSTRAINT IF EXISTS ck_settlements_proof_status"
-    )
+    op.execute("ALTER TABLE settlements DROP CONSTRAINT IF EXISTS ck_settlements_proof_status")
     op.execute(
         "ALTER TABLE settlements ADD CONSTRAINT ck_settlements_proof_status "
         "CHECK (proof_status IN ('none','pending','generating','requested','generated','failed'))"
@@ -26,9 +24,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "ALTER TABLE settlements DROP CONSTRAINT IF EXISTS ck_settlements_proof_status"
-    )
+    op.execute("ALTER TABLE settlements DROP CONSTRAINT IF EXISTS ck_settlements_proof_status")
     op.execute(
         "ALTER TABLE settlements ADD CONSTRAINT ck_settlements_proof_status "
         "CHECK (proof_status IN ('none','requested','generated','failed'))"

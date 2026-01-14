@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     cache_hydrate_page_size: int = Field(default=30, ge=1, le=250)
     cache_connect_retries: int = Field(default=3, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
-    claim_bundles_cache_ttl_seconds: int = Field(default=45, ge=5, description="Cache TTL for claim bundle responses")
+    claim_bundles_cache_ttl_seconds: int = Field(default=300, ge=5, description="Cache TTL for claim bundle responses")
     rate_limit_enabled: bool = Field(default=False)
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
