@@ -279,19 +279,16 @@ export function DashboardClient() {
   const [claimTxHash, setClaimTxHash] = useState<string | null>(null);
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
-  const [bundlesRequested, setBundlesRequested] = useState(false);
-  const [bundlesLoading, setBundlesLoading] = useState(false);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
+  const [preparingBundles, setPreparingBundles] = useState<Set<string>>(
+    () => new Set()
+  );
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "settled" | "claimable"
   >("all");
   const [sortBy, setSortBy] = useState<"recent" | "stake" | "closes">("recent");
   const [searchQuery, setSearchQuery] = useState("");
-  const {
-    claimTicket,
-    isPending: claimPending,
-    error: claimError,
-  } = useClaimTicket();
+  const { claimTicket, error: claimError } = useClaimTicket();
   const { mutateAsync: writeContract } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
   const { mutateAsync: signMessage } = useSignMessage();
@@ -363,11 +360,6 @@ export function DashboardClient() {
     : hasEscrowAllowance
     ? "Deposit to escrow"
     : "Approve and deposit to escrow";
-  const triggerBundleLoad = () => {
-    if (!address) return;
-    setBundlesRequested(true);
-    void fetchBundlesWithUi(address);
-  };
 
   const sanitizeError = (err: unknown): string => {
     const raw = err instanceof Error ? err.message : String(err);
@@ -414,58 +406,6 @@ export function DashboardClient() {
       }
     },
     []
-  );
-
-  const loadBundles = useMemo(
-    () => async (wallet: string) => {
-      try {
-        setBundleError(null);
-        setClaimMessage(null);
-        setClaimTxHash(null);
-        setClaimMessage("Preparing...");
-        const message = `claim-bundles:${wallet.toLowerCase()}`;
-        const signature =
-          bundleSignature && bundleSignature.length > 0
-            ? bundleSignature
-            : await signMessage({ message });
-        if (!bundleSignature) {
-          setBundleSignature(signature);
-        }
-        const res = await fetchClaimBundles(wallet, signature);
-        const bundles = res.bundles || [];
-        setClaimBundles(bundles);
-        if (res.status === "pending") {
-          setClaimMessage("Preparing...");
-        }
-        if (res.error) {
-          setBundleError(sanitizeUserActionError(res.error));
-        }
-        if (!res.error && bundles.length === 0) {
-          setClaimMessage(
-            "No new payouts to load yet. Check again after markets settle."
-          );
-        }
-        return bundles;
-      } catch (err) {
-        setBundleError(
-          sanitizeUserActionError(err) || "Failed to load claim bundles"
-        );
-        return [];
-      }
-    },
-    [bundleSignature, sanitizeUserActionError, signMessage]
-  );
-
-  const fetchBundlesWithUi = useMemo(
-    () => async (wallet: string) => {
-      setBundlesLoading(true);
-      try {
-        return await loadBundles(wallet);
-      } finally {
-        setBundlesLoading(false);
-      }
-    },
-    [loadBundles]
   );
 
   const bundleLookup = useMemo(() => {
@@ -526,9 +466,6 @@ export function DashboardClient() {
       await refetchEscrowAllowance();
       await refetchOnchainEscrow();
       await load(address);
-      if (bundlesRequested) {
-        await fetchBundlesWithUi(address);
-      }
     } catch (err) {
       setEscrowError(sanitizeError(err));
     }
@@ -577,9 +514,6 @@ export function DashboardClient() {
       await refetchEscrowAllowance();
       await refetchOnchainEscrow();
       await load(address);
-      if (bundlesRequested) {
-        await fetchBundlesWithUi(address);
-      }
     } catch (err) {
       setEscrowError(sanitizeError(err));
     }
@@ -590,7 +524,7 @@ export function DashboardClient() {
       setPositions([]);
       setClaimBundles([]);
       setBundleSignature(null);
-      setBundlesRequested(false);
+      setPreparingBundles(new Set());
       setClaimMessage(null);
       setClaimTxHash(null);
       setEscrowStatus(null);
@@ -602,38 +536,64 @@ export function DashboardClient() {
     });
   }, [address, load]);
 
+  const ensureBundleSignature = async () => {
+    if (!address) return null;
+    const message = `claim-bundles:${address.toLowerCase()}`;
+    const signature =
+      bundleSignature && bundleSignature.length > 0
+        ? bundleSignature
+        : await signMessage({ message });
+    if (!bundleSignature) {
+      setBundleSignature(signature);
+    }
+    return signature;
+  };
+
+  const handlePrepareBundle = async (marketId: string, ticketId?: number | null) => {
+    if (!address) return;
+    const key = `${marketId}:${ticketId ?? "na"}`;
+    setPreparingBundles((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    try {
+      const signature = await ensureBundleSignature();
+      if (!signature) return;
+      const res = await fetchClaimBundles(address, signature);
+      if (res.status === "pending") {
+        setClaimMessage("Preparing...");
+        return;
+      }
+      if (res.error) {
+        setBundleError(sanitizeUserActionError(res.error));
+        setClaimMessage(sanitizeUserActionError(res.error));
+        return;
+      }
+      if (Array.isArray(res.bundles)) {
+        setClaimBundles(res.bundles);
+        setClaimMessage(null);
+      }
+    } catch (err) {
+      const message = sanitizeUserActionError(err) || "Failed to load claim bundles";
+      setBundleError(message);
+      setClaimMessage(message);
+    } finally {
+      setPreparingBundles((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
     setClaimTxHash(null);
     let bundle = bundleLookup.get(key);
     if (!bundle) {
-      setClaimMessage("Preparing...");
-      setBundlesRequested(true);
-      const bundles = await fetchBundlesWithUi(address);
-      bundle = bundles.find((b) => `${b.marketId}:${b.ticketId}` === key);
-    }
-    if (!bundle) {
-      try {
-        const message = `claim-bundles:${address.toLowerCase()}`;
-        const signature =
-          bundleSignature && bundleSignature.length > 0
-            ? bundleSignature
-            : await signMessage({ message });
-        if (!bundleSignature) {
-          setBundleSignature(signature);
-        }
-        const status = await fetchClaimStatus(address, signature);
-        if (status.status === "pending") {
-          setClaimMessage("Preparing...");
-          return;
-        }
-      } catch {
-        // Fall through to default message below.
-      }
-      setClaimMessage(
-        "Claim data not available yet. Click “Load payout data” first."
-      );
+      setClaimMessage("Payment data not loaded for this market.");
       return;
     }
     if (!bundle.marketAddress) {
@@ -699,7 +659,7 @@ export function DashboardClient() {
       next.add(key);
       return next;
     });
-    setClaimMessage("Preparing claim transaction...");
+    setClaimMessage(null);
     try {
       let gasLimit = MIN_CLAIM_GAS;
       if (publicClient) {
@@ -725,6 +685,7 @@ export function DashboardClient() {
           gasLimit = MIN_CLAIM_GAS;
         }
       }
+      setClaimMessage("Claiming...");
       const txHash = await claimTicket({
         marketAddress: bundle.marketAddress as Address,
         user: bundle.user as Address,
@@ -737,9 +698,11 @@ export function DashboardClient() {
         gasLimit,
       });
       setClaimMessage("Claim sent");
+      setClaimBundles((prev) =>
+        prev.filter((b) => `${b.marketId}:${b.ticketId}` !== key)
+      );
       setClaimTxHash(txHash as string);
       await load(address);
-      await fetchBundlesWithUi(address);
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
@@ -1227,7 +1190,7 @@ export function DashboardClient() {
                               {toWinZen !== null
                                 ? `${toWinZen.toFixed(3)} ZEN`
                                 : p.claimable
-                                ? "Load payout"
+                                ? "Get payment data"
                                 : "—"}
                             </p>
                             {p.claimable && toWinZen === null ? (
@@ -1282,27 +1245,39 @@ export function DashboardClient() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                           {p.status === "settled" && p.claimable ? (
-                            <button
-                              type="button"
-                              className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
-                              disabled={
-                                chainMismatch ||
-                                bundlesLoading ||
-                                claimingTickets.has(bundleKey)
-                              }
-                              onClick={() =>
-                                handleClaim(p.market_id, p.ticket_id)
-                              }
-                            >
-                              {claimingTickets.has(bundleKey)
-                                ? "Claiming..."
-                                : "Claim"}
-                            </button>
-                          ) : null}
-                          {!bundle && p.claimable ? (
-                            <span className="text-amber-300">
-                              Claim data not available yet.
-                            </span>
+                            bundle ? (
+                              <button
+                                type="button"
+                                className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
+                                disabled={
+                                  chainMismatch ||
+                                  claimingTickets.has(bundleKey)
+                                }
+                                onClick={() =>
+                                  handleClaim(p.market_id, p.ticket_id)
+                                }
+                              >
+                                {claimingTickets.has(bundleKey)
+                                  ? "Claiming..."
+                                  : "Claim"}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed"
+                                disabled={
+                                  chainMismatch ||
+                                  preparingBundles.has(bundleKey)
+                                }
+                                onClick={() =>
+                                  handlePrepareBundle(p.market_id, p.ticket_id)
+                                }
+                              >
+                                {preparingBundles.has(bundleKey)
+                                  ? "Preparing..."
+                                  : "Get payment data"}
+                              </button>
+                            )
                           ) : null}
                           <Link
                             className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
