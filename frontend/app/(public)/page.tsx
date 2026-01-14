@@ -68,7 +68,12 @@ export default async function HomePage({ searchParams }: PageProps) {
       <Hero stats={callouts} />
       <div className="mt-10">
         <Suspense fallback={<FeaturedMarketsSkeleton />}>
-          <FeaturedMarketsSection searchQuery={effectiveSearchQuery} emptyNotice={searchNotice} />
+          <FeaturedMarketsSection
+            searchQuery={effectiveSearchQuery}
+            emptyNotice={searchNotice}
+            status={effectiveSearchQuery ? "any" : "active"}
+            onlyActive={!effectiveSearchQuery}
+          />
         </Suspense>
       </div>
     </div>

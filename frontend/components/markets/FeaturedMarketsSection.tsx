@@ -14,6 +14,8 @@ type Props = {
   categoryFilter?: string;
   emptyNotice?: string;
   sortBy?: MarketSortOption;
+  status?: string;
+  onlyActive?: boolean;
 };
 
 export async function FeaturedMarketsSection({
@@ -23,12 +25,14 @@ export async function FeaturedMarketsSection({
   categoryFilter,
   emptyNotice,
   sortBy = "totalVolume",
+  status = "active",
+  onlyActive = true,
 }: Props = {}) {
   const orderBy = "volume";
   const initialMarkets = await fetchFeaturedMarkets(pageSize, {
     searchQuery,
     category: categoryFilter,
-    status: "active",
+    status,
     trending: false,
     coalesceGroups: false,
     orderBy,
@@ -58,8 +62,8 @@ export async function FeaturedMarketsSection({
       searchQuery={searchQuery}
       categoryFilter={categoryFilter}
       emptyNotice={emptyNotice}
-      status="active"
-      onlyActive
+      status={status}
+      onlyActive={onlyActive}
       trending={false}
       sortBy={sortBy}
     />
