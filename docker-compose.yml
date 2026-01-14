@@ -165,7 +165,7 @@ services:
       - "prometheus.port=8000"
       - "prometheus.path=/metrics"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -H \"Host: ${RM_HEALTHCHECK_HOST:-localhost}\" http://127.0.0.1:8000/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -H \"Host: ${RM_HEALTHCHECK_HOST:-localhost}\" http://127.0.0.1:8000/live || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

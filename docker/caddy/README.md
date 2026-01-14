@@ -50,7 +50,8 @@ flowchart LR
 ## Reverse-proxy health checks
 
 - Frontend upstream uses `health_uri /` with short timeouts and `max_fails=2`.
-- API and streamer upstreams use `health_uri /healthz` with `Host` overrides (`api.revealmarket.xyz` and `stream.revealmarket.xyz`).
+- API upstream uses `health_uri /live` (cheap liveness) with `Host` override (`api.revealmarket.xyz`).
+- Streamer upstream uses `health_uri /healthz` with `Host` override (`stream.revealmarket.xyz`).
 
 ## Artifact hosting
 

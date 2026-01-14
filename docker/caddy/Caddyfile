@@ -74,7 +74,7 @@
 
 (proxy_api) {
   reverse_proxy api:8000 {
-    health_uri /healthz
+    health_uri /live
     health_headers {
       Host api.revealmarket.xyz
     }

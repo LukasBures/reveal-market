@@ -95,7 +95,7 @@ COPY --chown=appuser:appuser contracts/cache /contracts/cache
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://localhost:8000/healthz || exit 1
+  CMD curl -fsS http://localhost:8000/live || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "run.py"]
