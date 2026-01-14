@@ -280,6 +280,7 @@ export function DashboardClient() {
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
+  const [requestedBundleKeys, setRequestedBundleKeys] = useState<Set<string>>(() => new Set());
   const [preparingBundles, setPreparingBundles] = useState<Set<string>>(
     () => new Set()
   );
@@ -524,6 +525,7 @@ export function DashboardClient() {
       setPositions([]);
       setClaimBundles([]);
       setBundleSignature(null);
+      setRequestedBundleKeys(new Set());
       setPreparingBundles(new Set());
       setClaimMessage(null);
       setClaimTxHash(null);
@@ -562,12 +564,10 @@ export function DashboardClient() {
       if (!signature) return;
       const res = await fetchClaimBundles(address, signature);
       if (res.status === "pending") {
-        setClaimMessage("Preparing...");
         return;
       }
       if (res.error) {
         setBundleError(sanitizeUserActionError(res.error));
-        setClaimMessage(sanitizeUserActionError(res.error));
         return;
       }
       if (Array.isArray(res.bundles)) {
@@ -577,7 +577,6 @@ export function DashboardClient() {
     } catch (err) {
       const message = sanitizeUserActionError(err) || "Failed to load claim bundles";
       setBundleError(message);
-      setClaimMessage(message);
     } finally {
       setPreparingBundles((prev) => {
         const next = new Set(prev);
@@ -702,7 +701,23 @@ export function DashboardClient() {
         prev.filter((b) => `${b.marketId}:${b.ticketId}` !== key)
       );
       setClaimTxHash(txHash as string);
-      await load(address);
+      setPositions((prev) =>
+        prev.map((position) =>
+          `${position.market_id}:${position.ticket_id ?? "na"}` === key
+            ? {
+                ...position,
+                status: "claimed",
+                claimable: false,
+                tx_hash: txHash as string,
+              }
+            : position
+        )
+      );
+      setRequestedBundleKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
@@ -748,6 +763,8 @@ export function DashboardClient() {
     return positions.map((p, idx) => {
       const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
       const bundle = bundleLookup.get(bundleKey);
+      const bundleReady =
+        bundle && requestedBundleKeys.has(bundleKey);
       const market = p.market_summary ?? null;
       const outcomes = market?.outcomes ?? [];
       const outcomeLabel =
@@ -1245,7 +1262,7 @@ export function DashboardClient() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                           {p.status === "settled" && p.claimable ? (
-                            bundle ? (
+                            bundleReady ? (
                               <button
                                 type="button"
                                 className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
