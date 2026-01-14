@@ -711,6 +711,7 @@ export function DashboardClient() {
             : position
         )
       );
+      await refetchTokenBalance();
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
