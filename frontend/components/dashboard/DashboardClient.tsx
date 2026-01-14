@@ -272,7 +272,9 @@ export function DashboardClient() {
   const [escrowBalance, setEscrowBalance] = useState<string | number | null>(
     null
   );
-  const [claimingTicket, setClaimingTicket] = useState<string | null>(null);
+  const [claimingTickets, setClaimingTickets] = useState<Set<string>>(
+    () => new Set()
+  );
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
   const [claimTxHash, setClaimTxHash] = useState<string | null>(null);
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
@@ -592,6 +594,7 @@ export function DashboardClient() {
       setClaimMessage(null);
       setClaimTxHash(null);
       setEscrowStatus(null);
+      setClaimingTickets(new Set());
       return;
     }
     startTransition(() => {
@@ -691,7 +694,11 @@ export function DashboardClient() {
       );
       return;
     }
-    setClaimingTicket(key);
+    setClaimingTickets((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
     setClaimMessage("Preparing claim transaction...");
     try {
       let gasLimit = MIN_CLAIM_GAS;
@@ -736,7 +743,11 @@ export function DashboardClient() {
     } catch (err) {
       setClaimMessage(err instanceof Error ? err.message : "Claim failed");
     } finally {
-      setClaimingTicket(null);
+      setClaimingTickets((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -1275,16 +1286,15 @@ export function DashboardClient() {
                               type="button"
                               className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
                               disabled={
-                                Boolean(claimingTicket) ||
-                                claimPending ||
                                 chainMismatch ||
-                                bundlesLoading
+                                bundlesLoading ||
+                                claimingTickets.has(bundleKey)
                               }
                               onClick={() =>
                                 handleClaim(p.market_id, p.ticket_id)
                               }
                             >
-                              {claimingTicket === bundleKey || claimPending
+                              {claimingTickets.has(bundleKey)
                                 ? "Claiming..."
                                 : "Claim"}
                             </button>
