@@ -20,7 +20,8 @@ from shared import models
 from shared.logging import log_event
 from shared.merkle import build_merkle_path, build_merkle_root_and_paths
 from shared.onchain import OnChainConfigurationError, get_async_web3, load_account, to_checksum
-from shared.onchain.abi import ERC20_ABI, MARKET_FACTORY_ABI, PROTOCOL_POOL_ABI, REVEAL_MARKET_ABI
+from shared.onchain.abi import ERC20_ABI, MARKET_FACTORY_ABI, PROTOCOL_POOL_ABI, RELAYER_ESCROW_ABI, REVEAL_MARKET_ABI
+from shared.onchain.logs import decode_known_logs
 from shared.poseidon import BATCH_SIZE, compute_leaf, int_to_bytes32, int_to_hex32, poseidon_t3
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,15 +36,6 @@ from app.runtime import settings as runtime_settings
 from app.services.cache_client import get_cache_client
 
 COMMITTED_EVENT_SIG = Web3.keccak(text="Committed(uint256,bytes32,uint256)").hex()
-ESCROW_ABI = [
-    {
-        "name": "balances",
-        "type": "function",
-        "stateMutability": "view",
-        "inputs": [{"name": "", "type": "address"}],
-        "outputs": [{"name": "", "type": "uint256"}],
-    }
-]
 _RESERVE_TICKET_LUA = """
 local key = KEYS[1]
 local base = tonumber(ARGV[1])
@@ -303,7 +295,7 @@ async def _fetch_escrow_balance(wallet_address: str) -> int | None:
         return None
     try:
         web3 = get_async_web3(str(settings.rpc_url))
-        escrow = web3.eth.contract(address=to_checksum(settings.relayer_escrow_address), abi=ESCROW_ABI)
+        escrow = web3.eth.contract(address=to_checksum(settings.relayer_escrow_address), abi=RELAYER_ESCROW_ABI)
         balance = await escrow.functions.balances(Web3.to_checksum_address(wallet_address)).call()
         return int(balance)
     except Exception:
@@ -1001,11 +993,21 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "market_create_failed", "message": str(exc)},
         ) from exc
-    logs = factory.events.MarketCreated().process_receipt(receipt)
-    if not logs:
+    decoded_logs = decode_known_logs(web3, receipt)
+    factory_checksum = to_checksum(settings.factory_address)
+    market_created = next(
+        (
+            entry
+            for entry in decoded_logs
+            if entry.get("event") == "MarketCreated"
+            and str(entry.get("address", "")).lower() == factory_checksum.lower()
+        ),
+        None,
+    )
+    if not market_created:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="market_create_failed")
-    market_address = logs[0]["args"]["market"]
-    market_id = logs[0]["args"]["marketId"]
+    market_address = market_created["args"]["market"]
+    market_id = market_created["args"]["marketId"]
     # Persist address + onchain id.
     market_obj.market_address = market_address
     market_obj.onchain_market_id = int(market_id)
