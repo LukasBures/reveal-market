@@ -63,7 +63,7 @@ class Settings(BaseSettings):
         description="Per-commit stake limit in ZEN",
     )
     rake_percent: Decimal = Field(default=Decimal("0.02"), ge=Decimal("0"), lt=Decimal("0.25"))
-    haircut_percent: Decimal = Field(default=Decimal("0.12"), ge=Decimal("0"), lt=Decimal("1"))
+    haircut_percent: Decimal = Field(default=Decimal("0.12"), ge=Decimal("0"), lt=Decimal("0.25"))
     worsen_percent: Decimal = Field(default=Decimal("0.03"), ge=Decimal("0"), lt=Decimal("0.25"))
     lp_share_percent: Decimal = Field(default=Decimal("0.18"), ge=Decimal("0"), lt=Decimal("0.5"))
     vault_rpc_url: str | None = Field(default="http://localhost:8545")

@@ -236,8 +236,8 @@ export function MainNav({ initialHasAccess = false, gateEnabled = false }: MainN
       </div>
       {isMobileMenuOpen ? (
         <>
-          <div className="md:hidden">
-            <div className="mx-4 mb-4 rounded-2xl border border-white/10 bg-black/80 p-4 text-sm text-white/80">
+          <div className="relative z-50 md:hidden">
+            <div className="mx-4 mb-4 rounded-2xl border border-white/10 bg-slate-950/90 p-4 text-sm text-white/90 shadow-[0_18px_40px_rgba(2,6,40,0.45)]">
               <nav className="flex flex-col gap-3">
                 <Link
                   href="/search"

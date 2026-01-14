@@ -170,10 +170,10 @@ export function PublicNav() {
       </div>
       {isMobileMenuOpen ? (
         <>
-          <div className="md:hidden">
+          <div className="relative z-40 md:hidden">
             <nav
               id="public-mobile-nav"
-              className="mx-4 mb-4 rounded-2xl border border-white/10 bg-black/80 p-4 text-sm text-white/80"
+              className="mx-4 mb-4 rounded-2xl border border-white/10 bg-slate-950/90 p-4 text-sm text-white/90 shadow-[0_18px_40px_rgba(2,6,40,0.45)]"
             >
               <div className="flex flex-col gap-3">
                 {navLinks.map((link, index) => (

@@ -6,7 +6,7 @@ from .types import PricingQuote
 
 MAX_PERCENT = Decimal("0.25")
 MIN_HAIRCUT_PERCENT = Decimal("0")
-MAX_HAIRCUT_PERCENT = Decimal("1")
+MAX_HAIRCUT_PERCENT = Decimal("0.25")
 
 
 class PricingEngine:
