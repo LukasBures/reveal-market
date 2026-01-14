@@ -35,7 +35,7 @@ const formatZen = (value: number | undefined): string => {
   return `${value.toFixed(3)} ZEN`;
 };
 
-const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash);
+const shortenHash = (hash: string) => (hash.length > 16 ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : hash);
 
 export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
   const outcomes = market.outcomes ?? [];
@@ -245,7 +245,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
       const remainingMs = expiresTs - Date.now();
       if (remainingMs <= 0) {
         setQuoteCountdown("Expired");
-        setError("Quote expired. Refreshing…");
+        setError("Quote expired. Refreshing...");
         if (quoteRefreshTimer.current) {
           clearTimeout(quoteRefreshTimer.current);
           quoteRefreshTimer.current = null;
@@ -711,7 +711,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                         )}
                         <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
                           Chain {chainId ?? "unknown"} / Quote {quote?.chain_id ?? "—"} / Signer{" "}
-                          {quote?.signer ? `${quote.signer.slice(0, 6)}…${quote.signer.slice(-4)}` : "n/a"}
+                          {quote?.signer ? `${quote.signer.slice(0, 6)}...${quote.signer.slice(-4)}` : "n/a"}
                         </span>
                         {quote?.chain_id && chainId && Number(quote.chain_id) !== chainId && (
                           <span className="rounded-full bg-rose-500/20 px-2 py-1 text-rose-100">
@@ -777,7 +777,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                               : "bg-emerald-500 text-white hover:bg-emerald-400"
                           }`}
                         >
-                          {txLoading || txPending ? "Submitting…" : "Commit with quote"}
+                          {txLoading || txPending ? "Submitting..." : "Commit with quote"}
                         </button>
                         {txHash && (
                           <span className="text-[11px] text-emerald-200">
@@ -837,7 +837,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                           Switch to {defaultChain.name} (chain {expectedChainId}) to trade.
                         </p>
                       )}
-                      {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote…</p>}
+                      {loading && <p className="mt-2 text-xs text-slate-400">Calculating quote...</p>}
                       {missingZenToken && (
                         <p className="mt-1 text-xs text-rose-200">
                           ZEN token address missing. Ensure NEXT_PUBLIC_ZEN_TOKEN_ADDRESS is set before building the app.

@@ -11,7 +11,7 @@ const ProofsClient = dynamic(
   {
     loading: () => (
       <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-center text-slate-300">
-        Loading proof receipts…
+        Loading proof receipts...
       </div>
     ),
   },

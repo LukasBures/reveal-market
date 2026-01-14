@@ -101,7 +101,7 @@ function formatAddress(address?: string | null) {
   if (!address) {
     return "";
   }
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 export function ConnectWalletButton() {
@@ -331,7 +331,7 @@ export function ConnectWalletButton() {
 
   const buttonLabel = (() => {
     if (isConnecting) {
-      return "Connecting…";
+      return "Connecting...";
     }
     if (isConnected && address) {
       return formatAddress(address);
@@ -492,7 +492,7 @@ export function ConnectWalletButton() {
                     onClick={() => handleConnect(connectorsById[selectedOption.connectorId], selectedOption)}
                     className="w-full rounded-2xl bg-brand-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isConnecting ? "Connecting…" : `Connect with ${selectedOption.label}`}
+                    {isConnecting ? "Connecting..." : `Connect with ${selectedOption.label}`}
                   </button>
                 </div>
               ) : null}
@@ -513,7 +513,7 @@ export function ConnectWalletButton() {
                           disabled={!switchChain || isSwitching}
                           className="rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {isSwitching ? "Switching…" : `Switch to ${defaultChain.name}`}
+                          {isSwitching ? "Switching..." : `Switch to ${defaultChain.name}`}
                         </button>
                         <span className="text-[11px] text-amber-50/70">
                           If this fails, switch inside your wallet (WalletConnect, MetaMask, Coinbase, injected) then retry.

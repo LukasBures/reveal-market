@@ -82,7 +82,7 @@ const selectMarketCopy = (market: MarketDetail): string => {
 };
 
 const clampDescription = (copy: string, maxLength = MARKET_DESCRIPTION_MAX_LENGTH): string =>
-  copy.length > maxLength ? `${copy.slice(0, maxLength - 1).trim()}…` : copy;
+  copy.length > maxLength ? `${copy.slice(0, maxLength - 1).trim()}...` : copy;
 
 const resolveMarketImage = (market: MarketDetail): string | undefined => {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as

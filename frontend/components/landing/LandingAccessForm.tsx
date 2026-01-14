@@ -53,7 +53,7 @@ export function LandingAccessForm() {
             </p>
           ) : state?.success ? (
             <p className="text-sm text-emerald-300" role="status">
-              Access granted. Loading the app…
+              Access granted. Loading the app...
             </p>
           ) : null}
           <SubmitButton />

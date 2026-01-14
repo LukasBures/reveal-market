@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from . import models
 
@@ -385,8 +386,10 @@ async def list_commitments_with_settlement(
     the commitment outcome (settlement is required in that case).
     """
 
-    stmt = select(models.Commitment, models.Market, models.Settlement).join(
-        models.Market, models.Market.id == models.Commitment.market_id
+    stmt = (
+        select(models.Commitment, models.Market, models.Settlement)
+        .join(models.Market, models.Market.id == models.Commitment.market_id)
+        .options(selectinload(models.Market.outcomes_rel))
     )
     if winning_only:
         stmt = stmt.join(models.Settlement, models.Settlement.market_id == models.Commitment.market_id)

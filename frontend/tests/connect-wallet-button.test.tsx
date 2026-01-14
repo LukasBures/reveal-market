@@ -133,9 +133,9 @@ describe("ConnectWalletButton", () => {
 
     render(<ConnectWalletButton />);
 
-    expect(screen.getByRole("button", { name: /0x1234…5678/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /0x1234...5678/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /0x1234…5678/i }));
+    fireEvent.click(screen.getByRole("button", { name: /0x1234...5678/i }));
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
     expect(currentDisconnectState.mutate).toHaveBeenCalledTimes(1);
 

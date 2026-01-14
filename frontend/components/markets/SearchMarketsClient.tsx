@@ -349,7 +349,7 @@ export function SearchMarketsClient({
             disabled={isPending}
             className="rounded-2xl bg-brand-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isPending ? "Searching…" : "Search"}
+            {isPending ? "Searching..." : "Search"}
           </button>
         </form>
         {error ? <p className="mt-2 text-sm text-rose-300">{error}</p> : null}

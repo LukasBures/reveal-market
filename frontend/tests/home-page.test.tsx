@@ -28,7 +28,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
   FeaturedMarketsSection: () => <div data-testid="featured">Featured Markets</div>,
-  FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading…</div>,
+  FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading...</div>,
 }));
 
 describe("HomePage", () => {

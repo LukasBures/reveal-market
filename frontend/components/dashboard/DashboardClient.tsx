@@ -18,16 +18,8 @@ import {
 } from "wagmi";
 import type { Address, Hex } from "viem";
 import { erc20Abi, maxUint256 } from "viem";
-import {
-  fetchPositions,
-  fetchClaimBundles,
-  fetchMarketByEventId,
-} from "@/lib/api";
-import type {
-  ClaimBundle,
-  MarketDetail,
-  PositionRecord,
-} from "@/lib/api-types";
+import { fetchPositions, fetchClaimBundles } from "@/lib/api";
+import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { formatDateTime, normalizeTxHash } from "@/lib/formatters";
@@ -72,7 +64,7 @@ const normalizePositionStatus = (
 const shortenHash = (hash: string) => {
   const normalized = normalizeTxHash(hash) ?? hash;
   return normalized.length > 16
-    ? `${normalized.slice(0, 10)}…${normalized.slice(-6)}`
+    ? `${normalized.slice(0, 10)}...${normalized.slice(-6)}`
     : normalized;
 };
 const MIN_CLAIM_GAS = 5_000_000n;
@@ -155,7 +147,7 @@ function PositionStatusFlow({
   const trimmedReason = resolutionReason?.trim();
   const clippedReason =
     trimmedReason && trimmedReason.length > 80
-      ? `${trimmedReason.slice(0, 77)}…`
+      ? `${trimmedReason.slice(0, 77)}...`
       : trimmedReason;
 
   return (
@@ -275,6 +267,7 @@ export function DashboardClient() {
   const chainMismatch = Boolean(chainId && chainId !== defaultChain.id);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [loading, startTransition] = useTransition();
+  const [positionsLoading, setPositionsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [escrowBalance, setEscrowBalance] = useState<string | number | null>(
     null
@@ -287,9 +280,6 @@ export function DashboardClient() {
   const [bundlesRequested, setBundlesRequested] = useState(false);
   const [bundlesLoading, setBundlesLoading] = useState(false);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
-  const [marketDetails, setMarketDetails] = useState<Map<string, MarketDetail>>(
-    new Map()
-  );
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "settled" | "claimable"
   >("all");
@@ -407,6 +397,7 @@ export function DashboardClient() {
 
   const load = useMemo(
     () => async (wallet: string) => {
+      setPositionsLoading(true);
       try {
         setError(null);
         const res = await fetchPositions(wallet);
@@ -416,6 +407,8 @@ export function DashboardClient() {
         setError(
           err instanceof Error ? err.message : "Failed to load positions"
         );
+      } finally {
+        setPositionsLoading(false);
       }
     },
     []
@@ -592,7 +585,6 @@ export function DashboardClient() {
       setClaimBundles([]);
       setBundleSignature(null);
       setBundlesRequested(false);
-      setMarketDetails(new Map());
       setClaimMessage(null);
       setClaimTxHash(null);
       setEscrowStatus(null);
@@ -603,46 +595,13 @@ export function DashboardClient() {
     });
   }, [address, load]);
 
-  useEffect(() => {
-    if (!positions.length) return;
-    const knownIds = new Set(marketDetails.keys());
-    const missing = positions
-      .map((p) => p.market_id)
-      .filter((id) => id && !knownIds.has(id));
-    if (missing.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const fetched = await Promise.all(
-        missing.map(async (id) => {
-          try {
-            const detail = await fetchMarketByEventId(id);
-            return [id, detail] as const;
-          } catch {
-            return [id, null] as const;
-          }
-        })
-      );
-      if (cancelled) return;
-      setMarketDetails((prev) => {
-        const next = new Map(prev);
-        fetched.forEach(([id, detail]) => {
-          if (detail) next.set(id, detail);
-        });
-        return next;
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [positions, marketDetails]);
-
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
     setClaimTxHash(null);
     let bundle = bundleLookup.get(key);
     if (!bundle) {
-      setClaimMessage("Loading claim data for this ticket…");
+      setClaimMessage("Loading claim data for this ticket...");
       setBundlesRequested(true);
       const bundles = await fetchBundlesWithUi(address);
       bundle = bundles.find((b) => `${b.marketId}:${b.ticketId}` === key);
@@ -712,7 +671,7 @@ export function DashboardClient() {
       return;
     }
     setClaimingTicket(key);
-    setClaimMessage("Preparing claim transaction…");
+    setClaimMessage("Preparing claim transaction...");
     try {
       let gasLimit = MIN_CLAIM_GAS;
       if (publicClient) {
@@ -794,7 +753,7 @@ export function DashboardClient() {
     return positions.map((p, idx) => {
       const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
       const bundle = bundleLookup.get(bundleKey);
-      const market = marketDetails.get(p.market_id);
+      const market = p.market_summary ?? null;
       const outcomes = market?.outcomes ?? [];
       const outcomeLabel =
         p.outcome_label ?? outcomes[p.outcome_id] ?? `Outcome ${p.outcome_id}`;
@@ -835,8 +794,8 @@ export function DashboardClient() {
         toWinWei = 0n;
       }
       const price =
-        market && Array.isArray(market.outcomePrices)
-          ? market.outcomePrices[p.outcome_id]
+        market && Array.isArray(market.outcome_prices)
+          ? market.outcome_prices[p.outcome_id]
           : null;
       const toWinZen =
         toWinWei !== null
@@ -862,7 +821,7 @@ export function DashboardClient() {
         closesAtTs,
       };
     });
-  }, [bundleLookup, marketDetails, normalizeWei, positions]);
+  }, [bundleLookup, normalizeWei, positions]);
   const filteredPositions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return derivedPositions
@@ -873,7 +832,7 @@ export function DashboardClient() {
           return false;
         if (statusFilter === "claimable" && !position.claimable) return false;
         if (query.length === 0) return true;
-        const market = marketDetails.get(position.market_id);
+        const market = position.market_summary ?? null;
         const candidateTitle =
           position.market_title ??
           market?.title ??
@@ -891,7 +850,7 @@ export function DashboardClient() {
         }
         return b.createdAtTs - a.createdAtTs;
       });
-  }, [derivedPositions, searchQuery, sortBy, statusFilter, marketDetails]);
+  }, [derivedPositions, searchQuery, sortBy, statusFilter]);
   const totalStakeZen = filteredPositions.reduce(
     (acc, { position }) =>
       acc + (Number.isFinite(position.stake_zen) ? position.stake_zen : 0),
@@ -1053,9 +1012,9 @@ export function DashboardClient() {
         <div className="rounded-3xl border border-rose-400/30 bg-rose-500/10 p-6 text-rose-100">
           {error}
         </div>
-      ) : loading ? (
+      ) : positionsLoading || loading ? (
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
-          Loading positions…
+          Loading positions...
         </div>
       ) : positions.length === 0 ? (
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
@@ -1285,7 +1244,7 @@ export function DashboardClient() {
                               ? `${p.merkle_root.slice(
                                   0,
                                   8
-                                )}…${p.merkle_root.slice(-6)}`
+                                )}...${p.merkle_root.slice(-6)}`
                               : "—"}
                           </span>
                         </div>
@@ -1305,7 +1264,7 @@ export function DashboardClient() {
                               }
                             >
                               {claimingTicket === bundleKey || claimPending
-                                ? "Claiming…"
+                                ? "Claiming..."
                                 : "Claim"}
                             </button>
                           ) : null}

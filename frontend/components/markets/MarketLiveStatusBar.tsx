@@ -96,7 +96,7 @@ export function MarketLiveStatusBar({ marketId, tokenIds = [] }: Props) {
       const transport = stream.transport ? stream.transport.toUpperCase() : "LIVE";
       return { label: `Live (${transport})`, className: "bg-emerald-500/15 text-emerald-100 border border-emerald-400/30" };
     }
-    return { label: "Reconnecting…", className: "bg-amber-500/15 text-amber-100 border border-amber-400/30" };
+    return { label: "Reconnecting...", className: "bg-amber-500/15 text-amber-100 border border-amber-400/30" };
   }, [stream.connected, stream.error, stream.transport]);
 
   const tradeCount = stream.trades?.length ?? 0;

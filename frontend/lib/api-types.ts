@@ -156,6 +156,11 @@ export type PositionRecord = {
   commits_blocked_at?: string | null;
   potential_payout_zen?: number | null;
   potential_payout_wei?: number | string | null;
+  market_summary?: {
+    title?: string | null;
+    outcomes?: string[] | null;
+    outcome_prices?: number[] | null;
+  } | null;
 };
 
 export type ClaimBundle = {

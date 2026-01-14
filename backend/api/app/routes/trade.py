@@ -1742,6 +1742,14 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
         if claimed:
             status = "claimed"
             claimable = False
+        outcomes_rel = getattr(market, "outcomes_rel", []) or []
+        outcome_labels = [outcome.label for outcome in outcomes_rel]
+        outcome_prices = [float(outcome.price) if outcome.price is not None else None for outcome in outcomes_rel]
+        market_summary = schemas.PositionMarketSummary(
+            title=market.title,
+            outcomes=outcome_labels or None,
+            outcome_prices=outcome_prices or None,
+        )
         positions.append(
             schemas.PositionRecord(
                 market_id=market.event_id,
@@ -1769,6 +1777,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 resolution_status=getattr(market, "resolution_status", None),
                 resolution_reason=getattr(market, "resolution_reason", None),
                 commits_blocked_at=getattr(market, "commits_blocked_at", None),
+                market_summary=market_summary,
             )
         )
     escrow_balance = await _fetch_escrow_balance(wallet)

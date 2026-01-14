@@ -408,6 +408,13 @@ class PositionRecord(BaseModel):
     resolution_status: str | None = None
     resolution_reason: str | None = None
     commits_blocked_at: datetime | None = None
+    market_summary: PositionMarketSummary | None = None
+
+
+class PositionMarketSummary(BaseModel):
+    title: str | None = None
+    outcomes: list[str] | None = None
+    outcome_prices: list[float | None] | None = None
 
 
 class PositionsResponse(BaseModel):

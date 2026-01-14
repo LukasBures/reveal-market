@@ -20,7 +20,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
       ? stream.transport === "ws"
         ? "Live (WS)"
         : "Live (SSE)"
-      : "Reconnecting…";
+      : "Reconnecting...";
   const statusClass = stream.error
     ? "bg-rose-500/20 text-rose-200 border border-rose-500/30"
     : stream.connected
@@ -128,7 +128,7 @@ export function MarketLivePanels({ marketId, tokenIds = [] }: Props) {
       <div className="rounded-2xl border border-white/5 bg-slate-950/70 p-3">
         <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
           <span>Recent trades</span>
-          <span className="text-slate-400">{trades.length ? "" : "Waiting…"}</span>
+          <span className="text-slate-400">{trades.length ? "" : "Waiting..."}</span>
         </div>
         <div className="mt-2 flex max-h-52 flex-col gap-1 overflow-y-auto">
           {trades.map((trade, idx) => (

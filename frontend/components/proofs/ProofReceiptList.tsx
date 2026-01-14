@@ -246,7 +246,7 @@ function shorten(value?: string | null, visible = 6): string {
   if (value.length <= visible * 2) {
     return value;
   }
-  return `${value.slice(0, visible)}…${value.slice(-visible)}`;
+  return `${value.slice(0, visible)}...${value.slice(-visible)}`;
 }
 
 type TruncatedValueProps = {

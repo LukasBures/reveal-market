@@ -72,7 +72,7 @@ const shortenHash = (hash?: string | null): string | null => {
   const trimmed = hash.trim();
   if (!trimmed) return null;
   if (trimmed.length <= 16) return trimmed;
-  return `${trimmed.slice(0, 10)}…${trimmed.slice(-6)}`;
+  return `${trimmed.slice(0, 10)}...${trimmed.slice(-6)}`;
 };
 
 export function StakeQuoteCard({
@@ -478,17 +478,17 @@ export function StakeQuoteCard({
   const txHashIsHex = Boolean(normalizedTxHash);
   const txHashDisplay = normalizedTxHash ?? (typeof txHash === "string" ? txHash.trim() : "");
   const ctaLabel = txLoading
-    ? "Submitting…"
+    ? "Submitting..."
     : `Buy ${outcomeLabel}${stakeDisplay ? ` with ${stakeDisplay}` : ""}`;
   const txStatusLabel =
     txLoading
-      ? "Committing…"
+      ? "Committing..."
       : txStatus === "failed"
         ? "Commit failed"
         : txConfirmed || txStatus === "confirmed"
           ? "Committed"
           : txStatus === "pending" || relayerJobId
-            ? "Confirming…"
+            ? "Confirming..."
             : null;
   const shortQuoteId = shortenHash(quote?.quote_id ?? null);
 
@@ -576,7 +576,7 @@ export function StakeQuoteCard({
       }
       const issuedExpiry = getQuoteExpiryMs(issuedQuote);
       if (!issuedExpiry || issuedExpiry <= Date.now()) {
-        setTxError("Quote expired. Refreshing…");
+        setTxError("Quote expired. Refreshing...");
         setRefreshNonce((prev) => prev + 1);
         return;
       }
@@ -606,7 +606,7 @@ export function StakeQuoteCard({
       const message = err instanceof Error ? err.message : "Trade failed";
       const normalized = message.toLowerCase();
       if (normalized.includes("expired")) {
-        setTxError("Quote expired. Refreshing…");
+        setTxError("Quote expired. Refreshing...");
         setRefreshNonce((prev) => prev + 1);
       } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
         setTxError("Quote already consumed. Requesting a new one.");
@@ -932,7 +932,7 @@ export function StakeQuoteCard({
         )}
         {relayerJobId && !txHashIsHex && (
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
-            Waiting for the relayer to return the commit transaction hash…
+            Waiting for the relayer to return the commit transaction hash...
           </p>
         )}
         {txHashIsHex && txHash && (
@@ -945,10 +945,10 @@ export function StakeQuoteCard({
                 rel="noreferrer"
                 className="underline decoration-dotted"
               >
-                {txHashDisplay.slice(0, 10)}…{txHashDisplay.slice(-6)}
+                {txHashDisplay.slice(0, 10)}...{txHashDisplay.slice(-6)}
               </a>
             ) : (
-              `${txHashDisplay.slice(0, 10)}…${txHashDisplay.slice(-6)}`
+              `${txHashDisplay.slice(0, 10)}...${txHashDisplay.slice(-6)}`
             )}{" "}
             ({txStatus ?? "pending"})
           </p>

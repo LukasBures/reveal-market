@@ -48,7 +48,7 @@ export function PriceBanner({
                 disabled={!switchChain || isSwitching}
                 className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isSwitching ? "Switching…" : `Switch to ${defaultChain.name}`}
+                {isSwitching ? "Switching..." : `Switch to ${defaultChain.name}`}
               </button>
             </>
           ) : (

@@ -167,7 +167,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
         disabled={isPending}
         className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-50 sm:right-4 sm:px-5 sm:tracking-[0.35em]"
       >
-        {isPending ? "…" : "Search"}
+        {isPending ? "..." : "Search"}
       </button>
       {suggestionsVisible && (
         <div
@@ -175,7 +175,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
           role="listbox"
           aria-live="polite"
         >
-          {loadingSuggestions && <p className="px-4 py-3 text-sm text-slate-400">Searching…</p>}
+          {loadingSuggestions && <p className="px-4 py-3 text-sm text-slate-400">Searching...</p>}
           {!loadingSuggestions && suggestions.length === 0 && (
             <p className="px-4 py-3 text-sm text-slate-400">No matches yet</p>
           )}
