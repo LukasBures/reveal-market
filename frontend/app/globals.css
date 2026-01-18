@@ -25,6 +25,8 @@ html {
 
 body {
   min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
   width: 100%;
   background-color: var(--background);
   color: var(--foreground);
@@ -57,6 +59,9 @@ body::before {
     radial-gradient(circle at 55% 78%, rgba(2, 12, 76, 0.55), transparent 55%),
     linear-gradient(150deg, #010314 10%, #040c2c 40%, #020c4c 75%, #050e26 100%);
   opacity: 0.95;
+  background-attachment: fixed;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 body::after {
@@ -75,6 +80,9 @@ body::after {
   opacity: 0.25;
   mix-blend-mode: screen;
   pointer-events: none;
+  background-attachment: fixed;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 @media (max-width: 640px) {

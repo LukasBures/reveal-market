@@ -584,7 +584,7 @@ class RelayerService:
 
     async def health(self) -> dict[str, Any]:
         issues: list[str] = []
-        rpc_timeout = 2.0
+        rpc_timeout = 5.0
 
         async def _call(label: str, func, *args):
             start = time.perf_counter()

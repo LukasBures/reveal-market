@@ -131,6 +131,8 @@ export function ConnectWalletButton() {
   const activeConnectorId = activeConnector?.id;
   const connectErrorMessage = formatErrorMessage(connectError);
   const chainMismatch = isConnected && chain?.id !== defaultChain.id;
+  const [lastConnectedAddress, setLastConnectedAddress] = useState<string | null>(null);
+  const [lastConnectedChainName, setLastConnectedChainName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -177,6 +179,19 @@ export function ConnectWalletButton() {
         });
     }
   }, [attemptedAutoSwitch, chain, isConnected, switchChain, switchChainAsync, switchError]);
+
+  useEffect(() => {
+    if (isConnected && address) {
+      setLastConnectedAddress(address);
+    }
+    if (isConnected && chain?.name) {
+      setLastConnectedChainName(chain.name);
+    }
+    if (accountStatus === "disconnected") {
+      setLastConnectedAddress(null);
+      setLastConnectedChainName(null);
+    }
+  }, [accountStatus, address, chain?.name, isConnected]);
 
   const connectorsById = useMemo<ConnectorMap>(() => {
     return connectors.reduce<ConnectorMap>((acc, connector) => {
@@ -329,12 +344,14 @@ export function ConnectWalletButton() {
     }
   }, [autoCloseOnConnect, closeModal, connectStatus, isModalOpen]);
 
+  const displayAddress = address ?? lastConnectedAddress;
+  const displayChainName = chain?.name ?? lastConnectedChainName;
   const buttonLabel = (() => {
-    if (isConnecting) {
+    if (isConnecting && !displayAddress) {
       return "Connecting...";
     }
-    if (isConnected && address) {
-      return formatAddress(address);
+    if (displayAddress) {
+      return formatAddress(displayAddress);
     }
     return "Connect Wallet";
   })();
@@ -560,9 +577,9 @@ export function ConnectWalletButton() {
         className="inline-flex items-center gap-3 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/40 transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300"
       >
         {buttonLabel}
-        {isConnected && chain ? (
+        {displayAddress && displayChainName ? (
           <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] uppercase tracking-[0.3em] text-white/80">
-            {chain.name}
+            {displayChainName}
           </span>
         ) : null}
       </button>

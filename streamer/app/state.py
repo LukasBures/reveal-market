@@ -242,19 +242,7 @@ class StreamState:
         if self.metrics:
             # Reset staleness gauge to fresh on publish.
             self.metrics.market_staleness.labels(market_id=market_id).set(0)
-        history_key = f"{self.settings.history_prefix}:{market_id}:{outcome}"
-        record_history = True
-        if self.settings.history_debounce_seconds > 0:
-            last_ts = self._history_last_ts.get(history_key)
-            if last_ts and (now - last_ts).total_seconds() < self.settings.history_debounce_seconds:
-                record_history = False
-            else:
-                self._history_last_ts[history_key] = now
-        if record_history:
-            await self.redis.lpush(history_key, json.dumps(mapping))
-            await self.redis.ltrim(history_key, 0, self.settings.history_limit - 1)
-            if self.settings.history_ttl_seconds > 0:
-                await self.redis.expire(history_key, self.settings.history_ttl_seconds)
+        # History is no longer stored in Redis; charts pull from CLOB /prices-history instead.
 
     async def subscribe(self, market_id: str):
         if not self.redis:

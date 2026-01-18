@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     )
     market_stale_seconds: int = Field(default=60, ge=10, description="Threshold to consider market data stale")
     market_stale_evict_seconds: int = Field(
-        default=900, ge=60, description="Evict markets from staleness tracking after this many seconds"
+        default=300, ge=60, description="Evict markets from staleness tracking after this many seconds"
     )
     market_stale_log_interval_seconds: int = Field(
         default=300, ge=0, description="Minimum seconds between stale-market warnings when count is unchanged"
@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     )
     max_subscriptions: int = Field(default=200, ge=1, description="Maximum tracked upstream subscriptions")
     cache_prefix: str = Field(default="streamer:latest", description="Redis key prefix for latest ticks")
-    cache_ttl_seconds: int = Field(default=3600, ge=0, description="TTL for latest tick hashes (0 disables)")
+    cache_ttl_seconds: int = Field(default=600, ge=0, description="TTL for latest tick hashes (0 disables)")
     pubsub_prefix: str = Field(default="streamer:stream", description="Redis pubsub channel prefix for streams")
     history_prefix: str = Field(default="streamer:history", description="Redis key prefix for tick history")
     history_limit: int = Field(default=500, ge=10, description="Max history entries per outcome")
