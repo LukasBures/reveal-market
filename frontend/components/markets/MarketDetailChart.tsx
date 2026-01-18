@@ -10,11 +10,24 @@ type Props = {
   marketId: string;
   tokenIds?: string[];
   outcomePrices?: number[];
+  outcomes?: string[];
+  initialOutcome?: number;
 };
 
-export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] }: Props) {
+export function MarketDetailChart({
+  marketId,
+  tokenIds = [],
+  outcomePrices = [],
+  outcomes = [],
+  initialOutcome = 0,
+}: Props) {
   const [range, setRange] = useState<PriceHistoryRange>("24H");
-  const selectedOutcome = 0;
+  const [selectedOutcome, setSelectedOutcome] = useState(0);
+  useEffect(() => {
+    if (typeof initialOutcome === "number" && Number.isFinite(initialOutcome)) {
+      setSelectedOutcome(Math.max(0, Math.min(initialOutcome, Math.max(outcomes.length - 1, 0))));
+    }
+  }, [initialOutcome, outcomes.length]);
   const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds, range);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -90,6 +103,20 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
       ? ((latestPrice - firstPrice) / firstPrice) * 100
       : null;
 
+  const chartPadding = { top: 6, right: 6, bottom: 14, left: 10 };
+  const chartBox = useMemo(() => {
+    const width = 100 - chartPadding.left - chartPadding.right;
+    const height = 100 - chartPadding.top - chartPadding.bottom;
+    return {
+      left: chartPadding.left,
+      right: 100 - chartPadding.right,
+      top: chartPadding.top,
+      bottom: 100 - chartPadding.bottom,
+      width,
+      height,
+    };
+  }, []);
+
   const { pathData, areaData, minY, maxY, normalizedPoints } = useMemo(() => {
     if (filteredHistory.length < 2) {
       return {
@@ -97,7 +124,7 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
         areaData: "",
         minY: null,
         maxY: null,
-        normalizedPoints: [] as Array<{ xPct: number; yPct: number }>,
+        normalizedPoints: [] as Array<{ x: number; y: number }>,
       };
     }
     const xs = filteredHistory.map((p) => p.x);
@@ -114,23 +141,23 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
     const width = maxX - minX || 1;
     const height = maxY - minY || 1;
     const normalizedPoints = filteredHistory.map((point) => ({
-      xPct: ((point.x - minX) / width) * 100,
-      yPct: 100 - ((point.y - minY) / height) * 100,
+      x: chartBox.left + ((point.x - minX) / width) * chartBox.width,
+      y: chartBox.top + (1 - (point.y - minY) / height) * chartBox.height,
     }));
     const [first] = normalizedPoints;
-    let d = `M ${first.xPct},${first.yPct}`;
+    let d = `M ${first.x},${first.y}`;
     for (let i = 1; i < normalizedPoints.length; i++) {
       const point = normalizedPoints[i];
-      d += ` L ${point.xPct},${point.yPct}`;
+      d += ` L ${point.x},${point.y}`;
     }
     return {
       pathData: d,
-      areaData: `${d} L 100,100 L 0,100 Z`,
+      areaData: `${d} L ${chartBox.right},${chartBox.bottom} L ${chartBox.left},${chartBox.bottom} Z`,
       minY,
       maxY,
       normalizedPoints,
     };
-  }, [filteredHistory]);
+  }, [filteredHistory, chartBox]);
 
   const activeIndex =
     hoverIndex !== null && filteredHistory[hoverIndex] ? hoverIndex : Math.max(filteredHistory.length - 1, 0);
@@ -152,12 +179,57 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
   const mapYToSvg = (value: number) => {
     if (minY === null || maxY === null) return null;
     const height = maxY - minY || 1;
-    return 100 - ((value - minY) / height) * 100;
+    return chartBox.top + (1 - (value - minY) / height) * chartBox.height;
   };
   const bidY = bestBid !== undefined ? mapYToSvg(bestBid) : null;
   const askY = bestAsk !== undefined ? mapYToSvg(bestAsk) : null;
   const coverageMs =
     filteredHistory.length > 1 ? filteredHistory[filteredHistory.length - 1].x - filteredHistory[0].x : 0;
+
+  const outcomeOptions = outcomes.length ? outcomes : [];
+  const canSelectOutcome = outcomeOptions.length > 1;
+  const yTicks = useMemo(() => {
+    if (minY === null || maxY === null) return [];
+    if (outcomeOptions.length) {
+      const count = outcomeOptions.length;
+      if (count === 1) {
+        const y = chartBox.top + chartBox.height / 2;
+        return [{ label: outcomeOptions[0], y }];
+      }
+      return outcomeOptions.map((label, idx) => {
+        const ratio = count === 1 ? 0.5 : 1 - idx / (count - 1);
+        return {
+          label,
+          y: chartBox.top + ratio * chartBox.height,
+        };
+      });
+    }
+    const ticks = 4;
+    const step = (maxY - minY) / ticks;
+    return Array.from({ length: ticks + 1 }, (_, idx) => {
+      const value = minY + step * idx;
+      return {
+        label: value.toFixed(3),
+        y: mapYToSvg(value),
+      };
+    }).filter((tick) => tick.y !== null) as Array<{ label: string; y: number }>;
+  }, [minY, maxY, outcomeOptions, chartBox]);
+
+  const xTicks = useMemo(() => {
+    if (filteredHistory.length < 2) return [];
+    const start = filteredHistory[0];
+    const end = filteredHistory[filteredHistory.length - 1];
+    const mid = filteredHistory[Math.floor(filteredHistory.length / 2)];
+    return [
+      { label: formatTime(start.timestamp), x: chartBox.left },
+      { label: formatTime(mid.timestamp), x: chartBox.left + chartBox.width / 2 },
+      { label: formatTime(end.timestamp), x: chartBox.right },
+    ];
+  }, [filteredHistory, chartBox]);
+
+  const hoverLabel = activePoint
+    ? `${formatTime(activePoint.timestamp)} · ${activePoint.y.toFixed(4)} ZEN`
+    : null;
 
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">
@@ -185,6 +257,21 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canSelectOutcome &&
+              outcomeOptions.map((option, idx) => (
+                <button
+                  key={`${option}-${idx}`}
+                  type="button"
+                  onClick={() => setSelectedOutcome(idx)}
+                  className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.2em] ${
+                    selectedOutcome === idx
+                      ? "bg-emerald-400 text-slate-900"
+                      : "bg-white/10 text-white/80 hover:bg-white/20"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
             {(["1H", "24H", "7D", "MAX"] as const).map((option) => (
               <button
                 key={option}
@@ -227,10 +314,11 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
               if (!normalizedPoints.length) return;
               const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
               const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+              const clampedX = Math.min(Math.max(xPct, chartBox.left), chartBox.right);
               let closest = 0;
               let closestDiff = Infinity;
               normalizedPoints.forEach((point, idx) => {
-                const diff = Math.abs(point.xPct - xPct);
+                const diff = Math.abs(point.x - clampedX);
                 if (diff < closestDiff) {
                   closestDiff = diff;
                   closest = idx;
@@ -249,10 +337,46 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
                 <stop offset="100%" stopColor="#22d3ee" />
               </linearGradient>
             </defs>
+            <g>
+              {yTicks.map((tick) => (
+                <g key={`y-${tick.label}`}>
+                  <line
+                    x1={chartBox.left}
+                    x2={chartBox.right}
+                    y1={tick.y}
+                    y2={tick.y}
+                    stroke="rgba(148,163,184,0.15)"
+                    strokeDasharray="2 3"
+                  />
+                  <text
+                    x={chartBox.left - 2}
+                    y={tick.y}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    fill="rgba(148,163,184,0.7)"
+                    fontSize="3"
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              ))}
+              {xTicks.map((tick) => (
+                <text
+                  key={`x-${tick.label}`}
+                  x={tick.x}
+                  y={chartBox.bottom + 6}
+                  textAnchor={tick.x === chartBox.left ? "start" : tick.x === chartBox.right ? "end" : "middle"}
+                  fill="rgba(148,163,184,0.7)"
+                  fontSize="3"
+                >
+                  {tick.label}
+                </text>
+              ))}
+            </g>
             {bidY !== null && askY !== null && (
               <rect
-                x="0"
-                width="100"
+                x={chartBox.left}
+                width={chartBox.width}
                 y={Math.min(bidY, askY)}
                 height={Math.max(1, Math.abs(askY - bidY))}
                 fill="url(#chart-fill)"
@@ -271,14 +395,45 @@ export function MarketDetailChart({ marketId, tokenIds = [], outcomePrices = [] 
             />
             {activePoint && activeNormalized && (
               <>
+                <line
+                  x1={activeNormalized.x}
+                  x2={activeNormalized.x}
+                  y1={chartBox.top}
+                  y2={chartBox.bottom}
+                  stroke="rgba(226,232,240,0.3)"
+                  strokeDasharray="2 3"
+                />
                 <circle
-                  cx={activeNormalized.xPct}
-                  cy={activeNormalized.yPct}
+                  cx={activeNormalized.x}
+                  cy={activeNormalized.y}
                   r="2.2"
                   fill="#34d399"
                   stroke="#fff"
                   strokeWidth="0.4"
                 />
+                {hoverLabel && (
+                  <g>
+                    <rect
+                      x={Math.min(Math.max(activeNormalized.x - 18, chartBox.left), chartBox.right - 36)}
+                      y={chartBox.top + 1}
+                      width="36"
+                      height="8"
+                      rx="2"
+                      fill="rgba(15,23,42,0.85)"
+                      stroke="rgba(148,163,184,0.4)"
+                      strokeWidth="0.3"
+                    />
+                    <text
+                      x={Math.min(Math.max(activeNormalized.x - 18, chartBox.left), chartBox.right - 36) + 18}
+                      y={chartBox.top + 6}
+                      textAnchor="middle"
+                      fill="rgba(226,232,240,0.9)"
+                      fontSize="3"
+                    >
+                      {hoverLabel}
+                    </text>
+                  </g>
+                )}
               </>
             )}
           </svg>

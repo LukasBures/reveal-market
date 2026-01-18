@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { formatEthUsd, formatZenUsd } from "@/lib/fx";
 
 describe("fx formatters", () => {
-  it("formats ZEN/USD values with trimmed trailing zeros", () => {
+  it("formats ZEN/USD values with fixed decimals", () => {
     expect(formatZenUsd(1.23456)).toBe("1.2346");
-    expect(formatZenUsd(1.23)).toBe("1.23");
+    expect(formatZenUsd(1.23)).toBe("1.2300");
   });
 
   it("supports custom decimal precision", () => {

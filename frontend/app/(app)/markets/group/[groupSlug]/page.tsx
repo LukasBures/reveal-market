@@ -176,6 +176,8 @@ export default async function GroupedMarketPage({ params, searchParams }: GroupP
                 marketId={priceStreamMarketId}
                 tokenIds={tokenIds}
                 outcomePrices={market.outcomePrices ?? []}
+                outcomes={market.outcomes ?? []}
+                initialOutcome={0}
               />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

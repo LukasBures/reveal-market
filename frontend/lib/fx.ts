@@ -2,9 +2,7 @@ export const formatZenUsd = (zenUsd: number | null | undefined, decimals = 4): s
   if (typeof zenUsd !== "number" || Number.isNaN(zenUsd)) {
     return null;
   }
-  const fixed = zenUsd.toFixed(decimals);
-  const trimmed = fixed.replace(/\.?0+$/, "");
-  return trimmed.length ? trimmed : fixed;
+  return zenUsd.toFixed(decimals);
 };
 
 // Legacy alias for earlier ETH naming.

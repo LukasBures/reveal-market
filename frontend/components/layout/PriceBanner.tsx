@@ -67,7 +67,7 @@ export function PriceBanner({
             </>
           )}
         </div>
-        <span className="rounded-full bg-white/5 px-2 py-1 text-[11px] font-semibold tracking-wide md:px-3">
+        <span className="min-w-[9.25rem] rounded-full bg-white/5 px-2 py-1 text-[11px] font-semibold tabular-nums tracking-wide text-right md:px-3">
           {fxLabel ? fxLabel : "ZEN/USD loading ..."}
         </span>
       </div>
