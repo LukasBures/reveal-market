@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePriceStream, type PriceHistoryRange } from "@/hooks/usePriceStream";
 import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
 import { formatTime } from "@/lib/formatters";
 import { MarketFomoOverlay } from "./MarketFomoOverlay";
+import uPlot from "uplot";
 
 type Props = {
   marketId: string;
@@ -103,66 +104,15 @@ export function MarketDetailChart({
       ? ((latestPrice - firstPrice) / firstPrice) * 100
       : null;
 
-  const chartPadding = { top: 6, right: 6, bottom: 14, left: 10 };
-  const chartBox = useMemo(() => {
-    const width = 100 - chartPadding.left - chartPadding.right;
-    const height = 100 - chartPadding.top - chartPadding.bottom;
-    return {
-      left: chartPadding.left,
-      right: 100 - chartPadding.right,
-      top: chartPadding.top,
-      bottom: 100 - chartPadding.bottom,
-      width,
-      height,
-    };
-  }, []);
-
-  const { pathData, areaData, minY, maxY, normalizedPoints } = useMemo(() => {
-    if (filteredHistory.length < 2) {
-      return {
-        pathData: "",
-        areaData: "",
-        minY: null,
-        maxY: null,
-        normalizedPoints: [] as Array<{ x: number; y: number }>,
-      };
-    }
+  const dataSeries = useMemo(() => {
     const xs = filteredHistory.map((p) => p.x);
     const ys = filteredHistory.map((p) => p.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    let minY = Math.min(...ys);
-    let maxY = Math.max(...ys);
-    if (minY === maxY) {
-      const padding = Math.max(Math.abs(minY) * 0.02, 0.01);
-      minY -= padding;
-      maxY += padding;
-    }
-    const width = maxX - minX || 1;
-    const height = maxY - minY || 1;
-    const normalizedPoints = filteredHistory.map((point) => ({
-      x: chartBox.left + ((point.x - minX) / width) * chartBox.width,
-      y: chartBox.top + (1 - (point.y - minY) / height) * chartBox.height,
-    }));
-    const [first] = normalizedPoints;
-    let d = `M ${first.x},${first.y}`;
-    for (let i = 1; i < normalizedPoints.length; i++) {
-      const point = normalizedPoints[i];
-      d += ` L ${point.x},${point.y}`;
-    }
-    return {
-      pathData: d,
-      areaData: `${d} L ${chartBox.right},${chartBox.bottom} L ${chartBox.left},${chartBox.bottom} Z`,
-      minY,
-      maxY,
-      normalizedPoints,
-    };
-  }, [filteredHistory, chartBox]);
+    return [xs, ys];
+  }, [filteredHistory]);
 
   const activeIndex =
     hoverIndex !== null && filteredHistory[hoverIndex] ? hoverIndex : Math.max(filteredHistory.length - 1, 0);
   const activePoint = filteredHistory[activeIndex];
-  const activeNormalized = normalizedPoints[activeIndex];
 
   const parseNum = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
   const bestBid = parseNum(outcomeState.bestBid);
@@ -176,60 +126,114 @@ export function MarketDetailChart({
       ? streamState.tickSize
       : undefined;
 
-  const mapYToSvg = (value: number) => {
-    if (minY === null || maxY === null) return null;
-    const height = maxY - minY || 1;
-    return chartBox.top + (1 - (value - minY) / height) * chartBox.height;
-  };
-  const bidY = bestBid !== undefined ? mapYToSvg(bestBid) : null;
-  const askY = bestAsk !== undefined ? mapYToSvg(bestAsk) : null;
   const coverageMs =
     filteredHistory.length > 1 ? filteredHistory[filteredHistory.length - 1].x - filteredHistory[0].x : 0;
 
   const outcomeOptions = outcomes.length ? outcomes : [];
   const canSelectOutcome = outcomeOptions.length > 1;
-  const yTicks = useMemo(() => {
-    if (minY === null || maxY === null) return [];
-    if (outcomeOptions.length) {
-      const count = outcomeOptions.length;
-      if (count === 1) {
-        const y = chartBox.top + chartBox.height / 2;
-        return [{ label: outcomeOptions[0], y }];
+
+  const chartRef = useRef<HTMLDivElement | null>(null);
+  const plotRef = useRef<uPlot | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (filteredHistory.length < 2) {
+      if (plotRef.current) {
+        plotRef.current.destroy();
+        plotRef.current = null;
       }
-      return outcomeOptions.map((label, idx) => {
-        const ratio = count === 1 ? 0.5 : 1 - idx / (count - 1);
-        return {
-          label,
-          y: chartBox.top + ratio * chartBox.height,
-        };
-      });
+      return;
     }
-    const ticks = 4;
-    const step = (maxY - minY) / ticks;
-    return Array.from({ length: ticks + 1 }, (_, idx) => {
-      const value = minY + step * idx;
-      return {
-        label: value.toFixed(3),
-        y: mapYToSvg(value),
-      };
-    }).filter((tick) => tick.y !== null) as Array<{ label: string; y: number }>;
-  }, [minY, maxY, outcomeOptions, chartBox]);
 
-  const xTicks = useMemo(() => {
-    if (filteredHistory.length < 2) return [];
-    const start = filteredHistory[0];
-    const end = filteredHistory[filteredHistory.length - 1];
-    const mid = filteredHistory[Math.floor(filteredHistory.length / 2)];
-    return [
-      { label: formatTime(start.timestamp), x: chartBox.left },
-      { label: formatTime(mid.timestamp), x: chartBox.left + chartBox.width / 2 },
-      { label: formatTime(end.timestamp), x: chartBox.right },
-    ];
-  }, [filteredHistory, chartBox]);
+    const container = chartRef.current;
+    const basePadding = { top: 14, right: 16, bottom: 30, left: 46 };
 
-  const hoverLabel = activePoint
-    ? `${formatTime(activePoint.timestamp)} · ${activePoint.y.toFixed(4)} ZEN`
-    : null;
+    const formatAxisTime = (value: number) => formatTime(new Date(value));
+    const formatOutcomeLabels = (values: number[]) => {
+      if (outcomeOptions.length >= 2) {
+        return values.map((value, idx) => {
+          if (idx === 0) return outcomeOptions[outcomeOptions.length - 1] ?? "No";
+          if (idx === values.length - 1) return outcomeOptions[0] ?? "Yes";
+          return "";
+        });
+      }
+      return values.map((value) => value.toFixed(3));
+    };
+
+    const options: uPlot.Options = {
+      width: container.clientWidth,
+      height: container.clientHeight,
+      padding: [basePadding.top, basePadding.right, basePadding.bottom, basePadding.left],
+      legend: { show: false },
+      cursor: {
+        focus: { prox: 30 },
+        drag: { setScale: false },
+      },
+      scales: {
+        x: {
+          time: true,
+        },
+      },
+      axes: [
+        {
+          stroke: "rgba(148,163,184,0.6)",
+          grid: { stroke: "rgba(148,163,184,0.18)", width: 1 },
+          values: (_u, vals) => vals.map((v) => formatAxisTime(v)),
+        },
+        {
+          stroke: "rgba(148,163,184,0.6)",
+          grid: { stroke: "rgba(148,163,184,0.14)", width: 1 },
+          values: (_u, vals) => formatOutcomeLabels(vals),
+        },
+      ],
+      series: [
+        {},
+        {
+          label: "Price",
+          stroke: "#34d399",
+          width: 2,
+          fill: "rgba(52,211,153,0.22)",
+          points: { show: false },
+        },
+      ],
+      hooks: {
+        setCursor: [
+          (u) => {
+            if (typeof u.cursor.idx !== "number") {
+              setHoverIndex(null);
+              return;
+            }
+            setHoverIndex(u.cursor.idx);
+          },
+        ],
+      },
+    };
+
+    if (plotRef.current) {
+      plotRef.current.destroy();
+      plotRef.current = null;
+    }
+
+    plotRef.current = new uPlot(options, dataSeries as uPlot.AlignedData, container);
+
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+    }
+    const observer = new ResizeObserver(() => {
+      if (!plotRef.current || !chartRef.current) return;
+      plotRef.current.setSize({
+        width: chartRef.current.clientWidth,
+        height: chartRef.current.clientHeight,
+      });
+    });
+    observer.observe(container);
+    resizeObserverRef.current = observer;
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [dataSeries, filteredHistory.length, outcomeOptions]);
 
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">
@@ -306,137 +310,14 @@ export function MarketDetailChart({
       <div className="relative mt-4 h-64 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 p-4 shadow-inner shadow-black/40">
         <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} />
         {filteredHistory.length >= 2 ? (
-          <svg
-            viewBox="0 0 100 100"
-            className="h-full w-full"
-            onMouseLeave={() => setHoverIndex(null)}
-            onMouseMove={(e) => {
-              if (!normalizedPoints.length) return;
-              const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-              const xPct = ((e.clientX - rect.left) / rect.width) * 100;
-              const clampedX = Math.min(Math.max(xPct, chartBox.left), chartBox.right);
-              let closest = 0;
-              let closestDiff = Infinity;
-              normalizedPoints.forEach((point, idx) => {
-                const diff = Math.abs(point.x - clampedX);
-                if (diff < closestDiff) {
-                  closestDiff = diff;
-                  closest = idx;
-                }
-              });
-              setHoverIndex(closest);
-            }}
-          >
-            <defs>
-              <linearGradient id="chart-fill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#34d399" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
-              </linearGradient>
-              <linearGradient id="chart-line" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#34d399" />
-                <stop offset="100%" stopColor="#22d3ee" />
-              </linearGradient>
-            </defs>
-            <g>
-              {yTicks.map((tick) => (
-                <g key={`y-${tick.label}`}>
-                  <line
-                    x1={chartBox.left}
-                    x2={chartBox.right}
-                    y1={tick.y}
-                    y2={tick.y}
-                    stroke="rgba(148,163,184,0.15)"
-                    strokeDasharray="2 3"
-                  />
-                  <text
-                    x={chartBox.left - 2}
-                    y={tick.y}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    fill="rgba(148,163,184,0.7)"
-                    fontSize="3"
-                  >
-                    {tick.label}
-                  </text>
-                </g>
-              ))}
-              {xTicks.map((tick) => (
-                <text
-                  key={`x-${tick.label}`}
-                  x={tick.x}
-                  y={chartBox.bottom + 6}
-                  textAnchor={tick.x === chartBox.left ? "start" : tick.x === chartBox.right ? "end" : "middle"}
-                  fill="rgba(148,163,184,0.7)"
-                  fontSize="3"
-                >
-                  {tick.label}
-                </text>
-              ))}
-            </g>
-            {bidY !== null && askY !== null && (
-              <rect
-                x={chartBox.left}
-                width={chartBox.width}
-                y={Math.min(bidY, askY)}
-                height={Math.max(1, Math.abs(askY - bidY))}
-                fill="url(#chart-fill)"
-                opacity="0.35"
-              />
+          <div className="relative h-full w-full">
+            <div ref={chartRef} className="market-chart h-full w-full" />
+            {activePoint && (
+              <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/10 bg-slate-900/80 px-3 py-1 text-[11px] text-slate-100 shadow-lg">
+                {formatTime(activePoint.timestamp)} · {activePoint.y.toFixed(4)} ZEN
+              </div>
             )}
-            <path d={areaData} fill="url(#chart-fill)" />
-            <path
-              d={pathData}
-              stroke="url(#chart-line)"
-              strokeWidth="1.6"
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              filter="url(#glow)"
-            />
-            {activePoint && activeNormalized && (
-              <>
-                <line
-                  x1={activeNormalized.x}
-                  x2={activeNormalized.x}
-                  y1={chartBox.top}
-                  y2={chartBox.bottom}
-                  stroke="rgba(226,232,240,0.3)"
-                  strokeDasharray="2 3"
-                />
-                <circle
-                  cx={activeNormalized.x}
-                  cy={activeNormalized.y}
-                  r="2.2"
-                  fill="#34d399"
-                  stroke="#fff"
-                  strokeWidth="0.4"
-                />
-                {hoverLabel && (
-                  <g>
-                    <rect
-                      x={Math.min(Math.max(activeNormalized.x - 18, chartBox.left), chartBox.right - 36)}
-                      y={chartBox.top + 1}
-                      width="36"
-                      height="8"
-                      rx="2"
-                      fill="rgba(15,23,42,0.85)"
-                      stroke="rgba(148,163,184,0.4)"
-                      strokeWidth="0.3"
-                    />
-                    <text
-                      x={Math.min(Math.max(activeNormalized.x - 18, chartBox.left), chartBox.right - 36) + 18}
-                      y={chartBox.top + 6}
-                      textAnchor="middle"
-                      fill="rgba(226,232,240,0.9)"
-                      fontSize="3"
-                    >
-                      {hoverLabel}
-                    </text>
-                  </g>
-                )}
-              </>
-            )}
-          </svg>
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-slate-500">
             {error ? `No data: ${error}` : "Waiting for live prices..."}

@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import "uplot/dist/uPlot.min.css";
+
 :root {
   color-scheme: dark;
   --background: #010314;
@@ -197,6 +199,61 @@ a {
 
 .text-glow {
   text-shadow: 0 0 30px rgba(56, 189, 248, 0.35);
+}
+
+.market-chart {
+  font-family: inherit;
+}
+
+.market-chart .uplot {
+  width: 100%;
+  height: 100%;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.market-chart .u-axis {
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 11px;
+}
+
+.market-chart .u-grid {
+  stroke: rgba(148, 163, 184, 0.15);
+}
+
+.market-chart .u-series {
+  filter: drop-shadow(0 6px 12px rgba(34, 211, 238, 0.2));
+}
+
+.market-chart .u-cursor-x,
+.market-chart .u-cursor-y {
+  stroke: rgba(226, 232, 240, 0.3);
+  stroke-dasharray: 2 3;
+}
+
+.market-chart .u-over {
+  cursor: crosshair;
+}
+
+.market-chart .u-legend {
+  display: none;
+}
+
+.market-chart .u-title {
+  display: none;
+}
+
+.market-chart .u-label {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.market-chart .u-value {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.market-chart .u-under {
+  background: radial-gradient(circle at 10% 10%, rgba(52, 211, 153, 0.08), transparent 45%),
+    radial-gradient(circle at 85% 0%, rgba(34, 211, 238, 0.1), transparent 40%);
+  border-radius: 16px;
 }
 
 .wolf-aura {
