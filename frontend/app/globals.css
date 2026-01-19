@@ -214,6 +214,8 @@ a {
 .market-chart .u-axis {
   color: rgba(226, 232, 240, 0.7);
   font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .market-chart .u-grid {
@@ -251,8 +253,8 @@ a {
 }
 
 .market-chart .u-under {
-  background: radial-gradient(circle at 10% 10%, rgba(52, 211, 153, 0.08), transparent 45%),
-    radial-gradient(circle at 85% 0%, rgba(34, 211, 238, 0.1), transparent 40%);
+  background: radial-gradient(circle at 10% 10%, rgba(52, 211, 153, 0.12), transparent 45%),
+    radial-gradient(circle at 85% 0%, rgba(34, 211, 238, 0.12), transparent 40%);
   border-radius: 16px;
 }
 

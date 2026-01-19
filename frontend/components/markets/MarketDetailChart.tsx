@@ -24,6 +24,8 @@ export function MarketDetailChart({
 }: Props) {
   const [range, setRange] = useState<PriceHistoryRange>("24H");
   const [selectedOutcome, setSelectedOutcome] = useState(0);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [chartSize, setChartSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   useEffect(() => {
     if (typeof initialOutcome === "number" && Number.isFinite(initialOutcome)) {
       setSelectedOutcome(Math.max(0, Math.min(initialOutcome, Math.max(outcomes.length - 1, 0))));
@@ -143,11 +145,12 @@ export function MarketDetailChart({
         plotRef.current.destroy();
         plotRef.current = null;
       }
+      setCursorPos(null);
       return;
     }
 
     const container = chartRef.current;
-    const basePadding = { top: 14, right: 16, bottom: 30, left: 46 };
+    const basePadding = { top: 10, right: 10, bottom: 28, left: 42 };
 
     const formatAxisTime = (value: number) => formatTime(new Date(value));
     const formatOutcomeLabels = (values: number[]) => {
@@ -202,9 +205,13 @@ export function MarketDetailChart({
           (u) => {
             if (typeof u.cursor.idx !== "number") {
               setHoverIndex(null);
+              setCursorPos(null);
               return;
             }
             setHoverIndex(u.cursor.idx);
+            if (typeof u.cursor.left === "number" && typeof u.cursor.top === "number") {
+              setCursorPos({ x: u.cursor.left, y: u.cursor.top });
+            }
           },
         ],
       },
@@ -222,6 +229,7 @@ export function MarketDetailChart({
     }
     const observer = new ResizeObserver(() => {
       if (!plotRef.current || !chartRef.current) return;
+      setChartSize({ width: chartRef.current.clientWidth, height: chartRef.current.clientHeight });
       plotRef.current.setSize({
         width: chartRef.current.clientWidth,
         height: chartRef.current.clientHeight,
@@ -229,6 +237,7 @@ export function MarketDetailChart({
     });
     observer.observe(container);
     resizeObserverRef.current = observer;
+    setChartSize({ width: container.clientWidth, height: container.clientHeight });
 
     return () => {
       observer.disconnect();
@@ -241,7 +250,7 @@ export function MarketDetailChart({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-baseline gap-3">
             <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Price history</span>
-            <span className="text-2xl font-semibold text-white">
+            <span className="text-2xl font-semibold text-white tabular-nums">
               {latestPrice !== null ? latestPrice.toFixed(3) : "—"} ZEN
             </span>
             {changePct !== null && (
@@ -276,44 +285,54 @@ export function MarketDetailChart({
                   {option}
                 </button>
               ))}
-            {(["1H", "24H", "7D", "MAX"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setRange(option)}
-                className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.2em] ${
-                  range === option ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
+            <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-1">
+              {(["1H", "24H", "7D", "MAX"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setRange(option)}
+                  className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.2em] ${
+                    range === option
+                      ? "bg-white text-slate-900 shadow"
+                      : "bg-transparent text-white/70 hover:text-white"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-500">
-          <span className="rounded-full bg-white/5 px-3 py-1">
-            {hasStaleFx ? "FX stale" : "Live"} {latestTs ? `· ${formatTime(latestTs)}` : ""}
-          </span>
-          <div className="flex items-center gap-2 text-[11px]">
-            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
-              Bid {bestBid !== undefined ? bestBid.toFixed(3) : "—"}
+            <span className="rounded-full bg-white/5 px-3 py-1 tabular-nums">
+              {hasStaleFx ? "FX stale" : "Live"} {latestTs ? `· ${formatTime(latestTs)}` : ""}
             </span>
-            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
-              Ask {bestAsk !== undefined ? bestAsk.toFixed(3) : "—"}
-            </span>
-            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
-              Spread {spread !== undefined ? spread.toFixed(3) : "—"}
-            </span>
-          </div>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
+                Bid {bestBid !== undefined ? bestBid.toFixed(3) : "—"}
+              </span>
+              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
+                Ask {bestAsk !== undefined ? bestAsk.toFixed(3) : "—"}
+              </span>
+              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
+                Spread {spread !== undefined ? spread.toFixed(3) : "—"}
+              </span>
+            </div>
         </div>
       </div>
-      <div className="relative mt-4 h-64 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 p-4 shadow-inner shadow-black/40">
+      <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 p-2 shadow-inner shadow-black/40">
         <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} />
         {filteredHistory.length >= 2 ? (
           <div className="relative h-full w-full">
             <div ref={chartRef} className="market-chart h-full w-full" />
             {activePoint && (
-              <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/10 bg-slate-900/80 px-3 py-1 text-[11px] text-slate-100 shadow-lg">
+              <div
+                className="pointer-events-none absolute rounded-lg border border-white/10 bg-slate-900/85 px-3 py-1 text-[11px] text-slate-100 shadow-lg"
+                style={{
+                  left: Math.max(10, Math.min((cursorPos?.x ?? 0) - 60, chartSize.width - 150)),
+                  top: Math.max(8, Math.min((cursorPos?.y ?? 0) - 34, chartSize.height - 40)),
+                }}
+              >
                 {formatTime(activePoint.timestamp)} · {activePoint.y.toFixed(4)} ZEN
               </div>
             )}
