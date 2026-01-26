@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import type { EventSummary } from "@/lib/api-types";
 import { EventGrid } from "@/components/events/EventGrid";
 import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
-import { useFeaturedEvents } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
 import { fetchFeaturedEvents } from "@/lib/api";
 import { categorySlugFromLabel } from "@/lib/slugs";
@@ -47,10 +47,6 @@ export function FeaturedEventsClient({
   sortBy = "totalVolume",
   closesWithinHours,
 }: ClientProps) {
-  const [events, setEvents] = useState<EventSummary[]>(initialMarkets);
-  const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
-  const [offset, setOffset] = useState(initialMarkets.length);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -61,7 +57,6 @@ export function FeaturedEventsClient({
   }, []);
 
   const batchSize = Math.max(pageSize, 30);
-  const remainingSlots = useMemo(() => Math.max(0, maxItems - events.length), [events.length, maxItems]);
   const orderBy = "volume";
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}|${closesWithinHours ?? "default"}`;
 
@@ -98,26 +93,59 @@ export function FeaturedEventsClient({
     [filterByStatus, maxItems],
   );
 
-  const { data: refreshedMarkets } = useFeaturedEvents({
-    limit: pageSize,
-    searchQuery,
-    category: normalizedCategory,
-    status,
-    trending,
-    closesWithinHours,
-    orderBy,
-    initialData: initialMarkets,
+  const queryKey = useMemo(
+    () => [
+      "featuredEvents",
+      {
+        limit: batchSize,
+        searchQuery: searchQuery ?? null,
+        category: normalizedCategory ?? null,
+        status: status ?? "active",
+        trending: trending ?? null,
+        orderBy,
+        closesWithinHours: closesWithinHours ?? null,
+      },
+    ],
+    [batchSize, searchQuery, normalizedCategory, status, trending, orderBy, closesWithinHours],
+  );
+
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam = 0 }) =>
+      fetchFeaturedEvents(batchSize, {
+        searchQuery,
+        category: normalizedCategory,
+        offset: pageParam,
+        status,
+        trending,
+        coalesceGroups: false,
+        orderBy,
+        closesWithinHours,
+      }),
+    initialData: {
+      pages: [initialMarkets],
+      pageParams: [0],
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      const total = allPages.reduce((acc, page) => acc + page.length, 0);
+      if (total >= maxItems) return undefined;
+      if (lastPage.length === 0) return undefined;
+      return total;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
+
+  const events = useMemo(() => {
+    const pages = data?.pages ?? [];
+    const flattened = pages.flatMap((page) => page);
+    return normalizeEvents(flattened);
+  }, [data?.pages, normalizeEvents]);
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
-    const seeded = normalizeEvents([...initialMarkets]);
-    const initialLikelyMore = initialMarkets.length >= pageSize || seeded.length >= pageSize;
-    setEvents(seeded);
-    setHasMore(initialLikelyMore && seeded.length < maxItems);
-    setOffset(initialMarkets.length);
     setAutoLoadCount(0);
-    setIsLoadingMore(false);
+    setShowLoadingState(false);
   }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeEvents]);
 
   useEffect(() => {
@@ -127,74 +155,38 @@ export function FeaturedEventsClient({
     setIntersectionSupported(hasObserver);
   }, []);
 
-  useEffect(() => {
-    if (!refreshedMarkets) {
-      return;
-    }
-    setEvents((prev) => normalizeEvents([...(refreshedMarkets || []), ...prev]));
-  }, [refreshedMarkets, normalizeEvents]);
-
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
-      const nextLimit = Number.isFinite(remainingSlots) ? Math.min(batchSize, remainingSlots) : batchSize;
-      if (!hasMore || isPending || isLoadingMore || nextLimit <= 0) return;
-      const fetchOffset = offset;
-      setIsLoadingMore(true);
+      if (!hasNextPage || isPending || isFetchingNextPage) return;
       setShowLoadingState(true);
-      startTransition(async () => {
-        try {
-          const additions = await fetchFeaturedEvents(nextLimit, {
-            searchQuery,
-            category: normalizedCategory,
-            offset: fetchOffset,
-            status,
-            trending,
-            coalesceGroups: false,
-            orderBy,
-            closesWithinHours,
+      startTransition(() => {
+        fetchNextPage()
+          .then(() => {
+            if (mode === "auto") {
+              setAutoLoadCount((count) => count + 1);
+            }
+          })
+          .catch((error) => {
+            logger.clientError("FeaturedEventsClient:loadMore_failed", { error: (error as Error).message });
+          })
+          .finally(() => {
+            setShowLoadingState(false);
           });
-          const merged = normalizeEvents([...events, ...additions]);
-          const newItemsAdded = merged.length - events.length;
-          const computedHasMore = additions.length > 0 && merged.length < maxItems;
-          setEvents(merged);
-          setOffset(fetchOffset + additions.length);
-          setHasMore(computedHasMore);
-          if (mode === "auto" && newItemsAdded > 0) {
-            setAutoLoadCount((count) => count + 1);
-          }
-        } catch (error) {
-          logger.clientError("FeaturedEventsClient:loadMore_failed", { error: (error as Error).message });
-          setHasMore(false);
-        } finally {
-          setIsLoadingMore(false);
-          setShowLoadingState(false);
-        }
       });
     },
     [
-      normalizedCategory,
-      hasMore,
+      fetchNextPage,
+      hasNextPage,
       isPending,
-      isLoadingMore,
-      events,
-      maxItems,
-      remainingSlots,
-      offset,
-      searchQuery,
-      status,
-      trending,
-      closesWithinHours,
-      normalizeEvents,
-      batchSize,
-      orderBy,
+      isFetchingNextPage,
     ],
   );
 
-  const isBusy = isPending || isLoadingMore;
-  const canAutoLoad = intersectionSupported && hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
-  const showManualButton =
-    events.length > 0 && hasMore && (!intersectionSupported || autoLoadCount >= AUTO_LOAD_BATCHES);
-  const showLoadingIndicator = showLoadingState && !showManualButton;
+  const isBusy = isPending || isFetchingNextPage;
+  const canAutoLoad = intersectionSupported && hasNextPage && autoLoadCount < AUTO_LOAD_BATCHES;
+  const showManualButton = events.length > 0 && hasNextPage;
+  const showLoadingIndicator =
+    showLoadingState && intersectionSupported && autoLoadCount < AUTO_LOAD_BATCHES;
 
   useEffect(() => {
     if (!canAutoLoad || isBusy) {
@@ -244,7 +236,7 @@ export function FeaturedEventsClient({
       ) : (
         <EventGrid events={events} />
       )}
-      {hasMore && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
+      {hasNextPage && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
       {showLoadingIndicator && (
         <div
           className="flex items-center justify-center text-sm text-slate-300"
@@ -254,16 +246,16 @@ export function FeaturedEventsClient({
           Loading...
         </div>
       )}
-    {showManualButton && (
+      {showManualButton && (
       <div className="flex items-center justify-center">
         <button
           type="button"
-          disabled={!hasMore || isBusy}
+          disabled={!hasNextPage || isBusy}
           aria-busy={isBusy}
           onClick={() => handleLoadMore("manual")}
           className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isBusy ? "Loading..." : hasMore ? "Load more events" : "All events loaded"}
+          {isBusy ? "Loading..." : hasNextPage ? "Load more events" : "All events loaded"}
         </button>
       </div>
     )}

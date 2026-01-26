@@ -49,7 +49,7 @@ describe("MarketDetailMetadata", () => {
       "href",
       "https://explorer.testnet/address/0x123",
     );
-    expect(screen.getByRole("button", { name: "Copy Market address" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Copy" })).toBeInTheDocument();
   });
 
   it("renders CLOB metadata plus rake", () => {

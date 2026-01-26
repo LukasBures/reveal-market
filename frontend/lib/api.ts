@@ -549,11 +549,6 @@ export async function fetchMarketSuggestions(
   }
 }
 
-export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
-  const events = await fetchFeaturedEvents(limit, options);
-  return events.flatMap((event) => event.markets ?? []);
-}
-
 const normalizeMarketStats = (payload: any): MarketStatusStat[] | null => {
   if (!Array.isArray(payload)) {
     return null;

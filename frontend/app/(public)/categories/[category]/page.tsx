@@ -7,7 +7,7 @@ import { CategoryMarkets } from "@/app/(public)/categories/[category]/CategoryMa
 import { MarketGridSkeleton } from "@/components/markets/MarketGridSkeleton";
 import { JsonLd } from "@/components/seo/JsonLd";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 type CategoryPageProps = {
   params: Promise<{ category: string }>;

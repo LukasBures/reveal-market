@@ -1,8 +1,7 @@
-"use client";
-
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDateTime, normalizeHex } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";
+import { MetadataCopyButton } from "./MetadataCopyButton";
 
 type Props = {
   market: MarketDetail;
@@ -68,15 +67,6 @@ export function MarketDetailMetadata({ market }: Props) {
       return `${explorerBase}/tx/${normalized}`;
     }
     return `${explorerBase}/address/${trimmed}`;
-  };
-
-  const copyToClipboard = async (value?: string | null) => {
-    if (!value || typeof navigator === "undefined" || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch (error) {
-      console.error("Unable to copy value", error);
-    }
   };
 
   const metadataItems: MetadataItem[] = [
@@ -153,14 +143,11 @@ export function MarketDetailMetadata({ market }: Props) {
         <div className="mt-2 flex items-center gap-2">
           {content}
           {item.value && !item.copyDisabled && (
-            <button
-              type="button"
-              onClick={() => copyToClipboard(item.value)}
+            <MetadataCopyButton
+              value={item.value}
+              label="Copy"
               className="text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:text-brand-200"
-              aria-label={`Copy ${item.label}`}
-            >
-              Copy
-            </button>
+            />
           )}
         </div>
       </div>
@@ -236,13 +223,11 @@ export function MarketDetailMetadata({ market }: Props) {
                     ) : (
                       resolutionTxDisplay
                     )}{" "}
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(resolutionTxDisplay)}
+                    <MetadataCopyButton
+                      value={resolutionTxDisplay}
+                      label="Copy"
                       className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-400 hover:text-brand-200"
-                    >
-                      Copy
-                    </button>
+                    />
                   </p>
                 )}
                 {resolution.blockNumber && <p>Block #{resolution.blockNumber}</p>}

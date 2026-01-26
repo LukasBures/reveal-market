@@ -137,6 +137,7 @@ export function MarketDetailChart({
   const chartRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const plotKey = useMemo(() => outcomeOptions.join("|"), [outcomeOptions]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -155,7 +156,7 @@ export function MarketDetailChart({
     const formatAxisTime = (value: number) => formatTime(new Date(value));
     const formatOutcomeLabels = (values: number[]) => {
       if (outcomeOptions.length >= 2) {
-        return values.map((value, idx) => {
+        return values.map((_, idx) => {
           if (idx === 0) return outcomeOptions[outcomeOptions.length - 1] ?? "No";
           if (idx === values.length - 1) return outcomeOptions[0] ?? "Yes";
           return "";
@@ -242,7 +243,12 @@ export function MarketDetailChart({
     return () => {
       observer.disconnect();
     };
-  }, [dataSeries, filteredHistory.length, outcomeOptions]);
+  }, [filteredHistory.length, plotKey]);
+
+  useEffect(() => {
+    if (!plotRef.current) return;
+    plotRef.current.setData(dataSeries as uPlot.AlignedData);
+  }, [dataSeries]);
 
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">

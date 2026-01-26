@@ -259,7 +259,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
             <input
               id="market-search"
               type="search"
-              placeholder="Search events, oracles, or narratives"
+              placeholder="Search markets"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onFocus={() => search.trim().length >= 2 && setSuggestionsVisible(true)}

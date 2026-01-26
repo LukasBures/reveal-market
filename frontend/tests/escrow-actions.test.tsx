@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
@@ -91,14 +91,17 @@ describe("Escrow funding guard", () => {
   });
 
   it("blocks deposit/withdraw when on the wrong chain", async () => {
-    render(
-      <StakeQuoteCard
-        marketAddress="0x1111111111111111111111111111111111111111"
-        marketId="m1"
-        outcomes={["Yes", "No"]}
-        outcomePrices={[0.5, 0.5]}
-      />,
-    );
+    await act(async () => {
+      render(
+        <StakeQuoteCard
+          marketAddress="0x1111111111111111111111111111111111111111"
+          marketId="m1"
+          outcomes={["Yes", "No"]}
+          outcomePrices={[0.5, 0.5]}
+        />,
+      );
+      await Promise.resolve();
+    });
 
     const switchButton = screen.getByRole("button", { name: /switch to horizen/i });
     expect(switchButton).toBeDisabled();

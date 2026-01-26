@@ -1,5 +1,3 @@
-"use client";
-
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDate, formatDateTime, formatNumber, formatUsd, normalizeHex } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";

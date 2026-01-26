@@ -15,7 +15,7 @@ import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
 import { formatDateTime } from "@/lib/formatters";
 import { JsonLd } from "@/components/seo/JsonLd";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 const humanizeGroupSlug = (slug?: string | null): string | undefined => {
   if (!slug) return undefined;

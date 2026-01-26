@@ -1,5 +1,3 @@
-"use client";
-
 import type { EventSummary } from "@/lib/api-types";
 import { EventCardBinaryYesNo } from "./EventCardBinaryYesNo";
 import { EventCardBinary } from "./EventCardBinary";
@@ -15,12 +13,24 @@ const isYesNo = (outcomes: string[] = []) =>
 export function EventCard({ event }: Props) {
   const markets = event.markets ?? [];
   if (markets.length > 1) {
-    return <EventCardMultiMarket event={event} />;
+    return (
+      <div data-testid="event-card">
+        <EventCardMultiMarket event={event} />
+      </div>
+    );
   }
   const market = markets[0];
   const outcomes = market?.outcomes ?? [];
   if (isYesNo(outcomes)) {
-    return <EventCardBinaryYesNo event={event} market={market} />;
+    return (
+      <div data-testid="event-card">
+        <EventCardBinaryYesNo event={event} market={market} />
+      </div>
+    );
   }
-  return <EventCardBinary event={event} market={market} />;
+  return (
+    <div data-testid="event-card">
+      <EventCardBinary event={event} market={market} />
+    </div>
+  );
 }

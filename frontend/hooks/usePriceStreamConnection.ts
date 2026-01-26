@@ -50,6 +50,8 @@ type StreamConnection = {
   wsAttempts: number;
   wsDisabled: boolean;
   idleCloseTimer: ReturnType<typeof setTimeout> | null;
+  notifyTimer: ReturnType<typeof setTimeout> | null;
+  lastNotifiedAt: number;
   cleanup?: () => void;
 };
 
@@ -74,14 +76,28 @@ const initialState: StreamState = {
   fxStale: undefined,
 };
 const initialSnapshot = initialState;
+const NOTIFY_INTERVAL_MS = 250;
 
 function notify(conn: StreamConnection) {
   conn.subscribers.forEach((cb) => cb());
+  conn.lastNotifiedAt = Date.now();
+}
+
+function scheduleNotify(conn: StreamConnection) {
+  if (conn.notifyTimer) return;
+  const elapsed = Date.now() - conn.lastNotifiedAt;
+  const delay = Math.max(0, NOTIFY_INTERVAL_MS - elapsed);
+  conn.notifyTimer = setTimeout(() => {
+    conn.notifyTimer = null;
+    if (!conn.cancelled) {
+      notify(conn);
+    }
+  }, delay);
 }
 
 function setState(conn: StreamConnection, patch: Partial<StreamState>) {
   conn.state = { ...conn.state, ...patch };
-  notify(conn);
+  scheduleNotify(conn);
 }
 
 function updateOutcome(conn: StreamConnection, outcome: number, updater: (prev: OutcomePrice) => OutcomePrice) {
@@ -124,6 +140,8 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     wsAttempts: 0,
     wsDisabled: !shouldUseStreamerWs(),
     idleCloseTimer: null,
+    notifyTimer: null,
+    lastNotifiedAt: 0,
   };
 
   const cleanup = () => {
@@ -131,6 +149,10 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     if (conn.idleCloseTimer) {
       clearTimeout(conn.idleCloseTimer);
       conn.idleCloseTimer = null;
+    }
+    if (conn.notifyTimer) {
+      clearTimeout(conn.notifyTimer);
+      conn.notifyTimer = null;
     }
     if (conn.ws) {
       const closedState =
