@@ -23,7 +23,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     db_session.add(market)
     db_session.commit()
 
-    response = client.get("/markets", params={"limit": 10})
+    response = client.get("/events", params={"limit": 10})
     assert response.status_code == 200
 
     cache_key = markets_list_cache_key(None, None, None, None, 10, 0)
@@ -35,7 +35,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
 
     monkeypatch.setattr(crud, "get_markets", fail)
 
-    cached_response = client.get("/markets", params={"limit": 10})
+    cached_response = client.get("/events", params={"limit": 10})
     assert cached_response.status_code == 200
 
 
@@ -55,7 +55,7 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     db_session.add(shared_models.MarketGammaMetadata(market_id=market_id, description="Lightweight"))
     db_session.commit()
 
-    response = client.get("/markets", params={"limit": 5})
+    response = client.get("/events", params={"limit": 5})
     assert response.status_code == 200
 
     cache_key = markets_list_cache_key(None, None, None, None, 5, 0)
@@ -81,7 +81,7 @@ def test_market_detail_cached(client, db_session, monkeypatch):
     db_session.add(market)
     db_session.commit()
 
-    first = client.get(f"/markets/{market.event_id}")
+    first = client.get(f"/events/by-key/{market.event_id}")
     assert first.status_code == 200
 
     cache_key = market_detail_cache_key(market.event_id)
@@ -92,7 +92,7 @@ def test_market_detail_cached(client, db_session, monkeypatch):
         raise AssertionError("Database should not be queried on cache hit")
 
     monkeypatch.setattr(crud, "get_market_by_event_id", fail)
-    second = client.get(f"/markets/{market.event_id}")
+    second = client.get(f"/events/by-key/{market.event_id}")
     assert second.status_code == 200
 
 

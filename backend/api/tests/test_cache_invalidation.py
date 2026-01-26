@@ -21,7 +21,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
     db_session.commit()
 
     cache_key = markets_list_cache_key(None, None, None, None, 10, 0)
-    first = client.get("/markets", params={"limit": 10})
+    first = client.get("/events", params={"limit": 10})
     assert first.status_code == 200
     assert cache_key in api_main.cache_client.store
     record_key = "market:evt-cache-1"
@@ -34,7 +34,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
         "oracle": "0xcache",
         "status": "commit",
     }
-    response = client.post("/markets", json=payload)
+    response = client.post("/events", json=payload)
     assert response.status_code == 201
 
     assert cache_key not in api_main.cache_client.store
@@ -46,17 +46,17 @@ def test_patch_market_invalidates_detail_and_suggest_cache(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    detail = client.get(f"/markets/{market.event_id}")
+    detail = client.get(f"/events/by-key/{market.event_id}")
     assert detail.status_code == 200
     detail_key = market_detail_cache_key(market.event_id)
     assert detail_key in api_main.cache_client.store
 
-    suggest = client.get("/markets/suggest", params={"q": "Cache", "limit": 5})
+    suggest = client.get("/events/suggest", params={"q": "Cache", "limit": 5})
     assert suggest.status_code == 200
     suggestion_key = suggest_cache_key("Cache", 5)
     assert suggestion_key in api_main.cache_client.store
 
-    patch = client.patch(f"/markets/{market.event_id}", json={"title": "Retitled"})
+    patch = client.patch(f"/events/{market.event_id}", json={"title": "Retitled"})
     assert patch.status_code == 200
 
     assert detail_key not in api_main.cache_client.store

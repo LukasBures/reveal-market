@@ -55,7 +55,7 @@ def _history_cache_ttl_seconds(interval: str | None) -> int:
     return 600
 
 
-@router.get("/markets", response_model=list[schemas.MarketResponse], tags=["markets"])
+@router.get("/events", response_model=list[schemas.EventResponse], tags=["events"])
 async def list_markets(
     request: Request,
     status: Annotated[str | None, Query(description="Filter markets by status")] = None,
@@ -85,8 +85,8 @@ async def list_markets(
         Query(ge=1, le=168, description="Only return markets closing within this many hours"),
     ] = None,
     session: AsyncSession = Depends(get_session),
-) -> list[schemas.MarketResponse]:
-    """List markets with optional filters and heavy reliance on Redis caches."""
+) -> list[schemas.EventResponse]:
+    """List events with optional filters and heavy reliance on Redis caches."""
 
     coalesce_mode = bool(coalesce_groups)
     normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
@@ -154,8 +154,6 @@ async def list_markets(
             cached_models = market_svc.filter_markets_for_visibility(
                 hydrated, hide_settled=(status or "").lower() == "active"
             )
-            if coalesce_mode and cached_models:
-                cached_models = market_svc.coalesce_grouped_markets(cached_models, use_total_volume=total_volume_mode)
             if volume_mode and cached_models:
                 cached_models.sort(
                     key=lambda m: (
@@ -165,6 +163,7 @@ async def list_markets(
                     reverse=True,
                 )
             cached_models = cached_models[:limit]
+            cached_events = market_svc.build_event_responses(cached_models)
             log_event(
                 logger,
                 logging.INFO,
@@ -179,12 +178,12 @@ async def list_markets(
                 search=normalized_search,
                 limit=limit,
                 offset=offset,
-                result_count=len(cached_models),
+                result_count=len(cached_events),
                 featured=featured,
                 coalesce_groups=coalesce_mode,
                 closes_within_hours=closes_within_hours,
             )
-            return cached_models
+            return cached_events
         MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*", category=category or "*").inc()
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:list")
     else:
@@ -225,8 +224,6 @@ async def list_markets(
     market_models = market_svc.filter_markets_for_visibility(
         market_models, hide_settled=(status or "").lower() == "active"
     )
-    if coalesce_mode and market_models:
-        market_models = market_svc.coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if popularity_mode:
         popularity_scores = {m.event_id: market_svc.compute_market_popularity(m) for m in market_models}
         selected = market_models
@@ -320,7 +317,7 @@ async def list_markets(
             trending=bool(trending),
             closes_within_hours=closes_within_hours,
         )
-    return market_models
+    return market_svc.build_event_responses(market_models)
 
 
 @router.get("/categories/{category_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
@@ -543,43 +540,57 @@ async def list_markets_by_category(
     return market_models
 
 
-@router.get("/markets/group/{group_slug}", response_model=schemas.GroupedMarketsResponse, tags=["markets"])
-async def list_grouped_markets(
-    group_slug: str,
+@router.get("/events/by-key/{event_key}", response_model=schemas.EventResponse, tags=["events"])
+async def get_event_by_key(
+    event_key: str,
     session: AsyncSession = Depends(get_session),
-) -> schemas.GroupedMarketsResponse:
-    """Return markets that belong to a group_slug plus aggregate metrics."""
+) -> schemas.EventResponse:
+    """Resolve event detail by group slug (preferred) or event id fallback."""
 
-    normalized_slug = group_slug.strip().lower()
-    markets = await crud.get_markets_by_group_slug(session, normalized_slug)
+    normalized_key = (event_key or "").strip().lower()
+    cache = await get_cache_client()
+    if cache is not None:
+        cached = await get_json(cache, market_svc.market_detail_cache_key(event_key))
+        if cached is None and normalized_key != event_key:
+            cached = await get_json(cache, market_svc.market_detail_cache_key(normalized_key))
+        if cached is not None:
+            model = schemas.MarketResponse.model_validate(cached)
+            if normalized_key and getattr(model, "group_slug", None) == normalized_key and model.event_id != normalized_key:
+                cached = None
+            else:
+                await market_svc.enrich_market_models(session, [model], include_siblings=True)
+                return market_svc.build_event_responses([model])[0]
+    markets = await crud.get_markets_by_group_slug(session, normalized_key)
     if not markets:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="group_not_found")
+        market = await crud.get_market_by_event_id(session, event_key)
+        if market is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
+        group_slug = getattr(market, "group_slug", None)
+        if group_slug:
+            markets = await crud.get_markets_by_group_slug(session, str(group_slug))
+        if not markets:
+            markets = [market]
     market_models = await market_svc.enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
     )
-
-    def _group_sort_key(market: schemas.MarketResponse):
-        position = getattr(market, "group_position", None)
-        threshold = getattr(market, "group_item_threshold", None)
-        closes_at = market_svc.normalize_datetime(getattr(market, "closes_at", None))
-        return (
-            position if position is not None else threshold if threshold is not None else float("inf"),
-            closes_at or datetime.max.replace(tzinfo=UTC),
-            getattr(market, "slug", None) or getattr(market, "event_id", ""),
-        )
-
-    market_models.sort(key=_group_sort_key)
-    aggregate_volume = market_svc.safe_float(market_models[0].volume_24h_usd) if market_models else None
-    aggregate_liquidity = market_svc.safe_float(market_models[0].liquidity_usd) if market_models else None
-    return schemas.GroupedMarketsResponse(
-        group_slug=normalized_slug,
-        markets=market_models,
-        aggregate_volume_24h_usd=aggregate_volume,
-        aggregate_liquidity_usd=aggregate_liquidity,
-    )
+    if market_models:
+        cache = await get_cache_client()
+        for market_model in market_models:
+            cache_key = market_svc.market_detail_cache_key(market_model.event_id)
+            ttl_seconds = market_svc.resolved_cache_ttl(market_model.status, getattr(market_model, "resolved_at", None))
+            if cache is not None and ttl_seconds > 0:
+                payload = market_model.model_dump(mode="json")
+                await set_json(cache, cache_key, payload, ttl_seconds)
+                await add_tag(cache, f"market:{market_model.event_id}", cache_key)
+                if getattr(market_model, "condition_id", None):
+                    await add_tag(cache, f"resolution:{str(market_model.condition_id).lower()}", cache_key)
+                if getattr(market_model, "group_slug", None):
+                    await add_tag(cache, f"group:{str(market_model.group_slug)}", cache_key)
+    events = market_svc.build_event_responses(market_models)
+    return events[0]
 
 
-@router.get("/markets/onchain", tags=["markets"], include_in_schema=False)
+@router.get("/events/onchain", tags=["events"], include_in_schema=False)
 async def list_onchain_markets():
     """Return markets discovered directly from the on-chain factory contract."""
 
@@ -601,7 +612,7 @@ async def list_onchain_markets():
     return {"markets": addresses}
 
 
-@router.get("/markets/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["markets"])
+@router.get("/events/stats", response_model=list[schemas.MarketStatusBreakdown], tags=["events"])
 async def market_stats(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -659,7 +670,7 @@ async def market_stats(
     return stats
 
 
-@router.get("/markets/suggest", response_model=list[schemas.MarketResponse], tags=["markets"])
+@router.get("/events/suggest", response_model=list[schemas.MarketResponse], tags=["events"])
 async def suggest_markets(
     request: Request,
     q: Annotated[str, Query(min_length=2, max_length=200, description="Search term for suggestions")],
@@ -1124,13 +1135,13 @@ async def market_price_history(
     return response_payload
 
 
-@router.get("/markets/{event_id}", response_model=schemas.MarketResponse, tags=["markets"])
-async def read_market(
+@router.get("/events/{event_id}", response_model=schemas.EventResponse, tags=["events"])
+async def read_event_by_id(
     event_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-) -> schemas.MarketResponse:
-    """Return a single market detail record, hydrating siblings when cached."""
+) -> schemas.EventResponse:
+    """Return a single event detail record by event id, hydrating siblings when cached."""
 
     cache_key = market_svc.market_detail_cache_key(event_id)
     cache = await get_cache_client()
@@ -1161,7 +1172,7 @@ async def read_market(
             event_id=event_id,
             result_count=1,
         )
-        return model
+        return market_svc.build_event_responses([model])[0]
 
     market = await crud.get_market_by_event_id(session, event_id)
     if not market:
@@ -1212,7 +1223,7 @@ async def read_market(
     else:
         MARKET_DETAIL_CACHE_COUNTER.labels(outcome="bypass").inc()
     update_cache_context(request, cache_key=cache_key if cache_available else None, hit=False, source="markets:detail")
-    return response
+    return market_svc.build_event_responses([response])[0]
 
 
 @router.get(
@@ -1250,9 +1261,9 @@ async def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
 
 
 @router.post(
-    "/markets",
+    "/events",
     response_model=schemas.MarketResponse,
-    tags=["markets"],
+    tags=["events"],
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
 )
@@ -1297,9 +1308,9 @@ async def upsert_market(
 
 
 @router.patch(
-    "/markets/{event_id}",
+    "/events/{event_id}",
     response_model=schemas.MarketResponse,
-    tags=["markets"],
+    tags=["events"],
     include_in_schema=False,
 )
 async def update_market(

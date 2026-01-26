@@ -323,6 +323,111 @@
         "title": "CommitmentsSyncResponse",
         "type": "object"
       },
+      "EventResponse": {
+        "properties": {
+          "aggregate_liquidity_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Liquidity Usd"
+          },
+          "aggregate_volume_24h_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Volume 24H Usd"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "group_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Slug"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketResponse"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "title",
+          "markets"
+        ],
+        "title": "EventResponse",
+        "type": "object"
+      },
       "FxQuoteResponse": {
         "properties": {
           "received_at": {
@@ -351,49 +456,6 @@
           "zen_usd"
         ],
         "title": "FxQuoteResponse",
-        "type": "object"
-      },
-      "GroupedMarketsResponse": {
-        "properties": {
-          "aggregate_liquidity_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aggregate Liquidity Usd"
-          },
-          "aggregate_volume_24h_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aggregate Volume 24H Usd"
-          },
-          "group_slug": {
-            "title": "Group Slug",
-            "type": "string"
-          },
-          "markets": {
-            "items": {
-              "$ref": "#/components/schemas/MarketResponse"
-            },
-            "title": "Markets",
-            "type": "array"
-          }
-        },
-        "required": [
-          "group_slug",
-          "markets"
-        ],
-        "title": "GroupedMarketsResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -4081,80 +4143,10 @@
         ]
       }
     },
-    "/healthz": {
+    "/events": {
       "get": {
-        "description": "Readiness probe that fans out to DB/Redis/worker/Polymarket checks.",
-        "operationId": "health_check_healthz_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Health Check",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/healthz/heartbeats": {
-      "get": {
-        "description": "Return worker/API heartbeat snapshots stored in Redis.",
-        "operationId": "heartbeat_dashboard_healthz_heartbeats_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HeartbeatDashboard"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Heartbeat Dashboard",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/live": {
-      "get": {
-        "description": "Cheap liveness probe that never touches dependencies.",
-        "operationId": "liveness_check_live_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Liveness Check Live Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Liveness Check",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/markets": {
-      "get": {
-        "description": "List markets with optional filters and heavy reliance on Redis caches.",
-        "operationId": "list_markets_markets_get",
+        "description": "List events with optional filters and heavy reliance on Redis caches.",
+        "operationId": "list_markets_events_get",
         "parameters": [
           {
             "description": "Filter markets by status",
@@ -4356,9 +4348,9 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/MarketResponse"
+                    "$ref": "#/components/schemas/EventResponse"
                   },
-                  "title": "Response List Markets Markets Get",
+                  "title": "Response List Markets Events Get",
                   "type": "array"
                 }
               }
@@ -4378,21 +4370,21 @@
         },
         "summary": "List Markets",
         "tags": [
-          "markets"
+          "events"
         ]
       }
     },
-    "/markets/group/{group_slug}": {
+    "/events/by-key/{event_key}": {
       "get": {
-        "description": "Return markets that belong to a group_slug plus aggregate metrics.",
-        "operationId": "list_grouped_markets_markets_group__group_slug__get",
+        "description": "Resolve event detail by group slug (preferred) or event id fallback.",
+        "operationId": "get_event_by_key_events_by_key__event_key__get",
         "parameters": [
           {
             "in": "path",
-            "name": "group_slug",
+            "name": "event_key",
             "required": true,
             "schema": {
-              "title": "Group Slug",
+              "title": "Event Key",
               "type": "string"
             }
           }
@@ -4402,7 +4394,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroupedMarketsResponse"
+                  "$ref": "#/components/schemas/EventResponse"
                 }
               }
             },
@@ -4419,16 +4411,16 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Grouped Markets",
+        "summary": "Get Event By Key",
         "tags": [
-          "markets"
+          "events"
         ]
       }
     },
-    "/markets/stats": {
+    "/events/stats": {
       "get": {
         "description": "Return counts of markets per status, cached for fast health checks.",
-        "operationId": "market_stats_markets_stats_get",
+        "operationId": "market_stats_events_stats_get",
         "responses": {
           "200": {
             "content": {
@@ -4437,7 +4429,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MarketStatusBreakdown"
                   },
-                  "title": "Response Market Stats Markets Stats Get",
+                  "title": "Response Market Stats Events Stats Get",
                   "type": "array"
                 }
               }
@@ -4447,14 +4439,14 @@
         },
         "summary": "Market Stats",
         "tags": [
-          "markets"
+          "events"
         ]
       }
     },
-    "/markets/suggest": {
+    "/events/suggest": {
       "get": {
         "description": "Return a short suggestion list, caching the normalized query payload.",
-        "operationId": "suggest_markets_markets_suggest_get",
+        "operationId": "suggest_markets_events_suggest_get",
         "parameters": [
           {
             "description": "Search term for suggestions",
@@ -4492,7 +4484,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MarketResponse"
                   },
-                  "title": "Response Suggest Markets Markets Suggest Get",
+                  "title": "Response Suggest Markets Events Suggest Get",
                   "type": "array"
                 }
               }
@@ -4512,14 +4504,14 @@
         },
         "summary": "Suggest Markets",
         "tags": [
-          "markets"
+          "events"
         ]
       }
     },
-    "/markets/{event_id}": {
+    "/events/{event_id}": {
       "get": {
-        "description": "Return a single market detail record, hydrating siblings when cached.",
-        "operationId": "read_market_markets__event_id__get",
+        "description": "Return a single event detail record by event id, hydrating siblings when cached.",
+        "operationId": "read_event_by_id_events__event_id__get",
         "parameters": [
           {
             "in": "path",
@@ -4536,7 +4528,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MarketResponse"
+                  "$ref": "#/components/schemas/EventResponse"
                 }
               }
             },
@@ -4553,9 +4545,79 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Read Market",
+        "summary": "Read Event By Id",
         "tags": [
-          "markets"
+          "events"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Readiness probe that fans out to DB/Redis/worker/Polymarket checks.",
+        "operationId": "health_check_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/healthz/heartbeats": {
+      "get": {
+        "description": "Return worker/API heartbeat snapshots stored in Redis.",
+        "operationId": "heartbeat_dashboard_healthz_heartbeats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Heartbeat Dashboard",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/live": {
+      "get": {
+        "description": "Cheap liveness probe that never touches dependencies.",
+        "operationId": "liveness_check_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Liveness Check Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness Check",
+        "tags": [
+          "health"
         ]
       }
     },

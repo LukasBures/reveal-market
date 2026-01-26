@@ -166,6 +166,19 @@ class MarketStatusBreakdown(BaseModel):
     count: int
 
 
+class EventResponse(BaseModel):
+    event_id: str
+    title: str
+    category: str | None = None
+    group_slug: str | None = None
+    image_url: str | None = None
+    starts_at: datetime | None = None
+    closes_at: datetime | None = None
+    markets: list[MarketResponse]
+    aggregate_volume_24h_usd: float | None = None
+    aggregate_liquidity_usd: float | None = None
+
+
 class GroupedMarketsResponse(BaseModel):
     group_slug: str
     markets: list[MarketResponse]

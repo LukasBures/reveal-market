@@ -59,8 +59,8 @@ describe("MarketFilters", () => {
     expect(suggestionButton).not.toBeNull();
     fireEvent.mouseDown(suggestionButton!);
 
-    expect(pushMock).toHaveBeenCalledWith("/markets/evt-alpha");
-    expect(fetchMock).toHaveBeenCalledWith("/api/markets/suggest?limit=5&q=Al", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(pushMock).toHaveBeenCalledWith("/events/evt-alpha");
+    expect(fetchMock).toHaveBeenCalledWith("/api/events/suggest?limit=5&q=Al", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("caches successful suggestion queries", async () => {

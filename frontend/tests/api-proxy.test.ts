@@ -64,15 +64,15 @@ describe("proxyApiRequest", () => {
     const fetchMock = vi.fn().mockResolvedValue(upstreamResponse);
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = new Request("https://frontend.test/api/markets?limit=5&offset=2", {
+    const request = new Request("https://frontend.test/api/events?limit=5&offset=2", {
       headers: {
         accept: "application/json",
       },
     });
     const { proxyApiRequest } = await import("@/lib/server/apiProxy");
-    const response = await proxyApiRequest(request, "/markets");
+    const response = await proxyApiRequest(request, "/events");
 
-    expect(fetchMock).toHaveBeenCalledWith("https://api.reveal.test/markets?limit=5&offset=2", {
+    expect(fetchMock).toHaveBeenCalledWith("https://api.reveal.test/events?limit=5&offset=2", {
       headers: {
         accept: "application/json",
       },
@@ -84,12 +84,12 @@ describe("proxyApiRequest", () => {
 
   it("returns a 502 response when the upstream fetch fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    const request = new Request("https://frontend.test/api/markets?limit=1");
+    const request = new Request("https://frontend.test/api/events?limit=1");
     const { proxyApiRequest } = await import("@/lib/server/apiProxy");
 
-    const response = await proxyApiRequest(request, "/markets");
+    const response = await proxyApiRequest(request, "/events");
     expect(response.status).toBe(502);
     expect(JSON.parse(await response.text())).toEqual({ error: "upstream_unavailable" });
-    expect(loggerMock.error).toHaveBeenCalledWith("apiProxy:error", expect.objectContaining({ pathname: "/markets" }));
+    expect(loggerMock.error).toHaveBeenCalledWith("apiProxy:error", expect.objectContaining({ pathname: "/events" }));
   });
 });

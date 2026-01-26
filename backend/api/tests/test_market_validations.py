@@ -11,18 +11,18 @@ def test_create_market_requires_event_id(client):
         "oracle": "0xabc",
         "status": "commit",
     }
-    response = client.post("/markets", json=payload)
+    response = client.post("/events", json=payload)
     assert response.status_code == 422
 
 
 def test_patch_missing_market_returns_404(client):
-    response = client.patch("/markets/does-not-exist", json={"title": "noop"})
+    response = client.patch("/events/does-not-exist", json={"title": "noop"})
     assert response.status_code == 404
     assert response.json()["detail"] == "market_not_found"
 
 
 def test_search_requires_minimum_length(client):
-    response = client.get("/markets", params={"search": "a"})
+    response = client.get("/events", params={"search": "a"})
     assert response.status_code == 422
 
 
@@ -32,7 +32,7 @@ def test_category_limit_validation(client):
 
 
 def test_suggest_rejects_large_limit(client):
-    response = client.get("/markets/suggest", params={"q": "alpha", "limit": 100})
+    response = client.get("/events/suggest", params={"q": "alpha", "limit": 100})
     assert response.status_code == 422
 
 
@@ -49,6 +49,6 @@ def test_default_page_size_respected(client, db_session):
         )
     db_session.commit()
 
-    response = client.get("/markets")
+    response = client.get("/events")
     assert response.status_code == 200
     assert len(response.json()) == settings.default_page_size

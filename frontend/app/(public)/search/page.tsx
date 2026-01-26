@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
-import { SearchMarketsClient } from "@/components/markets/SearchMarketsClient";
-import { fetchFeaturedMarkets } from "@/lib/api";
+import { SearchEventsClient } from "@/components/markets/SearchMarketsClient";
+import { fetchFeaturedEvents } from "@/lib/api";
 import { buildMetadata } from "@/lib/seo";
 import { DEFAULT_PAGE_SIZE } from "@/components/markets/constants";
 import { parseCategorySlug } from "@/lib/slugs";
@@ -9,13 +9,13 @@ import { parseCategorySlug } from "@/lib/slugs";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Search Markets | Reveal Market",
+  title: "Search Events | Reveal Market",
   description:
-    "Browse live and settled private prediction markets with fixed ticket size. Search by category or status and claim after settlement.",
+    "Browse live and settled private prediction events with fixed ticket size. Search by category or status and claim after settlement.",
   path: "/search",
   keywords: [
-    "private prediction markets",
-    "market search",
+    "private prediction events",
+    "event search",
     "fixed ticket size",
     "claim after settlement",
     "settlement receipts",
@@ -52,7 +52,7 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
   const initialStatus = (normalizedStatus ?? fallbackStatus) as "any" | "active" | "locked" | "settled" | "cancelled";
   const shouldFetch = effectiveQuery.length >= 2 || Boolean(initialCategory) || hasStatusParam;
   const initialResults = shouldFetch
-    ? await fetchFeaturedMarkets(DEFAULT_PAGE_SIZE, {
+    ? await fetchFeaturedEvents(DEFAULT_PAGE_SIZE, {
         searchQuery: effectiveQuery || undefined,
         status: initialStatus,
         category: initialCategory ?? undefined,
@@ -63,19 +63,19 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <div className="space-y-3">
-        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Markets</p>
-        <h1 className="text-4xl font-semibold text-white">Search private prediction markets</h1>
+        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Events</p>
+        <h1 className="text-4xl font-semibold text-white">Search private prediction events</h1>
         <p className="text-lg text-slate-300">
-          Browse live and settled markets. Fixed tickets; entries stay private until settlement and receipts publish when
+          Browse live and settled events. Fixed tickets; entries stay private until settlement and receipts publish when
           outcomes post.
         </p>
         <p className="text-sm text-white/70">
-          Tip: type at least two characters. Filters apply to private markets with fixed ticket size and claim after
+          Tip: type at least two characters. Filters apply to private events with fixed ticket size and claim after
           settlement.
         </p>
       </div>
       <div className="mt-8">
-        <SearchMarketsClient
+        <SearchEventsClient
           initialQuery={initialQuery}
           initialCategory={initialCategory}
           initialStatus={initialStatus}

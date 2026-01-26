@@ -10,7 +10,7 @@ Browser -> Next.js (SSR + RSC) -> FastAPI backend
 
 ## Architecture
 
-- **App Router**: `app/layout.tsx` sets global providers (React Query, Wagmi, analytics), nav, and metadata. Routes include `/` (featured markets), `/search`, `/markets/[eventId]`, `/dashboard`, `/proofs`, `/docs/*`, `/contact`, and API proxies under `app/api/*` (suggestions, contact).
+- **App Router**: `app/layout.tsx` sets global providers (React Query, Wagmi, analytics), nav, and metadata. Routes include `/` (featured events), `/search`, `/events/[eventId]`, `/dashboard`, `/proofs`, `/docs/*`, `/contact`, and API proxies under `app/api/*` (suggestions, contact).
 - **Data layer**: `lib/api.ts` centralizes backend calls with cache tags that mirror worker invalidation; server actions in `app/actions/` reuse these fetchers for pagination and load-more UX. `lib/seo.ts` holds canonical metadata used by docs/legal pages.
 - **Streaming hooks**: `usePriceStream`/`useLiveOutcomePrices` connect to `/stream` WS/SSE with history seeding and HTTP fallback; `useFxStream` keeps a single FX WS alive with stale guards and HTTP fallback.
 - **Trading flow**: Stake panel enforces the fixed ticket size (0.1 ZEN by default) plus backend caps, pulls `/pricing/preview` + `/pricing/quote`, submits `/trade/commit`, and polls `/trade/status`. Dashboard uses `/positions`, which now includes `market_summary` (title/outcomes/prices) so it can render positions without extra per-market calls. Deposits/withdrawals are on-chain escrow actions and are not initiated by the API.
@@ -49,7 +49,7 @@ npm run build && npm run start   # production build (used in Docker/CI)
 
 ## File Map
 
-- `app/` – routes + API proxies + server actions; `app/api/markets/suggest` proxies search suggestions to backend.
+- `app/` – routes + API proxies + server actions; `app/api/events/suggest` proxies search suggestions to backend.
 - `components/` – nav/footer, hero modules, market cards/grids, trade panels, dashboards, proofs, docs UI.
 - `hooks/` – streaming + FX hooks and related utilities.
 - `lib/` – API clients, env presets, logging helpers, market mappers, Wagmi config, SEO helpers.
@@ -65,6 +65,6 @@ npm run build && npm run start   # production build (used in Docker/CI)
 
 ## Troubleshooting
 
-- **Blank markets**: verify backend `/healthz` and that Redis is reachable; set `RM_API_BASE_URL` to a live backend.
+- **Blank events**: verify backend `/healthz` and that Redis is reachable; set `RM_API_BASE_URL` to a live backend.
 - **Streams not updating**: check `NEXT_PUBLIC_PRICE_STREAMER_URL` and browser console for CORS/WS errors; set `NEXT_PUBLIC_DISABLE_STREAMER_WS=true` to force SSE/HTTP fallback.
 - **Wallet connect fails**: ensure `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and chain IDs match backend pricing chain.

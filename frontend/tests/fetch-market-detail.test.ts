@@ -65,7 +65,7 @@ describe("fetchMarketByEventId", () => {
     expect(detail.resolution?.winners?.[0]).toEqual({ index: 1, label: "No", payout: 1 });
     expect(detail.heartbeat?.latencyMs).toBe(120);
     expect(fetchMock).toHaveBeenCalled();
-    expect(fetchMock.mock.calls[0][0]).toContain("/markets/evt-detail");
+    expect(fetchMock.mock.calls[0][0]).toContain("/events/evt-detail");
   });
 
   it("returns null and logs a warning when the market is missing", async () => {

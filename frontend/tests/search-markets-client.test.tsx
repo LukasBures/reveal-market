@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SearchMarketsClient } from "@/components/markets/SearchMarketsClient";
-import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import { SearchEventsClient } from "@/components/markets/SearchMarketsClient";
+import { loadFeaturedEventsAction } from "@/app/actions/events";
 
 const pushMock = vi.fn();
 const replaceMock = vi.fn();
@@ -14,12 +14,12 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParamsMock,
 }));
 
-vi.mock("@/app/actions/markets", () => ({
-  loadFeaturedMarketsAction: vi.fn(),
+vi.mock("@/app/actions/events", () => ({
+  loadFeaturedEventsAction: vi.fn(),
 }));
 
 vi.mock("@/components/markets/FeaturedMarketsClient", () => ({
-  FeaturedMarketsClient: ({
+  FeaturedEventsClient: ({
     searchQuery,
     categoryFilter,
     status,
@@ -37,28 +37,28 @@ vi.mock("@/components/markets/FeaturedMarketsClient", () => ({
   ),
 }));
 
-describe("SearchMarketsClient", () => {
+describe("SearchEventsClient", () => {
   beforeEach(() => {
-    vi.mocked(loadFeaturedMarketsAction).mockReset();
+    vi.mocked(loadFeaturedEventsAction).mockReset();
     pushMock.mockReset();
     replaceMock.mockReset();
     window.localStorage.clear();
   });
 
   it("applies category and status filters when searching", async () => {
-    vi.mocked(loadFeaturedMarketsAction).mockResolvedValue([]);
+    vi.mocked(loadFeaturedEventsAction).mockResolvedValue([]);
 
-    render(<SearchMarketsClient initialResults={[]} />);
+    render(<SearchEventsClient initialResults={[]} />);
 
     const input = screen.getByPlaceholderText(/search by keyword/i);
     fireEvent.change(input, { target: { value: "Bitcoin" } });
     fireEvent.submit(input.closest("form")!);
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(1);
+      expect(loadFeaturedEventsAction).toHaveBeenCalledTimes(1);
     });
 
-    expect(loadFeaturedMarketsAction).toHaveBeenLastCalledWith(
+    expect(loadFeaturedEventsAction).toHaveBeenLastCalledWith(
       expect.any(Number),
       expect.objectContaining({
         searchQuery: "Bitcoin",
@@ -70,10 +70,10 @@ describe("SearchMarketsClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "Crypto" }));
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(2);
+      expect(loadFeaturedEventsAction).toHaveBeenCalledTimes(2);
     });
 
-    expect(loadFeaturedMarketsAction).toHaveBeenLastCalledWith(
+    expect(loadFeaturedEventsAction).toHaveBeenLastCalledWith(
       expect.any(Number),
       expect.objectContaining({
         searchQuery: "Bitcoin",
@@ -85,10 +85,10 @@ describe("SearchMarketsClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "Locked" }));
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(3);
+      expect(loadFeaturedEventsAction).toHaveBeenCalledTimes(3);
     });
 
-    expect(loadFeaturedMarketsAction).toHaveBeenLastCalledWith(
+    expect(loadFeaturedEventsAction).toHaveBeenLastCalledWith(
       expect.any(Number),
       expect.objectContaining({
         searchQuery: "Bitcoin",
@@ -99,16 +99,16 @@ describe("SearchMarketsClient", () => {
   });
 
   it("stores recent searches and re-runs them", async () => {
-    vi.mocked(loadFeaturedMarketsAction).mockResolvedValue([]);
+    vi.mocked(loadFeaturedEventsAction).mockResolvedValue([]);
 
-    render(<SearchMarketsClient initialResults={[]} />);
+    render(<SearchEventsClient initialResults={[]} />);
 
     const input = screen.getByPlaceholderText(/search by keyword/i);
     fireEvent.change(input, { target: { value: "Solana" } });
     fireEvent.submit(input.closest("form")!);
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(1);
+      expect(loadFeaturedEventsAction).toHaveBeenCalledTimes(1);
     });
 
     const stored = JSON.parse(window.localStorage.getItem("rm_recent_searches") ?? "[]");
@@ -118,12 +118,12 @@ describe("SearchMarketsClient", () => {
     fireEvent.click(recentButton);
 
     await waitFor(() => {
-      expect(loadFeaturedMarketsAction).toHaveBeenCalledTimes(1);
+      expect(loadFeaturedEventsAction).toHaveBeenCalledTimes(1);
     });
   });
 
   it("focuses the search input with keyboard shortcuts", () => {
-    render(<SearchMarketsClient initialResults={[]} />);
+    render(<SearchEventsClient initialResults={[]} />);
 
     const input = screen.getByPlaceholderText(/search by keyword/i);
     expect(input).not.toHaveFocus();

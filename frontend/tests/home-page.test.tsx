@@ -6,13 +6,20 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    fetchFeaturedMarkets: vi.fn().mockResolvedValue([
+    fetchFeaturedEvents: vi.fn().mockResolvedValue([
       {
         eventId: "evt-1",
-        title: "Sample market",
+        title: "Sample event",
         category: "Politics",
-        outcomes: ["Yes", "No"],
-        outcomePrices: [0.7, 0.3],
+        markets: [
+          {
+            eventId: "evt-1",
+            title: "Sample market",
+            category: "Politics",
+            outcomes: ["Yes", "No"],
+            outcomePrices: [0.7, 0.3],
+          },
+        ],
       },
     ]),
   };
@@ -27,8 +34,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
-  FeaturedMarketsSection: () => <div data-testid="featured">Featured Markets</div>,
-  FeaturedMarketsSkeleton: () => <div data-testid="featured-skeleton">Loading...</div>,
+  FeaturedEventsSection: () => <div data-testid="featured">Featured Events</div>,
+  FeaturedEventsSkeleton: () => <div data-testid="featured-skeleton">Loading...</div>,
 }));
 
 describe("HomePage", () => {

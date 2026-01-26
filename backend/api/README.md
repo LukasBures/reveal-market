@@ -17,7 +17,7 @@ Clients -> FastAPI -> Redis (caches/heartbeats) -> Postgres (source of truth)
 
 ## Responsibilities
 
-- **Markets/resolutions**: `/markets`, `/categories/{slug}`, `/markets/suggest`, `/markets/{event_id}`, `/resolution/{condition_id}` pull from normalized tables (outcomes, tags, clob tokens, Gamma metadata). Resolved markets drop from cache 12h after `resolved_at`.
+- **Events/resolutions**: `/events`, `/categories/{slug}`, `/events/suggest`, `/events/{event_id}`, `/resolution/{condition_id}` pull from normalized tables (outcomes, tags, clob tokens, Gamma metadata). Resolved markets drop from cache 12h after `resolved_at`.
 - **Search**: Indexed Postgres queries for full-text search and pagination (intentionally not cached).
 - **Pricing**: `/pricing/preview` (unsigned, non-persistent) and `/pricing/quote` (signed QUOTE_V1 digest, stored in the quote ledger) fetch FX from the streamer endpoint, ignore client-supplied FX, and enforce per-quote/user/market caps. `/pricing/submit` revalidates digest/expiry and optional FX drift.
 - **Trade/relayer**: `/trade/commit` consumes a quote, builds CommitAuth signatures, and forwards to the relayer (Redis queue fallback). `/trade/status` polls queue results; `/trade/claim` + `/claim/bundles` surface settlement/claim state; `/positions` returns user positions, escrow balance, and a `market_summary` payload so dashboards don't need extra market detail calls. On-chain receipts are decoded via an ABI registry (factory, market, escrow, pool, ERC20) so multi-contract logs can be inspected without MismatchedABI noise.

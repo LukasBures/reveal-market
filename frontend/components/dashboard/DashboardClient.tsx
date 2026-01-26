@@ -1292,7 +1292,7 @@ export function DashboardClient() {
                           ) : null}
                           <Link
                             className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
-                            href={`/markets/${encodeURIComponent(p.market_id)}`}
+                            href={`/events/${encodeURIComponent(p.market_id)}`}
                           >
                             View market
                           </Link>

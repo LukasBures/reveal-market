@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import dynamicImport from "next/dynamic";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { fetchFeaturedMarkets, fetchMarketByEventId } from "@/lib/api";
+import { fetchFeaturedEvents, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildBreadcrumbJsonLd, buildMetadata } from "@/lib/seo";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
@@ -48,7 +48,7 @@ type MarketDetailPageProps = {
 };
 
 const MARKET_CONTEXT_FALLBACK =
-  "This market mirrors Reveal Market’s commit/reveal rails. Settlement proofs are recorded on-chain and mirrored in the backend resolution ledger.";
+  "This market mirrors Reveal Event’s commit/reveal rails. Settlement proofs are recorded on-chain and mirrored in the backend resolution ledger.";
 const MARKET_DESCRIPTION_MAX_LENGTH = 320;
 const DEFAULT_EVENT_STATUS = "https://schema.org/EventScheduled";
 const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
@@ -63,11 +63,11 @@ const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
   voided: "https://schema.org/EventCancelled",
 };
 
-const loadMarket = cache(async (eventId: string) => fetchMarketByEventId(eventId));
+const loadEvent = cache(async (eventId: string) => fetchMarketByEventId(eventId));
 
-const buildMarketPath = (eventId: string): string => `/markets/${encodeURIComponent(eventId)}`;
+const buildEventPath = (eventId: string): string => `/events/${encodeURIComponent(eventId)}`;
 
-const selectMarketCopy = (market: MarketDetail): string => {
+const selectEventCopy = (market: MarketDetail): string => {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
     | null;
@@ -84,7 +84,7 @@ const selectMarketCopy = (market: MarketDetail): string => {
 const clampDescription = (copy: string, maxLength = MARKET_DESCRIPTION_MAX_LENGTH): string =>
   copy.length > maxLength ? `${copy.slice(0, maxLength - 1).trim()}...` : copy;
 
-const resolveMarketImage = (market: MarketDetail): string | undefined => {
+const resolveEventImage = (market: MarketDetail): string | undefined => {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
     | Record<string, any>
     | null;
@@ -109,7 +109,7 @@ const resolveMarketImage = (market: MarketDetail): string | undefined => {
 const getCanonicalEventId = (market: MarketDetail, fallback: string): string =>
   market.eventId && market.eventId !== "unknown" ? market.eventId : fallback;
 
-const extractMarketKeywords = (market: MarketDetail): string[] => {
+const extractEventKeywords = (market: MarketDetail): string[] => {
   const source = [
     market.category,
     market.status,
@@ -129,35 +129,35 @@ const extractMarketKeywords = (market: MarketDetail): string[] => {
   return keywords;
 };
 
-const mapMarketStatusToSchema = (status?: string): string => {
+const mapEventStatusToSchema = (status?: string): string => {
   if (!status) {
     return DEFAULT_EVENT_STATUS;
   }
   return SCHEMA_EVENT_STATUS_MAP[status.toLowerCase()] ?? DEFAULT_EVENT_STATUS;
 };
 
-const buildMarketStructuredData = (
+const buildEventStructuredData = (
   market: MarketDetail,
   description: string,
   canonicalPath: string,
 ): Record<string, any> => {
   const url = absoluteUrl(canonicalPath);
-  const keywords = extractMarketKeywords(market);
+  const keywords = extractEventKeywords(market);
   const commitDeadline = getCommitDeadline(market);
   const structuredData: Record<string, any> = {
     "@context": "https://schema.org",
     "@type": "Event",
     name: market.title,
     description,
-    eventStatus: mapMarketStatusToSchema(market.status),
+    eventStatus: mapEventStatusToSchema(market.status),
     eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
     startDate: commitDeadline ?? market.createdAt ?? undefined,
     endDate: market.revealDeadline ?? market.updatedAt ?? undefined,
     url,
-    image: [absoluteUrl(resolveMarketImage(market) ?? "/opengraph-image")],
+    image: [absoluteUrl(resolveEventImage(market) ?? "/opengraph-image")],
     organizer: {
       "@type": "Organization",
-      name: "Reveal Market",
+      name: "Reveal Event",
       url: absoluteUrl("/"),
     },
     location: {
@@ -186,9 +186,9 @@ export type GenerateStaticParams = () => Promise<MarketDetailParams[]>;
 
 export const generateStaticParams: GenerateStaticParams = async () => {
   try {
-    const markets = await fetchFeaturedMarkets(12);
-    return markets
-      .map((market) => market.eventId)
+    const events = await fetchFeaturedEvents(12);
+    return events
+      .map((event) => event.eventId)
       .filter((eventId): eventId is string => Boolean(eventId && eventId !== "unknown"))
       .map((eventId) => ({ eventId }));
   } catch (error) {
@@ -199,26 +199,26 @@ export const generateStaticParams: GenerateStaticParams = async () => {
 
 export async function generateMetadata({ params }: MarketDetailPageProps): Promise<Metadata> {
   const { eventId } = await params;
-  const fallbackPath = buildMarketPath(eventId);
-  const market = await loadMarket(eventId);
+  const fallbackPath = buildEventPath(eventId);
+  const market = await loadEvent(eventId);
   if (!market) {
     return buildMetadata({
-      title: "Market unavailable | Reveal Market",
+      title: "Event unavailable | Reveal Event",
       description: "This market could not be located or is no longer visible.",
       path: fallbackPath,
       robots: { index: false, follow: false },
     });
   }
   const canonicalEventId = getCanonicalEventId(market, eventId);
-  const canonicalPath = buildMarketPath(canonicalEventId);
-  const baseDescription = clampDescription(selectMarketCopy(market));
+  const canonicalPath = buildEventPath(canonicalEventId);
+  const baseDescription = clampDescription(selectEventCopy(market));
   const description = `${baseDescription} Private prediction market with fixed ticket size and claims after settlement.`;
   return buildMetadata({
-    title: `${market.title} | Reveal Market`,
+    title: `${market.title} | Reveal Event`,
     description,
     path: canonicalPath,
-    keywords: extractMarketKeywords(market),
-    image: resolveMarketImage(market),
+    keywords: extractEventKeywords(market),
+    image: resolveEventImage(market),
     type: "article",
   });
 }
@@ -227,22 +227,22 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
   const { eventId } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const requestedOutcome = resolvedSearchParams?.outcome ? Number(resolvedSearchParams.outcome) : null;
-  const market = await loadMarket(eventId);
+  const market = await loadEvent(eventId);
   if (!market) {
     notFound();
   }
   const canonicalEventId = getCanonicalEventId(market, eventId);
-  const canonicalPath = buildMarketPath(canonicalEventId);
-  const contextCopy = selectMarketCopy(market);
-  const structuredData = buildMarketStructuredData(market, contextCopy, canonicalPath);
-  const coverImage = resolveMarketImage(market);
+  const canonicalPath = buildEventPath(canonicalEventId);
+  const contextCopy = selectEventCopy(market);
+  const structuredData = buildEventStructuredData(market, contextCopy, canonicalPath);
+  const coverImage = resolveEventImage(market);
   const breadcrumbs = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },
-    { name: "Markets", path: "/search" },
+    { name: "Events", path: "/search" },
     { name: market.title, path: canonicalPath },
   ]);
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
-  const priceStreamMarketId = resolvePriceStreamMarketId(market, canonicalEventId);
+  const priceStreamEventId = resolvePriceStreamMarketId(market, canonicalEventId);
   const siblings = Array.isArray(market.siblings) ? market.siblings : [];
   const resolverSource =
     market.resolutionSource ??
@@ -280,7 +280,7 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-16 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
           <MarketDetailHeader market={market} coverImage={coverImage} />
-          <MarketLiveStatusBar marketId={priceStreamMarketId} tokenIds={tokenIds} />
+          <MarketLiveStatusBar marketId={priceStreamEventId} tokenIds={tokenIds} />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6">
               <GroupedMarketSelector
@@ -293,7 +293,7 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
                 forceShow
               />
               <MarketDetailChart
-                marketId={priceStreamMarketId}
+                marketId={priceStreamEventId}
                 tokenIds={tokenIds}
                 outcomePrices={market.outcomePrices ?? []}
                 outcomes={market.outcomes ?? []}
@@ -302,7 +302,7 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market context</p>
+                    <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Event context</p>
                     <div className="mt-3 space-y-3 text-slate-200">
                       <p className="text-sm font-semibold text-white">Resolution criteria</p>
                       <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{contextCopy}</div>
@@ -350,7 +350,7 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
             "@type": "BreadcrumbList",
             itemListElement: [
               { "@type": "ListItem", position: 1, name: "Home", item: absoluteUrl("/") },
-          { "@type": "ListItem", position: 2, name: "Markets", item: absoluteUrl("/search") },
+          { "@type": "ListItem", position: 2, name: "Events", item: absoluteUrl("/search") },
               { "@type": "ListItem", position: 3, name: market.title, item: absoluteUrl(canonicalPath) },
             ],
           }),

@@ -3,9 +3,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { MarketSummary } from "@/lib/api-types";
-import { FeaturedMarketsClient } from "@/components/markets/FeaturedMarketsClient";
-import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import type { EventSummary } from "@/lib/api-types";
+import { FeaturedEventsClient } from "@/components/markets/FeaturedMarketsClient";
+import { loadFeaturedEventsAction } from "@/app/actions/events";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "@/components/markets/constants";
 import { MARKET_CATEGORY_FILTERS } from "@/lib/markets";
 import type { MarketSortOption } from "@/lib/markets";
@@ -15,13 +15,13 @@ type Props = {
   initialQuery?: string;
   initialCategory?: string | null;
   initialStatus?: string;
-  initialResults: MarketSummary[];
+  initialResults: EventSummary[];
   pageSize?: number;
   sortBy?: MarketSortOption;
 };
 
 type CacheEntry = {
-  data: MarketSummary[];
+  data: EventSummary[];
   cachedAt: number;
 };
 
@@ -56,7 +56,7 @@ const isEditableTarget = (target: EventTarget | null) => {
   return Boolean(target.isContentEditable);
 };
 
-export function SearchMarketsClient({
+export function SearchEventsClient({
   initialQuery = "",
   initialCategory = null,
   initialStatus,
@@ -72,7 +72,7 @@ export function SearchMarketsClient({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(
     normalizeStatusFilter(initialStatus, initialQuery.trim() ? "any" : "active"),
   );
-  const [seedResults, setSeedResults] = useState<MarketSummary[]>(initialResults);
+  const [seedResults, setSeedResults] = useState<EventSummary[]>(initialResults);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isPending, startTransition] = useTransition();
@@ -247,7 +247,7 @@ export function SearchMarketsClient({
         return;
       }
       try {
-        const data = await loadFeaturedMarketsAction(pageSize, {
+        const data = await loadFeaturedEventsAction(pageSize, {
           searchQuery: effectiveQuery || undefined,
           status: nextStatus,
           category: nextCategory ?? undefined,
@@ -314,10 +314,10 @@ export function SearchMarketsClient({
   const onlyActive = statusFilter === "active";
   const hasActiveFilters = Boolean(activeQuery) || Boolean(categoryFilter) || statusFilter !== "active";
   const emptyNotice = activeQuery
-    ? "No markets matched your search."
+    ? "No events matched your search."
     : hasActiveFilters
-      ? "No markets matched your filters."
-      : "Start typing to see markets.";
+      ? "No events matched your filters."
+      : "Start typing to see events.";
   const clientKey = useMemo(
     () => `${activeQuery}|${categoryFilter ?? "all"}|${statusFilter}|${refreshKey}|${sortBy}`,
     [activeQuery, categoryFilter, refreshKey, sortBy, statusFilter],
@@ -326,17 +326,17 @@ export function SearchMarketsClient({
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 shadow-lg shadow-black/40">
-        <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Search markets</p>
-        <h1 className="mt-2 text-3xl font-semibold text-white">Find a market</h1>
+        <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Search events</p>
+        <h1 className="mt-2 text-3xl font-semibold text-white">Find an event</h1>
         <p className="mt-2 text-sm text-slate-400">
-          Results are cached per query and include resolved/finalized markets. Active markets stay prioritized on the homepage and category pages.
+          Results are cached per query and include resolved/finalized events. Active events stay prioritized on the homepage and category pages.
         </p>
         <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row">
           <label className="flex-1">
             <span className="sr-only">Search</span>
             <input
               type="search"
-              name="marketsSearch"
+              name="eventsSearch"
               placeholder="Search by keyword (e.g., election, BTC, sports)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -443,7 +443,7 @@ export function SearchMarketsClient({
         </div>
       </div>
 
-      <FeaturedMarketsClient
+      <FeaturedEventsClient
         key={clientKey}
         initialMarkets={seedResults}
         pageSize={pageSize}

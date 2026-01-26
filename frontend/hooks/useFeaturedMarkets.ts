@@ -2,18 +2,18 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import type { FetchFeaturedMarketsOptions, MarketSummary } from "@/lib/api-types";
-import { loadFeaturedMarketsAction } from "@/app/actions/markets";
+import type { EventSummary, FetchFeaturedMarketsOptions } from "@/lib/api-types";
+import { loadFeaturedEventsAction } from "@/app/actions/events";
 
 type UseFeaturedMarketsArgs = {
   limit: number;
-  initialData?: MarketSummary[];
+  initialData?: EventSummary[];
 } & Pick<
   FetchFeaturedMarketsOptions,
   "searchQuery" | "category" | "status" | "trending" | "orderBy" | "closesWithinHours"
 >;
 
-export function useFeaturedMarkets({
+export function useFeaturedEvents({
   limit,
   searchQuery,
   category,
@@ -27,7 +27,7 @@ export function useFeaturedMarkets({
   const normalizedOrderBy = orderBy ?? "volume";
   return useQuery({
     queryKey: [
-      "featuredMarkets",
+      "featuredEvents",
       {
         limit,
         searchQuery: searchQuery ?? null,
@@ -40,7 +40,7 @@ export function useFeaturedMarkets({
       },
     ],
     queryFn: () =>
-      loadFeaturedMarketsAction(limit, {
+      loadFeaturedEventsAction(limit, {
         searchQuery,
         category,
         status: normalizedStatus,

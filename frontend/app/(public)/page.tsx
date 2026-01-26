@@ -4,7 +4,7 @@ import { Suspense } from "react";
 
 import { LandingGate } from "@/components/landing/LandingGate";
 import { Hero } from "@/components/marketing/Hero";
-import { FeaturedMarketsSection, FeaturedMarketsSkeleton } from "@/components/markets/FeaturedMarketsSection";
+import { FeaturedEventsSection, FeaturedEventsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { fetchHealthSnapshot, fetchInvestorKpis, fetchMarketStatsBreakdown } from "@/lib/api";
 import { formatNumber } from "@/lib/formatters";
 import { buildMetadata } from "@/lib/seo";
@@ -53,22 +53,22 @@ export default async function HomePage({ searchParams }: PageProps) {
     stats.find((stat) => stat.status === "finalized")?.count ??
     0;
   const callouts = [
-    { label: "Live markets", value: formatNumber(liveMarkets) },
-    { label: "Ended markets", value: formatNumber(endedMarkets) },
+    { label: "Live events", value: formatNumber(liveMarkets) },
+    { label: "Ended events", value: formatNumber(endedMarkets) },
   ];
   const resolvedParams = (await searchParams) ?? {};
   const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;
   const normalizedSearch = rawSearchQuery?.trim() ?? "";
   const hasShortSearch = normalizedSearch.length > 0 && normalizedSearch.length < 2;
   const effectiveSearchQuery = hasShortSearch ? undefined : normalizedSearch || undefined;
-  const searchNotice = hasShortSearch ? "Enter at least two characters to search markets." : undefined;
+  const searchNotice = hasShortSearch ? "Enter at least two characters to search events." : undefined;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <Hero stats={callouts} />
       <div className="mt-10">
-        <Suspense fallback={<FeaturedMarketsSkeleton />}>
-          <FeaturedMarketsSection
+        <Suspense fallback={<FeaturedEventsSkeleton />}>
+          <FeaturedEventsSection
             searchQuery={effectiveSearchQuery}
             emptyNotice={searchNotice}
             status={effectiveSearchQuery ? "any" : "active"}

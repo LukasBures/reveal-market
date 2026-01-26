@@ -31,7 +31,7 @@ describe("fetchMarketStatsBreakdown", () => {
     const stats = await fetchMarketStatsBreakdown();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${DEFAULT_API_BASE}/markets/stats`,
+      `${DEFAULT_API_BASE}/events/stats`,
       expect.objectContaining({
         next: expect.objectContaining({ revalidate: 60 }),
       }),

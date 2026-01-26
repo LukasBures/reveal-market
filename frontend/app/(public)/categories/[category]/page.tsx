@@ -56,10 +56,10 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
     <>
       <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:gap-10">
         <header className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">{parsed.label} markets</p>
-          <h1 className="text-4xl font-semibold text-white">{parsed.label} prediction markets</h1>
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">{parsed.label} events</p>
+          <h1 className="text-4xl font-semibold text-white">{parsed.label} prediction events</h1>
           <p className="max-w-3xl text-lg text-slate-300">
-            Explore live {parsed.label.toLowerCase()} markets with private commits, fixed tickets, and transparent
+            Explore live {parsed.label.toLowerCase()} events with private commits, fixed tickets, and transparent
             settlement receipts. Results stay easy to review so you can monitor outcomes over time.
           </p>
         </header>

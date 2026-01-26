@@ -60,19 +60,19 @@ def test_list_markets_supports_filters(client, db_session):
     )
     db_session.commit()
 
-    all_markets = client.get("/markets").json()
+    all_markets = client.get("/events").json()
     assert {m["event_id"] for m in all_markets} == {"evt-1", "evt-2", "evt-3"}
 
-    filtered_status = client.get("/markets", params={"status": "commit"}).json()
+    filtered_status = client.get("/events", params={"status": "commit"}).json()
     assert {m["event_id"] for m in filtered_status} == {"evt-1", "evt-3"}
 
-    filtered_category = client.get("/markets", params={"category": "crypto"}).json()
+    filtered_category = client.get("/events", params={"category": "crypto"}).json()
     assert [m["event_id"] for m in filtered_category] == ["evt-2"]
 
-    filtered_oracle = client.get("/markets", params={"oracle": "0xaaa"}).json()
+    filtered_oracle = client.get("/events", params={"oracle": "0xaaa"}).json()
     assert {m["event_id"] for m in filtered_oracle} == {"evt-1", "evt-3"}
 
-    filtered_search = client.get("/markets", params={"search": "Alpha"}).json()
+    filtered_search = client.get("/events", params={"search": "Alpha"}).json()
     assert {m["event_id"] for m in filtered_search} == {"evt-1", "evt-3"}
 
 
@@ -112,11 +112,11 @@ def test_volume_sorting_prefers_total_volume(client, db_session):
     )
     db_session.commit()
 
-    ordered = client.get("/markets", params={"order_by": "volume"}).json()
+    ordered = client.get("/events", params={"order_by": "volume"}).json()
     ids = [m["event_id"] for m in ordered][:3]
     assert ids == ["evt-total-high", "evt-total-mid", "evt-total-low"]
 
-    alias_ordered = client.get("/markets", params={"order_by": "volume_24h_usd"}).json()
+    alias_ordered = client.get("/events", params={"order_by": "volume_24h_usd"}).json()
     alias_ids = [m["event_id"] for m in alias_ordered][:3]
     assert alias_ids == ids
 
@@ -130,7 +130,7 @@ def test_create_and_read_market(client):
         "status": "commit",
     }
 
-    create_response = client.post("/markets", json=payload)
+    create_response = client.post("/events", json=payload)
     assert create_response.status_code == 201
     created = create_response.json()
     assert created["event_id"] == payload["event_id"]
@@ -138,12 +138,12 @@ def test_create_and_read_market(client):
     assert created["status"] == payload["status"]
     assert created["rake_bps"] is None
 
-    read_response = client.get(f"/markets/{payload['event_id']}")
+    read_response = client.get(f"/events/by-key/{payload['event_id']}")
     assert read_response.status_code == 200
     retrieved = read_response.json()
     assert retrieved["event_id"] == payload["event_id"]
     assert retrieved["title"] == payload["title"]
-    assert retrieved["rake_bps"] is None
+    assert retrieved["markets"][0]["rake_bps"] is None
 
 
 def test_create_market_with_rake(client):
@@ -156,13 +156,13 @@ def test_create_market_with_rake(client):
         "rake_bps": 75,
     }
 
-    response = client.post("/markets", json=payload)
+    response = client.post("/events", json=payload)
     assert response.status_code == 201
     created = response.json()
     assert created["rake_bps"] == 75
 
-    fetched = client.get(f"/markets/{payload['event_id']}").json()
-    assert fetched["rake_bps"] == 75
+    fetched = client.get(f"/events/by-key/{payload['event_id']}").json()
+    assert fetched["markets"][0]["rake_bps"] == 75
 
 
 def test_market_detail_includes_grouping_and_siblings(client, db_session):
@@ -217,19 +217,18 @@ def test_market_detail_includes_grouping_and_siblings(client, db_session):
     )
     db_session.commit()
 
-    response = client.get(f"/markets/{first.event_id}")
+    response = client.get(f"/events/by-key/{first.event_id}")
     assert response.status_code == 200
     payload = response.json()
     assert payload["group_slug"] == group_slug
-    assert payload["group_position"] == 1500000
-    assert payload["volume_24h_usd"] == 15.0
-    siblings = payload["siblings"]
-    assert isinstance(siblings, list)
-    assert {sib["event_id"] for sib in siblings} == {first.event_id, second.event_id}
-    assert siblings[0]["group_position"] == 1500000
-    assert siblings[0]["group_item_title"] == ">$1.5M"
-    assert siblings[0]["outcome_prices"] == [0.55, 0.45]
-    assert siblings[1]["group_position"] == 2000000
+    assert payload["aggregate_volume_24h_usd"] == 15.0
+    markets = payload["markets"]
+    assert isinstance(markets, list)
+    assert {m["event_id"] for m in markets} == {first.event_id, second.event_id}
+    assert markets[0]["group_position"] == 1500000
+    assert markets[0]["group_item_title"] == ">$1.5M"
+    assert markets[0]["outcome_prices"] == [0.55, 0.45]
+    assert markets[1]["group_position"] == 2000000
 
 
 def test_patch_market_and_stats(client, db_session):
@@ -245,7 +244,7 @@ def test_patch_market_and_stats(client, db_session):
         "tags": ["patched"],
     }
 
-    patch_response = client.patch(f"/markets/{market.event_id}", json=patch_payload)
+    patch_response = client.patch(f"/events/{market.event_id}", json=patch_payload)
     assert patch_response.status_code == 200
     patched = patch_response.json()
     assert patched["title"] == "Patched Title"
@@ -253,7 +252,7 @@ def test_patch_market_and_stats(client, db_session):
     assert patched["tags"] == ["patched"]
     assert patched["rake_bps"] is None
 
-    stats_response = client.get("/markets/stats")
+    stats_response = client.get("/events/stats")
     assert stats_response.status_code == 200
     stats = {entry["status"]: entry["count"] for entry in stats_response.json()}
     assert stats.get("finalized") == 1
@@ -261,7 +260,7 @@ def test_patch_market_and_stats(client, db_session):
 
 
 def test_onchain_markets_unconfigured(client):
-    response = client.get("/markets/onchain")
+    response = client.get("/events/onchain")
     assert response.status_code == 503
 
 
@@ -273,7 +272,7 @@ def test_onchain_markets_success(client, monkeypatch):
     monkeypatch.setattr(api_main.settings, "factory_address", "0x123", raising=False)
     monkeypatch.setattr(api_main.settings, "rpc_url", "https://unit.test", raising=False)
 
-    response = client.get("/markets/onchain")
+    response = client.get("/events/onchain")
     assert response.status_code == 200
     assert response.json()["markets"] == ["0x1111111111111111111111111111111111111111"]
 
@@ -398,11 +397,11 @@ def test_markets_cache_metrics_track_hits_and_misses(client, db_session):
     miss_before = _cache_metric("miss")
     hit_before = _cache_metric("hit")
 
-    response_one = client.get("/markets", params={"limit": 10})
+    response_one = client.get("/events", params={"limit": 10})
     assert response_one.status_code == 200
     assert _cache_metric("miss") == miss_before + 1
 
-    response_two = client.get("/markets", params={"limit": 10})
+    response_two = client.get("/events", params={"limit": 10})
     assert response_two.status_code == 200
     assert _cache_metric("hit") == hit_before + 1
 
@@ -500,7 +499,7 @@ def test_markets_volume_order_respects_offset_and_cache(client, db_session):
     db_session.add_all([low, middle, top])
     db_session.commit()
 
-    resp = client.get("/markets", params={"limit": 1, "offset": 1, "order_by": "volume"})
+    resp = client.get("/events", params={"limit": 1, "offset": 1, "order_by": "volume"})
     assert resp.status_code == 200
     payload = resp.json()
     assert len(payload) == 1
@@ -551,14 +550,14 @@ def test_suggest_endpoint_serves_cache_when_source_removed(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    first = client.get("/markets/suggest", params={"q": "Alpha", "limit": 3})
+    first = client.get("/events/suggest", params={"q": "Alpha", "limit": 3})
     assert first.status_code == 200
     assert {item["event_id"] for item in first.json()} == {"evt-suggest"}
 
     db_session.query(models.Market).delete()
     db_session.commit()
 
-    second = client.get("/markets/suggest", params={"q": "Alpha", "limit": 3})
+    second = client.get("/events/suggest", params={"q": "Alpha", "limit": 3})
     assert second.status_code == 200
     assert {item["event_id"] for item in second.json()} == {"evt-suggest"}
     cache_key = suggest_cache_key("Alpha", 3)
@@ -569,7 +568,7 @@ def test_create_market_invalidates_list_cache(client, db_session):
     db_session.add(_make_market("evt-cache-base", "Base Market", category="sports", oracle="0xaaa", status="commit"))
     db_session.commit()
 
-    first = client.get("/markets", params={"limit": 10})
+    first = client.get("/events", params={"limit": 10})
     assert first.status_code == 200
     assert {item["event_id"] for item in first.json()} == {"evt-cache-base"}
 
@@ -580,10 +579,10 @@ def test_create_market_invalidates_list_cache(client, db_session):
         "oracle": "0xbbb",
         "status": "commit",
     }
-    create_response = client.post("/markets", json=payload)
+    create_response = client.post("/events", json=payload)
     assert create_response.status_code == 201
 
-    second = client.get("/markets", params={"limit": 10})
+    second = client.get("/events", params={"limit": 10})
     assert second.status_code == 200
     assert {item["event_id"] for item in second.json()} == {"evt-cache-base", "evt-cache-new"}
 
@@ -592,7 +591,7 @@ def test_market_search_requests_not_cached(client, db_session):
     db_session.add(_make_market("evt-search", "AI Boom", category="tech", oracle="0xaaa", status="commit"))
     db_session.commit()
 
-    response = client.get("/markets", params={"search": "AI", "limit": 5})
+    response = client.get("/events", params={"search": "AI", "limit": 5})
     assert response.status_code == 200
     cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0)
     assert cache_key not in api_main.cache_client.store
@@ -603,21 +602,21 @@ def test_patch_market_invalidates_detail_cache(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    detail = client.get(f"/markets/{market.event_id}")
+    detail = client.get(f"/events/by-key/{market.event_id}")
     assert detail.status_code == 200
     cache_key = market_detail_cache_key(market.event_id)
     assert cache_key in api_main.cache_client.store
 
     patch = client.patch(
-        f"/markets/{market.event_id}",
+        f"/events/{market.event_id}",
         json={"title": "Updated Detail", "status": "settled"},
     )
     assert patch.status_code == 200
 
-    refreshed = client.get(f"/markets/{market.event_id}")
+    refreshed = client.get(f"/events/by-key/{market.event_id}")
     assert refreshed.status_code == 200
-    assert refreshed.json()["title"] == "Updated Detail"
-    assert refreshed.json()["status"] == "settled"
+    assert refreshed.json()["markets"][0]["title"] == "Updated Detail"
+    assert refreshed.json()["markets"][0]["status"] == "settled"
 
 
 def test_markets_support_pagination_with_offset(client, db_session):
@@ -637,19 +636,19 @@ def test_markets_support_pagination_with_offset(client, db_session):
     db_session.add_all(entries)
     db_session.commit()
 
-    response = client.get("/markets", params={"limit": 1, "offset": 1})
+    response = client.get("/events", params={"limit": 1, "offset": 1})
     assert response.status_code == 200
     # Markets are ordered by created_at desc, so offset 1 should return the second newest entry.
     assert response.json()[0]["event_id"] == "evt-page-1"
 
 
 def test_markets_limit_requires_positive_integer(client):
-    resp = client.get("/markets", params={"limit": 0})
+    resp = client.get("/events", params={"limit": 0})
     assert resp.status_code == 422
 
 
 def test_suggest_requires_min_length(client):
-    resp = client.get("/markets/suggest", params={"q": "a", "limit": 5})
+    resp = client.get("/events/suggest", params={"q": "a", "limit": 5})
     assert resp.status_code == 422
 
 
@@ -658,7 +657,7 @@ def test_suggest_trims_and_is_case_insensitive(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    resp = client.get("/markets/suggest", params={"q": "  ALpHa  ", "limit": 5})
+    resp = client.get("/events/suggest", params={"q": "  ALpHa  ", "limit": 5})
     assert resp.status_code == 200
     assert {item["event_id"] for item in resp.json()} == {"evt-suggest-case"}
 
@@ -674,7 +673,7 @@ def test_suggest_supports_partial_word_matches(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    resp = client.get("/markets/suggest", params={"q": "sol", "limit": 5})
+    resp = client.get("/events/suggest", params={"q": "sol", "limit": 5})
     assert resp.status_code == 200
     payload = resp.json()
     assert any(item["event_id"] == "evt-solana" for item in payload)
@@ -694,7 +693,7 @@ def test_suggest_capped_at_limit_without_duplicates(client, db_session):
     db_session.add_all(markets)
     db_session.commit()
 
-    resp = client.get("/markets/suggest", params={"q": "alpha", "limit": 5})
+    resp = client.get("/events/suggest", params={"q": "alpha", "limit": 5})
     assert resp.status_code == 200
     payload = resp.json()
     assert len(payload) == 5
@@ -725,14 +724,14 @@ def test_market_allowlists_filter_results(client, db_session):
     api_main.settings.market_category_allowlist = ["sports"]
 
     try:
-        response = client.get("/markets", params={"limit": 10})
+        response = client.get("/events", params={"limit": 10})
         assert response.status_code == 200
         payload = response.json()
         assert len(payload) == 1
         market = payload[0]
         assert market["event_id"] == "evt-allowed"
 
-        cached_response = client.get("/markets", params={"limit": 10})
+        cached_response = client.get("/events", params={"limit": 10})
         assert cached_response.status_code == 200
         cached_payload = cached_response.json()
         assert [item["event_id"] for item in cached_payload] == ["evt-allowed"]
@@ -772,7 +771,7 @@ def test_list_markets_by_category_uses_cache(client, db_session, monkeypatch):
 
 def test_create_market_requires_mandatory_fields(client):
     response = client.post(
-        "/markets",
+        "/events",
         json={
             "title": "Invalid payload",
             "category": "sports",
@@ -787,7 +786,7 @@ def test_create_market_requires_mandatory_fields(client):
 
 
 def test_list_markets_validates_limit_bounds(client):
-    response = client.get("/markets", params={"limit": 0})
+    response = client.get("/events", params={"limit": 0})
     assert response.status_code == 422
     assert response.json()["detail"][0]["type"] == "greater_than_equal"
 
@@ -809,7 +808,7 @@ def test_market_suggestions_endpoint(client, db_session):
     )
     db_session.commit()
 
-    response = client.get("/markets/suggest", params={"q": "Election", "limit": 2})
+    response = client.get("/events/suggest", params={"q": "Election", "limit": 2})
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 2

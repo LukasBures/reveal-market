@@ -44,21 +44,21 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
   const heroStats = useMemo(
     () => [
       {
-        label: "Live markets",
+        label: "Live events",
         value:
           typeof liveMarketsCount === "number" && liveMarketsCount > 0
             ? formatNumber(liveMarketsCount)
             : "—",
       },
       {
-        label: "Ended markets",
+        label: "Ended events",
         value:
           typeof endedMarketsCount === "number" && endedMarketsCount > 0
             ? formatNumber(endedMarketsCount)
             : "—",
       },
       {
-        label: "Total markets tracked",
+        label: "Total events tracked",
         value:
           typeof totalMarketsCount === "number" && totalMarketsCount > 0
             ? formatNumber(totalMarketsCount)
@@ -123,7 +123,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
         const fetchSuggestions = async () => {
           const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
           try {
-            const response = await fetch(`/api/markets/suggest?${params.toString()}`, {
+            const response = await fetch(`/api/events/suggest?${params.toString()}`, {
               signal: controller.signal,
               headers: {
                 Accept: "application/json",
@@ -209,7 +209,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
       } else if (event.key === "Enter") {
         if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
           event.preventDefault();
-          router.push(`/markets/${suggestions[highlightedIndex].eventId}`);
+      router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
           setSuggestionsVisible(false);
         }
       }
@@ -237,7 +237,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-4 text-center lg:max-w-2xl lg:text-left">
           <div>
-            <h1 className="text-3xl font-semibold text-white sm:text-4xl">Trade-ready markets curated for every narrative.</h1>
+            <h1 className="text-3xl font-semibold text-white sm:text-4xl">Trade-ready events curated for every narrative.</h1>
             <p className="mt-3 text-base text-slate-300">
               Browse liquidity-backed order books, high-volume catalysts, and bespoke categories powered by the Reveal Market feed.
               Search instantly or jump straight into a category.
@@ -251,15 +251,15 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
             ))}
           </div>
         </div>
-        <form onSubmit={handleSubmit} aria-label="Search markets" className="relative w-full max-w-xl">
+        <form onSubmit={handleSubmit} aria-label="Search events" className="relative w-full max-w-xl">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 shadow-inner shadow-black/30">
             <label htmlFor="market-search" className="sr-only">
-              Search markets
+              Search events
             </label>
             <input
               id="market-search"
               type="search"
-              placeholder="Search markets, oracles, or narratives"
+              placeholder="Search events, oracles, or narratives"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onFocus={() => search.trim().length >= 2 && setSuggestionsVisible(true)}
@@ -296,7 +296,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
                     aria-selected={index === highlightedIndex}
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      router.push(`/markets/${suggestion.eventId}`);
+                      router.push(`/events/${suggestion.groupSlug ?? suggestion.eventId}`);
                       setSuggestionsVisible(false);
                     }}
                     className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${

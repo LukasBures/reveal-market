@@ -1,8 +1,8 @@
-import { fetchFeaturedMarkets } from "@/lib/api";
+import { fetchFeaturedEvents } from "@/lib/api";
 import { logger } from "@/lib/logging";
 import { serverEnv } from "@/lib/serverEnv";
 import type { MarketSortOption } from "@/lib/markets";
-import { FeaturedMarketsClient } from "./FeaturedMarketsClient";
+import { FeaturedEventsClient } from "./FeaturedMarketsClient";
 import { DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./constants";
 import { MarketGridSkeleton } from "./MarketGridSkeleton";
 import { Skeleton } from "../ui/Skeleton";
@@ -18,7 +18,7 @@ type Props = {
   onlyActive?: boolean;
 };
 
-export async function FeaturedMarketsSection({
+export async function FeaturedEventsSection({
   pageSize = DEFAULT_PAGE_SIZE,
   maxItems = DEFAULT_MAX_ITEMS,
   searchQuery,
@@ -29,7 +29,7 @@ export async function FeaturedMarketsSection({
   onlyActive = true,
 }: Props = {}) {
   const orderBy = "volume";
-  const initialMarkets = await fetchFeaturedMarkets(pageSize, {
+  const initialMarkets = await fetchFeaturedEvents(pageSize, {
     searchQuery,
     category: categoryFilter,
     status,
@@ -39,14 +39,14 @@ export async function FeaturedMarketsSection({
   });
 
   if (initialMarkets.length === 0) {
-    logger.info("featuredMarkets:empty", {
+    logger.info("featuredEvents:empty", {
       pageSize,
       categoryFilter,
       searchQuery,
       apiBase: serverEnv.apiBaseUrl,
     });
   } else {
-    logger.debug("featuredMarkets:loaded", {
+    logger.debug("featuredEvents:loaded", {
       count: initialMarkets.length,
       pageSize,
       categoryFilter,
@@ -55,7 +55,7 @@ export async function FeaturedMarketsSection({
   }
 
   return (
-    <FeaturedMarketsClient
+    <FeaturedEventsClient
       initialMarkets={initialMarkets}
       pageSize={pageSize}
       maxItems={maxItems}
@@ -70,7 +70,7 @@ export async function FeaturedMarketsSection({
   );
 }
 
-export function FeaturedMarketsSkeleton() {
+export function FeaturedEventsSkeleton() {
   return (
     <section className="space-y-4">
       <MarketGridSkeleton />

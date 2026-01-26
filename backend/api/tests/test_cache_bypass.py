@@ -26,7 +26,7 @@ def test_markets_endpoint_bypasses_cache_when_unavailable(client, db_session, mo
     db_session.add(market)
     db_session.commit()
 
-    response = client.get("/markets", params={"limit": 5})
+    response = client.get("/events", params={"limit": 5})
     assert response.status_code == 200
     payload = response.json()
     assert isinstance(payload, list)
@@ -35,6 +35,6 @@ def test_markets_endpoint_bypasses_cache_when_unavailable(client, db_session, mo
 
 def test_market_stats_bypasses_cache_when_unavailable(client, monkeypatch):
     _disable_cache(monkeypatch)
-    response = client.get("/markets/stats")
+    response = client.get("/events/stats")
     assert response.status_code == 200
     assert isinstance(response.json(), list)

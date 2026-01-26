@@ -61,10 +61,10 @@ def test_market_metadata_enrichment_applies_description_and_tokens(client, db_se
     )
     db_session.commit()
 
-    response = client.get("/markets")
+    response = client.get("/events")
     assert response.status_code == 200
     payload = {item["event_id"]: item for item in response.json()}
-    enriched = payload["evt-meta"]
+    enriched = payload["evt-meta"]["markets"][0]
     assert enriched["description"] == "Detailed narrative from Polymarket."
     assert enriched["resolution_source"] == "https://example.com/source"
     assert enriched["clob_token_ids"] == ["A", "B"]
@@ -107,10 +107,10 @@ def test_market_stats_cache_overrides_db_values(client, db_session):
         set_json(client.app.cache_client, market_stats_cache_key(market.event_id), cache_payload, ttl_seconds=60)
     )
 
-    response = client.get("/markets")
+    response = client.get("/events")
     assert response.status_code == 200
     payload = {item["event_id"]: item for item in response.json()}
-    enriched = payload["evt-stats"]
+    enriched = payload["evt-stats"]["markets"][0]
     assert enriched["best_bid"] == cache_payload["best_bid"]
     assert enriched["best_ask"] == cache_payload["best_ask"]
     assert enriched["spread"] == cache_payload["spread"]
@@ -141,7 +141,7 @@ def test_category_allowlist_filters_markets(monkeypatch, client, db_session):
 
     monkeypatch.setattr(api_main.settings, "market_category_allowlist", ["Finance"], raising=False)
 
-    response = client.get("/markets")
+    response = client.get("/events")
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 1
@@ -240,11 +240,11 @@ def test_settlement_statuses_surface_in_market_and_resolution(client, db_session
     db_session.add(settlement)
     db_session.commit()
 
-    market_payload = client.get(f"/markets/{market.event_id}").json()
-    assert market_payload["proof_status"] == shared_models.SettlementProofStatus.GENERATED.value
-    assert market_payload["proof_request_id"] == "req-123"
-    assert market_payload["submission_status"] == shared_models.SettlementSubmissionStatus.QUEUED.value
-    assert market_payload["settlement_tx_hash"] == "0xtx"
+    market_payload = client.get(f"/events/by-key/{market.event_id}").json()
+    assert market_payload["markets"][0]["proof_status"] == shared_models.SettlementProofStatus.GENERATED.value
+    assert market_payload["markets"][0]["proof_request_id"] == "req-123"
+    assert market_payload["markets"][0]["submission_status"] == shared_models.SettlementSubmissionStatus.QUEUED.value
+    assert market_payload["markets"][0]["settlement_tx_hash"] == "0xtx"
 
     resolution_payload = client.get(f"/resolution/{condition_id}").json()
     assert resolution_payload["proofStatus"] == shared_models.SettlementProofStatus.GENERATED.value

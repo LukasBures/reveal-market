@@ -104,6 +104,19 @@ export type GroupedMarkets = {
   aggregateLiquidityUsd?: number | null;
 };
 
+export type EventSummary = {
+  eventId: string;
+  title: string;
+  category?: string;
+  groupSlug?: string | null;
+  imageUrl?: string | null;
+  startsAt?: string | null;
+  closesAt?: string | null;
+  markets: MarketSummary[];
+  aggregateVolume24hUsd?: number | null;
+  aggregateLiquidityUsd?: number | null;
+};
+
 export type ProofReceipt = {
   requestId: string;
   marketId?: number | null;

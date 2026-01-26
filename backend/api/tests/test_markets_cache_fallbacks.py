@@ -43,6 +43,6 @@ def test_markets_endpoint_serves_db_when_cache_missing(client, db_session, monke
     db_session.add(market)
     db_session.commit()
 
-    resp = client.get("/markets", params={"limit": 1})
+    resp = client.get("/events", params={"limit": 1})
     assert resp.status_code == 200
     assert resp.json()[0]["event_id"] == "evt-nocache"

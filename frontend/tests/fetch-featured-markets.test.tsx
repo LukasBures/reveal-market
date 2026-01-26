@@ -1,7 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, vi } from "vitest";
-import { fetchFeaturedMarkets } from "@/lib/api";
+import { fetchFeaturedEvents } from "@/lib/api";
 
-describe("fetchFeaturedMarkets", () => {
+describe("fetchFeaturedEvents", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -16,10 +16,10 @@ describe("fetchFeaturedMarkets", () => {
     vi.unstubAllGlobals();
   });
 
-  it("calls /markets by default", async () => {
-    await fetchFeaturedMarkets(6);
+  it("calls /events by default", async () => {
+    await fetchFeaturedEvents(6);
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/markets?limit=6&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1"),
+      expect.stringContaining("/events?limit=6&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1"),
       expect.objectContaining({
         next: expect.objectContaining({ tags: ["markets:list"] }),
       }),
@@ -27,7 +27,7 @@ describe("fetchFeaturedMarkets", () => {
   });
 
   it("targets the categories endpoint when category filter provided", async () => {
-    await fetchFeaturedMarkets(10, { category: "Sports" });
+    await fetchFeaturedEvents(10, { category: "Sports" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
         "/categories/sports?limit=10&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1",
@@ -40,7 +40,7 @@ describe("fetchFeaturedMarkets", () => {
 
   it("returns an empty list when the network request fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("offline"));
-    const result = await fetchFeaturedMarkets(4);
+    const result = await fetchFeaturedEvents(4);
     expect(result).toEqual([]);
   });
 });

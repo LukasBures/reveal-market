@@ -2,27 +2,34 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactElement } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { FeaturedMarketsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
-import { fetchFeaturedMarkets } from "@/lib/api";
+import { FeaturedEventsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
+import { fetchFeaturedEvents } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
-  fetchFeaturedMarkets: vi.fn(),
+  fetchFeaturedEvents: vi.fn(),
 }));
 
-const sampleMarket = {
+const sampleEvent = {
   eventId: "evt-1",
-  title: "Sample Market",
+  title: "Sample Event",
   category: "Politics",
-  tags: ["gov"],
-  outcomes: ["Yes", "No"],
-  outcomePrices: [0.5, 0.5],
+  markets: [
+    {
+      eventId: "evt-1",
+      title: "Sample Market",
+      category: "Politics",
+      tags: ["gov"],
+      outcomes: ["Yes", "No"],
+      outcomePrices: [0.5, 0.5],
+    },
+  ],
 };
 
-describe("FeaturedMarketsClient", () => {
+describe("FeaturedEventsClient", () => {
   let queryClient: QueryClient | null = null;
 
   beforeEach(() => {
-    vi.mocked(fetchFeaturedMarkets).mockReset();
+    vi.mocked(fetchFeaturedEvents).mockReset();
     delete (globalThis as any).IntersectionObserver;
   });
 
@@ -42,32 +49,39 @@ describe("FeaturedMarketsClient", () => {
     return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
   };
 
-  it("renders skeletons when no markets exist yet", () => {
-    const { container } = renderWithClient(<FeaturedMarketsClient initialMarkets={[]} />);
+  it("renders skeletons when no events exist yet", () => {
+    const { container } = renderWithClient(<FeaturedEventsClient initialMarkets={[]} />);
     const skeletons = container.querySelectorAll(".animate-pulse");
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
   it("renders a helpful notice when provided", () => {
-    renderWithClient(<FeaturedMarketsClient initialMarkets={[]} emptyNotice="Type more to search" />);
+    renderWithClient(<FeaturedEventsClient initialMarkets={[]} emptyNotice="Type more to search" />);
     expect(screen.getByText(/type more to search/i)).toBeInTheDocument();
   });
 
-  it("renders markets and loads more on demand", async () => {
-    const nextMarket = {
+  it("renders events and loads more on demand", async () => {
+    const nextEvent = {
       eventId: "evt-2",
-      title: "Second Market",
+      title: "Second Event",
       category: "Sports",
-      tags: [],
-      outcomes: [],
-      outcomePrices: [],
+      markets: [
+        {
+          eventId: "evt-2",
+          title: "Second Market",
+          category: "Sports",
+          tags: [],
+          outcomes: [],
+          outcomePrices: [],
+        },
+      ],
     };
-    const fetchMock = vi.mocked(fetchFeaturedMarkets);
-    fetchMock.mockResolvedValue([nextMarket]);
+    const fetchMock = vi.mocked(fetchFeaturedEvents);
+    fetchMock.mockResolvedValue([nextEvent]);
 
     renderWithClient(
-      <FeaturedMarketsClient
-        initialMarkets={[sampleMarket]}
+      <FeaturedEventsClient
+        initialMarkets={[sampleEvent]}
         pageSize={1}
         maxItems={3}
         searchQuery="sample"
@@ -77,8 +91,8 @@ describe("FeaturedMarketsClient", () => {
       />,
     );
 
-    expect(screen.getByText("Sample Market")).toBeInTheDocument();
-    const button = screen.getByRole("button", { name: /load more markets/i });
+    expect(screen.getByText("Sample Event")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: /load more events/i });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -98,7 +112,7 @@ describe("FeaturedMarketsClient", () => {
   });
 
   it("keeps the load more button when a short page arrives mid-pagination", async () => {
-    const fetchMock = vi.mocked(fetchFeaturedMarkets);
+    const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock
       .mockResolvedValueOnce(
         Array.from({ length: 10 }, (_, idx) => ({
@@ -126,18 +140,18 @@ describe("FeaturedMarketsClient", () => {
     }));
 
     renderWithClient(
-      <FeaturedMarketsClient
+      <FeaturedEventsClient
         initialMarkets={initialBatch}
         pageSize={30}
         maxItems={200}
       />,
     );
 
-    const button = screen.getByRole("button", { name: /load more markets/i });
+    const button = screen.getByRole("button", { name: /load more events/i });
     fireEvent.click(button);
 
     await screen.findByText("Gap Market 0");
-    expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /load more events/i })).toBeInTheDocument();
 
     fireEvent.click(button);
 
@@ -152,7 +166,7 @@ describe("FeaturedMarketsClient", () => {
 
   it("auto-loads batches then surfaces the manual button after the cap", async () => {
     let callCount = 0;
-    const fetchMock = vi.mocked(fetchFeaturedMarkets);
+    const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock.mockImplementation((limit = 0) => {
       callCount += 1;
       return Promise.resolve(
@@ -186,7 +200,7 @@ describe("FeaturedMarketsClient", () => {
     }));
 
     renderWithClient(
-      <FeaturedMarketsClient
+      <FeaturedEventsClient
         initialMarkets={initialBatch}
         pageSize={30}
         maxItems={300}
@@ -201,7 +215,7 @@ describe("FeaturedMarketsClient", () => {
     );
     await waitFor(
       () => {
-        expect(screen.getByRole("button", { name: /load more markets/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /load more events/i })).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -209,7 +223,7 @@ describe("FeaturedMarketsClient", () => {
 
   it("shows a loading indicator during automatic pagination", async () => {
     let resolveFetch: (() => void) | undefined;
-    const fetchMock = vi.mocked(fetchFeaturedMarkets);
+    const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock.mockImplementation((limit = 0) => {
       return new Promise((resolve) => {
         resolveFetch = () =>
@@ -235,13 +249,13 @@ describe("FeaturedMarketsClient", () => {
     (globalThis as any).IntersectionObserver = ManualIntersectionObserver;
 
     const initialBatch = Array.from({ length: 30 }, (_, idx) => ({
-      ...sampleMarket,
+      ...sampleEvent,
       eventId: `evt-lazy-init-${idx}`,
       title: `Lazy Initial ${idx}`,
     }));
 
     renderWithClient(
-      <FeaturedMarketsClient
+      <FeaturedEventsClient
         initialMarkets={initialBatch}
         pageSize={30}
         maxItems={120}
@@ -275,13 +289,21 @@ describe("FeaturedMarketsClient", () => {
   });
 
   it("keeps the server-provided ordering that favors total volume", () => {
-    const markets = [
-      { eventId: "evt-b", title: "Highest total", volume24hUsd: 100, volume: 5_000 },
-      { eventId: "evt-a", title: "Lower total", volume24hUsd: 800, volume: 1_000 },
+    const events = [
+      {
+        eventId: "evt-b",
+        title: "Highest total",
+        markets: [{ eventId: "evt-b", title: "Highest total" }],
+      },
+      {
+        eventId: "evt-a",
+        title: "Lower total",
+        markets: [{ eventId: "evt-a", title: "Lower total" }],
+      },
     ];
 
     const { container } = renderWithClient(
-      <FeaturedMarketsClient initialMarkets={markets} sortBy="totalVolume" />,
+      <FeaturedEventsClient initialMarkets={events} sortBy="totalVolume" />,
     );
 
     const titles = Array.from(container.querySelectorAll("h3")).map((node) => node.textContent ?? "");

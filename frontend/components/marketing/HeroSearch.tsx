@@ -57,7 +57,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
         const fetchSuggestions = async () => {
           const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
           try {
-            const res = await fetch(`/api/markets/suggest?${params.toString()}`, {
+            const res = await fetch(`/api/events/suggest?${params.toString()}`, {
               signal: controller.signal,
               headers: { Accept: "application/json" },
             });
@@ -128,7 +128,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
         setHighlightedIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
       } else if (event.key === "Enter" && highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
         event.preventDefault();
-        router.push(`/markets/${suggestions[highlightedIndex].eventId}`);
+        router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
         setSuggestionsVisible(false);
       }
     },
@@ -139,7 +139,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
     event.preventDefault();
     const query = search.trim();
     if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
-      router.push(`/markets/${suggestions[highlightedIndex].eventId}`);
+      router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
       return;
     }
     if (!query) return;
@@ -201,7 +201,7 @@ export function HeroSearch({ initialSearch = "" }: Props) {
                 aria-selected={index === highlightedIndex}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  router.push(`/markets/${suggestion.eventId}`);
+                  router.push(`/events/${suggestion.groupSlug ?? suggestion.eventId}`);
                   setSuggestionsVisible(false);
                 }}
                 className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${

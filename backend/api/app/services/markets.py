@@ -300,6 +300,72 @@ def slugify_value(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
+def derive_group_slug(market: schemas.MarketResponse) -> str:
+    """Choose a stable group slug for event grouping."""
+
+    slug = (getattr(market, "group_slug", None) or "").strip().lower()
+    if slug:
+        return slug
+    title = (getattr(market, "title", None) or "").strip()
+    if title:
+        return slugify_value(title)
+    return (getattr(market, "event_id", None) or "").strip().lower()
+
+
+def build_event_responses(markets: list[schemas.MarketResponse]) -> list[schemas.EventResponse]:
+    """Group markets into event responses for list endpoints."""
+
+    grouped: dict[str, list[schemas.MarketResponse]] = {}
+    for market in markets:
+        key = (getattr(market, "group_slug", None) or "").strip().lower() or market.event_id
+        if not key:
+            key = (getattr(market, "event_id", None) or "unknown").strip().lower()
+        grouped.setdefault(key, []).append(market)
+
+    events: list[schemas.EventResponse] = []
+    for key, items in grouped.items():
+        items.sort(
+            key=lambda item: (
+                safe_float(getattr(item, "group_position", None))
+                if safe_float(getattr(item, "group_position", None)) is not None
+                else float("inf"),
+                getattr(item, "event_id", "") or "",
+            )
+        )
+        primary = items[0]
+        volumes = [item.volume_24h_usd for item in items if item.volume_24h_usd is not None]
+        liquidities = [item.liquidity_usd for item in items if item.liquidity_usd is not None]
+        aggregate_volume: float | None
+        aggregate_liquidity: float | None
+        if volumes and len({float(value) for value in volumes}) == 1:
+            aggregate_volume = float(volumes[0])
+        else:
+            aggregate_volume = float(sum(volumes)) if volumes else None
+        if liquidities and len({float(value) for value in liquidities}) == 1:
+            aggregate_liquidity = float(liquidities[0])
+        else:
+            aggregate_liquidity = float(sum(liquidities)) if liquidities else None
+        if aggregate_volume is None and primary.volume_24h_usd is not None:
+            aggregate_volume = primary.volume_24h_usd
+        if aggregate_liquidity is None and primary.liquidity_usd is not None:
+            aggregate_liquidity = primary.liquidity_usd
+        events.append(
+            schemas.EventResponse(
+                event_id=key,
+                title=primary.title,
+                category=primary.category,
+                group_slug=key,
+                image_url=primary.image_url,
+                starts_at=primary.starts_at,
+                closes_at=primary.closes_at,
+                markets=items,
+                aggregate_volume_24h_usd=aggregate_volume,
+                aggregate_liquidity_usd=aggregate_liquidity,
+            )
+        )
+    return events
+
+
 def apply_market_caps(market: schemas.MarketResponse) -> None:
     """Attach stake caps to a market model if missing."""
 

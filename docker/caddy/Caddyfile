@@ -127,7 +127,6 @@ revealmarket.xyz {
   import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
-  import cache_frontend
   import log_common
   handle_path /artifacts/* {
     root * /srv/artifacts

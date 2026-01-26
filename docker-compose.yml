@@ -14,6 +14,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: reveal-market-postgres
+    user: "70:70"
     restart: unless-stopped
     shm_size: "1gb"
     command:
@@ -101,6 +102,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: reveal-market-redis
+    user: "999:1000"
     restart: unless-stopped
     # mem_swappiness: 0
     # Acts as cache + heartbeat store. Port binding lives in docker-compose.override.yml for local-only access.

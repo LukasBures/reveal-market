@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { MarketSummary } from "@/lib/api-types";
-import { MarketGrid } from "./MarketGrid";
+import type { EventSummary } from "@/lib/api-types";
+import { EventGrid } from "@/components/events/EventGrid";
 import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
-import { useFeaturedMarkets } from "@/hooks/useFeaturedMarkets";
+import { useFeaturedEvents } from "@/hooks/useFeaturedMarkets";
 import { logger } from "@/lib/logging";
-import { fetchFeaturedMarkets } from "@/lib/api";
+import { fetchFeaturedEvents } from "@/lib/api";
 import { categorySlugFromLabel } from "@/lib/slugs";
 import type { MarketSortOption } from "@/lib/markets";
 
@@ -18,7 +18,7 @@ import type { MarketSortOption } from "@/lib/markets";
 export const AUTO_LOAD_BATCHES = 5;
 
 type ClientProps = {
-  initialMarkets: MarketSummary[];
+  initialMarkets: EventSummary[];
   pageSize?: number;
   maxItems?: number;
   searchQuery?: string;
@@ -32,9 +32,9 @@ type ClientProps = {
 };
 
 /**
- * Client component that hydrates featured markets with lazy loading, auto-refresh, and pagination.
+ * Client component that hydrates featured events with lazy loading, auto-refresh, and pagination.
  */
-export function FeaturedMarketsClient({
+export function FeaturedEventsClient({
   initialMarkets,
   pageSize = DEFAULT_PAGE_SIZE,
   maxItems = DEFAULT_MAX_ITEMS,
@@ -47,7 +47,7 @@ export function FeaturedMarketsClient({
   sortBy = "totalVolume",
   closesWithinHours,
 }: ClientProps) {
-  const [markets, setMarkets] = useState<MarketSummary[]>(initialMarkets);
+  const [events, setEvents] = useState<EventSummary[]>(initialMarkets);
   const [hasMore, setHasMore] = useState<boolean>(initialMarkets.length >= pageSize);
   const [offset, setOffset] = useState(initialMarkets.length);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -61,17 +61,17 @@ export function FeaturedMarketsClient({
   }, []);
 
   const batchSize = Math.max(pageSize, 30);
-  const remainingSlots = useMemo(() => Math.max(0, maxItems - markets.length), [markets.length, maxItems]);
+  const remainingSlots = useMemo(() => Math.max(0, maxItems - events.length), [events.length, maxItems]);
   const orderBy = "volume";
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}|${closesWithinHours ?? "default"}`;
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
 
   const filterByStatus = useCallback(
-    (items: MarketSummary[]) =>
+    (items: EventSummary[]) =>
       onlyActive
         ? items.filter((m) => {
-            const normalizedStatus = (m.status ?? "").toLowerCase();
+            const normalizedStatus = (m.markets?.[0]?.status ?? "").toLowerCase();
             return (
               normalizedStatus === "" ||
               normalizedStatus === "active" ||
@@ -83,8 +83,8 @@ export function FeaturedMarketsClient({
         : items,
     [onlyActive],
   );
-  const normalizeMarkets = useCallback(
-    (items: MarketSummary[]) => {
+  const normalizeEvents = useCallback(
+    (items: EventSummary[]) => {
       const seen = new Set<string>();
       const filtered = filterByStatus(items).filter((item) => {
         if (!item.eventId || seen.has(item.eventId)) {
@@ -98,7 +98,7 @@ export function FeaturedMarketsClient({
     [filterByStatus, maxItems],
   );
 
-  const { data: refreshedMarkets } = useFeaturedMarkets({
+  const { data: refreshedMarkets } = useFeaturedEvents({
     limit: pageSize,
     searchQuery,
     category: normalizedCategory,
@@ -111,14 +111,14 @@ export function FeaturedMarketsClient({
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.
-    const seeded = normalizeMarkets([...initialMarkets]);
+    const seeded = normalizeEvents([...initialMarkets]);
     const initialLikelyMore = initialMarkets.length >= pageSize || seeded.length >= pageSize;
-    setMarkets(seeded);
+    setEvents(seeded);
     setHasMore(initialLikelyMore && seeded.length < maxItems);
     setOffset(initialMarkets.length);
     setAutoLoadCount(0);
     setIsLoadingMore(false);
-  }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeMarkets]);
+  }, [initialMarkets, pageSize, maxItems, filterSignature, normalizeEvents]);
 
   useEffect(() => {
     const hasObserver =
@@ -131,8 +131,8 @@ export function FeaturedMarketsClient({
     if (!refreshedMarkets) {
       return;
     }
-    setMarkets((prev) => normalizeMarkets([...(refreshedMarkets || []), ...prev]));
-  }, [refreshedMarkets, normalizeMarkets]);
+    setEvents((prev) => normalizeEvents([...(refreshedMarkets || []), ...prev]));
+  }, [refreshedMarkets, normalizeEvents]);
 
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
@@ -143,7 +143,7 @@ export function FeaturedMarketsClient({
       setShowLoadingState(true);
       startTransition(async () => {
         try {
-          const additions = await fetchFeaturedMarkets(nextLimit, {
+          const additions = await fetchFeaturedEvents(nextLimit, {
             searchQuery,
             category: normalizedCategory,
             offset: fetchOffset,
@@ -153,17 +153,17 @@ export function FeaturedMarketsClient({
             orderBy,
             closesWithinHours,
           });
-          const merged = normalizeMarkets([...markets, ...additions]);
-          const newItemsAdded = merged.length - markets.length;
+          const merged = normalizeEvents([...events, ...additions]);
+          const newItemsAdded = merged.length - events.length;
           const computedHasMore = additions.length > 0 && merged.length < maxItems;
-          setMarkets(merged);
+          setEvents(merged);
           setOffset(fetchOffset + additions.length);
           setHasMore(computedHasMore);
           if (mode === "auto" && newItemsAdded > 0) {
             setAutoLoadCount((count) => count + 1);
           }
         } catch (error) {
-          logger.clientError("FeaturedMarketsClient:loadMore_failed", { error: (error as Error).message });
+          logger.clientError("FeaturedEventsClient:loadMore_failed", { error: (error as Error).message });
           setHasMore(false);
         } finally {
           setIsLoadingMore(false);
@@ -176,7 +176,7 @@ export function FeaturedMarketsClient({
       hasMore,
       isPending,
       isLoadingMore,
-      markets,
+      events,
       maxItems,
       remainingSlots,
       offset,
@@ -184,7 +184,7 @@ export function FeaturedMarketsClient({
       status,
       trending,
       closesWithinHours,
-      normalizeMarkets,
+      normalizeEvents,
       batchSize,
       orderBy,
     ],
@@ -193,7 +193,7 @@ export function FeaturedMarketsClient({
   const isBusy = isPending || isLoadingMore;
   const canAutoLoad = intersectionSupported && hasMore && autoLoadCount < AUTO_LOAD_BATCHES;
   const showManualButton =
-    markets.length > 0 && hasMore && (!intersectionSupported || autoLoadCount >= AUTO_LOAD_BATCHES);
+    events.length > 0 && hasMore && (!intersectionSupported || autoLoadCount >= AUTO_LOAD_BATCHES);
   const showLoadingIndicator = showLoadingState && !showManualButton;
 
   useEffect(() => {
@@ -218,7 +218,7 @@ export function FeaturedMarketsClient({
     }, { rootMargin: "200px" });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [canAutoLoad, handleLoadMore, isBusy, markets.length]);
+  }, [canAutoLoad, handleLoadMore, isBusy, events.length]);
 
   const renderEmptyState = () => {
     if (emptyNotice) {
@@ -239,10 +239,10 @@ export function FeaturedMarketsClient({
 
   return (
     <section className="space-y-4">
-      {markets.length === 0 ? (
+      {events.length === 0 ? (
         renderEmptyState()
       ) : (
-        <MarketGrid markets={markets} />
+        <EventGrid events={events} />
       )}
       {hasMore && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
       {showLoadingIndicator && (
@@ -263,7 +263,7 @@ export function FeaturedMarketsClient({
           onClick={() => handleLoadMore("manual")}
           className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isBusy ? "Loading..." : hasMore ? "Load more markets" : "All markets loaded"}
+          {isBusy ? "Loading..." : hasMore ? "Load more events" : "All events loaded"}
         </button>
       </div>
     )}

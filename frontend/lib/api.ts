@@ -1,4 +1,5 @@
 import type {
+  EventSummary,
   FetchFeaturedMarketsOptions,
   HealthSnapshot,
   InvestorKpis,
@@ -377,12 +378,12 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
 };
 
 
-export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
-  if (maybeShortCircuitOffline("fetchFeaturedMarkets")) {
+export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<EventSummary[]> {
+  if (maybeShortCircuitOffline("fetchFeaturedEvents")) {
     return [];
   }
   if (IS_BUILD_TIME) {
-    logger.info("fetchFeaturedMarkets:skipped_build", {
+    logger.info("fetchFeaturedEvents:skipped_build", {
       limit,
       category: options?.category,
       searchQuery: options?.searchQuery,
@@ -392,7 +393,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
   try {
     const onlyFeatured = options?.onlyFeatured ?? false;
     const coalesceGroups = options?.coalesceGroups ?? true;
-    let endpoint = "/markets";
+    let endpoint = "/events";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     const statusParam = options?.status ?? "active";
@@ -442,7 +443,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     }
     const url = new URL(endpoint, DEFAULT_API_BASE);
     params.forEach((value, key) => url.searchParams.set(key, value));
-    logger.debug("fetchFeaturedMarkets:request", {
+    logger.debug("fetchFeaturedEvents:request", {
       endpoint: url.toString(),
       limit,
       offset: options?.offset,
@@ -459,7 +460,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
     });
 
     if (!response.ok) {
-      logger.warn("fetchFeaturedMarkets:failed", {
+      logger.warn("fetchFeaturedEvents:failed", {
         status: response.status,
         endpoint: url.toString(),
         baseUrl: DEFAULT_API_BASE,
@@ -469,7 +470,7 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
 
     const payload = await response.json();
     const items = Array.isArray(payload) ? payload : payload?.items ?? [];
-    logger.debug("fetchFeaturedMarkets:success", {
+    logger.debug("fetchFeaturedEvents:success", {
       limit,
       category: options?.category,
       searchQuery: options?.searchQuery,
@@ -477,35 +478,26 @@ export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMar
       orderBy,
       cacheTags: fetchTags,
     });
-    const mapped: MarketSummary[] = items.map((item: any) => mapApiMarketToSummary(item));
-    // Enrich with orderbook aggregates when token IDs are present (best-effort).
-    try {
-      const tokenIds = mapped.flatMap((m) => m.clobTokenIds ?? []).filter(Boolean) as string[];
-      if (tokenIds.length) {
-        const aggregates = await fetchOrderbookAggregates(tokenIds);
-        mapped.forEach((market) => {
-          const ids = market.clobTokenIds ?? [];
-          const matching = ids.map((id) => aggregates[id]).filter(Boolean);
-          if (matching.length) {
-            const volume = matching.reduce(
-              (acc, curr) => acc + (curr.scaledCollateralVolume ?? curr.collateralVolume ?? 0),
-              0,
-            );
-            const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
-            market.orderbookVolumeUsd = volume;
-            market.tradesQuantity = trades;
-          }
-        });
-      }
-    } catch (err) {
-      logger.warn("fetchFeaturedMarkets:orderbook_enrich_failed", {
-        error: (err as Error).message,
-        count: items.length,
-      });
-    }
-    return mapped;
+    return items.map((item: any) => {
+      const marketsPayload = Array.isArray(item.markets) ? item.markets : [];
+      const markets = marketsPayload.map((market: any) => mapApiMarketToSummary(market));
+      const groupSlug = item.group_slug ?? item.groupSlug ?? null;
+      const imageUrl = item.image_url ?? item.imageUrl ?? markets[0]?.imageUrl ?? null;
+      return {
+        eventId: item.event_id ?? item.eventId ?? groupSlug ?? markets[0]?.eventId ?? "",
+        title: item.title ?? markets[0]?.title ?? "",
+        category: item.category ?? markets[0]?.category ?? undefined,
+        groupSlug: groupSlug ?? markets[0]?.groupSlug ?? null,
+        imageUrl,
+        startsAt: item.starts_at ?? item.startsAt ?? markets[0]?.startsAt ?? null,
+        closesAt: item.closes_at ?? item.closesAt ?? markets[0]?.closesAt ?? null,
+        markets,
+        aggregateVolume24hUsd: coerceNumber(item.aggregate_volume_24h_usd ?? item.aggregateVolume24hUsd) ?? null,
+        aggregateLiquidityUsd: coerceNumber(item.aggregate_liquidity_usd ?? item.aggregateLiquidityUsd) ?? null,
+      } as EventSummary;
+    });
   } catch (error) {
-    logOfflineAwareError("fetchFeaturedMarkets", error);
+    logOfflineAwareError("fetchFeaturedEvents", error);
     return [];
   }
 }
@@ -523,7 +515,7 @@ export async function fetchMarketSuggestions(
     return [];
   }
   const normalized = trimmed.toLowerCase();
-  const url = new URL("/markets/suggest", DEFAULT_API_BASE);
+  const url = new URL("/events/suggest", DEFAULT_API_BASE);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("q", trimmed);
 
@@ -557,6 +549,11 @@ export async function fetchMarketSuggestions(
   }
 }
 
+export async function fetchFeaturedMarkets(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<MarketSummary[]> {
+  const events = await fetchFeaturedEvents(limit, options);
+  return events.flatMap((event) => event.markets ?? []);
+}
+
 const normalizeMarketStats = (payload: any): MarketStatusStat[] | null => {
   if (!Array.isArray(payload)) {
     return null;
@@ -585,7 +582,7 @@ async function fetchMarketStatsFrom(
   revalidateSeconds = 60,
 ): Promise<MarketStatusStat[] | null> {
   try {
-    const endpoint = `${baseUrl}/markets/stats`;
+    const endpoint = `${baseUrl}/events/stats`;
     const response = await fetch(endpoint, {
       next: { revalidate: revalidateSeconds },
     });
@@ -891,7 +888,7 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     return null;
   }
   try {
-    const detailUrl = `${DEFAULT_API_BASE}/markets/${eventId}`;
+    const detailUrl = `${DEFAULT_API_BASE}/events/by-key/${eventId}`;
     logger.info("fetchMarketByEventId:request", { eventId, endpoint: detailUrl });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -914,7 +911,13 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       return null;
     }
     const payload = await response.json();
-    const detail: MarketDetail = mapMarketDetailPayload(payload, eventId);
+    const marketsPayload = Array.isArray(payload.markets) ? payload.markets : [];
+    const primary = marketsPayload[0] ?? payload;
+    const detail: MarketDetail = mapMarketDetailPayload(primary, eventId);
+    detail.groupSlug = payload.group_slug ?? payload.groupSlug ?? detail.groupSlug;
+    detail.siblings = marketsPayload
+      .slice(1)
+      .map((item: any) => mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""));
     // Enrich with subgraph orderbook + OI when available (best-effort).
     try {
       if (!detail.clobTokenIds?.length && detail.conditionId) {
@@ -953,39 +956,6 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     return detail;
   } catch (error) {
     logOfflineAwareError("fetchMarketByEventId", error, { eventId });
-    return null;
-  }
-}
-
-export async function fetchGroupedMarkets(groupSlug: string): Promise<GroupedMarkets | null> {
-  if (maybeShortCircuitOffline("fetchGroupedMarkets")) {
-    return null;
-  }
-  const normalizedSlug = groupSlug.trim().toLowerCase();
-  if (!normalizedSlug) return null;
-  try {
-    const url = `${DEFAULT_API_BASE}/markets/group/${encodeURIComponent(normalizedSlug)}`;
-    logger.info("fetchGroupedMarkets:request", { groupSlug: normalizedSlug, endpoint: url });
-    const response = await fetch(url, { next: { revalidate: 30 } });
-    if (response.status === 404) {
-      logger.warn("fetchGroupedMarkets:not_found", { groupSlug: normalizedSlug });
-      return null;
-    }
-    if (!response.ok) {
-      logger.error("fetchGroupedMarkets:failed", { groupSlug: normalizedSlug, status: response.status });
-      return null;
-    }
-    const payload = await response.json();
-    const marketsPayload = Array.isArray(payload.markets) ? payload.markets : [];
-    const markets = marketsPayload.map((item: any) => mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""));
-    return {
-      groupSlug: payload.group_slug ?? payload.groupSlug ?? normalizedSlug,
-      markets,
-      aggregateVolume24hUsd: coerceNumber(payload.aggregate_volume_24h_usd ?? payload.aggregateVolume24hUsd) ?? null,
-      aggregateLiquidityUsd: coerceNumber(payload.aggregate_liquidity_usd ?? payload.aggregateLiquidityUsd) ?? null,
-    };
-  } catch (error) {
-    logOfflineAwareError("fetchGroupedMarkets", error, { groupSlug });
     return null;
   }
 }

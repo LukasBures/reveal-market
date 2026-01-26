@@ -133,8 +133,8 @@ export function GroupedMarketSelector({
           const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
           const href: UrlObject | Route =
             linkToGroupPage && groupSlug
-              ? { pathname: `/markets/group/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
-              : (`/markets/${encodeURIComponent(sibling.eventId)}` as Route);
+              ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+              : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
           return (
             <Link
               key={`${sibling.eventId}-summary`}
