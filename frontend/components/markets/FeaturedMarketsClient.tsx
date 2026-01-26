@@ -122,6 +122,7 @@ export function FeaturedEventsClient({
         orderBy,
         closesWithinHours,
       }),
+    initialPageParam: 0,
     initialData: {
       pages: [initialMarkets],
       pageParams: [0],
