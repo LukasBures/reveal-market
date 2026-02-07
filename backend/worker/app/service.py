@@ -59,7 +59,8 @@ logger = runtime.logger
 
 _LAST_CLOSED_RECONCILE_TS: float | None = None
 _LAST_POLYMARKET_UPDATED_AT_TS: float | None = None
-_LAST_MEMORY_PRESSURE_TS: float | None = None
+_LAST_MEMORY_PRESSURE_SCAN_TS: float | None = None
+_LAST_SYNC_LEASE_FAILURE_TS: float | None = None
 
 
 class MemoryStats(TypedDict, total=False):
@@ -152,6 +153,21 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
 
     if redis_client is None:
         return 0
+    cursor_key = "reveal_market_worker:proof_backfill:last_market_id"
+    last_id: int | None = None
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get(cursor_key)
+            last_id = int(raw) if raw is not None else None
+        except Exception as exc:  # pragma: no cover - best effort
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.backfill_cursor_read_failed",
+                message="failed to read backfill cursor",
+                error=str(exc),
+            )
+            last_id = None
     try:
         async with session_scope() as session:
             stmt = (
@@ -162,10 +178,32 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
                     shared_models.Settlement.proof_status != shared_models.SettlementProofStatus.GENERATED.value,
                 )
                 .order_by(shared_models.Market.id.asc())
-                .limit(max(runtime.settings.proof_backfill_page_size, 1))
             )
+            if last_id is not None:
+                stmt = stmt.where(shared_models.Market.id > last_id)
+            stmt = stmt.limit(max(runtime.settings.proof_backfill_page_size, 1))
             rows = list((await session.execute(stmt)).all())
-    except Exception:
+            if not rows and last_id is not None:
+                # Wrap around to the start when we reach the end of the table.
+                stmt = (
+                    select(shared_models.Market, shared_models.Settlement)
+                    .where(
+                        shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                        shared_models.Settlement.market_id == shared_models.Market.id,
+                        shared_models.Settlement.proof_status != shared_models.SettlementProofStatus.GENERATED.value,
+                    )
+                    .order_by(shared_models.Market.id.asc())
+                    .limit(max(runtime.settings.proof_backfill_page_size, 1))
+                )
+                rows = list((await session.execute(stmt)).all())
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.proof.backfill_query_failed",
+            message="failed to query backfill candidates",
+            error=str(exc),
+        )
         return 0
 
     if not rows:
@@ -194,7 +232,21 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
 
     if not summary.proof_jobs:
         return 0
-    return await enqueue_proof_jobs(redis_client, summary)
+    enqueued = await enqueue_proof_jobs(redis_client, summary)
+    if enqueued and redis_client is not None:
+        last_market_id = getattr(rows[-1][0], "id", None)
+        if last_market_id is not None:
+            try:
+                await redis_client.set(cursor_key, str(last_market_id))
+            except Exception as exc:  # pragma: no cover - best effort
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.backfill_cursor_write_failed",
+                    message="failed to persist backfill cursor",
+                    error=str(exc),
+                )
+    return enqueued
 
 
 async def _recover_settlement_state(redis_client: Redis | None) -> int:
@@ -202,6 +254,19 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
 
     if redis_client is None:
         return 0
+    recovery_gate_key = "reveal_market_worker:settlement_recovery:cooldown"
+    try:
+        gate = await redis_client.get(recovery_gate_key)
+        if gate:
+            return 0
+    except Exception as exc:  # pragma: no cover - best effort
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.recovery_gate_read_failed",
+            message="failed to read settlement recovery gate",
+            error=str(exc),
+        )
     min_interval = max(runtime.settings.settlement_recovery_min_interval_seconds, 0)
     if min_interval > 0:
         key = "reveal_market_worker:settlement_recovery:last"
@@ -277,6 +342,20 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                         message="settlement recovery retry scheduled after failure",
                         reason=str(exc),
                     )
+                    try:
+                        await redis_client.set(
+                            recovery_gate_key,
+                            "1",
+                            ex=max(runtime.settings.settlement_recovery_failure_base_seconds, 30),
+                        )
+                    except Exception as gate_exc:  # pragma: no cover - best effort
+                        log_event(
+                            logger,
+                            logging.DEBUG,
+                            event="worker.settlement.recovery_gate_write_failed",
+                            message="failed to set settlement recovery gate",
+                            error=str(gate_exc),
+                        )
             if recovered:
                 summary = SyncSummary()
                 for market, _settlement in rows:
@@ -287,7 +366,28 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                 await invalidate_cache_tags(redis_client, summary)
         if recovered:
             await enqueue_settlement_job(redis_client)
-    except Exception:
+    except Exception as exc:
+        try:
+            await redis_client.set(
+                recovery_gate_key,
+                "1",
+                ex=max(runtime.settings.settlement_recovery_failure_base_seconds, 30),
+            )
+        except Exception as gate_exc:  # pragma: no cover - best effort
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.settlement.recovery_gate_write_failed",
+                message="failed to set settlement recovery gate",
+                error=str(gate_exc),
+            )
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.recover_failed",
+            message="settlement recovery failed",
+            error=str(exc),
+        )
         return 0
     return recovered
 
@@ -370,13 +470,20 @@ def _trim_worker_memory() -> bool:
 
 
 def _count_memory_pressure_objects() -> MemoryPressureStats:
-    if not runtime.settings.worker_memory_log_enabled:
-        return {"market_payload_objects": 0, "market_orm_objects": 0}
-    global _LAST_MEMORY_PRESSURE_TS
+    global _LAST_MEMORY_PRESSURE_SCAN_TS
+    interval = max(runtime.settings.worker_memory_pressure_scan_interval_seconds, 0)
+    if interval <= 0:
+        return {
+            "market_payload_objects": 0,
+            "market_orm_objects": 0,
+        }
     now = time.monotonic()
-    if _LAST_MEMORY_PRESSURE_TS is not None and (now - _LAST_MEMORY_PRESSURE_TS) < 300:
-        return {"market_payload_objects": 0, "market_orm_objects": 0}
-    _LAST_MEMORY_PRESSURE_TS = now
+    if _LAST_MEMORY_PRESSURE_SCAN_TS is not None and (now - _LAST_MEMORY_PRESSURE_SCAN_TS) < interval:
+        return {
+            "market_payload_objects": 0,
+            "market_orm_objects": 0,
+        }
+    _LAST_MEMORY_PRESSURE_SCAN_TS = now
     counts: MemoryPressureStats = {
         "market_payload_objects": 0,
         "market_orm_objects": 0,
@@ -423,15 +530,23 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | 
 async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
     """Best-effort lease so only one worker paginates Gamma at a time."""
 
+    global _LAST_SYNC_LEASE_FAILURE_TS
+    cooldown = max(runtime.settings.polymarket_sync_lease_failure_cooldown_seconds, 0)
+    cooldown_jitter = max(runtime.settings.polymarket_sync_lease_failure_jitter_seconds, 0)
+    now = time.monotonic()
+    if cooldown > 0 and _LAST_SYNC_LEASE_FAILURE_TS is not None:
+        if (now - _LAST_SYNC_LEASE_FAILURE_TS) < cooldown:
+            return False
     if redis_client is None:
-        jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
-        ttl = max(runtime.settings.polymarket_sync_lease_ttl_seconds, 5)
-        wait_for = ttl + (random.uniform(0, jitter) if jitter else 0)  # noqa: S311 - non-crypto jitter
-        await asyncio.sleep(wait_for)
+        if cooldown > 0:
+            _LAST_SYNC_LEASE_FAILURE_TS = now
+        wait_for = cooldown + (random.uniform(0, cooldown_jitter) if cooldown_jitter else 0)  # noqa: S311
+        if wait_for > 0:
+            await asyncio.sleep(wait_for)
         return False
-    jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
+    lease_jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
     ttl = max(runtime.settings.polymarket_sync_lease_ttl_seconds, 5)
-    ttl_with_jitter = ttl + (random.uniform(0, jitter) if jitter else 0)  # noqa: S311 - non-crypto jitter
+    ttl_with_jitter = ttl + (random.uniform(0, lease_jitter) if lease_jitter else 0)  # noqa: S311
     try:
         acquired = await redis_client.set(
             runtime.settings.polymarket_sync_lease_key,
@@ -439,8 +554,13 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
             nx=True,
             ex=int(ttl_with_jitter),
         )
+        if acquired:
+            _LAST_SYNC_LEASE_FAILURE_TS = None
+        else:
+            _LAST_SYNC_LEASE_FAILURE_TS = now
         return bool(acquired)
     except Exception as exc:  # pragma: no cover - defensive
+        _LAST_SYNC_LEASE_FAILURE_TS = now
         log_event(
             logger,
             logging.WARNING,
@@ -470,7 +590,7 @@ async def _acquire_maintenance_lease(redis_client: Redis | None) -> bool:
     """Best-effort lease so only one worker runs maintenance at a time."""
 
     if redis_client is None:
-        return True
+        return False
     ttl = max(int(runtime.settings.maintenance_poll_seconds), 5)
     try:
         acquired = await redis_client.set(
@@ -488,7 +608,7 @@ async def _acquire_maintenance_lease(redis_client: Redis | None) -> bool:
             message="failed to acquire maintenance lease",
             error=str(exc),
         )
-        return True
+        return False
 
 
 async def _release_maintenance_lease(redis_client: Redis | None) -> None:

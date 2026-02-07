@@ -122,6 +122,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Log memory snapshots every N pages when enabled.",
     )
+    worker_memory_pressure_scan_interval_seconds: int = Field(
+        default=600,
+        ge=0,
+        description="Minimum seconds between GC object scans for memory pressure diagnostics (0 disables scans).",
+    )
     worker_memory_trim_threshold_mb: int = Field(
         default=0,
         ge=0,
@@ -155,6 +160,16 @@ class Settings(BaseSettings):
     polymarket_sync_lease_key: str = Field(default="reveal_market_worker:polymarket_sync_lease")
     polymarket_sync_lease_ttl_seconds: int = Field(default=120, ge=5)
     polymarket_sync_lease_jitter_seconds: float = Field(default=2.0, ge=0)
+    polymarket_sync_lease_failure_cooldown_seconds: float = Field(
+        default=30.0,
+        ge=0,
+        description="Local cooldown after failing to acquire a sync lease (seconds).",
+    )
+    polymarket_sync_lease_failure_jitter_seconds: float = Field(
+        default=5.0,
+        ge=0,
+        description="Jitter added to the local cooldown after lease failure.",
+    )
     polymarket_updated_at_cutoff_enabled: bool = Field(
         default=True,
         description="Stop pagination once updatedAt is older than the last successful sync marker.",

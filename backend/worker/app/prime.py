@@ -68,9 +68,10 @@ async def prime_markets_cache(
     start = time.perf_counter()
     page_summaries: list[dict[str, Any]] = []
     try:
-        async with httpx.AsyncClient(
-            timeout=runtime.settings.cache_prime_timeout_seconds, transport=transport
-        ) as client:
+        client = await runtime.get_http_client(runtime.settings.cache_prime_timeout_seconds)
+        if transport is not None:
+            client = httpx.AsyncClient(timeout=runtime.settings.cache_prime_timeout_seconds, transport=transport)
+        try:
             for page_index in range(max_pages):
                 offset = base_offset + page_index * limit
                 params: dict[str, int | str] = {"limit": limit, "offset": offset}
@@ -105,6 +106,9 @@ async def prime_markets_cache(
                     )
                 if result_count < limit:
                     break
+        finally:
+            if transport is not None:
+                await client.aclose()
     except Exception as exc:  # pragma: no cover - defensive
         duration_ms = (time.perf_counter() - start) * 1000
         error_detail = _format_prime_error(exc)
@@ -187,7 +191,10 @@ async def prime_featured_views(
     if not runtime.settings.featured_categories and not runtime.settings.featured_suggest_queries:
         return summary
     base_url = runtime.settings.api_base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=runtime.settings.cache_prime_timeout_seconds, transport=transport) as client:
+    client = await runtime.get_http_client(runtime.settings.cache_prime_timeout_seconds)
+    if transport is not None:
+        client = httpx.AsyncClient(timeout=runtime.settings.cache_prime_timeout_seconds, transport=transport)
+    try:
         for category in runtime.settings.featured_categories:
             slug = quote_plus(category)
             params = {"limit": runtime.settings.category_cache_limit}
@@ -236,6 +243,9 @@ async def prime_featured_views(
                     query=query,
                     error=str(exc),
                 )
+    finally:
+        if transport is not None:
+            await client.aclose()
 
     log_event(
         logger,

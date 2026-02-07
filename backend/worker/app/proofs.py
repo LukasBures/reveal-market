@@ -182,20 +182,22 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
     if redis_client is None:
         return 0
     queue_key, dedupe_key = _queue_keys()
-    depth_raw = await _resolve_awaitable(redis_client.llen(queue_key))
-    depth = int(depth_raw or 0)
-    if depth >= runtime.settings.proof_queue_max_depth:
-        PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
+    enqueued = 0
+    lua = (
+        "local depth = redis.call('LLEN', KEYS[1]); "
+        "if depth >= tonumber(ARGV[1]) then return 0 end; "
+        "local added = redis.call('SADD', KEYS[2], ARGV[2]); "
+        "if added == 0 then return -1 end; "
+        "redis.call('RPUSH', KEYS[1], ARGV[3]); return 1;"
+    )
+    if not hasattr(redis_client, "eval"):
         log_event(
             logger,
             logging.WARNING,
-            event="worker.proof.queue_overflow",
-            message="skipping proof enqueue because queue is at capacity",
-            depth=depth,
-            max_depth=runtime.settings.proof_queue_max_depth,
+            event="worker.proof.queue_eval_missing",
+            message="redis client does not support eval; skipping proof enqueue to avoid race",
         )
         return 0
-    enqueued = 0
     for snapshot, payload, condition in summary.proof_jobs:
         job_id = str(
             snapshot.get("market_address")
@@ -207,12 +209,6 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
         )
         if not job_id:
             continue
-        try:
-            added = await _resolve_awaitable(redis_client.sadd(dedupe_key, job_id))
-        except Exception:
-            added = False
-        if not added:
-            continue
         job = {
             "job_id": job_id,
             "market_snapshot": snapshot,
@@ -220,30 +216,24 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
             "condition_id": condition,
         }
         try:
-            if hasattr(redis_client, "eval"):
-                lua = (
-                    "local depth = redis.call('LLEN', KEYS[1]); "
-                    "if depth >= tonumber(ARGV[1]) then return 0 end; "
-                    "redis.call('RPUSH', KEYS[1], ARGV[2]); return 1;"
+            result = await _resolve_awaitable(
+                redis_client.eval(
+                    lua,
+                    2,
+                    queue_key,
+                    dedupe_key,
+                    str(runtime.settings.proof_queue_max_depth),
+                    job_id,
+                    json.dumps(job, default=str),
                 )
-                pushed = await _resolve_awaitable(
-                    redis_client.eval(
-                        lua,
-                        1,
-                        queue_key,
-                        str(runtime.settings.proof_queue_max_depth),
-                        json.dumps(job, default=str),
-                    )
-                )
-                if int(pushed or 0) <= 0:
-                    PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
-                    await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
-                    continue
+            )
+            if int(result or 0) == 1:
+                enqueued += 1
+            elif int(result or 0) == 0:
+                PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
             else:
-                await _resolve_awaitable(redis_client.rpush(queue_key, json.dumps(job, default=str)))
-            enqueued += 1
+                continue
         except Exception as exc:  # pragma: no cover - enqueue best-effort
-            await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
             log_event(
                 logger,
                 logging.WARNING,

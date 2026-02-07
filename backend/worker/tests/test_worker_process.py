@@ -144,6 +144,22 @@ class DummyRedis:
         queue = self.store.get(key, [])
         return len(queue) if isinstance(queue, list) else 0
 
+    async def eval(self, script: str, numkeys: int, *args):
+        if numkeys != 2:
+            raise RuntimeError("unsupported numkeys")
+        queue_key, dedupe_key = args[0], args[1]
+        max_depth = int(args[2])
+        job_id = args[3]
+        payload = args[4]
+        depth = await self.llen(queue_key)
+        if depth >= max_depth:
+            return 0
+        added = await self.sadd(dedupe_key, job_id)
+        if added == 0:
+            return -1
+        await self.rpush(queue_key, payload)
+        return 1
+
 
 class DummyCounter:
     def __init__(self):

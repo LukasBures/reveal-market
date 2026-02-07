@@ -10,6 +10,8 @@ from eth_abi import encode as abi_encode
 from httpx import AsyncClient
 from shared.logging import log_event
 
+from . import runtime
+
 logger = logging.getLogger("reveal_market.worker.prover")
 
 
@@ -223,9 +225,13 @@ class AsyncProverClient:
             }
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
-            async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+            if self._transport is None:
+                client = await runtime.get_http_client(self.timeout_seconds)
                 response = await client.post(url, json=payload, headers=self._headers())
-                response.raise_for_status()
+            else:
+                async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+                    response = await client.post(url, json=payload, headers=self._headers())
+            response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(
                 logger,
@@ -243,8 +249,12 @@ class AsyncProverClient:
 
         url = f"{self.base_url}/healthz"
         try:
-            async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+            if self._transport is None:
+                client = await runtime.get_http_client(self.timeout_seconds)
                 response = await client.get(url, headers=self._headers())
+            else:
+                async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+                    response = await client.get(url, headers=self._headers())
         except httpx.HTTPError as exc:
             log_event(
                 logger,
