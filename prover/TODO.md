@@ -1,32 +1,38 @@
 # Prover TODO
 
 **MVP - Critical**
-- Ensure all artifacts in `prover/circuits/build` are present and verified.
-- Confirm circuit hash matches contracts and API.
+- Ensure circuit artifacts in `prover/circuits/build` match the deployed contracts (hashes + version).
+- Lock down internal endpoints (`/debug/pprof/*`, `/metrics/expvar`) to trusted networks or `PROVER_ENABLE_DEBUG`.
+- Validate proof requests from the worker with `PROVER_SHARED_SECRET` set in prod.
 
 **MVP - High**
-- Add timeouts for proof generation and clear error reporting.
+- Decide on `PROVER_STRICT_VALIDATION` policy (on/off) and document the expected totals/rake invariants.
+- Add a lightweight proof queue in front of the prover (if request volume is bursty) to avoid 429 spikes.
+- Add alerting on proof failures and high latency (Prometheus rules).
 
 **MVP - Medium**
-- Add resource limit checks for memory and CPU usage.
+- Add a per-request trace ID propagated from worker to prover (e.g., `X-Request-Id`).
+- Add a circuit hash endpoint so worker can preflight without hitting `/healthz`.
 
 **MVP - Low**
-- Add structured logs for proof input sizes.
+- Add a warmup endpoint that runs a sample proof on startup to verify full pipeline.
 
 **MVP - Nice to have**
-- Add a dry-run validation mode for deployments.
+- Add structured logging to include proof input sizes and queue wait times.
 
 **Production - Critical**
-- Store proving keys securely and rotate safely.
+- Store proving keys in a secure store (KMS + sealed artifact distribution).
+- Implement key rotation procedure with rollback safeguards.
 
 **Production - High**
-- Add a queueing layer to smooth proof bursts.
+- Add autoscaling based on active proof concurrency and queue depth.
+- Add a shared artifact cache for multi-instance deployments.
 
 **Production - Medium**
-- Add canary proof runs after deployments.
+- Add canary proofs on deploys; block traffic if canary fails.
 
 **Production - Low**
-- Add proof cache for repeated inputs.
+- Add proof result caching keyed by circuit hash + batch root to skip duplicates.
 
 **Production - Nice to have**
-- Add horizontal scaling with shared artifact store.
+- Add separate long-running proof worker processes with a public API front-end.
