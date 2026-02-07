@@ -24,6 +24,12 @@ type Config struct {
 	HeartbeatSeconds    int
 	BackendMode         proverBackendMode
 	SharedSecret        string
+	EnableDebug         bool
+	ReadHeaderTimeout   time.Duration
+	ReadTimeout         time.Duration
+	WriteTimeout        time.Duration
+	IdleTimeout         time.Duration
+	MaxHeaderBytes      int
 	NodeBinary          string
 	RapidSnarkBinary    string
 	CircuitDir          string
@@ -38,6 +44,8 @@ type Config struct {
 	MaxConcurrency      int
 	RequestTimeout      time.Duration
 	MaxRequestBytes     int64
+	HealthCacheSeconds  int
+	StrictValidation    bool
 }
 
 // LoadConfig builds the config struct from environment variables (with sane defaults).
@@ -49,6 +57,14 @@ func LoadConfig() Config {
 	if maxRequestBytes <= 0 {
 		maxRequestBytes = 1_048_576
 	}
+	readHeaderTimeout := durationEnv("PROVER_READ_HEADER_TIMEOUT_SECONDS", 5)
+	readTimeout := durationEnv("PROVER_READ_TIMEOUT_SECONDS", 15)
+	writeTimeout := durationEnv("PROVER_WRITE_TIMEOUT_SECONDS", 180)
+	idleTimeout := durationEnv("PROVER_IDLE_TIMEOUT_SECONDS", 60)
+	maxHeaderBytes := intEnv("PROVER_MAX_HEADER_BYTES", 1<<20)
+	if maxHeaderBytes <= 0 {
+		maxHeaderBytes = 1 << 20
+	}
 	conf := Config{
 		ListenAddr:          getenv("PROVER_LISTEN_ADDR", "0.0.0.0:8085"),
 		Version:             getenv("PROVER_VERSION", "dev"),
@@ -56,6 +72,12 @@ func LoadConfig() Config {
 		HeartbeatSeconds:    intEnv("PROVER_HEARTBEAT_SECONDS", 60),
 		BackendMode:         parseBackendMode(getenv("PROVER_BACKEND", "groth16")),
 		SharedSecret:        getenv("PROVER_SHARED_SECRET", ""),
+		EnableDebug:         boolEnv("PROVER_ENABLE_DEBUG", false),
+		ReadHeaderTimeout:   readHeaderTimeout,
+		ReadTimeout:         readTimeout,
+		WriteTimeout:        writeTimeout,
+		IdleTimeout:         idleTimeout,
+		MaxHeaderBytes:      maxHeaderBytes,
 		NodeBinary:          getenv("PROVER_NODE_BINARY", "node"),
 		RapidSnarkBinary:    getenv("PROVER_RAPIDSNARK_BINARY", "rapidsnark"),
 		CircuitDir:          baseDir,
@@ -70,6 +92,8 @@ func LoadConfig() Config {
 		MaxConcurrency:      max(1, intEnv("PROVER_MAX_CONCURRENCY", runtime.NumCPU())),
 		RequestTimeout:      requestTimeout,
 		MaxRequestBytes:     int64(maxRequestBytes),
+		HealthCacheSeconds:  intEnv("PROVER_HEALTH_CACHE_SECONDS", 5),
+		StrictValidation:    boolEnv("PROVER_STRICT_VALIDATION", false),
 	}
 	return conf
 }
@@ -102,6 +126,21 @@ func durationEnv(key string, defaultSeconds int) time.Duration {
 		seconds = defaultSeconds
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func boolEnv(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(getenv(key, "")))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func max(a, b int) int {

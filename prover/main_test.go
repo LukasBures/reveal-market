@@ -31,6 +31,7 @@ func TestValidateRequest(t *testing.T) {
 		{"missing_batch_index", func(req *settlementProofRequest) { req.BatchIndex = "" }},
 		{"missing_commitments_count", func(req *settlementProofRequest) { req.CommitmentsCount = "" }},
 		{"bad_ticket_length", func(req *settlementProofRequest) { req.Tickets = req.Tickets[:1] }},
+		{"duplicate_ticket_id", func(req *settlementProofRequest) { req.Tickets[1].TicketID = req.Tickets[0].TicketID }},
 	}
 
 	for _, tc := range cases {
@@ -342,10 +343,55 @@ func TestProofHandlerUnready(t *testing.T) {
 	}
 }
 
+func TestProofHandlerBusy(t *testing.T) {
+	stub := &stubProver{ready: true, busy: true, circuitHash: "0x1"}
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
+	payload := buildTestRequest()
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped when busy")
+	}
+}
+
+func TestProofHandlerStrictValidation(t *testing.T) {
+	stub := &stubProver{
+		ready:       true,
+		circuitHash: "0x1",
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+		},
+	}
+	cfg := newTestConfig(t)
+	cfg.StrictValidation = true
+	app := newApp(cfg, stub)
+	payload := buildTestRequest()
+	payload.TotalLiability = "9"
+	payload.RakeBps = "50"
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped when strict validation fails")
+	}
+}
+
 type stubProver struct {
 	backend     string
 	circuitHash string
 	ready       bool
+	busy        bool
 	result      *proofResult
 	err         error
 	calls       int
@@ -368,6 +414,10 @@ func (s *stubProver) CircuitHash() string {
 
 func (s *stubProver) Ready() bool {
 	return s.ready
+}
+
+func (s *stubProver) IsBusy() bool {
+	return s.busy
 }
 
 func (s *stubProver) Generate(ctx context.Context, req settlementProofRequest) (*proofResult, error) {

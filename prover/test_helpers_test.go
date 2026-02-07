@@ -52,6 +52,11 @@ func newTestConfig(t *testing.T) shared.Config {
 		ProofTimeout:        5 * time.Second,
 		RequestTimeout:      5 * time.Second,
 		MaxConcurrency:      1,
+		ReadHeaderTimeout:   1 * time.Second,
+		ReadTimeout:         1 * time.Second,
+		WriteTimeout:        1 * time.Second,
+		IdleTimeout:         1 * time.Second,
+		MaxHeaderBytes:      1 << 20,
 	}
 }
 

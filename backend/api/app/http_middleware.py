@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from shared.db_metrics import reset_metrics as reset_db_metrics
 from shared.db_metrics import snapshot as snapshot_db_metrics
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -22,7 +23,7 @@ from app.logging_config import setup_logging
 from app.metrics import classify_latency_bucket
 from app.metrics_registry import REQUEST_LATENCY
 from app.rate_limit import RateLimiter, RateLimitMiddleware
-from app.runtime import instrumentator, is_production, logger, preset, sanitized_config, settings
+from app.runtime import instrumentator, is_production, load_shed_state, logger, preset, sanitized_config, settings
 from app.security import SecurityHeadersMiddleware
 from app.services.cache_client import get_cache_client
 from app.utils.requests import estimate_response_bytes, extract_cache_metadata
@@ -214,6 +215,32 @@ def attach_request_context(app: FastAPI) -> None:
             "cache_key": None,
             "cache_source": None,
         }
+        if settings.load_shed_enabled and load_shed_state.should_shed(
+            db_threshold=settings.load_shed_db_failure_threshold,
+            cache_threshold=settings.load_shed_cache_failure_threshold,
+        ):
+            path = request.url.path
+            shed_paths = set(settings.load_shed_paths or [])
+            should_block = any(path.startswith(prefix) for prefix in shed_paths) if shed_paths else True
+            if should_block and not load_shed_state.in_cooldown(settings.load_shed_cooldown_seconds):
+                load_shed_state.mark_shed()
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="load_shed.active",
+                    message="load shedding active; rejecting request",
+                    path=path,
+                    method=request.method,
+                    db_failures=load_shed_state.db_failures,
+                    cache_failures=load_shed_state.cache_failures,
+                )
+                reset_request_id(token)
+                response = JSONResponse(
+                    {"detail": "service_unavailable"},
+                    status_code=503,
+                    headers={"Retry-After": str(settings.load_shed_cooldown_seconds)},
+                )
+                return response
         log_event(
             logger,
             logging.DEBUG,

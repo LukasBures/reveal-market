@@ -14,6 +14,7 @@ type httpStubProver struct{}
 func (s httpStubProver) Backend() string     { return "groth16-rapidsnark" }
 func (s httpStubProver) CircuitHash() string { return "0x1" }
 func (s httpStubProver) Ready() bool         { return true }
+func (s httpStubProver) IsBusy() bool        { return false }
 func (s httpStubProver) Generate(_ context.Context, _ settlementProofRequest) (*proofResult, error) {
 	return &proofResult{
 		Proof:         "{}",

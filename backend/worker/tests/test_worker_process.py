@@ -169,6 +169,11 @@ class DummyRedis:
         await self.rpush(queue_key, payload)
         return 1
 
+    async def clear(self):
+        self.store.clear()
+        self.last_set = None
+        self._ttls.clear()
+
 
 class DummyCounter:
     def __init__(self):
@@ -1289,6 +1294,8 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
     monkeypatch.setattr(runtime_module, "PROVER_CLIENT", object(), raising=False)
     monkeypatch.setattr(runtime_module.settings, "proof_queue_poll_seconds", 0.01, raising=False)
     monkeypatch.setattr(runtime_module.settings, "settlement_queue_poll_seconds", 0.01, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "polymarket_sync_lease_failure_cooldown_seconds", 0, raising=False)
+    monkeypatch.setattr(worker_service, "_LAST_SYNC_LEASE_FAILURE_TS", None, raising=False)
 
     # In-memory DB
     engine, session_factory = await create_async_in_memory_db()

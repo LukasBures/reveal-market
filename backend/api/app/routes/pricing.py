@@ -24,7 +24,7 @@ from web3 import Web3
 from app import models, repository_async, schemas
 from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
-from app.pricing import PricingEngine, _coerce_price, fetch_fx_quote
+from app.pricing import PricingEngine, _coerce_price, build_quote_audit_payload, fetch_fx_quote
 from app.runtime import logger, settings
 from app.services.cache_client import get_http_client
 
@@ -302,221 +302,270 @@ async def pricing_quote(
 
     now = datetime.now(tz=UTC)
     user_id = payload.user_id or payload.wallet_address
-    if payload.stake_zen > settings.max_stake_zen:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "stake_above_cap",
-                "stake_zen": float(payload.stake_zen),
-                "max_stake_zen": settings.max_stake_zen,
-            },
-        )
-    ticket_size_wei = int(settings.ticket_size_wei)
-    stake_wei = _to_wei_amount(payload.stake_zen)
-    if stake_wei != ticket_size_wei:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"stake_mismatch_expected_{ticket_size_wei}",
-        )
-    if payload.market_id:
-        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
-        if market_record and (
-            market_record.status
-            in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
-            or market_record.resolved_at is not None
-        ):
+    quote_id_for_audit: str | None = None
+    try:
+        if payload.stake_zen > settings.max_stake_zen:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Market is settled; new quotes are disabled",
-            )
-        if market_record:
-            _assert_commits_allowed(market_record, now, session)
-    # Auto-deploy on first quote if a market address is missing.
-    ensured_market_address: str | None = (payload.market_address or "") or None
-    if payload.market_id and not ensured_market_address:
-        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
-        ensured_market_address = getattr(market_record, "market_address", None)
-    if payload.market_id and not ensured_market_address:
-        from app.routes.trade import _ensure_market_or_create
-
-        _, ensured_market_address, _ = await _ensure_market_or_create(
-            session, payload.market_id, payload.market_address
-        )
-    try:
-        fx_quote = await fetch_fx_quote(settings)
-        if fx_quote.stale:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
-                    "error": "fx_stale",
-                    "message": "FX price stale",
-                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+                    "error": "stake_above_cap",
+                    "stake_zen": float(payload.stake_zen),
+                    "max_stake_zen": settings.max_stake_zen,
                 },
             )
-        zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
-        fx_received_at = fx_quote.received_at
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        ) from exc
-
-    market_total = None
-    user_total = None
-    user_remaining = None
-    market_remaining = None
-    if payload.market_id:
-        market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
-            session,
-            stake_zen=payload.stake_zen,
-            market_id=payload.market_id,
-            wallet_address=payload.wallet_address,
-            include_stake=True,
-        )
-
-    price = None
-    if payload.market_id is not None:
-        price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
-    if price is None or price <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
-        )
-
-    if zen_usd is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        )
-    if settings.pricing_chain_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
-        )
-
-    zen_usd_scaled = _scale_fx_value(zen_usd)
-    engine = PricingEngine(settings)
-    try:
-        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    payout_zen = quote.payout_zen
-
-    expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
-    expiry_ts = int(expires_at.timestamp())
-    quote_id = token_hex(32)
-    if settings.pricing_signer_private_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "pricing_signer_unavailable", "message": "Pricing signer unavailable"},
-            headers=None,
-        )
-    raw_signer_key = settings.pricing_signer_private_key
-    signer_key: str | None
-    if isinstance(raw_signer_key, SecretStr):
-        signer_key = raw_signer_key.get_secret_value()
-    else:
-        signer_key = cast(str | None, raw_signer_key)
-    signer_account = await asyncio.to_thread(load_account, signer_key)
-    signature: str | None = None
-    signer_address: str | None = None
-    if ensured_market_address:
-        try:
-            digest = build_quote_digest(
-                settings.pricing_chain_id,
-                ensured_market_address,
-                payload.wallet_address,
-                int(payload.outcome_id),
-                stake_wei,
-                zen_usd_scaled,
-                expiry_ts,
-                quote_id,
+        ticket_size_wei = int(settings.ticket_size_wei)
+        stake_wei = _to_wei_amount(payload.stake_zen)
+        if stake_wei != ticket_size_wei:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"stake_mismatch_expected_{ticket_size_wei}",
             )
+        if payload.market_id:
+            market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+            if market_record and (
+                market_record.status
+                in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
+                or market_record.resolved_at is not None
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Market is settled; new quotes are disabled",
+                )
+            if market_record:
+                _assert_commits_allowed(market_record, now, session)
+        # Auto-deploy on first quote if a market address is missing.
+        ensured_market_address: str | None = (payload.market_address or "") or None
+        if payload.market_id and not ensured_market_address:
+            market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+            ensured_market_address = getattr(market_record, "market_address", None)
+        if payload.market_id and not ensured_market_address:
+            from app.routes.trade import _ensure_market_or_create
+
+            _, ensured_market_address, _ = await _ensure_market_or_create(
+                session, payload.market_id, payload.market_address
+            )
+        try:
+            fx_quote = await fetch_fx_quote(settings)
+            if fx_quote.stale:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error": "fx_stale",
+                        "message": "FX price stale",
+                        "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+                    },
+                )
+            zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
+            fx_received_at = fx_quote.received_at
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+            ) from exc
+
+        market_total = None
+        user_total = None
+        user_remaining = None
+        market_remaining = None
+        if payload.market_id:
+            market_total, user_total, market_remaining, user_remaining = await _enforce_caps(
+                session,
+                stake_zen=payload.stake_zen,
+                market_id=payload.market_id,
+                wallet_address=payload.wallet_address,
+                include_stake=True,
+            )
+
+        price = None
+        if payload.market_id is not None:
+            price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
+        if price is None or price <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
+            )
+
+        if zen_usd is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "fx_unavailable", "message": "FX price unavailable"},
+            )
+        if settings.pricing_chain_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
+            )
+
+        zen_usd_scaled = _scale_fx_value(zen_usd)
+        engine = PricingEngine(settings)
+        try:
+            quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        message = encode_defunct(hexstr=digest.hex())
-        signed = Account.sign_message(message, signer_account.key)
-        signature = signed.signature.hex()
-        signer_address = signer_account.address
+        payout_zen = quote.payout_zen
 
-    quote = quote.model_copy(
-        update={
-            "max_stake_zen": settings.max_stake_zen,
-            "max_user_stake_per_market_zen": settings.max_user_stake_per_market_zen if payload.market_id else None,
-            "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
-            "remaining_user_stake_zen": user_remaining,
-            "remaining_market_stake_zen": market_remaining,
-            "stake_wei": stake_wei,
-            "zen_usd_scaled": zen_usd_scaled,
-            "quote_id": quote_id,
-            "expires_at": expires_at,
-            "expiry_ts": expiry_ts,
-            "fx_stale": False,
-            "fx_received_at": fx_received_at,
-            "signature": signature,
-            "signer": signer_address,
-            "market_id": payload.market_id,
-            "user_id": user_id,
-            "wallet_address": payload.wallet_address,
-            "outcome_id": payload.outcome_id,
-            "market_address": ensured_market_address,
-            "chain_id": settings.pricing_chain_id,
-            "payout_zen": payout_zen,
-        }
-    )
-    quote_payload = quote.model_dump(mode="json")
-    try:
-        await repository_async.create_quote(
-            session,
-            {
-                "quote_id": quote_id,
-                "status": models.QuoteStatusEnum.ISSUED.value,
-                "payload": quote_payload,
-                "stake_zen": Decimal(str(quote.stake_zen)),
+        expires_at = datetime.now(tz=UTC) + timedelta(seconds=settings.pricing_quote_ttl_seconds)
+        expiry_ts = int(expires_at.timestamp())
+        quote_id = token_hex(32)
+        quote_id_for_audit = quote_id
+        if settings.pricing_signer_private_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "pricing_signer_unavailable", "message": "Pricing signer unavailable"},
+                headers=None,
+            )
+        raw_signer_key = settings.pricing_signer_private_key
+        signer_key: str | None
+        if isinstance(raw_signer_key, SecretStr):
+            signer_key = raw_signer_key.get_secret_value()
+        else:
+            signer_key = cast(str | None, raw_signer_key)
+        signer_account = await asyncio.to_thread(load_account, signer_key)
+        signature: str | None = None
+        signer_address: str | None = None
+        if ensured_market_address:
+            try:
+                digest = build_quote_digest(
+                    settings.pricing_chain_id,
+                    ensured_market_address,
+                    payload.wallet_address,
+                    int(payload.outcome_id),
+                    stake_wei,
+                    zen_usd_scaled,
+                    expiry_ts,
+                    quote_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            message = encode_defunct(hexstr=digest.hex())
+            signed = Account.sign_message(message, signer_account.key)
+            signature = signed.signature.hex()
+            signer_address = signer_account.address
+
+        quote = quote.model_copy(
+            update={
+                "max_stake_zen": settings.max_stake_zen,
+                "max_user_stake_per_market_zen": settings.max_user_stake_per_market_zen if payload.market_id else None,
+                "max_market_stake_zen": settings.max_market_stake_zen if payload.market_id else None,
+                "remaining_user_stake_zen": user_remaining,
+                "remaining_market_stake_zen": market_remaining,
                 "stake_wei": stake_wei,
-                "fx_scaled": zen_usd_scaled,
-                "zen_usd": quote.zen_usd,
+                "zen_usd_scaled": zen_usd_scaled,
+                "quote_id": quote_id,
+                "expires_at": expires_at,
+                "expiry_ts": expiry_ts,
+                "fx_stale": False,
+                "fx_received_at": fx_received_at,
+                "signature": signature,
+                "signer": signer_address,
                 "market_id": payload.market_id,
-                "market_address": ensured_market_address,
                 "user_id": user_id,
                 "wallet_address": payload.wallet_address,
-                "outcome_id": quote.outcome_id,
+                "outcome_id": payload.outcome_id,
+                "market_address": ensured_market_address,
                 "chain_id": settings.pricing_chain_id,
-                "expires_at": expires_at,
-            },
+                "payout_zen": payout_zen,
+            }
         )
-        await session.flush()
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive log
+        quote_payload = quote.model_dump(mode="json")
+        try:
+            await repository_async.create_quote(
+                session,
+                {
+                    "quote_id": quote_id,
+                    "status": models.QuoteStatusEnum.ISSUED.value,
+                    "payload": quote_payload,
+                    "stake_zen": Decimal(str(quote.stake_zen)),
+                    "stake_wei": stake_wei,
+                    "fx_scaled": zen_usd_scaled,
+                    "zen_usd": quote.zen_usd,
+                    "market_id": payload.market_id,
+                    "market_address": ensured_market_address,
+                    "user_id": user_id,
+                    "wallet_address": payload.wallet_address,
+                    "outcome_id": quote.outcome_id,
+                    "chain_id": settings.pricing_chain_id,
+                    "expires_at": expires_at,
+                },
+            )
+            await session.flush()
+            await repository_async.record_quote_audit(
+                session,
+                build_quote_audit_payload(
+                    quote_id=quote_id,
+                    action="issued",
+                    payload=quote_payload,
+                    status=models.QuoteStatusEnum.ISSUED.value,
+                ),
+            )
+        except ValueError as exc:
+            if quote_id_for_audit and quote_payload:
+                await repository_async.record_quote_audit(
+                    session,
+                    build_quote_audit_payload(
+                        quote_id=quote_id_for_audit,
+                        action="issue_failed",
+                        payload=quote_payload,
+                        error=str(exc),
+                        context={"reason": "duplicate"},
+                    ),
+                )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive log
+            log_event(
+                logger,
+                logging.ERROR,
+                event="pricing.quote.persist_failed",
+                message="failed to persist issued quote",
+                quote_id=quote_id,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Quote persistence failed"
+            ) from exc
+
         log_event(
             logger,
-            logging.ERROR,
-            event="pricing.quote.persist_failed",
-            message="failed to persist issued quote",
+            logging.INFO,
+            event="pricing.quote",
+            message="pricing quote generated",
+            stake_zen=payload.stake_zen,
+            zen_usd=zen_usd,
+            total_monetisation=str(quote.total_monetization),
+            market_total=market_total,
+            user_total=user_total,
             quote_id=quote_id,
-            error=str(exc),
+            market_id=payload.market_id,
+            user_id=payload.user_id,
         )
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Quote persistence failed") from exc
-
-    log_event(
-        logger,
-        logging.INFO,
-        event="pricing.quote",
-        message="pricing quote generated",
-        stake_zen=payload.stake_zen,
-        zen_usd=zen_usd,
-        total_monetisation=str(quote.total_monetization),
-        market_total=market_total,
-        user_total=user_total,
-        quote_id=quote_id,
-        market_id=payload.market_id,
-        user_id=payload.user_id,
-    )
-    PRICING_COUNTER.labels(event="issue", result="ok").inc()
-    return quote
+        PRICING_COUNTER.labels(event="issue", result="ok").inc()
+        return quote
+    except HTTPException as exc:
+        if quote_id_for_audit:
+            await repository_async.record_quote_audit(
+                session,
+                build_quote_audit_payload(
+                    quote_id=quote_id_for_audit,
+                    action="issue_failed",
+                    payload={"user_id": user_id, "wallet_address": payload.wallet_address},
+                    error=str(exc.detail) if hasattr(exc, "detail") else str(exc),
+                ),
+            )
+        raise
+    except Exception as exc:  # pragma: no cover - defensive audit fallback
+        if quote_id_for_audit:
+            await repository_async.record_quote_audit(
+                session,
+                build_quote_audit_payload(
+                    quote_id=quote_id_for_audit,
+                    action="issue_failed",
+                    payload={"user_id": user_id, "wallet_address": payload.wallet_address},
+                    error=str(exc),
+                ),
+            )
+        raise
 
 
 @router.post("/pricing/preview", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
@@ -646,82 +695,107 @@ async def pricing_submit(
 
     quote = payload.quote
     now = datetime.now(tz=UTC)
+    quote_payload_for_audit = quote.model_dump(mode="json")
+    try:
 
-    def _as_aware(dt: datetime | None) -> datetime | None:
-        if dt is None:
-            return None
-        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-            return dt.replace(tzinfo=UTC)
-        return dt
+        def _as_aware(dt: datetime | None) -> datetime | None:
+            if dt is None:
+                return None
+            if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+                return dt.replace(tzinfo=UTC)
+            return dt
 
-    if settings.pricing_chain_id is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured")
-    if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="wallet_address, market_address, and outcome_id are required for signed quotes",
-        )
+        if settings.pricing_chain_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured"
+            )
+        if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="wallet_address, market_address, and outcome_id are required for signed quotes",
+            )
 
-    raw_signer_key = settings.pricing_signer_private_key
-    signer_key: str | None
-    if isinstance(raw_signer_key, SecretStr):
-        signer_key = raw_signer_key.get_secret_value()
-    else:
-        signer_key = cast(str | None, raw_signer_key)
-    signer_account = await asyncio.to_thread(load_account, signer_key) if signer_key else None
-    if signer_account is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
+        raw_signer_key = settings.pricing_signer_private_key
+        signer_key: str | None
+        if isinstance(raw_signer_key, SecretStr):
+            signer_key = raw_signer_key.get_secret_value()
+        else:
+            signer_key = cast(str | None, raw_signer_key)
+        signer_account = await asyncio.to_thread(load_account, signer_key) if signer_key else None
+        if signer_account is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
 
-    if not quote.quote_id:
-        PRICING_COUNTER.labels(event="submit", result="missing").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
-    quote_id = quote.quote_id
-    stmt = select(models.Quote).where(models.Quote.quote_id == quote_id).with_for_update()
-    db_quote = (await session.execute(stmt)).scalar_one_or_none()
-    if db_quote is None:
-        PRICING_COUNTER.labels(event="submit", result="missing").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
-    if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
-    db_expires_at = _as_aware(cast(datetime | None, getattr(db_quote, "expires_at", None)))
-    if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
-        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
-        await session.flush()
-        PRICING_COUNTER.labels(event="submit", result="expired").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
-    quote_expires_at = _as_aware(quote.expires_at)
-    if quote_expires_at and quote_expires_at <= now:
-        db_quote.status = models.QuoteStatusEnum.EXPIRED.value
-        await session.flush()
-        PRICING_COUNTER.labels(event="submit", result="expired").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
-    if db_quote.wallet_address and quote.wallet_address:
-        if db_quote.wallet_address.lower() != quote.wallet_address.lower():
-            PRICING_COUNTER.labels(event="submit", result="wallet_mismatch").inc()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote wallet mismatch")
-    if db_quote.market_id and quote.market_id and db_quote.market_id != quote.market_id:
-        PRICING_COUNTER.labels(event="submit", result="market_id_mismatch").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market id mismatch")
-    if db_quote.market_address and quote.market_address:
-        if db_quote.market_address.lower() != quote.market_address.lower():
-            PRICING_COUNTER.labels(event="submit", result="market_mismatch").inc()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market mismatch")
-    if db_quote.outcome_id is not None and quote.outcome_id is not None:
-        if db_quote.outcome_id != quote.outcome_id:
-            PRICING_COUNTER.labels(event="submit", result="outcome_mismatch").inc()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote outcome mismatch")
+        if not quote.quote_id:
+            PRICING_COUNTER.labels(event="submit", result="missing").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
+        quote_id = quote.quote_id
+        stmt = select(models.Quote).where(models.Quote.quote_id == quote_id).with_for_update()
+        db_quote = (await session.execute(stmt)).scalar_one_or_none()
+        if db_quote is None:
+            PRICING_COUNTER.labels(event="submit", result="missing").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
+        if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
+        db_expires_at = _as_aware(cast(datetime | None, getattr(db_quote, "expires_at", None)))
+        if db_quote.status == models.QuoteStatusEnum.EXPIRED.value or (db_expires_at and db_expires_at <= now):
+            db_quote.status = models.QuoteStatusEnum.EXPIRED.value
+            await session.flush()
+            PRICING_COUNTER.labels(event="submit", result="expired").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+        quote_expires_at = _as_aware(quote.expires_at)
+        if quote_expires_at and quote_expires_at <= now:
+            db_quote.status = models.QuoteStatusEnum.EXPIRED.value
+            await session.flush()
+            PRICING_COUNTER.labels(event="submit", result="expired").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote expired")
+        if db_quote.wallet_address and quote.wallet_address:
+            if db_quote.wallet_address.lower() != quote.wallet_address.lower():
+                PRICING_COUNTER.labels(event="submit", result="wallet_mismatch").inc()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote wallet mismatch")
+        if db_quote.market_id and quote.market_id and db_quote.market_id != quote.market_id:
+            PRICING_COUNTER.labels(event="submit", result="market_id_mismatch").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market id mismatch")
+        if db_quote.market_address and quote.market_address:
+            if db_quote.market_address.lower() != quote.market_address.lower():
+                PRICING_COUNTER.labels(event="submit", result="market_mismatch").inc()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote market mismatch")
+        if db_quote.outcome_id is not None and quote.outcome_id is not None:
+            if db_quote.outcome_id != quote.outcome_id:
+                PRICING_COUNTER.labels(event="submit", result="outcome_mismatch").inc()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote outcome mismatch")
 
-    expiry_reference = quote_expires_at or db_expires_at or now
-    expiry_ts = quote.expiry_ts or int(expiry_reference.timestamp())
-    quote.expiry_ts = expiry_ts
-    stake_wei = quote.stake_wei
-    zen_usd_scaled = quote.zen_usd_scaled
-    recalculated_stake = _to_wei_amount(quote.stake_zen)
-    recalculated_fx = _scale_fx_value(quote.zen_usd)
-    if recalculated_stake != stake_wei or recalculated_fx != zen_usd_scaled:
-        PRICING_COUNTER.labels(event="submit", result="scaled_mismatch").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote fields do not match scaled values")
-    if not quote.signature:
+        expiry_reference = quote_expires_at or db_expires_at or now
+        expiry_ts = quote.expiry_ts or int(expiry_reference.timestamp())
+        quote.expiry_ts = expiry_ts
+        stake_wei = quote.stake_wei
+        zen_usd_scaled = quote.zen_usd_scaled
+        recalculated_stake = _to_wei_amount(quote.stake_zen)
+        recalculated_fx = _scale_fx_value(quote.zen_usd)
+        if recalculated_stake != stake_wei or recalculated_fx != zen_usd_scaled:
+            PRICING_COUNTER.labels(event="submit", result="scaled_mismatch").inc()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Quote fields do not match scaled values"
+            )
+        if not quote.signature:
+            try:
+                digest = build_quote_digest(
+                    settings.pricing_chain_id,
+                    quote.market_address,
+                    quote.wallet_address,
+                    int(quote.outcome_id),
+                    stake_wei,
+                    zen_usd_scaled,
+                    expiry_ts,
+                    quote_id,
+                )
+                signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
+                quote.signature = signed.signature.hex()
+                quote.signer = signer_account.address
+            except Exception as exc:
+                PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}"
+                ) from exc
         try:
             digest = build_quote_digest(
                 settings.pricing_chain_id,
@@ -733,121 +807,136 @@ async def pricing_submit(
                 expiry_ts,
                 quote_id,
             )
-            signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
-            quote.signature = signed.signature.hex()
-            quote.signer = signer_account.address
+            recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote.signature)
         except Exception as exc:
             PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
-    try:
-        digest = build_quote_digest(
-            settings.pricing_chain_id,
-            quote.market_address,
-            quote.wallet_address,
-            int(quote.outcome_id),
-            stake_wei,
-            zen_usd_scaled,
-            expiry_ts,
-            quote_id,
+        if recovered.lower() != signer_account.address.lower():
+            PRICING_COUNTER.labels(event="submit", result="signer_mismatch").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
+        if db_quote.stake_wei != stake_wei or db_quote.fx_scaled != zen_usd_scaled:
+            PRICING_COUNTER.labels(event="submit", result="payload_mismatch").inc()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote payload mismatch with ledger")
+
+        current_fx: Decimal | None = None
+        if payload.max_fx_diff_percent is not None:
+            try:
+                fx_quote = await fetch_fx_quote(settings)
+                if fx_quote.zen_usd is not None:
+                    current_fx = fx_quote.zen_usd
+                if fx_quote.stale:
+                    PRICING_COUNTER.labels(event="submit", result="fx_stale").inc()
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "error": "fx_stale",
+                            "message": "FX price stale during submit",
+                            "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
+                        },
+                    )
+                fx_diff_percent = (
+                    (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
+                    if current_fx is not None and quote.zen_usd
+                    else Decimal("0")
+                )
+                if current_fx is None:
+                    PRICING_COUNTER.labels(event="submit", result="fx_missing").inc()
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={"error": "fx_missing", "message": "FX check failed: missing price"},
+                    )
+                if fx_diff_percent > payload.max_fx_diff_percent:
+                    PRICING_COUNTER.labels(event="submit", result="fx_drift").inc()
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"FX drift {fx_diff_percent:.4f}% exceeds bound {payload.max_fx_diff_percent}%",
+                    )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                PRICING_COUNTER.labels(event="submit", result="fx_error").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"error": "fx_check_failed", "message": f"FX check failed: {exc}"},
+                ) from exc
+        else:
+            current_fx = quote.zen_usd
+        market_id_for_caps = db_quote.market_id
+        if db_quote.market_id is not None:
+            quote.market_id = db_quote.market_id
+
+        await _enforce_caps(
+            session,
+            stake_zen=quote.stake_zen,
+            market_id=market_id_for_caps,
+            wallet_address=quote.wallet_address,
+            exclude_quote=db_quote,
+            include_stake=True,
+            statuses={
+                models.QuoteStatusEnum.ISSUED.value,
+                models.QuoteStatusEnum.CONSUMED.value,
+            },
         )
-        recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote.signature)
-    except Exception as exc:
-        PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
-    if recovered.lower() != signer_account.address.lower():
-        PRICING_COUNTER.labels(event="submit", result="signer_mismatch").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
-    if db_quote.stake_wei != stake_wei or db_quote.fx_scaled != zen_usd_scaled:
-        PRICING_COUNTER.labels(event="submit", result="payload_mismatch").inc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote payload mismatch with ledger")
 
-    current_fx: Decimal | None = None
-    if payload.max_fx_diff_percent is not None:
-        try:
-            fx_quote = await fetch_fx_quote(settings)
-            if fx_quote.zen_usd is not None:
-                current_fx = fx_quote.zen_usd
-            if fx_quote.stale:
-                PRICING_COUNTER.labels(event="submit", result="fx_stale").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "fx_stale",
-                        "message": "FX price stale during submit",
-                        "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
-                    },
-                )
-            fx_diff_percent = (
-                (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
-                if current_fx is not None and quote.zen_usd
-                else Decimal("0")
-            )
-            if current_fx is None:
-                PRICING_COUNTER.labels(event="submit", result="fx_missing").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={"error": "fx_missing", "message": "FX check failed: missing price"},
-                )
-            if fx_diff_percent > payload.max_fx_diff_percent:
-                PRICING_COUNTER.labels(event="submit", result="fx_drift").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"FX drift {fx_diff_percent:.4f}% exceeds bound {payload.max_fx_diff_percent}%",
-                )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            PRICING_COUNTER.labels(event="submit", result="fx_error").inc()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "fx_check_failed", "message": f"FX check failed: {exc}"},
-            ) from exc
-    else:
-        current_fx = quote.zen_usd
-    market_id_for_caps = db_quote.market_id
-    if db_quote.market_id is not None:
-        quote.market_id = db_quote.market_id
+        db_quote.payload = quote.model_dump(mode="json")
+        await repository_async.mark_quote_status(
+            session,
+            db_quote,
+            models.QuoteStatusEnum.CONSUMED,
+            consumed_at=now,
+        )
+        await session.flush()
+        await repository_async.record_quote_audit(
+            session,
+            build_quote_audit_payload(
+                quote_id=quote_id,
+                action="consumed",
+                payload=db_quote.payload,
+                status=models.QuoteStatusEnum.CONSUMED.value,
+            ),
+        )
+        PRICING_COUNTER.labels(event="submit", result="ok").inc()
+        log_event(
+            logger,
+            logging.INFO,
+            event="pricing.submit",
+            message="pricing quote submitted",
+            quote_id=quote.quote_id,
+            market_id=quote.market_id,
+            user_id=quote.user_id,
+            outcome_id=quote.outcome_id,
+            stake_zen=float(quote.stake_zen),
+            zen_usd=float(quote.zen_usd),
+        )
 
-    await _enforce_caps(
-        session,
-        stake_zen=quote.stake_zen,
-        market_id=market_id_for_caps,
-        wallet_address=quote.wallet_address,
-        exclude_quote=db_quote,
-        include_stake=True,
-        statuses={
-            models.QuoteStatusEnum.ISSUED.value,
-            models.QuoteStatusEnum.CONSUMED.value,
-        },
-    )
-
-    db_quote.payload = quote.model_dump(mode="json")
-    await repository_async.mark_quote_status(
-        session,
-        db_quote,
-        models.QuoteStatusEnum.CONSUMED,
-        consumed_at=now,
-    )
-    await session.flush()
-    PRICING_COUNTER.labels(event="submit", result="ok").inc()
-    log_event(
-        logger,
-        logging.INFO,
-        event="pricing.submit",
-        message="pricing quote submitted",
-        quote_id=quote.quote_id,
-        market_id=quote.market_id,
-        user_id=quote.user_id,
-        outcome_id=quote.outcome_id,
-        stake_zen=float(quote.stake_zen),
-        zen_usd=float(quote.zen_usd),
-    )
-
-    return schemas.PricingSubmitResponse(
-        quote=quote,
-        current_fx=current_fx if current_fx is not None else quote.zen_usd,
-        valid=True,
-    )
+        return schemas.PricingSubmitResponse(
+            quote=quote,
+            current_fx=current_fx if current_fx is not None else quote.zen_usd,
+            valid=True,
+        )
+    except HTTPException as exc:
+        error_text = str(exc.detail) if hasattr(exc, "detail") else str(exc)
+        await repository_async.record_quote_audit(
+            session,
+            build_quote_audit_payload(
+                quote_id=quote.quote_id or "unknown",
+                action="consume_failed",
+                payload=quote_payload_for_audit,
+                error=error_text,
+            ),
+        )
+        raise
+    except Exception as exc:  # pragma: no cover - defensive audit fallback
+        await repository_async.record_quote_audit(
+            session,
+            build_quote_audit_payload(
+                quote_id=quote.quote_id or "unknown",
+                action="consume_failed",
+                payload=quote_payload_for_audit,
+                error=str(exc),
+            ),
+        )
+        raise
 
 
 @router.get("/pricing/quotes/{quote_id}", response_model=schemas.QuoteRecord, tags=["pricing"])

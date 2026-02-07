@@ -57,6 +57,10 @@ async def mark_quote_status(
     return await shared_repository_async.mark_quote_status(session, quote, status, consumed_at=consumed_at)
 
 
+async def record_quote_audit(session: AsyncSession, data: Mapping[str, Any]) -> shared_models.QuoteAudit:
+    return await shared_repository_async.record_quote_audit(session, data)
+
+
 async def upsert_resolution(session: AsyncSession, data: Mapping[str, Any]) -> shared_models.Resolution:
     return await shared_repository_async.upsert_resolution(session, data)
 

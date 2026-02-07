@@ -294,6 +294,32 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "quote_audits",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True, nullable=False),
+        sa.Column("quote_id", sa.String(length=66), nullable=False),
+        sa.Column("action", sa.String(length=32), nullable=False),
+        sa.Column("user_id", sa.String(length=128), nullable=True),
+        sa.Column("wallet_address", sa.String(length=64), nullable=True),
+        sa.Column("market_id", sa.String(length=128), nullable=True),
+        sa.Column("market_address", sa.String(length=64), nullable=True),
+        sa.Column("outcome_id", sa.Integer(), nullable=True),
+        sa.Column("chain_id", sa.BigInteger(), nullable=True),
+        sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("stake_wei", sa.Numeric(precision=78, scale=0), nullable=True),
+        sa.Column("fx_scaled", sa.BigInteger(), nullable=True),
+        sa.Column("zen_usd", sa.Float(), nullable=True),
+        sa.Column("status", sa.String(length=32), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("context", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(["quote_id"], ["quotes.quote_id"], ondelete="CASCADE"),
+    )
+    op.create_index("ix_quote_audits_quote_id", "quote_audits", ["quote_id"])
+    op.create_index("ix_quote_audits_user_id", "quote_audits", ["user_id"])
+    op.create_index("ix_quote_audits_wallet_address", "quote_audits", ["wallet_address"])
+    op.create_index("ix_quote_audits_market_id", "quote_audits", ["market_id"])
+
+    op.create_table(
         "factory_events",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("factory_address", sa.String(length=64), nullable=False),
@@ -359,6 +385,7 @@ def downgrade() -> None:
     op.drop_table("hedger_treasury_snapshots")
     op.drop_table("settlement_receipts")
     op.drop_table("factory_events")
+    op.drop_table("quote_audits")
     op.drop_table("quotes")
     op.drop_table("schema_versions")
     op.drop_table("settlements")

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import schemas
 from .cache import get_redis_client
 from .config import Settings, get_settings
+from .runtime import load_shed_state
 
 ComponentMap = dict[str, schemas.HealthComponent]
 health_logger = logging.getLogger("reveal_market.api.health")
@@ -79,9 +80,9 @@ async def build_shallow_health_response() -> schemas.HealthResponse:
 
 
 async def build_deep_health_response(session: AsyncSession, *, force: bool = False) -> schemas.HealthResponse:
+    settings = get_settings()
     """Aggregate health information from core dependencies."""
 
-    settings = get_settings()
     ttl = max(getattr(settings, "health_deep_cache_ttl_seconds", 0) or 0, 0)
     if (settings.environment or "").lower() in {"test", "testing"}:
         ttl = 0
@@ -196,8 +197,10 @@ async def _check_database(session: AsyncSession) -> tuple[str, schemas.HealthCom
         await session.execute(text("SELECT 1"))
         db_latency = (time.perf_counter() - db_start) * 1000
         component = schemas.HealthComponent(status="ok", latency_ms=db_latency)
+        load_shed_state.record_db_success()
     except (SQLAlchemyError, TypeError) as exc:  # pragma: no cover - defensive
         component = schemas.HealthComponent(status="error", detail=str(exc))
+        load_shed_state.record_db_failure()
     return "database", component
 
 
@@ -210,10 +213,13 @@ async def _check_redis_connectivity() -> tuple[str, schemas.HealthComponent]:
         await redis_client.ping()
         redis_latency = (time.perf_counter() - redis_start) * 1000
         component = schemas.HealthComponent(status="ok", latency_ms=redis_latency)
+        load_shed_state.record_cache_success()
     except RedisError as exc:
         component = schemas.HealthComponent(status="error", detail=str(exc))
+        load_shed_state.record_cache_failure()
     except (TypeError, ValueError, OSError) as exc:  # pragma: no cover - defensive
         component = schemas.HealthComponent(status="error", detail=str(exc))
+        load_shed_state.record_cache_failure()
     return "redis", component
 
 

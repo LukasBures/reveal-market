@@ -48,6 +48,7 @@ type groth16Settings struct {
 	Timeout             time.Duration
 	MaxConcurrency      int
 	CircuitHashOverride string
+	StrictValidation    bool
 }
 
 // groth16Prover drives witness generation + rapidsnark proof creation.
@@ -128,7 +129,16 @@ func (p *groth16Prover) Ready() bool {
 	return p.ready.Load()
 }
 
+func (p *groth16Prover) IsBusy() bool {
+	return len(p.sem) >= cap(p.sem)
+}
+
 func (p *groth16Prover) Generate(ctx context.Context, req settlementProofRequest) (*proofResult, error) {
+	if p.settings.StrictValidation {
+		if err := validateStrictRequest(req); err != nil {
+			return nil, err
+		}
+	}
 	inputs, err := buildWitnessInput(req)
 	if err != nil {
 		return nil, err
@@ -159,6 +169,9 @@ func (p *groth16Prover) Generate(ctx context.Context, req settlementProofRequest
 	}
 	if err := p.runWitness(jobCtx, inputFile, witnessFile); err != nil {
 		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, newInternalError(err)
 	}
 	if err := p.runProve(jobCtx, witnessFile, proofFile, publicFile); err != nil {
 		return nil, err
@@ -333,6 +346,7 @@ func runCommand(ctx context.Context, binary string, args []string, workdir strin
 	if workdir != "" {
 		cmd.Dir = workdir
 	}
+	setProcessGroup(cmd)
 	stdout := bufferPool.Get().(*bytes.Buffer)
 	stderr := bufferPool.Get().(*bytes.Buffer)
 	stdout.Reset()
@@ -344,9 +358,23 @@ func runCommand(ctx context.Context, binary string, args []string, workdir strin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
+	if ctx.Err() != nil {
+		terminateProcessGroup(cmd)
+	}
 	outCopy := append([]byte(nil), stdout.Bytes()...)
 	errCopy := append([]byte(nil), stderr.Bytes()...)
 	return outCopy, errCopy, err
+}
+
+func setProcessGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func terminateProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
 func witnessMode(settings groth16Settings) string {
@@ -831,6 +859,60 @@ func buildWitnessInput(req settlementProofRequest) (map[string]any, error) {
 		"salt":             salts,
 	}
 	return inputs, nil
+}
+
+func validateStrictRequest(req settlementProofRequest) error {
+	totalEscrow, err := parsePositiveDecimal(req.TotalEscrow, "total_escrow")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	totalLiability, err := parseNonNegativeDecimal(req.TotalLiability, "total_liability")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	rakeBps, err := parseNonNegativeDecimal(req.RakeBps, "rake_bps")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	if rakeBps.Cmp(big.NewInt(10_000)) > 0 {
+		return newValidationError("rake_bps must be <= 10000")
+	}
+	if len(req.PoolTotals) != 2 {
+		return newValidationError("pool_totals must contain two entries")
+	}
+	poolYes, err := parseNonNegativeDecimal(req.PoolTotals[0], "pool_totals[0]")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	poolNo, err := parseNonNegativeDecimal(req.PoolTotals[1], "pool_totals[1]")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	sumPools := new(big.Int).Add(poolYes, poolNo)
+	if sumPools.Cmp(totalEscrow) > 0 {
+		return newValidationError("pool_totals cannot exceed total_escrow")
+	}
+	if totalLiability.Cmp(totalEscrow) > 0 {
+		return newValidationError("total_liability cannot exceed total_escrow")
+	}
+	expectedRake := new(big.Int).Set(totalEscrow)
+	expectedRake.Mul(expectedRake, rakeBps)
+	expectedRake.Div(expectedRake, big.NewInt(10_000))
+	expectedLiability := new(big.Int).Sub(totalEscrow, expectedRake)
+	if totalLiability.Cmp(expectedLiability) != 0 {
+		return newValidationError("total_liability does not match total_escrow and rake_bps")
+	}
+	commitmentsCount, err := parseFlexibleNumber(req.CommitmentsCount, "commitments_count")
+	if err != nil {
+		return newValidationError(err.Error())
+	}
+	if commitmentsCount.Cmp(big.NewInt(settlementBatchSize)) > 0 {
+		return newValidationError("commitments_count must be <= 256")
+	}
+	if len(req.Tickets) != settlementBatchSize {
+		return newValidationError("tickets must contain 256 entries")
+	}
+	return nil
 }
 
 func parsePositiveDecimal(value string, field string) (*big.Int, error) {

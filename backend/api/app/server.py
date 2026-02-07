@@ -24,6 +24,7 @@ from app.routes.pricing import build_quote_digest
 from app.runtime import cache_client, is_production, logger, mode_env, settings
 from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
+from app.services.startup_validation import validate_required_secrets
 from app.tasks import cache_refresh_loop, quote_sweeper_loop, run_startup_tasks, stop_background_tasks
 
 
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     """
 
     _log_environment()
+    validate_required_secrets()
     rate_limiter = RateLimiter(lambda: settings, get_cache_client)
     app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     app.cache_client = None  # type: ignore[attr-defined]

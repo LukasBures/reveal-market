@@ -28,6 +28,7 @@ from app.onchain import validate_verifier_circuit_hash
 from app.routes.trade import _call_relayer
 from app.runtime import logger, request_metrics
 from app.runtime import settings as runtime_settings
+from app.services.alerting import alert_background_failure
 from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
 
@@ -232,6 +233,11 @@ async def cache_refresh_loop() -> None:
                     error=str(exc),
                     failures=failure_count,
                 )
+                await alert_background_failure(
+                    "cache_refresh_loop",
+                    exc,
+                    {"failures": failure_count, "interval_seconds": settings.cache_refresh_interval_seconds},
+                )
             jitter = min(interval * 0.2, 30)
             base_wait = interval + _RNG.uniform(-jitter, jitter)
             if failure_count > 0:
@@ -325,6 +331,11 @@ async def relayer_queue_loop() -> None:
                     else:
                         payload["attempts"] = attempts
                         await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
+                    await alert_background_failure(
+                        "relayer_queue_loop",
+                        exc,
+                        {"job_id": job_id, "attempts": attempts, "failures": failure_count},
+                    )
                     backoff = min(settings.relayer_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
                     await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
             except asyncio.CancelledError:
@@ -338,6 +349,11 @@ async def relayer_queue_loop() -> None:
                     error=str(exc),
                 )
                 failure_count += 1
+                await alert_background_failure(
+                    "relayer_queue_loop",
+                    exc,
+                    {"failures": failure_count, "interval_seconds": settings.relayer_retry_backoff_seconds},
+                )
                 backoff = min(settings.relayer_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
                 opened = await circuit.record_failure("relayer_queue")
                 await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
@@ -378,6 +394,11 @@ async def quote_sweeper_loop(*, run_once: bool = False) -> None:
                     event="pricing.quote.sweep_error",
                     message="quote expiry sweep failed",
                     error=str(exc),
+                )
+                await alert_background_failure(
+                    "quote_sweeper_loop",
+                    exc,
+                    {"interval_seconds": settings.quote_expiry_sweep_interval_seconds},
                 )
             if run_once:
                 break

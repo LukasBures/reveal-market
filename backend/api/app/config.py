@@ -222,6 +222,32 @@ class Settings(BaseSettings):
     internal_api_secret: SecretStr | None = Field(
         default=None, description="Shared secret required for internal API endpoints"
     )
+    load_shed_enabled: bool = Field(default=False, description="Enable load shedding under dependency failures")
+    load_shed_db_failure_threshold: int = Field(
+        default=3, ge=1, description="Consecutive DB failures before shedding traffic"
+    )
+    load_shed_cache_failure_threshold: int = Field(
+        default=5, ge=1, description="Consecutive cache failures before shedding traffic"
+    )
+    load_shed_cooldown_seconds: int = Field(default=30, ge=5, description="Cooldown period for load shedding (seconds)")
+    load_shed_paths: list[str] = Field(
+        default_factory=lambda: [
+            "/events",
+            "/categories",
+            "/markets",
+            "/positions",
+            "/pricing/quote",
+            "/pricing/preview",
+            "/trade/commit",
+            "/trade/claim",
+            "/proofs",
+            "/treasury",
+        ]
+    )
+    alert_webhook_url: AnyHttpUrl | None = Field(
+        default=None, description="Optional webhook URL for background task alerts"
+    )
+    alert_webhook_token: SecretStr | None = Field(default=None, description="Optional bearer token for alert webhook")
     proof_queue_key: str = Field(
         default="reveal_market_worker:proof_queue",
         description="Redis list key for proof generation jobs",
@@ -316,6 +342,19 @@ class Settings(BaseSettings):
         """Enable rate limiting by default in non-dev environments unless explicitly disabled."""
 
         env_value = os.getenv("RM_RATE_LIMIT_ENABLED")
+        if env_value is not None:
+            return value
+        env = (os.getenv("RM_ENVIRONMENT") or "development").lower()
+        if env not in {"dev", "development", "local", "test", "testing"}:
+            return True
+        return value
+
+    @field_validator("load_shed_enabled", mode="before")
+    @classmethod
+    def _default_load_shed(cls, value):
+        """Enable load shedding by default in non-dev environments unless explicitly disabled."""
+
+        env_value = os.getenv("RM_LOAD_SHED_ENABLED")
         if env_value is not None:
             return value
         env = (os.getenv("RM_ENVIRONMENT") or "development").lower()

@@ -19,6 +19,7 @@ from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import AsyncGoldskyClient
 
 from app.config import get_settings
+from app.load_shedding import LoadSheddingState
 from app.metrics import RequestMetrics
 
 settings = get_settings()
@@ -69,6 +70,7 @@ cache_refresh_task: asyncio.Task | None = None
 quote_sweeper_task: asyncio.Task | None = None
 relayer_queue_task: asyncio.Task | None = None
 goldsky_client: AsyncGoldskyClient | None = None
+load_shed_state = LoadSheddingState()
 
 
 def configure_db_metrics(engine) -> None:

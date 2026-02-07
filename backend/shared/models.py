@@ -412,6 +412,30 @@ class Quote(Base):
     )
 
 
+class QuoteAudit(Base):
+    __tablename__ = "quote_audits"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    quote_id: Mapped[str] = mapped_column(
+        String(66), ForeignKey("quotes.quote_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    wallet_address: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    market_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    market_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outcome_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chain_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    stake_zen: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    stake_wei: Mapped[Decimal | None] = mapped_column(Numeric(precision=78, scale=0), nullable=True)
+    fx_scaled: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    zen_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class FactoryEvent(Base):
     __tablename__ = "factory_events"
     __table_args__ = (UniqueConstraint("factory_address", "event", "tx_hash", name="ux_factory_events_dedupe"),)

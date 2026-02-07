@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -98,6 +100,7 @@ type app struct {
 	requestCounter  atomic.Uint64
 	artifactCheck   artifactCheck
 	artifactCheckMu sync.Mutex
+	healthCache     healthCache
 }
 
 type artifactCheck struct {
@@ -106,6 +109,13 @@ type artifactCheck struct {
 	mismatches []string
 	err        string
 	checkedAt  time.Time
+}
+
+type healthCache struct {
+	payload   []byte
+	status    int
+	expiresAt time.Time
+	mu        sync.Mutex
 }
 
 func newApp(cfg shared.Config, prover proverEngine) *app {
@@ -148,12 +158,14 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/heartbeat", a.heartbeatHandler)
 	mux.HandleFunc("/api/v1/proofs/settlement", a.proofHandler)
 	mux.HandleFunc("/metrics", promMetricsHandler)
-	mux.Handle("/metrics/expvar", expvar.Handler())
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	if a.cfg.EnableDebug {
+		mux.Handle("/metrics/expvar", expvar.Handler())
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
 	return mux
 }
 
@@ -197,7 +209,17 @@ func main() {
 		"circuit":     server.circuitHash,
 	})
 
-	if err := http.ListenAndServe(cfg.ListenAddr, server.routes()); err != nil {
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           server.routes(),
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
 		logLine("error", "prover.shutdown", map[string]any{"error": err.Error()})
 		os.Exit(1)
 	}
@@ -217,6 +239,7 @@ func initProver(cfg shared.Config) proverEngine {
 		MaxConcurrency:    cfg.MaxConcurrency,
 	}
 	settings.CircuitHashOverride = cfg.ManualCircuitHash
+	settings.StrictValidation = cfg.StrictValidation
 
 	switch cfg.BackendMode {
 	case shared.BackendMock:
@@ -247,6 +270,14 @@ func (a *app) heartbeatLoop() {
 }
 
 func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
+	if cached := a.healthCache.read(); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(cached.status)
+		if _, err := w.Write(cached.payload); err != nil {
+			logLine("error", "prover.health.cache_write_failed", map[string]any{"error": err.Error()})
+		}
+		return
+	}
 	lastHeartbeat, _ := a.lastHeartbeat.Load().(time.Time)
 	lastProof, _ := a.lastProofAt.Load().(time.Time)
 	artifactsOk, missing, mismatches, errMsg := a.verifyArtifacts()
@@ -278,7 +309,8 @@ func (a *app) healthHandler(w http.ResponseWriter, r *http.Request) {
 		payload["status"] = "degraded"
 		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, status, payload)
+	serialized := writeJSONBytes(w, status, payload)
+	a.healthCache.store(serialized, status, a.cfg.HealthCacheSeconds)
 }
 
 func (a *app) heartbeatHandler(w http.ResponseWriter, r *http.Request) {
@@ -436,11 +468,17 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
 		return
 	}
+	if a.prover.IsBusy() {
+		writeError(w, http.StatusTooManyRequests, "busy", "prover at capacity", nil)
+		return
+	}
 	defer r.Body.Close()
 
 	if a.cfg.MaxRequestBytes > 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, a.cfg.MaxRequestBytes)
 	}
+
+	inputBytes := r.ContentLength
 
 	var req settlementProofRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -471,6 +509,18 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), err)
 		return
 	}
+	if a.cfg.StrictValidation {
+		if err := validateStrictRequest(req); err != nil {
+			logLine("warn", "prover.request.strict_validation_failed", map[string]any{
+				"path":   r.URL.Path,
+				"error":  err.Error(),
+				"market": req.MarketID,
+			})
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), err)
+			return
+		}
+	}
+
 	matches, err := equalHex(req.CircuitHash, a.circuitHash)
 	if err != nil {
 		logLine("warn", "prover.request.circuit_hash_invalid", map[string]any{
@@ -496,11 +546,11 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 	requestID := a.nextRequestID()
 
 	if wantsStream(r) {
-		a.streamProof(w, r, req, requestID)
+		a.streamProof(w, r, req, requestID, inputBytes)
 		return
 	}
 
-	resp, err := a.generateProofResponse(r.Context(), req, requestID)
+	resp, err := a.generateProofResponse(r.Context(), req, requestID, inputBytes)
 	if err != nil {
 		var perr *proverError
 		if errors.As(err, &perr) {
@@ -522,7 +572,7 @@ func wantsStream(r *http.Request) bool {
 	return strings.Contains(accept, "text/event-stream")
 }
 
-func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlementProofRequest, requestID string) {
+func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlementProofRequest, requestID string, inputBytes int64) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "stream_unavailable", "streaming not supported", nil)
@@ -549,7 +599,7 @@ func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlement
 
 	resultCh := make(chan proofStreamResult, 1)
 	go func() {
-		resp, err := a.generateProofResponse(ctx, req, requestID)
+		resp, err := a.generateProofResponse(ctx, req, requestID, inputBytes)
 		resultCh <- proofStreamResult{resp: resp, err: err}
 		close(resultCh)
 	}()
@@ -597,7 +647,7 @@ func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlement
 	}
 }
 
-func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest, requestID string) (settlementProofResponse, error) {
+func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest, requestID string, inputBytes int64) (settlementProofResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 	defer cancel()
 	start := time.Now().UTC()
@@ -609,7 +659,13 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		"merkle_root": req.MerkleRoot,
 		"request_id":  requestID,
 		"backend":     a.prover.Backend(),
+		"input_bytes": inputBytes,
 	})
+	if inputBytes > 0 {
+		lastInputBytes.Set(float64(inputBytes))
+	}
+	ticketCount := float64(len(req.Tickets))
+	lastTicketCount.Set(ticketCount)
 
 	result, err := a.prover.Generate(ctx, req)
 	if err != nil {
@@ -637,6 +693,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		"duration_ms": time.Since(start).Milliseconds(),
 		"proof_size":  len(result.Proof),
 		"warnings":    len(result.Warnings),
+		"input_bytes": inputBytes,
 	}
 	if len(result.Warnings) > 0 {
 		logFields["warning_messages"] = result.Warnings
@@ -659,13 +716,18 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 
 func (a *app) nextRequestID() string {
 	counter := a.requestCounter.Add(1)
-	return fmt.Sprintf("req-%d", counter)
+	random := make([]byte, 6)
+	if _, err := randRead(random); err != nil {
+		return fmt.Sprintf("req-%d", counter)
+	}
+	return fmt.Sprintf("req-%d-%s", counter, hex.EncodeToString(random))
 }
 
 type proverEngine interface {
 	Backend() string
 	CircuitHash() string
 	Ready() bool
+	IsBusy() bool
 	Generate(ctx context.Context, req settlementProofRequest) (*proofResult, error)
 }
 
@@ -693,9 +755,26 @@ func validateRequest(req settlementProofRequest) error {
 		return errors.New("commitmentsCount required")
 	case len(req.Tickets) != settlementBatchSize:
 		return fmt.Errorf("tickets must contain %d entries", settlementBatchSize)
+	case containsDuplicateTicketIDs(req.Tickets):
+		return errors.New("ticketId values must be unique")
 	default:
 		return nil
 	}
+}
+
+func containsDuplicateTicketIDs(tickets []ticket) bool {
+	seen := make(map[string]struct{}, len(tickets))
+	for _, t := range tickets {
+		id := strings.TrimSpace(t.TicketID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			return true
+		}
+		seen[id] = struct{}{}
+	}
+	return false
 }
 
 type proverError struct {
@@ -808,6 +887,54 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		logLine("error", "prover.encode_failed", map[string]any{"error": err.Error()})
 	}
+}
+
+func writeJSONBytes(w http.ResponseWriter, status int, payload any) []byte {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		logLine("error", "prover.encode_failed", map[string]any{"error": err.Error()})
+		w.WriteHeader(status)
+		return nil
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(data); err != nil {
+		logLine("error", "prover.encode_failed", map[string]any{"error": err.Error()})
+	}
+	return data
+}
+
+func (h *healthCache) read() *healthCache {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.payload == nil || h.expiresAt.IsZero() || time.Now().UTC().After(h.expiresAt) {
+		return nil
+	}
+	return &healthCache{
+		payload: append([]byte(nil), h.payload...),
+		status:  h.status,
+	}
+}
+
+func (h *healthCache) store(payload []byte, status int, ttlSeconds int) {
+	if h == nil || ttlSeconds <= 0 || len(payload) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.payload = append([]byte(nil), payload...)
+	h.status = status
+	h.expiresAt = time.Now().UTC().Add(time.Duration(ttlSeconds) * time.Second)
+}
+
+func randRead(buf []byte) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	return rand.Read(buf)
 }
 
 func writeSSE(w http.ResponseWriter, event string, payload any) {

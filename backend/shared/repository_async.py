@@ -157,6 +157,13 @@ async def mark_quote_status(
     return quote
 
 
+async def record_quote_audit(session: AsyncSession, data: Mapping[str, Any]) -> models.QuoteAudit:
+    payload = dict(data)
+    record = models.QuoteAudit(**payload)
+    session.add(record)
+    return record
+
+
 async def expire_stale_quotes(session: AsyncSession, *, now: datetime | None = None) -> int:
     """Mark any expired quotes as stale so cap calculations stay accurate."""
 

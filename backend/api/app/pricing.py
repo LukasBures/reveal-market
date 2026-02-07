@@ -240,6 +240,34 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
         )
 
 
+def build_quote_audit_payload(
+    *,
+    quote_id: str,
+    action: str,
+    payload: dict,
+    status: str | None = None,
+    error: str | None = None,
+    context: dict | None = None,
+) -> dict[str, object]:
+    return {
+        "quote_id": quote_id,
+        "action": action,
+        "user_id": payload.get("user_id"),
+        "wallet_address": payload.get("wallet_address"),
+        "market_id": payload.get("market_id"),
+        "market_address": payload.get("market_address"),
+        "outcome_id": payload.get("outcome_id"),
+        "chain_id": payload.get("chain_id"),
+        "stake_zen": payload.get("stake_zen"),
+        "stake_wei": payload.get("stake_wei"),
+        "fx_scaled": payload.get("zen_usd_scaled") or payload.get("fx_scaled"),
+        "zen_usd": payload.get("zen_usd"),
+        "status": status,
+        "error": error,
+        "context": context,
+    }
+
+
 def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool, datetime | None]:
     """Synchronous wrapper around the async FX fetcher to preserve legacy call sites."""
 
