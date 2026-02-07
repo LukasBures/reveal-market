@@ -1,8 +1,8 @@
 # Relayer TODO
 
 **MVP - Critical**
-- Confirm relayer auth (bearer token or IP allowlist) is enforced in prod.
-- Validate internal API secrets are set and reachable.
+- (done) Confirm relayer auth (bearer token or IP allowlist) is enforced in prod.
+- (done) Validate internal API secrets are set and reachable.
 
 **MVP - High**
 - Add exponential backoff for status polling and relayer API retries.
@@ -14,7 +14,7 @@
 - Improve queue stats and admin endpoints.
 
 **MVP - Nice to have**
-- Add per-route rate limit controls.
+- (done) Add per-route rate limit controls.
 
 **Production - Critical**
 - Ensure key management and signing isolation for relayer private key.
