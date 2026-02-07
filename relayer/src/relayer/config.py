@@ -105,7 +105,9 @@ class RelayerConfig:
     trust_x_forwarded_for: bool
     api_base_url: str | None
     api_bearer_token: str | None
+    api_internal_secret: str | None
     api_timeout_seconds: int
+    health_deep_cache_ttl_seconds: int
 
 
 def load_config() -> RelayerConfig:
@@ -149,5 +151,7 @@ def load_config() -> RelayerConfig:
         trust_x_forwarded_for=_bool_env("RELAYER_TRUST_X_FORWARDED_FOR", False),
         api_base_url=os.getenv("RELAYER_API_BASE_URL"),
         api_bearer_token=os.getenv("RELAYER_API_BEARER_TOKEN"),
+        api_internal_secret=os.getenv("RELAYER_API_INTERNAL_SECRET"),
         api_timeout_seconds=_int_env("RELAYER_API_TIMEOUT_SECONDS", 10),
+        health_deep_cache_ttl_seconds=_int_env("RELAYER_HEALTH_DEEP_CACHE_TTL_SECONDS", 10),
     )

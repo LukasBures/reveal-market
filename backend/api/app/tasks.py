@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from redis.exceptions import RedisError
+from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from shared.logging import log_event, start_heartbeat_logger
 from shared.migrations import get_current_revision
 from sqlalchemy.exc import SQLAlchemyError
@@ -181,28 +182,63 @@ async def cache_refresh_loop() -> None:
         )
         return
     interval = max(1, settings.cache_refresh_interval_seconds)
+    failure_count = 0
+    cache = await get_cache_client()
+    lock_key = "reveal_market:markets_cache_refresh:lock"
     try:
         while True:
+            acquired = True
+            if cache is not None:
+                try:
+                    acquired = bool(
+                        await cache.set(
+                            lock_key,
+                            str(time.time()),
+                            nx=True,
+                            ex=max(int(interval), 5),
+                        )
+                    )
+                except RedisError as exc:
+                    acquired = False
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="markets.cache.refresh.lock_error",
+                        message="failed to acquire cache refresh lock",
+                        error=str(exc),
+                    )
+            if not acquired:
+                jitter = min(interval * 0.2, 30)
+                wait_seconds = interval + _RNG.uniform(-jitter, jitter)
+                await asyncio.sleep(max(1, wait_seconds))
+                continue
             try:
                 await hydrate_markets_cache(
                     source="refresh", limit=settings.cache_refresh_limit, order_by=settings.cache_hydrate_order_by
                 )
+                failure_count = 0
             except (
                 RedisError,
                 SQLAlchemyError,
                 RuntimeError,
                 ValueError,
             ) as exc:  # pragma: no cover - defensive
+                failure_count += 1
                 log_event(
                     logger,
                     logging.WARNING,
                     event="markets.cache.refresh.error",
                     message="failed to refresh markets cache",
                     error=str(exc),
+                    failures=failure_count,
                 )
             jitter = min(interval * 0.2, 30)
-            # Add small jitter so parallel workers do not all refresh at once.
-            wait_seconds = interval + _RNG.uniform(-jitter, jitter)
+            base_wait = interval + _RNG.uniform(-jitter, jitter)
+            if failure_count > 0:
+                backoff = min(interval * (2 ** (failure_count - 1)), interval * 10)
+                wait_seconds = base_wait + backoff
+            else:
+                wait_seconds = base_wait
             await asyncio.sleep(max(1, wait_seconds))
     except asyncio.CancelledError:
         log_event(
@@ -229,9 +265,23 @@ async def relayer_queue_loop() -> None:
         )
         return
     queue_key = settings.relayer_queue_key
+    failure_count = 0
+    circuit = CircuitBreaker(
+        client,
+        CircuitBreakerConfig(
+            key_prefix="reveal_market:relayer_circuit",
+            failure_threshold=settings.relayer_circuit_failure_threshold,
+            window_seconds=settings.relayer_circuit_window_seconds,
+            cooldown_seconds=settings.relayer_circuit_cooldown_seconds,
+        ),
+        logger,
+    )
     try:
         while True:
             try:
+                if await circuit.is_open("relayer_queue"):
+                    await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
+                    continue
                 item = await cast(Awaitable[Any], client.brpop([queue_key], timeout=5))
                 if item is None:
                     continue
@@ -260,8 +310,12 @@ async def relayer_queue_loop() -> None:
                         json.dumps(result),
                         ex=settings.relayer_queue_result_ttl_seconds,
                     )
+                    failure_count = 0
+                    await circuit.record_success("relayer_queue")
                 except Exception as exc:  # pragma: no cover - network retry guard
                     attempts += 1
+                    failure_count += 1
+                    opened = await circuit.record_failure("relayer_queue")
                     if attempts >= settings.relayer_queue_max_attempts:
                         await client.set(
                             f"{queue_key}:result:{job_id}",
@@ -271,7 +325,8 @@ async def relayer_queue_loop() -> None:
                     else:
                         payload["attempts"] = attempts
                         await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
-                        await asyncio.sleep(settings.relayer_retry_backoff_seconds)
+                    backoff = min(settings.relayer_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
+                    await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - defensive loop guard
@@ -282,7 +337,10 @@ async def relayer_queue_loop() -> None:
                     message="relayer queue loop error; continuing",
                     error=str(exc),
                 )
-                await asyncio.sleep(settings.relayer_retry_backoff_seconds)
+                failure_count += 1
+                backoff = min(settings.relayer_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
+                opened = await circuit.record_failure("relayer_queue")
+                await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
     except asyncio.CancelledError:
         log_event(
             logger,

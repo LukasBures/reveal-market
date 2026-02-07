@@ -132,6 +132,8 @@ class Settings(BaseSettings):
         ge=0,
         description="If >0, stop the sync tick when RSS exceeds this threshold (MB).",
     )
+    db_query_warn_threshold: int = Field(default=200, ge=1)
+    db_query_time_warn_ms: float = Field(default=500.0, ge=0)
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_only_open_markets: bool | None = Field(default=None)
@@ -143,6 +145,9 @@ class Settings(BaseSettings):
     polymarket_sync_max_attempts: int = Field(default=3, ge=1)
     polymarket_sync_retry_backoff_seconds: float = Field(default=1.0, ge=0)
     polymarket_sync_retry_backoff_max_seconds: float = Field(default=15.0, ge=0)
+    circuit_failure_threshold: int = Field(default=10, ge=1)
+    circuit_window_seconds: int = Field(default=60, ge=1)
+    circuit_cooldown_seconds: int = Field(default=90, ge=1)
     polymarket_rate_limit_requests: int | None = Field(default=100, ge=1)
     polymarket_rate_limit_window_seconds: float | None = Field(default=8.0, gt=0)
     polymarket_empty_page_tolerance: int = Field(default=2, ge=0)
@@ -264,6 +269,11 @@ class Settings(BaseSettings):
     prover_base_url: AnyHttpUrl | None = Field(default=None)
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
     prover_shared_secret: SecretStr | None = Field(default=None)
+    chain_refresh_timeout_seconds: int = Field(
+        default=30,
+        ge=5,
+        description="Timeout in seconds for on-chain settlement hydration",
+    )
     proof_cache_prefix: str = Field(default="reveal_market:proof_receipts")
     proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
@@ -277,6 +287,11 @@ class Settings(BaseSettings):
     proof_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     proof_queue_max_concurrency: int = Field(default=2, ge=1)
     proof_queue_max_depth: int = Field(default=1000, ge=1)
+    proof_backfill_page_size: int = Field(
+        default=250,
+        ge=1,
+        description="Max markets to inspect per backfill proof tick",
+    )
     proof_failure_base_seconds: int = Field(
         default=120,
         ge=30,
@@ -294,6 +309,31 @@ class Settings(BaseSettings):
     )
     settlement_queue_key: str = Field(default="reveal_market_worker:settlement_queue")
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
+    settlement_recovery_min_interval_seconds: int = Field(
+        default=120,
+        ge=0,
+        description="Minimum seconds between settlement recovery passes (0 disables cooldown)",
+    )
+    proof_queue_dead_letter_max_items: int = Field(
+        default=2000,
+        ge=0,
+        description="Max items to retain in proof queue dead letter (0 disables trimming)",
+    )
+    proof_queue_dead_letter_ttl_seconds: int = Field(
+        default=604800,
+        ge=0,
+        description="TTL for proof queue dead letter entries (0 disables)",
+    )
+    settlement_queue_dead_letter_max_items: int = Field(
+        default=2000,
+        ge=0,
+        description="Max items to retain in settlement dead letter (0 disables trimming)",
+    )
+    settlement_queue_dead_letter_ttl_seconds: int = Field(
+        default=604800,
+        ge=0,
+        description="TTL for settlement dead letter entries (0 disables)",
+    )
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
     lock_batches_use_relayer: bool = Field(

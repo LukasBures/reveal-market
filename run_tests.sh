@@ -57,7 +57,7 @@ run_section() {
   # Compact status line similar to pre-commit output.
   local width=68
   local result
-  if (cd "$(dirname "${script_path}")" && env "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}") >"${log_file}" 2>&1; then
+  if (cd "$(dirname "${script_path}")" && env TERM=dumb NO_COLOR=1 PYTEST_ADDOPTS="--color=no ${PYTEST_ADDOPTS}" "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}") >"${log_file}" 2>&1; then
     result="Passed"
     local dots=$((width - ${#name} - ${#result}))
     ((dots < 2)) && dots=2

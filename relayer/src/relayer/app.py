@@ -88,6 +88,33 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
+        snapshot = relayer_service.cached_health_snapshot()
+        if snapshot:
+            return snapshot
+        return {"status": "ok", "service": "relayer"}
+
+    @app.get("/healthz/deep")
+    async def healthz_deep(force: bool = False) -> dict[str, Any]:
+        if force:
+            payload = await relayer_service.health()
+            if tx_queue:
+                try:
+                    queue_stats = await tx_queue.get_stats()
+                    payload["queue"] = {"enabled": True, **queue_stats}
+                except Exception as err:
+                    logger.warning("relayer.health.queue_failed", error=str(err))
+                    payload["queue"] = {"enabled": True, "error": str(err)}
+                    payload["status"] = "degraded"
+                    issues = payload.get("issues")
+                    if isinstance(issues, list):
+                        issues.append("queue_stats_failed")
+            else:
+                payload["queue"] = {"enabled": False}
+            relayer_service.store_health_snapshot(payload)
+            return payload
+        snapshot = relayer_service.cached_health_snapshot()
+        if snapshot:
+            return snapshot
         payload = await relayer_service.health()
         if tx_queue:
             try:
@@ -102,6 +129,7 @@ def create_app(
                     issues.append("queue_stats_failed")
         else:
             payload["queue"] = {"enabled": False}
+        relayer_service.store_health_snapshot(payload)
         return payload
 
     @app.post("/status")

@@ -221,7 +221,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
     MARKET_CATEGORY_FILTERS.slice(0, 4).forEach((category) => {
       const slug = categorySlugFromLabel(category);
       if (!slug) return;
-      const path = `/categories/${encodeURIComponent(slug)}` as Route;
+      const path = `/?category=${encodeURIComponent(slug)}` as Route;
       router.prefetch(path);
     });
   }, [router]);
@@ -330,7 +330,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
           return (
             <Link
               key={category}
-              href={`/categories/${encodeURIComponent(slug)}`}
+              href={`/?category=${encodeURIComponent(slug)}`}
               prefetch
               className="group rounded-full border border-white/10 bg-slate-900/30 px-4 py-2 text-sm text-slate-100 transition hover:border-brand-400/60 hover:text-white"
             >

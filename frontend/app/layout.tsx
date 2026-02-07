@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
-import { cookies } from "next/headers";
 import "./globals.css";
 
 import { absoluteUrl } from "@/lib/seo";
@@ -12,7 +11,8 @@ import { AppProviders } from "@/components/providers/AppProviders";
 import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
-import { LANDING_ACCESS_COOKIE_NAME, isLandingGateEnabled } from "@/lib/access-gate";
+import { cookies } from "next/headers";
+import { isLandingGateEnabled, LANDING_ACCESS_COOKIE_NAME } from "@/lib/access-gate";
 
 export const revalidate = 60;
 
@@ -120,11 +120,7 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const gateEnabled = isLandingGateEnabled();
-  let initialHasAccess = true;
-  if (gateEnabled) {
-    const cookieStore = await cookies();
-    initialHasAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
-  }
+  const initialHasAccess = gateEnabled ? await hasLandingAccess() : true;
 
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
@@ -191,4 +187,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </body>
     </html>
   );
+}
+
+async function hasLandingAccess(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const cookie = cookieStore.get(LANDING_ACCESS_COOKIE_NAME);
+    return cookie?.value === "granted";
+  } catch {
+    return false;
+  }
 }

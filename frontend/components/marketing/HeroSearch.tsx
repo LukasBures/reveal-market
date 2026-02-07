@@ -15,9 +15,23 @@ const SUGGEST_RETRY_DELAY_MS = 400;
 
 type Props = {
   initialSearch?: string;
+  showButton?: boolean;
+  showIcon?: boolean;
+  className?: string;
+  inputClassName?: string;
+  containerClassName?: string;
+  placeholder?: string;
 };
 
-export function HeroSearch({ initialSearch = "" }: Props) {
+export function HeroSearch({
+  initialSearch = "",
+  showButton = true,
+  showIcon = false,
+  className,
+  inputClassName,
+  containerClassName,
+  placeholder = "Search markets, oracles, or narratives",
+}: Props) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
   const deferredSearch = useDeferredValue(search);
@@ -150,16 +164,44 @@ export function HeroSearch({ initialSearch = "" }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Search markets" className="relative w-full">
+    <form onSubmit={handleSubmit} aria-label="Search markets" className={`relative w-full ${className ?? ""}`}>
       <label htmlFor="hero-market-search" className="sr-only">
         Search markets
       </label>
-      <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 shadow-inner shadow-black/30">
+      <div
+        className={`relative rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 shadow-inner shadow-black/30 ${
+          containerClassName ?? ""
+        }`}
+      >
+        {showIcon ? (
+          <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/40">
+            <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
+              <path
+                d="M15.75 15.75L11.6386 11.6386"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+              <path
+                d="M7.75 13.25C10.7875 13.25 13.25 10.7875 13.25 7.75C13.25 4.7125 10.7875 2.25 7.75 2.25C4.7125 2.25 2.25 4.7125 2.25 7.75C2.25 10.7875 4.7125 13.25 7.75 13.25Z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </svg>
+          </div>
+        ) : null}
         <input
           id="hero-market-search"
           type="search"
-          placeholder="Search markets, oracles, or narratives"
-          className="w-full bg-transparent text-base text-white placeholder:text-slate-500 focus:outline-none"
+          placeholder={placeholder}
+          className={`w-full bg-transparent text-base text-white placeholder:text-slate-500 focus:outline-none ${
+            showIcon ? "pl-6" : ""
+          } ${inputClassName ?? ""}`}
           autoComplete="off"
           value={search}
           onChange={(e) => {
@@ -175,13 +217,15 @@ export function HeroSearch({ initialSearch = "" }: Props) {
           onKeyDown={handleKeyboardNavigation}
         />
       </div>
-      <button
-        type="submit"
-        disabled={isPending}
-        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-50 sm:right-4 sm:px-5 sm:tracking-[0.35em]"
-      >
-        {isPending ? "..." : "Search"}
-      </button>
+      {showButton ? (
+        <button
+          type="submit"
+          disabled={isPending}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-50 sm:right-4 sm:px-5 sm:tracking-[0.35em]"
+        >
+          {isPending ? "..." : "Search"}
+        </button>
+      ) : null}
       {suggestionsVisible && (
         <div
           className="fade-up absolute top-[calc(100%+0.75rem)] z-20 w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/60"

@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from .config import Settings
+from .state import get_http_client
 
 logger = logging.getLogger("reveal_market.streamer.subgraph")
 
@@ -52,13 +53,19 @@ class SubgraphClient:
         return str(endpoint)
 
     async def _execute(self, endpoint: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            timeout=self.settings.subgraph_timeout_seconds, transport=self._transport
-        ) as client:
+        if self._transport is not None:
+            async with httpx.AsyncClient(
+                transport=self._transport, timeout=self.settings.subgraph_timeout_seconds
+            ) as client:
+                response = await client.post(
+                    endpoint, json={"query": query, "variables": variables}, headers=self._headers()
+                )
+        else:
+            client = await get_http_client(self.settings.subgraph_timeout_seconds)
             response = await client.post(
                 endpoint, json={"query": query, "variables": variables}, headers=self._headers()
             )
-            response.raise_for_status()
+        response.raise_for_status()
         data = response.json()
         errors = data.get("errors")
         if errors:

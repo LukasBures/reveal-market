@@ -185,7 +185,17 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        identifier = self._extract_identifier(request) or "anonymous"
+        base_identifier = self._extract_identifier(request) or "anonymous"
+        if self._is_whitelisted(base_identifier):
+            allowance = self._build_headers(self._default_allowance())
+            await self._call_with_headers(scope, receive, send, allowance)
+            return
+
+        path_key = request.scope.get("route")
+        template = getattr(path_key, "path", None) if path_key else None
+        if not template:
+            template = request.url.path
+        identifier = f"{base_identifier}:{template}"
 
         if self._is_whitelisted(identifier):
             allowance = self._build_headers(self._default_allowance())
@@ -221,6 +231,15 @@ class RateLimitMiddleware:
         client_host = request.client.host if request.client else None
         if forwarded and client_host and self._is_trusted_proxy(client_host):
             candidate = forwarded.split(",")[0].strip()
+        elif forwarded and client_host:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="rate_limit.forwarded_untrusted",
+                message="x-forwarded-for present but proxy not trusted",
+                client_host=client_host,
+            )
+            candidate = client_host
         elif client_host:
             candidate = client_host
         if not candidate:

@@ -223,7 +223,6 @@ export type FetchFeaturedMarketsOptions = {
   status?: string;
   trending?: boolean;
   onlyFeatured?: boolean;
-  coalesceGroups?: boolean;
-  orderBy?: "volume";
+  orderBy?: "volume" | "recent" | "popularity";
   closesWithinHours?: number | null;
 };

@@ -160,6 +160,7 @@ class Settings(BaseSettings):
         default=cast(AnyHttpUrl, "http://streamer:8100"),
         description="Internal streamer host used by server components.",
     )
+    health_deep_cache_ttl_seconds: int = Field(default=10, ge=0, description="TTL for deep health snapshot cache")
 
     @property
     def total_monetization(self) -> float:

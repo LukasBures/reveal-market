@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     settlement_poll_seconds: int = Field(default=20)
     heartbeat_interval_seconds: int = Field(default=60)
     event_poll_interval_seconds: int = Field(default=10)
+    health_deep_cache_ttl_seconds: int = Field(default=10)
     run_migrations_on_startup: bool = Field(default=True)
     metrics_enabled: bool = Field(default=True)
 

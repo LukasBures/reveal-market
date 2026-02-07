@@ -512,10 +512,29 @@ class HedgerService:
             lag_seconds = (datetime.now(UTC) - latest_commit_at).total_seconds()
             record_event_lag(lag_seconds)
         return {
+            "status": "ok",
+            "service": "hedger",
             "fx_stale": fx_stale,
             "latest_commit_at": latest_commit_at.isoformat() if latest_commit_at else None,
             "lp_utilization": utilization,
         }
+
+    def cached_health_snapshot(self) -> dict[str, Any] | None:
+        ttl_seconds = max(int(self.settings.health_deep_cache_ttl_seconds or 0), 0)
+        if ttl_seconds <= 0:
+            return None
+        snapshot = getattr(self, "_health_snapshot", None)
+        ts = getattr(self, "_health_snapshot_ts", None)
+        if not snapshot or not ts:
+            return None
+        age = (datetime.now(UTC) - ts).total_seconds()
+        if age > ttl_seconds:
+            return None
+        return snapshot
+
+    def store_health_snapshot(self, payload: dict[str, Any]) -> None:
+        self._health_snapshot = payload
+        self._health_snapshot_ts = datetime.now(UTC)
 
     async def _hydrate_from_storage(self) -> None:
         aggregates = await self.repository.load_commit_aggregates()

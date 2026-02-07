@@ -1,14 +1,33 @@
-# Backend TODO (API + shared)
+# Backend TODO
 
-Remaining work specific to the FastAPI service and shared backend modules.
+**MVP - Critical**
+- Validate `RM_INTERNAL_API_SECRET` is set for API and caller services.
+- Confirm database schema matches expected `backend/shared/models.py`.
 
-## Critical
-- **Auth hardening**: Protect mutation/admin routes with auth or network allowlists (pricing/quote, trade/commit, relayer ingest hooks, cache/markets admin paths, `/metrics`, `/healthz/heartbeats`). Ensure `RM_RELAYER_WEBHOOK_SECRET` and any bearer tokens are enforced in production.
-- **Rate limiting**: Enable Redis-backed rate limits for `/pricing/quote` and `/trade/commit` in prod with trusted proxy configuration; avoid in-memory fallback outside local.
-- **Market auto-deploy controls**: Decide policy for auto-creating markets during commit; add env guard for production and ensure deploy lock errors surface clearly in observability.
-- **FX + CORS alignment**: Add smoke checks/alerts when FX host/CORS/allowed hosts diverge from frontend origin; include FX freshness in health probes.
+**MVP - High**
+- Verify cache refresh loop uses distributed locks to avoid multi-worker stampedes.
+- Ensure API pricing uses shared HTTP clients and resilient FX cache.
 
-## Nice to have
-- Quote/commit audit endpoints behind admin auth (searchable quote ledger with expiry/status).
-- Circuit hash/verifier alignment check exposed in proof receipts/health when RPC/verifier config is present.
-- Refine cache hydration during Redis outages (optional background requeue once Redis recovers).
+**MVP - Medium**
+- Add slow query alerts for API list endpoints.
+
+**MVP - Low**
+- Improve cache observability for list endpoints and category caches.
+
+**MVP - Nice to have**
+- Add request profiling endpoints behind internal auth.
+
+**Production - Critical**
+- Formalize migration plan and schema versioning controls.
+
+**Production - High**
+- Add load-shedding strategy for DB outages and Redis failures.
+
+**Production - Medium**
+- Add structured alerts for API background task failures.
+
+**Production - Low**
+- Add auditing for quote issuance and consumption.
+
+**Production - Nice to have**
+- Add read replica support and query routing.

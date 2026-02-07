@@ -40,6 +40,9 @@ def _configure_signer(settings):
         "0x59c6995e998f97a5a004497e5a61829cb0d9bf5f7f19f6cbe9a6a5e4f6b9f9f5"
     )
     settings.rpc_url = "http://localhost:8545"
+    settings.environment = "test"
+    settings.health_cache_ttl_seconds = 0
+    settings.health_deep_cache_ttl_seconds = 0
     return settings
 
 
@@ -57,7 +60,7 @@ def test_health_endpoint_reports_ok(client, monkeypatch):
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
     monkeypatch.setattr("app.health.get_settings", lambda: settings)
 
-    response = client.get("/healthz")
+    response = client.get("/healthz/deep")
     assert response.status_code == 200
 
     payload = response.json()
@@ -81,7 +84,7 @@ def test_health_endpoint_marks_worker_degraded_when_heartbeat_missing(client, mo
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", _AsyncClientSuccess)
 
-    response = client.get("/healthz")
+    response = client.get("/healthz/deep")
     assert response.status_code == 200
 
     payload = response.json()
@@ -118,7 +121,7 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
     monkeypatch.setattr("app.health.get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr("app.health.httpx.AsyncClient", TimeoutAsyncClient)
 
-    response = client.get("/healthz")
+    response = client.get("/healthz/deep")
     assert response.status_code == 200
 
     payload = response.json()

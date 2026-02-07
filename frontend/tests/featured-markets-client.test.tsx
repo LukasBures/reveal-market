@@ -60,9 +60,8 @@ describe("FeaturedEventsClient", () => {
   };
 
   it("renders skeletons when no events exist yet", () => {
-    const { container } = renderWithClient(<FeaturedEventsClient initialMarkets={[]} />);
-    const skeletons = container.querySelectorAll(".animate-pulse");
-    expect(skeletons.length).toBeGreaterThan(0);
+    renderWithClient(<FeaturedEventsClient initialMarkets={[]} />);
+    expect(screen.getByText(/no markets match that yet/i)).toBeInTheDocument();
   });
 
   it("renders a helpful notice when provided", () => {
@@ -113,9 +112,8 @@ describe("FeaturedEventsClient", () => {
       expect.objectContaining({
         searchQuery: "sample",
         category: "politics",
-        
+
         status: "settled",
-        coalesceGroups: false,
         orderBy: "volume",
       }),
     );
@@ -161,9 +159,10 @@ describe("FeaturedEventsClient", () => {
     fireEvent.click(button);
 
     await screen.findByText("Gap Market 0");
-    expect(screen.getByRole("button", { name: /load more events/i })).toBeInTheDocument();
+    const nextButton = screen.getByRole("button", { name: /load more events/i });
+    expect(nextButton).toBeInTheDocument();
 
-    fireEvent.click(button);
+    fireEvent.click(nextButton);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(

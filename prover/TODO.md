@@ -1,11 +1,32 @@
 # Prover TODO
 
-## MVP
-- Expose circuit metadata (name/version) from `settlement_hashes.json` in `/healthz` and proof responses for easier audit trails.
-- Add alerting hooks for artifact verification failures, readiness flaps, and proof latency spikes (metrics exist; wire alerts).
+**MVP - Critical**
+- Ensure all artifacts in `prover/circuits/build` are present and verified.
+- Confirm circuit hash matches contracts and API.
 
-## Post-MVP
-- Signed artifact manifest/checksum to guard against stale/poisoned zkeys and WASM; surface hash/mtime metrics.
-- Harden subprocess timeouts/backoff for witness + rapidsnark and include command output in structured logs when failures occur.
-- Integration test path for `PROVER_WITNESS_BINARY` (C++ witness) to ensure parity with the Node witness generator.
-- Benchmark harness for different `PROVER_MAX_CONCURRENCY`/temp dir/binary settings; document recommended knobs for constrained CPU/memory.
+**MVP - High**
+- Add timeouts for proof generation and clear error reporting.
+
+**MVP - Medium**
+- Add resource limit checks for memory and CPU usage.
+
+**MVP - Low**
+- Add structured logs for proof input sizes.
+
+**MVP - Nice to have**
+- Add a dry-run validation mode for deployments.
+
+**Production - Critical**
+- Store proving keys securely and rotate safely.
+
+**Production - High**
+- Add a queueing layer to smooth proof bursts.
+
+**Production - Medium**
+- Add canary proof runs after deployments.
+
+**Production - Low**
+- Add proof cache for repeated inputs.
+
+**Production - Nice to have**
+- Add horizontal scaling with shared artifact store.

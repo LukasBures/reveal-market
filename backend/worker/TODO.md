@@ -1,11 +1,33 @@
 # Worker TODO
 
-Focused follow-ups for the ingestion/priming/proof worker.
+**MVP - Critical**
+- Ensure Polymarket sync lease prevents multi-worker stampede during outages.
+- Confirm proof queue depth enforcement is atomic under concurrency.
 
-## MVP-critical
-- **Monitoring & alerts**: Add explicit alerts for stalled Gamma sync, missing heartbeats, and proof/settlement queue gaps so markets cannot silently skip proof generation.
-- **Factory mirroring**: Stream factory events (Goldsky or RPC) for rake/signer/oracle/cap changes instead of relying solely on backfill, and record deltas in the ledger.
+**MVP - High**
+- Add cooldown on expensive memory scans and recovery loops.
+- Ensure settlement recovery is paced for large datasets.
 
-## Operational
-- **Retention policy**: Decide whether to keep retention as metrics-only or enable deletes/archival; if enabling deletes, ensure cache tags and batch stats stay consistent.
-- **Proof queue visibility**: Expose queue depth + oldest job age in `/metrics` and health to catch prover outages quickly.
+**MVP - Medium**
+- Add metrics on Gamma empty page tolerance and gap detection.
+
+**MVP - Low**
+- Add batch-level timing metrics to logs.
+
+**MVP - Nice to have**
+- Add a local mock mode for Gamma and chain to speed tests.
+
+**Production - Critical**
+- Validate prover artifacts and circuit hash alignment at startup.
+
+**Production - High**
+- Add circuit breaker for chain hydration calls.
+
+**Production - Medium**
+- Add queue DLQ trimming and aging policies.
+
+**Production - Low**
+- Add a maintenance mode for backfills and cleanup tasks.
+
+**Production - Nice to have**
+- Add automatic pacing based on DB latency metrics.

@@ -10,6 +10,11 @@
   respond @healthz "ok" 200
 }
 
+(block_internal) {
+  @internal path /internal/*
+  respond @internal 404
+}
+
 (header_common) {
   header {
     Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -127,6 +132,7 @@ revealmarket.xyz {
   import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
+  import block_internal
   import log_common
   handle_path /artifacts/* {
     root * /srv/artifacts
@@ -142,6 +148,7 @@ stream.revealmarket.xyz {
   import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
+  import block_internal
   import cache_no_store
   import access_log_json
   import proxy_streamer
@@ -153,6 +160,7 @@ api.revealmarket.xyz {
   import {$CADDY_TLS_PROFILE}
   import health_common
   import header_common
+  import block_internal
   import cache_no_store
   import access_log_json
   import proxy_api

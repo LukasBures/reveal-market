@@ -1,10 +1,32 @@
-# Zen Contracts TODO
+# Contracts Zen TODO
 
-## MVP
-- Keep on-chain verifier + `circuitHash` aligned with `prover/circuits/build/settlement_hashes.json` (field-reduced). Add CI check (RPC-gated) and update env caches after any redeploy.
-- Extend tests for pause/rotation sequencing, cap updates mid-market, multi-claim ordering, and protocol cap edge cases.
+**MVP - Critical**
+- Validate `BATCH_SIZE=256` and `MERKLE_DEPTH=8` are consistent with prover.
+- Confirm `Verifier` uses the correct circuit hash.
 
-## Post-MVP
-- Fuzz/invariant coverage for Poseidon leaf creation, duplicate tickets/salts, and surplus distribution (pool draw/return).
-- Scripted monitoring helpers for protocol pool draws/rake and factory event mirroring for backend consumers.
-- Optional guardrails: document signer/oracle rotation cadence and consider timelock/pauser flows if required by ops.
+**MVP - High**
+- Add tests for `lockBatches` and `verifyAndSettleBatched` flows.
+
+**MVP - Medium**
+- Add tests for `CommitAuth` nonce and expiry.
+
+**MVP - Low**
+- Add gas snapshot updates for recent changes.
+
+**MVP - Nice to have**
+- Add fuzz tests for batch settlement edge cases.
+
+**Production - Critical**
+- Confirm admin permissions and ownership transfers.
+
+**Production - High**
+- Add contract-level circuit hash upgrade procedure.
+
+**Production - Medium**
+- Add incident halt strategy for settlement failures.
+
+**Production - Low**
+- Add on-chain analytics for commitment counts.
+
+**Production - Nice to have**
+- Add defense-in-depth for escrow drains.

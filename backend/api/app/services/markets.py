@@ -45,6 +45,21 @@ MARKETS_STATS_KEY = "v1:markets:stats"
 MARKET_DETAIL_PREFIX = "v1:markets:detail"
 
 
+def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
+    """Return the group key and optional display title for event grouping."""
+
+    event_key = (getattr(market, "event_key", None) or "").strip().lower()
+    if event_key:
+        return event_key, None
+    slug = (getattr(market, "group_slug", None) or "").strip().lower()
+    if slug:
+        return slug, None
+    event_id = (getattr(market, "event_id", None) or "").strip()
+    if event_id:
+        return event_id.lower(), None
+    return "unknown", None
+
+
 def build_resolution_summary_from_record(
     record: models.Resolution,
     market: models.Market | schemas.MarketResponse | None = None,
@@ -300,29 +315,43 @@ def slugify_value(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
-def derive_group_slug(market: schemas.MarketResponse) -> str:
-    """Choose a stable group slug for event grouping."""
+def build_event_responses(
+    markets: list[schemas.MarketResponse], *, coalesce_groups: bool = True
+) -> list[schemas.EventResponse]:
+    """Build event responses for list endpoints."""
 
-    slug = (getattr(market, "group_slug", None) or "").strip().lower()
-    if slug:
-        return slug
-    title = (getattr(market, "title", None) or "").strip()
-    if title:
-        return slugify_value(title)
-    return (getattr(market, "event_id", None) or "").strip().lower()
-
-
-def build_event_responses(markets: list[schemas.MarketResponse]) -> list[schemas.EventResponse]:
-    """Group markets into event responses for list endpoints."""
+    if not coalesce_groups:
+        events: list[schemas.EventResponse] = []
+        for market in markets:
+            event_id = (getattr(market, "event_id", None) or "unknown").strip()
+            group_slug = (
+                getattr(market, "event_key", None) or getattr(market, "group_slug", None) or ""
+            ).strip().lower() or event_id
+            events.append(
+                schemas.EventResponse(
+                    event_id=event_id,
+                    title=market.title,
+                    category=market.category,
+                    group_slug=group_slug,
+                    image_url=market.image_url,
+                    starts_at=market.starts_at,
+                    closes_at=market.closes_at,
+                    markets=[market],
+                    aggregate_volume_24h_usd=market.volume_24h_usd,
+                    aggregate_liquidity_usd=market.liquidity_usd,
+                )
+            )
+        return events
 
     grouped: dict[str, list[schemas.MarketResponse]] = {}
+    group_titles: dict[str, str | None] = {}
     for market in markets:
-        key = (getattr(market, "group_slug", None) or "").strip().lower() or market.event_id
-        if not key:
-            key = (getattr(market, "event_id", None) or "unknown").strip().lower()
+        key, title_override = derive_group_key(market)
         grouped.setdefault(key, []).append(market)
+        if title_override and key not in group_titles:
+            group_titles[key] = title_override
 
-    events: list[schemas.EventResponse] = []
+    grouped_events: list[schemas.EventResponse] = []
     for key, items in grouped.items():
         items.sort(
             key=lambda item: (
@@ -349,10 +378,11 @@ def build_event_responses(markets: list[schemas.MarketResponse]) -> list[schemas
             aggregate_volume = primary.volume_24h_usd
         if aggregate_liquidity is None and primary.liquidity_usd is not None:
             aggregate_liquidity = primary.liquidity_usd
-        events.append(
+        title_value = group_titles.get(key) or primary.title
+        grouped_events.append(
             schemas.EventResponse(
                 event_id=key,
-                title=primary.title,
+                title=title_value,
                 category=primary.category,
                 group_slug=key,
                 image_url=primary.image_url,
@@ -363,7 +393,7 @@ def build_event_responses(markets: list[schemas.MarketResponse]) -> list[schemas
                 aggregate_liquidity_usd=aggregate_liquidity,
             )
         )
-    return events
+    return grouped_events
 
 
 def apply_market_caps(market: schemas.MarketResponse) -> None:
@@ -438,7 +468,7 @@ async def _fetch_market_stats(cache: Redis | None, event_ids: list[str]) -> dict
 
 
 def _group_slug_expression():
-    return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug)
+    return func.coalesce(models.Market.event_key, models.Market.group_slug, models.MarketGammaMetadata.group_slug)
 
 
 def _total_volume_expression():
@@ -448,64 +478,6 @@ def _total_volume_expression():
         models.Market.orderbook_volume_usd,
         0,
     )
-
-
-def parse_group_threshold(value: Any) -> float | None:
-    """Extract numeric threshold values from Gamma metadata fields."""
-
-    threshold_re = re.compile(r"-?\d+(?:\.\d+)?")
-    if value is None:
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        try:
-            return float(value)
-        except (TypeError, ValueError, OverflowError):
-            return None
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip().lower().replace(",", "").replace("$", "")
-    cleaned = cleaned.lstrip("><= ")
-    multiplier = 1.0
-    if cleaned.endswith("k"):
-        multiplier = 1_000.0
-        cleaned = cleaned[:-1]
-    elif cleaned.endswith("m"):
-        multiplier = 1_000_000.0
-        cleaned = cleaned[:-1]
-    elif cleaned.endswith("b"):
-        multiplier = 1_000_000_000.0
-        cleaned = cleaned[:-1]
-    match = threshold_re.search(cleaned)
-    if not match:
-        return None
-    try:
-        return float(match.group(0)) * multiplier
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-def parse_threshold_from_title(title: str | None) -> float | None:
-    """Extract numeric thresholds embedded in group titles (e.g., 'GDP > 4%')."""
-
-    threshold_re = re.compile(r"-?\d+(?:\.\d+)?")
-    if not title:
-        return None
-    cleaned = title.strip().lower().replace(",", "")
-    match = threshold_re.search(cleaned)
-    if not match:
-        return None
-    suffix = cleaned[match.end() :].strip()
-    multiplier = 1.0
-    if suffix.startswith("k"):
-        multiplier = 1_000.0
-    elif suffix.startswith("m"):
-        multiplier = 1_000_000.0
-    elif suffix.startswith("b"):
-        multiplier = 1_000_000_000.0
-    try:
-        return float(match.group(0)) * multiplier
-    except (TypeError, ValueError, OverflowError):
-        return None
 
 
 def normalize_datetime(dt: datetime | None) -> datetime | None:
@@ -643,7 +615,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
                 error=str(exc),
             )
 
-    result = await session.execute(select(models.Market).where(models.Market.group_slug == normalized))
+    result = await session.execute(select(models.Market).where(models.Market.event_key == normalized))
     markets = result.scalars().all()
     if not markets:
         return []
@@ -672,20 +644,13 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
     event_ids = [record.event_id for record in markets if isinstance(record.event_id, str)]
     stats_map = await _fetch_market_stats(cache, event_ids)
 
-    siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None, float | None]] = []
+    siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None]] = []
     for record in markets:
         meta = meta_map.get(record.id)
         outcomes = outcome_map.get(getattr(record, "id", -1), [])
         prices_raw = [float(row.price) if row.price is not None else None for row in outcomes]
-        threshold = parse_group_threshold(getattr(meta, "group_item_threshold", None) if meta else None)
         title_value = getattr(meta, "group_item_title", None) if meta else None
-        threshold = threshold or parse_threshold_from_title(title_value)
         position = getattr(record, "group_position", None)
-        if position is None and threshold is not None:
-            try:
-                position = int(threshold)
-            except (TypeError, ValueError, OverflowError):
-                position = None
         outcome_prices: list[float] | None = None
         if any(p is not None for p in prices_raw):
             outcome_prices = [float(p) for p in prices_raw if p is not None]
@@ -698,7 +663,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
             event_id=record.event_id,
             title=record.title,
             group_item_title=title_value,
-            group_item_threshold=threshold,
+            group_item_threshold=None,
             group_position=position,
             outcome_prices=outcome_prices,
             liquidity_usd=liquidity_value if liquidity_value is not None else safe_float(record.liquidity_usd),
@@ -710,19 +675,12 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
                 normalize_datetime(getattr(record, "closes_at", None)),
                 getattr(record, "slug", None) or sibling.event_id,
                 position,
-                threshold,
             )
         )
 
-    def _sort_key(item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None, float | None]):
-        sibling, closes_at, slug_value, position_value, threshold_value = item
-        primary = (
-            position_value
-            if position_value is not None
-            else threshold_value
-            if threshold_value is not None
-            else float("inf")
-        )
+    def _sort_key(item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None]):
+        sibling, closes_at, slug_value, position_value = item
+        primary = position_value if position_value is not None else float("inf")
         close_ts = closes_at or datetime.max.replace(tzinfo=UTC)
         return primary, close_ts, slug_value or sibling.event_id
 
@@ -792,7 +750,7 @@ def market_volume_value(market: schemas.MarketResponse, *, use_total: bool = Fal
 def coalesce_grouped_markets(
     markets: list[schemas.MarketResponse], *, use_total_volume: bool = False
 ) -> list[schemas.MarketResponse]:
-    """Collapse markets sharing a group_slug into a single representative."""
+    """Collapse markets sharing a group into a single representative."""
 
     grouped: dict[str, schemas.MarketResponse] = {}
     standalone: list[schemas.MarketResponse] = []
@@ -822,7 +780,7 @@ def coalesce_grouped_markets(
         return cand_event < inc_event
 
     for market in markets:
-        slug = getattr(market, "group_slug", None)
+        slug = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
         if not slug:
             standalone.append(market)
             continue
@@ -839,18 +797,9 @@ async def attach_group_fields(
 
     slug_map: dict[str, list[schemas.MarketResponse]] = {}
     for market in markets:
-        slug = getattr(market, "group_slug", None)
+        slug = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
         if not slug:
             continue
-        if getattr(market, "group_item_threshold", None) is None and getattr(market, "group_item_title", None):
-            fallback = parse_threshold_from_title(getattr(market, "group_item_title", None))
-            if fallback is not None:
-                market.group_item_threshold = fallback
-                if getattr(market, "group_position", None) is None:
-                    try:
-                        market.group_position = int(fallback)
-                    except (TypeError, ValueError, OverflowError):
-                        market.group_position = None
         slug_map.setdefault(slug, []).append(market)
     if not slug_map:
         return
@@ -977,20 +926,6 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
         if mid_int is None:
             continue
         meta_map[mid_int] = meta_row
-    event_rows = (
-        await session.execute(select(models.MarketGammaEvent).where(models.MarketGammaEvent.market_id.in_(market_ids)))
-    ).scalars()
-    event_map: dict[int, models.MarketGammaEvent] = {}
-    event_iter: Iterable[models.MarketGammaEvent] = cast(Iterable[models.MarketGammaEvent], event_rows)
-    for event_row in event_iter:
-        mid = getattr(event_row, "market_id", None)
-        try:
-            mid_int = int(mid) if mid is not None else None
-        except (TypeError, ValueError):
-            mid_int = None
-        if mid_int is None or mid_int in event_map:
-            continue
-        event_map[mid_int] = event_row
     for mid, target in id_map.items():
         meta = meta_map.get(mid)
         if not meta:
@@ -1024,20 +959,12 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
         except (TypeError, ValueError):
             target.volume = target.volume if hasattr(target, "volume") else None
         try:
-            if meta.liquidity_clob is not None:
-                target.liquidity_usd = float(meta.liquidity_clob)
-            elif meta.liquidity_num is not None:
-                target.liquidity_usd = float(meta.liquidity_num)
-            elif meta.liquidity is not None:
+            if meta.liquidity is not None:
                 target.liquidity_usd = float(meta.liquidity)
         except (TypeError, ValueError):
             target.liquidity_usd = target.liquidity_usd or None
         try:
-            if meta.volume1mo is not None:
-                target.volume_24h_usd = float(meta.volume1mo) / 30
-            elif meta.volume_num is not None:
-                target.volume_24h_usd = float(meta.volume_num)
-            elif meta.volume is not None:
+            if meta.volume is not None:
                 target.volume_24h_usd = float(meta.volume)
         except (TypeError, ValueError):
             target.volume_24h_usd = target.volume_24h_usd or None
@@ -1052,25 +979,6 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
             target.group_slug = meta.group_slug
         if meta.group_item_title and not getattr(target, "group_item_title", None):
             target.group_item_title = meta.group_item_title
-        threshold_value = None
-        if meta.group_item_threshold is not None:
-            threshold_value = parse_group_threshold(meta.group_item_threshold)
-            target.group_item_threshold = threshold_value
-        if threshold_value is None and getattr(target, "group_item_title", None):
-            threshold_value = parse_threshold_from_title(target.group_item_title)
-            if threshold_value is not None:
-                target.group_item_threshold = threshold_value
-        if getattr(target, "group_position", None) is None and threshold_value is not None:
-            try:
-                target.group_position = int(threshold_value)
-            except (TypeError, ValueError, OverflowError):
-                target.group_position = None
-        event_meta = event_map.get(mid)
-        if event_meta is not None and event_meta.open_interest is not None:
-            try:
-                target.open_interest = float(event_meta.open_interest)
-            except (TypeError, ValueError):
-                target.open_interest = target.open_interest if hasattr(target, "open_interest") else None
         if isinstance(getattr(target, "event_id", None), str):
             stats = stats_map.get(target.event_id)
             if stats:
@@ -1287,7 +1195,10 @@ def canonical_category_lookup(raw: str) -> tuple[str, str] | None:
 
 
 async def invalidate_market_cache(
-    event_id: str | None = None, condition_id: str | None = None, group_slug: str | None = None
+    event_id: str | None = None,
+    condition_id: str | None = None,
+    group_slug: str | None = None,
+    event_key: str | None = None,
 ) -> None:
     """Invalidate all cache tags touching a market/detail/resolution/group."""
 
@@ -1312,6 +1223,8 @@ async def invalidate_market_cache(
         await invalidate_tag(cache, f"resolution:{condition_id.lower()}")
     if group_slug:
         await invalidate_tag(cache, f"group:{group_slug}")
+    if event_key:
+        await invalidate_tag(cache, f"group:{event_key}")
 
 
 async def hydrate_markets_cache(

@@ -52,7 +52,17 @@ calc_pytest_workers() {
     echo "${override}"
     return
   fi
-  echo 4
+  local cpu_count
+  if command -v nproc >/dev/null 2>&1; then
+    cpu_count="$(nproc)"
+  else
+    cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  fi
+  local workers=$((cpu_count - 2))
+  if [[ "${workers}" -lt 1 ]]; then
+    workers=1
+  fi
+  echo "${workers}"
 }
 
 run_py_tests() {
@@ -85,6 +95,21 @@ run_openapi_snapshot() {
     activate_venv "${REPO_ROOT}/backend/api"
     pushd "${REPO_ROOT}" >/dev/null
     python -m pytest backend/api/tests/test_openapi_snapshot.py
+    popd >/dev/null
+  )
+}
+
+run_schema_drift_check() {
+  log_step "Schema drift check (alembic autogenerate --check)"
+  if [[ -z "${RM_DATABASE_URL:-}" ]]; then
+    printf '[%s] RM_DATABASE_URL not set; skipping schema drift check\n' "$(timestamp)"
+    return
+  fi
+  (
+    activate_venv "${REPO_ROOT}/backend/api"
+    pushd "${REPO_ROOT}/backend/migrations" >/dev/null
+    alembic -x db_url="${RM_DATABASE_URL}" upgrade head >/dev/null
+    alembic -x db_url="${RM_DATABASE_URL}" revision --autogenerate --check -m "schema_check" >/dev/null
     popd >/dev/null
   )
 }
@@ -126,6 +151,7 @@ run_mypy() {
 }
 
 run_openapi_snapshot
+run_schema_drift_check
 run_mypy "${REPO_ROOT}/backend/api" backend/api/app backend/shared
 
 run_py_tests "${REPO_ROOT}/backend/worker"

@@ -131,7 +131,7 @@ export function MarketDetailChart({
   const coverageMs =
     filteredHistory.length > 1 ? filteredHistory[filteredHistory.length - 1].x - filteredHistory[0].x : 0;
 
-  const outcomeOptions = outcomes.length ? outcomes : [];
+  const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : []), [outcomes]);
   const canSelectOutcome = outcomeOptions.length > 1;
 
   const chartRef = useRef<HTMLDivElement | null>(null);
@@ -243,7 +243,7 @@ export function MarketDetailChart({
     return () => {
       observer.disconnect();
     };
-  }, [filteredHistory.length, plotKey]);
+  }, [filteredHistory.length, plotKey, outcomeOptions, dataSeries]);
 
   useEffect(() => {
     if (!plotRef.current) return;

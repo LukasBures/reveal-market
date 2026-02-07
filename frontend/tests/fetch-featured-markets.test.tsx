@@ -26,11 +26,11 @@ describe("fetchFeaturedEvents", () => {
     );
   });
 
-  it("targets the categories endpoint when category filter provided", async () => {
+  it("adds category filter as query param when provided", async () => {
     await fetchFeaturedEvents(10, { category: "Sports" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        "/categories/sports?limit=10&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1",
+        "/events?limit=10&status=active&order_by=volume&closes_within_hours=24&coalesce_groups=1&category=sports",
       ),
       expect.objectContaining({
         next: expect.objectContaining({ tags: ["category:sports"] }),

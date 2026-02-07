@@ -29,10 +29,90 @@ ComponentMap = dict[str, schemas.HealthComponent]
 health_logger = logging.getLogger("reveal_market.api.health")
 
 
+_HEALTH_CACHE: dict[str, tuple[float, schemas.HealthResponse]] = {}
+_HEALTH_DEEP_CACHE: dict[str, tuple[float, schemas.HealthResponse]] = {}
+
+
 async def build_health_response(session: AsyncSession) -> schemas.HealthResponse:
+    """Compatibility wrapper for /healthz (shallow)."""
+
+    return await build_shallow_health_response()
+
+
+async def build_shallow_health_response() -> schemas.HealthResponse:
+    settings = get_settings()
+    ttl = max(getattr(settings, "health_cache_ttl_seconds", 0) or 0, 0)
+    if (settings.environment or "").lower() in {"test", "testing"}:
+        ttl = 0
+    cache_key = "health:shallow"
+    if ttl > 0:
+        now = time.monotonic()
+        cached = _HEALTH_CACHE.get(cache_key)
+        if cached and now < cached[0]:
+            return cached[1]
+
+    components: ComponentMap = {}
+    component_states: list[str] = []
+    try:
+        redis_client = get_redis_client()
+        cache_key = f"health:shallow:{'redis' if redis_client is not None else 'no_redis'}"
+    except Exception:
+        cache_key = "health:shallow:no_redis"
+
+    deep_snapshot = await _get_cached_deep_snapshot(redis_client)
+    if deep_snapshot is not None:
+        components = deep_snapshot.components
+        component_states = [component.status for component in components.values()]
+    overall_status = _derive_overall_status(component_states) if component_states else "ok"
+
+    response = schemas.HealthResponse(
+        status=overall_status,
+        service=settings.app_name,
+        version=settings.version,
+        timestamp=datetime.now(tz=UTC),
+        components=components,
+        cache_stats=None,
+    )
+    if ttl > 0:
+        _HEALTH_CACHE[cache_key] = (time.monotonic() + ttl, response)
+    return response
+
+
+async def build_deep_health_response(session: AsyncSession, *, force: bool = False) -> schemas.HealthResponse:
     """Aggregate health information from core dependencies."""
 
     settings = get_settings()
+    ttl = max(getattr(settings, "health_deep_cache_ttl_seconds", 0) or 0, 0)
+    if (settings.environment or "").lower() in {"test", "testing"}:
+        ttl = 0
+    cache_key = "health:deep"
+    redis_client = None
+    try:
+        redis_client = get_redis_client()
+        cache_key = f"health:deep:{'redis' if redis_client is not None else 'no_redis'}"
+    except Exception:
+        cache_key = "health:deep:no_redis"
+
+    if ttl > 0 and not force:
+        cached = _HEALTH_DEEP_CACHE.get(cache_key)
+        if cached and time.monotonic() < cached[0]:
+            return cached[1]
+        if redis_client is not None:
+            try:
+                payload = await redis_client.get("health:deep:snapshot")
+                if payload:
+                    parsed = json.loads(payload)
+                    response = schemas.HealthResponse.model_validate(parsed)
+                    _HEALTH_DEEP_CACHE[cache_key] = (time.monotonic() + ttl, response)
+                    return response
+            except Exception as exc:
+                log_event(
+                    health_logger,
+                    logging.DEBUG,
+                    event="health.deep.cache.read_failed",
+                    message=str(exc),
+                )
+
     components: ComponentMap = {}
     component_states: list[str] = []
 
@@ -60,7 +140,7 @@ async def build_health_response(session: AsyncSession) -> schemas.HealthResponse
         log_event(health_logger, logging.WARNING, event="health.cache.stats.error", message=str(exc))
         cache_stats = None
 
-    return schemas.HealthResponse(
+    response = schemas.HealthResponse(
         status=overall_status,
         service=settings.app_name,
         version=settings.version,
@@ -68,6 +148,36 @@ async def build_health_response(session: AsyncSession) -> schemas.HealthResponse
         components=components,
         cache_stats=cache_stats,
     )
+    if ttl > 0:
+        _HEALTH_DEEP_CACHE[cache_key] = (time.monotonic() + ttl, response)
+        if redis_client is not None:
+            try:
+                await redis_client.set(
+                    "health:deep:snapshot",
+                    response.model_dump_json(),
+                    ex=ttl,
+                )
+            except Exception as exc:
+                log_event(
+                    health_logger,
+                    logging.DEBUG,
+                    event="health.deep.cache.write_failed",
+                    message=str(exc),
+                )
+    return response
+
+
+async def _get_cached_deep_snapshot(redis_client) -> schemas.HealthResponse | None:
+    if redis_client is None:
+        return None
+    try:
+        payload = await redis_client.get("health:deep:snapshot")
+        if payload:
+            parsed = json.loads(payload)
+            return schemas.HealthResponse.model_validate(parsed)
+    except Exception:
+        return None
+    return None
 
 
 def _derive_overall_status(states: list[str]) -> schemas.HealthState:

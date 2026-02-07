@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import httpx
 from app import runtime
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -63,7 +64,12 @@ async def get_cache_client() -> Redis | None:
     """Return the shared Redis client, populating it on first call."""
 
     if runtime.cache_client is not None:
-        return runtime.cache_client
+        try:
+            await runtime.cache_client.ping()
+        except RedisError:
+            runtime.cache_client = None
+        else:
+            return runtime.cache_client
     async with runtime.cache_lock:
         if runtime.cache_client is None:
             runtime.cache_client = await _connect_cache_with_retry()
@@ -81,3 +87,19 @@ async def get_cache_client() -> Redis | None:
                         error=str(exc),
                     )
     return runtime.cache_client
+
+
+async def get_http_client(timeout_seconds: float | None = None) -> httpx.AsyncClient:
+    """Return a shared AsyncClient for outbound HTTP calls."""
+
+    timeout = float(timeout_seconds or runtime.settings.fx_timeout_seconds)
+    async with runtime.shared_http_lock:
+        client = runtime.shared_http_clients.get(timeout)
+        if client is not None and getattr(client, "is_closed", False):
+            await client.aclose()
+            runtime.shared_http_clients.pop(timeout, None)
+            client = None
+        if client is None:
+            client = httpx.AsyncClient(timeout=timeout)
+            runtime.shared_http_clients[timeout] = client
+        return client

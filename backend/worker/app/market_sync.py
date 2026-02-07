@@ -27,7 +27,6 @@ from .polymarket import (
     MarketPayload,
     _build_market_hash_payload,
     _compute_market_hash,
-    _extract_timestamp_candidate,
     _parse_group_threshold,
 )
 from .resolution import apply_resolution
@@ -49,7 +48,6 @@ class SyncOutcome:
     market_updated: bool = False
     group_slugs: set[str] = field(default_factory=set)
     gamma_metadata_updates: int = 0
-    gamma_events_written: int = 0
     timing_match_ms: float = 0.0
     timing_upsert_ms: float = 0.0
     timing_normalized_ms: float = 0.0
@@ -64,7 +62,6 @@ class PrefetchedMarketState:
     tags: dict[int, set[str]] = field(default_factory=dict)
     clob_tokens: dict[int, list[shared_models.MarketClobToken]] = field(default_factory=dict)
     gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = field(default_factory=dict)
-    gamma_events: dict[int, list[shared_models.MarketGammaEvent]] = field(default_factory=dict)
 
 
 @dataclass
@@ -99,7 +96,6 @@ class SyncSummary:
     markets_updated: int = 0
     markets_deleted: int = 0
     gamma_metadata_updates: int = 0
-    gamma_events_written: int = 0
     proofs_generated: int = 0
     lock_batches_submitted: int = 0
     resolutions_backfilled: int = 0
@@ -128,7 +124,6 @@ class SyncSummary:
             "resolutions_backfilled": self.resolutions_backfilled,
             "market_errors": self.failed_markets,
             "gamma_metadata_updates": self.gamma_metadata_updates,
-            "gamma_events_written": self.gamma_events_written,
         }
 
 
@@ -159,7 +154,6 @@ async def _persist_normalized_market_data(
     tags: list[str] | None,
     clob_token_ids: list[str] | None,
     gamma_metadata: dict | None,
-    gamma_events: list[dict[str, Any]] | None,
     prefetched_state: PrefetchedMarketState | None = None,
 ) -> dict[str, int]:
     """Upsert normalized tables for a market, avoiding unnecessary rewrites."""
@@ -297,99 +291,9 @@ async def _persist_normalized_market_data(
                 metadata_written = 1
     # If metadata was not provided, leave existing rows intact to avoid churn.
 
-    # Gamma events: only rewrite when payload differs.
-    if gamma_events is not None:
-        normalized_events: list[dict[str, Any]] = []
-        for raw in gamma_events:
-            if not isinstance(raw, dict):
-                continue
-            normalized = _normalize_gamma_event(raw)
-            if normalized:
-                normalized_events.append(normalized)
-        if prefetched_state and market_id in prefetched_state.gamma_events:
-            existing_events = prefetched_state.gamma_events.get(market_id, [])
-        else:
-            existing_events = list(
-                (
-                    await session.execute(
-                        select(shared_models.MarketGammaEvent).where(
-                            shared_models.MarketGammaEvent.market_id == market_id
-                        )
-                    )
-                ).scalars()
-            )
-        existing_serialized = []
-        keys = list(normalized_events[0].keys()) if normalized_events else []
-        for event_row in existing_events:
-            data = {k: getattr(event_row, k, None) for k in keys} if keys else {}
-            existing_serialized.append(data)
-        if normalized_events:
-            if normalized_events != existing_serialized:
-                await session.execute(
-                    delete(shared_models.MarketGammaEvent).where(shared_models.MarketGammaEvent.market_id == market_id)
-                )
-                for payload in normalized_events:
-                    session.add(shared_models.MarketGammaEvent(market_id=market_id, **payload))
-                    events_written += 1
-        else:
-            # No events provided => leave existing as-is.
-            events_written = 0
+    # Gamma events no longer persisted.
 
     return {"metadata": metadata_written, "events": events_written}
-
-
-def _normalize_gamma_event(raw: dict[str, Any]) -> dict[str, Any] | None:
-    """Sanitize Polymarket event payloads to match our MarketGammaEvent schema."""
-
-    allowed_fields = {
-        "event_id",
-        "ticker",
-        "slug",
-        "title",
-        "description",
-        "resolution_source",
-        "start_date",
-        "end_date",
-        "image",
-        "icon",
-        "active",
-        "closed",
-        "archived",
-        "new",
-        "featured",
-        "restricted",
-        "liquidity",
-        "volume",
-        "open_interest",
-        "sort_by",
-        "created_at_raw",
-        "updated_at_raw",
-        "competitive",
-        "volume_1wk",
-        "volume_1mo",
-        "volume_1yr",
-        "enable_order_book",
-        "liquidity_clob",
-        "neg_risk",
-        "neg_risk_market_id",
-    }
-    key_map = {
-        "startDate": "start_date",
-        "endDate": "end_date",
-        "resolutionSource": "resolution_source",
-        "createdAt": "created_at_raw",
-        "updatedAt": "updated_at_raw",
-    }
-    parsed: dict[str, Any] = {}
-    for key, value in raw.items():
-        target_key = key_map.get(key, key)
-        if target_key not in allowed_fields:
-            continue
-        if target_key in {"start_date", "end_date", "created_at_raw", "updated_at_raw"}:
-            parsed[target_key] = _extract_timestamp_candidate(value)
-        else:
-            parsed[target_key] = value
-    return parsed or None
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -429,7 +333,6 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
     tags: dict[int, set[str]] = {}
     clob_tokens: dict[int, list[shared_models.MarketClobToken]] = {}
     gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = {}
-    gamma_events: dict[int, list[shared_models.MarketGammaEvent]] = {}
 
     def _chunk(seq: list[int], size: int = 500):
         for start in range(0, len(seq), size):
@@ -442,10 +345,6 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
         gamma_meta_stmt = select(shared_models.MarketGammaMetadata).where(
             shared_models.MarketGammaMetadata.market_id.in_(chunk)
         )
-        gamma_events_stmt = select(shared_models.MarketGammaEvent).where(
-            shared_models.MarketGammaEvent.market_id.in_(chunk)
-        )
-
         for outcome_row in (await session.execute(outcome_stmt)).scalars():
             outcomes.setdefault(outcome_row.market_id, []).append(outcome_row)
         for tag_row in (await session.execute(tag_stmt)).scalars():
@@ -454,15 +353,12 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
             clob_tokens.setdefault(clob_row.market_id, []).append(clob_row)
         for gamma_meta_row in (await session.execute(gamma_meta_stmt)).scalars():
             gamma_metadata[gamma_meta_row.market_id] = gamma_meta_row
-        for gamma_event_row in (await session.execute(gamma_events_stmt)).scalars():
-            gamma_events.setdefault(gamma_event_row.market_id, []).append(gamma_event_row)
 
     return PrefetchedMarketState(
         outcomes=outcomes,
         tags=tags,
         clob_tokens=clob_tokens,
         gamma_metadata=gamma_metadata,
-        gamma_events=gamma_events,
     )
 
 
@@ -625,9 +521,8 @@ async def collect_market_changes_with_summary(
             summary.changed_group_slugs.update(outcome.group_slugs)
         if outcome.resolution_cache_payload and outcome.condition_id:
             summary.resolution_cache_updates.append((outcome.condition_id, outcome.resolution_cache_payload))
-        if outcome.gamma_metadata_updates or outcome.gamma_events_written:
+        if outcome.gamma_metadata_updates:
             summary.gamma_metadata_updates += outcome.gamma_metadata_updates
-            summary.gamma_events_written += outcome.gamma_events_written
             summary.stats_dirty = True
         if runtime.PROVER_CLIENT is not None and db_market is not None and db_market.id is not None:
             if getattr(db_market, "resolution_status", None) not in (
@@ -756,6 +651,7 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
     group_slug = getattr(record, "group_slug", None) or (
         getattr(gamma_meta, "group_slug", None) if gamma_meta else None
     )
+    event_key = getattr(record, "event_key", None)
     group_position = getattr(record, "group_position", None)
     group_item_title = getattr(gamma_meta, "group_item_title", None) if gamma_meta else None
     group_item_threshold = (
@@ -786,15 +682,8 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         outcomes=outcomes,
         outcome_prices=prices,
         tags=tags,
-        gamma_raw=record.gamma_raw,
         clob_token_ids=clob_ids,
         gamma_metadata={k: v for k, v in vars(gamma_meta).items() if not k.startswith("_")} if gamma_meta else None,
-        gamma_events=[
-            {k: v for k, v in vars(row).items() if not k.startswith("_")}
-            for row in getattr(record, "gamma_events_rel", [])
-            if hasattr(record, "gamma_events_rel")
-        ]
-        or None,
         rake_bps=record.rake_bps,
         condition_id=record.condition_id,
         question_id=record.question_id,
@@ -816,6 +705,7 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         image_variants=image_variants,
         closes_at=record.closes_at,
         group_slug=group_slug,
+        event_key=event_key,
         group_position=group_position,
         group_item_title=group_item_title,
         group_item_threshold=group_item_threshold,
@@ -831,6 +721,8 @@ async def sync_market(
     allow_resolution_fetch: bool = True,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
+    if market.event_key:
+        market.group_slug = market.event_key
     return await _sync_market(
         session,
         market,
@@ -1109,9 +1001,7 @@ async def _sync_market(
     outcome_prices = payload.pop("outcome_prices", None)
     tags = payload.pop("tags", None)
     clob_token_ids = payload.pop("clob_token_ids", None)
-    payload.pop("gamma_raw", None)  # no longer persisted; drop to avoid unused variable
     gamma_metadata = payload.pop("gamma_metadata", None)
-    gamma_events = payload.pop("gamma_events", None)
     gamma_counts = {"metadata": 0, "events": 0}
 
     if existing is None:
@@ -1171,7 +1061,6 @@ async def _sync_market(
                 market_updated=False,
                 group_slugs=group_slugs,
                 gamma_metadata_updates=0,
-                gamma_events_written=0,
                 timing_match_ms=timing_match_ms,
                 timing_upsert_ms=timing_upsert_ms,
                 timing_normalized_ms=timing_normalized_ms,
@@ -1210,7 +1099,6 @@ async def _sync_market(
             tags=tags,
             clob_token_ids=clob_token_ids,
             gamma_metadata=gamma_metadata,
-            gamma_events=gamma_events,
             prefetched_state=prefetched_state,
         )
         timing_normalized_ms = (time.perf_counter() - norm_start) * 1000
@@ -1234,7 +1122,6 @@ async def _sync_market(
             "outcomes_rel": [],
             "tags_rel": [],
             "clob_tokens_rel": [],
-            "gamma_events_rel": [],
             "gamma_metadata_rel": None,
         }
         for rel_key, value in relationship_resets.items():
@@ -1276,7 +1163,6 @@ async def _sync_market(
         market_updated=market_updated,
         group_slugs=group_slugs,
         gamma_metadata_updates=gamma_counts.get("metadata", 0),
-        gamma_events_written=gamma_counts.get("events", 0),
         timing_match_ms=timing_match_ms,
         timing_upsert_ms=timing_upsert_ms,
         timing_normalized_ms=timing_normalized_ms,

@@ -43,7 +43,6 @@ async def get_markets(
         selectinload(models.Market.outcomes_rel),
         selectinload(models.Market.tags_rel),
         selectinload(models.Market.clob_tokens_rel),
-        selectinload(models.Market.gamma_metadata_rel),
     )
     stmt = _apply_common_filters(stmt, status=status, category=category, oracle=oracle, featured=featured)
     stmt = _apply_text_search(session, stmt, search, apply_default_order=order_by is None)
@@ -60,14 +59,10 @@ async def get_markets(
             models.Market.created_at.desc(),
         )
     elif order_by == "volume":
-        stmt = (
-            stmt.outerjoin(models.MarketGammaMetadata)
-            .order_by(
-                _volume_value_expression().desc(),
-                models.Market.updated_at.desc(),
-                models.Market.created_at.desc(),
-            )
-            .options(selectinload(models.Market.gamma_metadata_rel))
+        stmt = stmt.outerjoin(models.MarketGammaMetadata).order_by(
+            _volume_value_expression().desc(),
+            models.Market.updated_at.desc(),
+            models.Market.created_at.desc(),
         )
     else:
         stmt = stmt.order_by(models.Market.created_at.desc())
@@ -120,9 +115,24 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> l
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
-            selectinload(models.Market.gamma_metadata_rel),
         )
         .where(models.Market.group_slug == group_slug)
+        .order_by(models.Market.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    rows: list[models.Market] = list(result.unique().scalars().all())
+    return rows
+
+
+async def get_markets_by_event_key(session: AsyncSession, event_key: str) -> list[models.Market]:
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+        )
+        .where(models.Market.event_key == event_key)
         .order_by(models.Market.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -185,7 +195,9 @@ def _apply_common_filters(stmt, *, status: str | None, category: str | None, ora
 
 
 def _volume_group_expression():
-    return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_id)
+    return func.coalesce(
+        models.Market.event_key, models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_id
+    )
 
 
 def _volume_value_expression():
@@ -245,7 +257,6 @@ async def _get_markets_by_total_volume(
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
-            selectinload(models.Market.gamma_metadata_rel),
         )
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
         .where(group_expr.in_(group_order))
@@ -258,20 +269,14 @@ async def _get_markets_by_total_volume(
     rows: list[models.Market] = list(result.unique().scalars().all())
 
     def _group_key(market: models.Market) -> str | None:
-        meta = getattr(market, "gamma_metadata_rel", None)
         return (
-            getattr(market, "group_slug", None)
-            or getattr(meta, "group_slug", None)
+            getattr(market, "event_key", None)
+            or getattr(market, "group_slug", None)
             or getattr(market, "event_id", None)
         )
 
     def _volume_value(market: models.Market) -> float:
-        meta = getattr(market, "gamma_metadata_rel", None)
-        raw = getattr(meta, "volume", None)
-        if raw is None:
-            raw = getattr(meta, "volume_clob", None)
-        if raw is None:
-            raw = getattr(market, "orderbook_volume_usd", None)
+        raw = getattr(market, "orderbook_volume_usd", None)
         try:
             return float(raw) if raw is not None else 0.0
         except (TypeError, ValueError):

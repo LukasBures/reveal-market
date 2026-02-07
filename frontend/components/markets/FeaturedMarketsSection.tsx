@@ -28,13 +28,12 @@ export async function FeaturedEventsSection({
   status = "active",
   onlyActive = true,
 }: Props = {}) {
-  const orderBy = "volume";
+  const orderBy = sortBy === "recent" ? "recent" : sortBy === "popularity" ? "popularity" : "volume";
   const initialMarkets = await fetchFeaturedEvents(pageSize, {
     searchQuery,
     category: categoryFilter,
     status,
     trending: false,
-    coalesceGroups: false,
     orderBy,
   });
 

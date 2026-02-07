@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from shared import models as shared_models
-from shared.cache_async import get_json
+from shared.cache_async import get_json_many
 from shared.cache_keys import proof_receipt_cache_key
 from shared.logging import log_event
 from sqlalchemy import func, select
@@ -147,19 +147,31 @@ async def list_proof_receipts(
     rows = (await session.execute(stmt)).all()
     receipts: list[schemas.ProofReceipt] = []
     cache_hits = 0
-    for receipt_row, settlement_row, market_row in rows:
-        cached_payload = None
-        condition_value = getattr(market_row, "condition_id", None) if market_row is not None else None
-        if cache_available:
+    cache_keys: list[str] = []
+    key_sets: list[list[str]] = []
+    if cache_available:
+        for receipt_row, settlement_row, market_row in rows:
+            keys: list[str] = []
             key = _root_cache_key(receipt_row)
             if key:
-                cached_payload = await get_json(cache, key)
-            if cached_payload is None and settlement_row is not None:
+                keys.append(key)
+            if settlement_row is not None:
                 key = _root_cache_key_from_batch(receipt_row, settlement_row)
                 if key:
-                    cached_payload = await get_json(cache, key)
-            if cached_payload is None and condition_value:
-                cached_payload = await get_json(cache, proof_receipt_cache_key(str(condition_value)))
+                    keys.append(key)
+            condition_value = getattr(market_row, "condition_id", None) if market_row is not None else None
+            if condition_value:
+                keys.append(proof_receipt_cache_key(str(condition_value)))
+            key_sets.append(keys)
+            cache_keys.extend(keys)
+    cached_map = await get_json_many(cache, cache_keys) if cache_available and cache_keys else {}
+    for idx, (receipt_row, settlement_row, market_row) in enumerate(rows):
+        cached_payload = None
+        if cache_available and key_sets:
+            for key in key_sets[idx]:
+                cached_payload = cached_map.get(key)
+                if cached_payload is not None:
+                    break
             if cached_payload is not None:
                 cache_hits += 1
         receipts.append(build_proof_receipt_model(receipt_row, settlement_row, market_row, cached_payload))

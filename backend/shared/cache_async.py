@@ -259,7 +259,18 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
         return
     try:
         payload = _json_dumps(value)
-        if ttl_seconds:
+        if ttl_seconds is not None and ttl_seconds <= 0:
+            if logger.isEnabledFor(logging.DEBUG):
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="cache.set.skip",
+                    message="skipping cache set due to non-positive ttl",
+                    key=key,
+                    ttl_seconds=ttl_seconds,
+                )
+            return
+        if ttl_seconds is not None:
             await client.set(key, payload, ex=ttl_seconds)
         else:
             await client.set(key, payload)
@@ -300,6 +311,17 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
         return 0
     if not items:
         return 0
+    if ttl_seconds is not None and ttl_seconds <= 0:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="cache.set_many.skip",
+                message="skipping cache set due to non-positive ttl",
+                key_count=len(items),
+                ttl_seconds=ttl_seconds,
+            )
+        return 0
     if not hasattr(client, "pipeline"):
         for key, value in items.items():
             await set_json(client, key, value, ttl_seconds)
@@ -308,7 +330,7 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
         pipe = client.pipeline()
         for key, value in items.items():
             payload = _json_dumps(value)
-            if ttl_seconds:
+            if ttl_seconds is not None:
                 pipe.set(key, payload, ex=ttl_seconds)
             else:
                 pipe.set(key, payload)

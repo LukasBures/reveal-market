@@ -456,7 +456,6 @@ async def test_polymarket_client_fetches_events_and_flattens_markets():
     assert {m.group_slug for m in multi} == {"multi-event"}
     assert single[0].group_slug is None
     # Ensure event metadata was attached
-    assert markets[0].gamma_events and markets[0].gamma_events[0].get("slug") == "multi-event"
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ type Props = {
   roundedClass?: string;
   borderClass?: string;
   fallback?: ReactNode;
+  priority?: boolean;
 };
 
 const DEFAULT_FALLBACK = (
@@ -26,6 +27,7 @@ export function MarketArtwork({
   roundedClass = "rounded-xl",
   borderClass = "border border-white/10",
   fallback = DEFAULT_FALLBACK,
+  priority = false,
 }: Props) {
   const [errored, setErrored] = useState(false);
 
@@ -47,8 +49,8 @@ export function MarketArtwork({
           sizes="(max-width: 768px) 96px, 120px"
           className="h-full w-full object-cover object-center"
           style={{ objectFit: "cover", objectPosition: "center" }}
-          priority={false}
-          loading="lazy"
+          priority={priority}
+          loading={priority ? "eager" : "lazy"}
           onError={() => setErrored(true)}
         />
       ) : (

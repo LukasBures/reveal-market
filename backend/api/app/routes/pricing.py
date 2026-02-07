@@ -26,6 +26,7 @@ from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
 from app.pricing import PricingEngine, _coerce_price, fetch_fx_quote
 from app.runtime import logger, settings
+from app.services.cache_client import get_http_client
 
 router = APIRouter()
 
@@ -47,8 +48,8 @@ async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decim
     url = f"{base}/data/clob/latest"
     params = {"market_id": stream_market_id, "outcome": str(outcome_id)}
     try:
-        async with httpx.AsyncClient(timeout=_STREAMER_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url, params=params)
+        client = await get_http_client(_STREAMER_TIMEOUT_SECONDS)
+        resp = await client.get(url, params=params)
         if resp.status_code != status.HTTP_200_OK:
             return None
         payload = resp.json() if resp.content else {}

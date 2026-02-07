@@ -134,9 +134,15 @@ async def _dead_letter(redis_client: Redis, job: dict[str, Any], reason: str) ->
     """Push a failed job to dead letter list for inspection."""
 
     try:
-        await _resolve_awaitable(
-            redis_client.rpush(runtime.settings.proof_queue_dead_letter_key, json.dumps(job, default=str))
-        )
+        key = runtime.settings.proof_queue_dead_letter_key
+        payload = json.dumps(job, default=str)
+        await _resolve_awaitable(redis_client.rpush(key, payload))
+        max_items = runtime.settings.proof_queue_dead_letter_max_items
+        if max_items > 0:
+            await _resolve_awaitable(redis_client.ltrim(key, max(-max_items, -1), -1))
+        ttl_seconds = runtime.settings.proof_queue_dead_letter_ttl_seconds
+        if ttl_seconds > 0:
+            await _resolve_awaitable(redis_client.expire(key, ttl_seconds))
         PROOF_QUEUE_DLQ_COUNTER.labels(reason=reason).inc()
     except Exception:  # pragma: no cover - defensive
         log_event(
@@ -150,9 +156,15 @@ async def _dead_letter(redis_client: Redis, job: dict[str, Any], reason: str) ->
 
 async def _settlement_dead_letter(redis_client: Redis, job: dict[str, Any], reason: str) -> None:
     try:
-        await _resolve_awaitable(
-            redis_client.rpush(runtime.settings.settlement_queue_dead_letter_key, json.dumps(job, default=str))
-        )
+        key = runtime.settings.settlement_queue_dead_letter_key
+        payload = json.dumps(job, default=str)
+        await _resolve_awaitable(redis_client.rpush(key, payload))
+        max_items = runtime.settings.settlement_queue_dead_letter_max_items
+        if max_items > 0:
+            await _resolve_awaitable(redis_client.ltrim(key, max(-max_items, -1), -1))
+        ttl_seconds = runtime.settings.settlement_queue_dead_letter_ttl_seconds
+        if ttl_seconds > 0:
+            await _resolve_awaitable(redis_client.expire(key, ttl_seconds))
         SETTLEMENT_QUEUE_DLQ_COUNTER.labels(reason=reason).inc()
     except Exception:  # pragma: no cover - defensive
         log_event(
@@ -208,7 +220,27 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
             "condition_id": condition,
         }
         try:
-            await _resolve_awaitable(redis_client.rpush(queue_key, json.dumps(job, default=str)))
+            if hasattr(redis_client, "eval"):
+                lua = (
+                    "local depth = redis.call('LLEN', KEYS[1]); "
+                    "if depth >= tonumber(ARGV[1]) then return 0 end; "
+                    "redis.call('RPUSH', KEYS[1], ARGV[2]); return 1;"
+                )
+                pushed = await _resolve_awaitable(
+                    redis_client.eval(
+                        lua,
+                        1,
+                        queue_key,
+                        str(runtime.settings.proof_queue_max_depth),
+                        json.dumps(job, default=str),
+                    )
+                )
+                if int(pushed or 0) <= 0:
+                    PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
+                    await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
+                    continue
+            else:
+                await _resolve_awaitable(redis_client.rpush(queue_key, json.dumps(job, default=str)))
             enqueued += 1
         except Exception as exc:  # pragma: no cover - enqueue best-effort
             await _resolve_awaitable(redis_client.srem(dedupe_key, job_id))
@@ -336,6 +368,30 @@ async def maybe_generate_settlement_proof(
             message="settlement proof generation skipped (prover client unavailable)",
         )
         return False
+    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("prover"):
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.prover.circuit_open",
+            message="prover circuit open; skipping proof generation",
+        )
+        return False
+    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("prover"):
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.prover.circuit_open",
+            message="prover circuit open; skipping proof generation",
+        )
+        return False
+    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("prover"):
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.prover.circuit_open",
+            message="prover circuit open; skipping proof generation",
+        )
+        return False
 
     def _as_int(value: Any) -> int | None:
         try:
@@ -436,7 +492,10 @@ async def maybe_generate_settlement_proof(
                 async with session_scope() as session:
                     market_record = await session.get(shared_models.Market, numeric_market_id)
                     if market_record and getattr(market_record, "market_address", None):
-                        refreshed = await _upsert_settlement_from_chain(session, market_record)
+                        refreshed = await asyncio.wait_for(
+                            _upsert_settlement_from_chain(session, market_record),
+                            timeout=max(runtime.settings.chain_refresh_timeout_seconds, 5),
+                        )
                         if refreshed is not None:
                             payloads = await build_prover_payload_async(session, numeric_market_id)
                             settlement_row = (
@@ -490,7 +549,10 @@ async def maybe_generate_settlement_proof(
                     async with session_scope() as session:
                         market_record = await session.get(shared_models.Market, numeric_market_id)
                         if market_record and getattr(market_record, "market_address", None):
-                            await _upsert_settlement_from_chain(session, market_record, force=True)
+                            await asyncio.wait_for(
+                                _upsert_settlement_from_chain(session, market_record, force=True),
+                                timeout=max(runtime.settings.chain_refresh_timeout_seconds, 5),
+                            )
                             await session.flush()
                 except Exception as exc:
                     log_event(
@@ -606,6 +668,8 @@ async def maybe_generate_settlement_proof(
         try:
             response = await runtime.PROVER_CLIENT.generate_settlement_proof(payload)
         except ProverError as exc:
+            if runtime.circuit_breaker:
+                await runtime.circuit_breaker.record_failure("prover")
             if numeric_market_id is not None:
                 try:
                     async with session_scope() as session:
@@ -649,6 +713,9 @@ async def maybe_generate_settlement_proof(
                 reason=str(exc),
             )
             return False
+        else:
+            if runtime.circuit_breaker:
+                await runtime.circuit_breaker.record_success("prover")
 
         proof_hash = None
         try:

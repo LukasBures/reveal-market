@@ -10,6 +10,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import get_settings
+from .runtime import configure_db_metrics
 
 settings = get_settings()
 logger = logging.getLogger("reveal_market.api")
@@ -21,6 +22,7 @@ engine = create_async_engine(
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
 )
+configure_db_metrics(engine.sync_engine)
 SessionLocal = async_sessionmaker(
     bind=engine,
     autoflush=False,

@@ -30,7 +30,17 @@ calc_workers() {
     echo "${override}"
     return
   fi
-  echo 4
+  local cpu_count
+  if command -v nproc >/dev/null 2>&1; then
+    cpu_count="$(nproc)"
+  else
+    cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  fi
+  local workers=$((cpu_count - 2))
+  if [[ "${workers}" -lt 1 ]]; then
+    workers=1
+  fi
+  echo "${workers}"
 }
 
 workers="$(calc_workers)"

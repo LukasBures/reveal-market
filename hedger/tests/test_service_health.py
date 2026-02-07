@@ -38,3 +38,4 @@ async def test_health_reports_fx_and_utilization():
     assert payload["fx_stale"] is True
     assert payload["latest_commit_at"] == now.isoformat()
     assert payload["lp_utilization"] == 0.42
+    assert payload["status"] == "ok"

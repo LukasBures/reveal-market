@@ -103,6 +103,7 @@ async def test_poll_receipt_revert_marks_permanent():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
 
     with pytest.raises(TxSendError) as exc:
@@ -120,6 +121,7 @@ async def test_commit_serializes_nonce_lock():
         account=SimpleNamespace(address="0x0000000000000000000000000000000000000001"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
 
     payload = {
@@ -144,6 +146,7 @@ def test_validate_commit_rejects_expired():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     payload = _valid_commit_payload()
     payload["expiry"] = int(time.time()) - 1
@@ -162,6 +165,7 @@ def test_validate_commit_rejects_bad_commitment():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     payload = _valid_commit_payload()
     payload["commitment"] = "0x" + "0" * 62
@@ -179,6 +183,7 @@ def test_validate_claim_rejects_bad_salt():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     payload = _valid_claim_payload()
     payload["salt"] = "0x" + "4" * 62
@@ -196,6 +201,7 @@ def test_validate_lock_requires_market_id():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     payload = {
         "market": "0x0000000000000000000000000000000000000002",
@@ -224,6 +230,7 @@ def test_build_batch_roots_matches_poseidon():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     tickets = [
         {
@@ -276,6 +283,7 @@ def test_build_batch_roots_rejects_leaf_mismatch():
         account=SimpleNamespace(address="0xrelayer"),
         chain_id=1,
         rpc_url="http://localhost",
+        api_internal_secret=None,
     )
     tickets = [
         {
@@ -327,6 +335,7 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
         rpc_url="http://localhost",
         api_base_url="http://api",
         api_bearer_token="token",  # noqa: S106 - test-only token
+        api_internal_secret="secret",  # noqa: S106 - test-only secret
     )
     payload = {
         "event_id": "evt-1",
@@ -345,7 +354,8 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
     assert client is not None
     assert client.requests
     request = client.requests[0]
-    assert request["url"].endswith("/commitments/sync")
+    assert request["url"].endswith("/internal/commitments/sync")
+    assert request["headers"]["X-Internal-Secret"] == "secret"
     ticket = request["json"]["tickets"][0]
     assert ticket["ticketHash"] == payload["commitment"]
     assert ticket["user_address"] == payload["user"]
@@ -387,6 +397,7 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
         chain_id=1,
         rpc_url="http://localhost",
         api_base_url="http://api",
+        api_internal_secret="secret",  # noqa: S106 - test-only secret
     )
     payload = {
         "event_id": "evt-2",
@@ -407,7 +418,8 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
     assert client is not None
     assert client.requests
     request = client.requests[0]
-    assert request["url"].endswith("/settlements/ingest")
+    assert request["url"].endswith("/internal/settlements/ingest")
+    assert request["headers"]["X-Internal-Secret"] == "secret"
     body = request["json"]
     assert body["merkleRoot"] == payload["merkle_root"]
     assert body["commitmentsCount"] == payload["commitments_count"]
@@ -435,6 +447,7 @@ async def test_push_commit_ingest_skips_missing_event_id(monkeypatch):
         chain_id=1,
         rpc_url="http://localhost",
         api_base_url="http://api",
+        api_internal_secret=None,
     )
     payload = {
         "market": "0x0000000000000000000000000000000000000002",
@@ -462,6 +475,7 @@ async def test_push_settlement_ingest_skips_missing_market_id(monkeypatch):
         chain_id=1,
         rpc_url="http://localhost",
         api_base_url="http://api",
+        api_internal_secret=None,
     )
     payload = {
         "merkle_root": "0x" + "2" * 64,

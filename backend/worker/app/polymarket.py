@@ -90,9 +90,6 @@ _GAMMA_EVENT_ALLOWED_FIELDS = {
     "volume_1mo",
     "volume_1yr",
     "enable_order_book",
-    "liquidity_clob",
-    "neg_risk",
-    "neg_risk_market_id",
 }
 _GAMMA_EVENT_KEY_MAP = {
     "startDate": "start_date",
@@ -101,26 +98,6 @@ _GAMMA_EVENT_KEY_MAP = {
     "createdAt": "created_at_raw",
     "updatedAt": "updated_at_raw",
 }
-
-
-def _trim_gamma_events(events: Any) -> list[dict[str, Any]] | None:
-    """Reduce Gamma event payloads to the fields our DB schema accepts."""
-
-    if not isinstance(events, list):
-        return None
-    trimmed: list[dict[str, Any]] = []
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        slim: dict[str, Any] = {}
-        for key, value in event.items():
-            target_key = _GAMMA_EVENT_KEY_MAP.get(key, key)
-            if target_key not in _GAMMA_EVENT_ALLOWED_FIELDS:
-                continue
-            slim[target_key] = value
-        if slim:
-            trimmed.append(slim)
-    return trimmed or None
 
 
 class MarketPayload(BaseModel):
@@ -140,10 +117,9 @@ class MarketPayload(BaseModel):
     outcome_prices: list[float] | None = None  # transient; persisted into market_outcomes
     tags: list[str] | None = None  # transient; persisted into market_tags
     clob_token_ids: list[str] | None = None  # transient; persisted into market_clob_tokens
-    gamma_raw: dict[str, Any] | None = None
     gamma_metadata: dict[str, Any] | None = None
-    gamma_events: list[dict[str, Any]] | None = None
     group_slug: str | None = None
+    event_key: str | None = None
     group_position: int | None = None
     group_item_title: str | None = None
     group_item_threshold: float | None = None
@@ -196,16 +172,16 @@ class MarketPayload(BaseModel):
         closed = raw.get("closed")
         accepting_orders = _coerce_bool(raw.get("acceptingOrders"))
         active_flag = _coerce_bool(raw.get("active"))
-        ready_flag = _coerce_bool(raw.get("ready"))
-        funded_flag = _coerce_bool(raw.get("funded"))
-        approved_flag = _coerce_bool(raw.get("approved"))
-        restricted_flag = _coerce_bool(raw.get("restricted"))
-        archived_flag = _coerce_bool(raw.get("archived"))
-        pending_deployment = _coerce_bool(raw.get("pendingDeployment"))
-        deploying = _coerce_bool(raw.get("deploying"))
-        manual_activation = _coerce_bool(raw.get("manualActivation"))
-        clear_book_on_start = _coerce_bool(raw.get("clearBookOnStart"))
-        deploying_timestamp = _extract_timestamp_candidate(raw.get("deployingTimestamp"))
+        _coerce_bool(raw.get("ready"))
+        _coerce_bool(raw.get("funded"))
+        _coerce_bool(raw.get("approved"))
+        _coerce_bool(raw.get("restricted"))
+        _coerce_bool(raw.get("archived"))
+        _coerce_bool(raw.get("pendingDeployment"))
+        _coerce_bool(raw.get("deploying"))
+        _coerce_bool(raw.get("manualActivation"))
+        _coerce_bool(raw.get("clearBookOnStart"))
+        _extract_timestamp_candidate(raw.get("deployingTimestamp"))
         if accepting_orders is False:
             closed = True
         uma_status = _extract_uma_status(raw)
@@ -225,10 +201,7 @@ class MarketPayload(BaseModel):
         )
         orders_opened_at = _extract_timestamp_candidate(raw.get("acceptingOrdersTimestamp"))
         featured = True if raw.get("featured") is True else False
-        trimmed_events = _trim_gamma_events(raw.get("events"))
-        resolution_source = _clean_string(raw.get("resolutionSource")) or _extract_resolution_source_from_events(
-            trimmed_events
-        )
+        resolution_source = _clean_string(raw.get("resolutionSource"))
         market_maker = _clean_string(raw.get("marketMakerAddress"))
         enable_order_book = raw.get("enableOrderBook") if isinstance(raw.get("enableOrderBook"), bool) else None
         order_min_size = _coerce_float(raw.get("orderMinSize"))
@@ -260,36 +233,20 @@ class MarketPayload(BaseModel):
             "description": raw.get("description"),
             "active": active_flag,
             "closed": closed_flag,
-            "archived": archived_flag,
-            "restricted": restricted_flag,
-            "ready": ready_flag,
-            "funded": funded_flag,
-            "approved": approved_flag,
             "enable_order_book": enable_order_book,
             "order_price_min_tick_size": price_tick_size,
             "order_min_size": order_min_size,
             "clob_token_id_yes": clob_token_ids[0] if clob_token_ids and clob_token_ids[0] is not None else None,
             "clob_token_id_no": clob_token_ids[1] if clob_token_ids and len(clob_token_ids) > 1 else None,
-            "accepting_orders": accepting_orders,
-            "accepting_orders_timestamp": orders_opened_at,
-            "pending_deployment": pending_deployment,
-            "deploying": deploying,
-            "deploying_timestamp": deploying_timestamp,
-            "manual_activation": manual_activation,
-            "clear_book_on_start": clear_book_on_start,
             "group_item_title": group_item_title,
-            "group_item_threshold": raw_group_threshold if raw_group_threshold is not None else group_item_threshold,
+            "group_item_threshold": group_item_threshold,
             "group_slug": group_slug,
-            "featured": featured,
             "best_bid": None,
             "best_ask": None,
             "spread": None,
             "volume": None,
         }
-        gamma_events = trimmed_events or []
         open_interest = _coerce_float(raw.get("openInterest") or raw.get("open_interest"))
-        if open_interest is not None and not gamma_events:
-            gamma_events.append({"open_interest": open_interest})
 
         liquidity_usd = _extract_liquidity(raw)
         volume_24h_usd = _extract_volume_24h(raw)
@@ -332,9 +289,7 @@ class MarketPayload(BaseModel):
             tags=tags,
             outcomes=outcomes,
             outcome_prices=outcome_prices,
-            gamma_raw=None,
             gamma_metadata=gamma_metadata,
-            gamma_events=gamma_events or None,
             rake_bps=None,
             condition_id=str(condition_id) if condition_id is not None else None,
             question_id=str(question_id) if question_id is not None else None,
@@ -366,6 +321,7 @@ class MarketPayload(BaseModel):
             open_interest=open_interest,
             volume=volume_total,
             group_slug=group_slug,
+            event_key=group_slug,
             group_position=group_position,
             group_item_title=group_item_title,
             group_item_threshold=group_item_threshold,
@@ -411,6 +367,8 @@ class AsyncPolymarketClient:
         self._empty_page_counter = empty_page_counter
         self._rate_limiter = _AsyncRateLimiter(rate_limit_requests, rate_limit_window_seconds)
         self._empty_page_tolerance = max(0, empty_page_tolerance)
+        self._client_started_at = time.monotonic()
+        self._client_max_age_seconds = 900.0
 
     async def fetch_markets(
         self,
@@ -512,6 +470,7 @@ class AsyncPolymarketClient:
         page = 0
         empty_pages = 0
         total_records: int | None = None
+        await self._refresh_client_if_needed()
         client = self._client
 
         while True:
@@ -564,11 +523,11 @@ class AsyncPolymarketClient:
                     extra={"offset": offset, "empty_pages": empty_pages},
                 )
                 self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
                 if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
+                    retry_delay = min(1.0 * (2 ** (empty_pages - 1)), 8.0)
+                    await asyncio.sleep(retry_delay)
+                    if total_records is not None and offset < total_records:
+                        offset += page_size
                     continue
                 break
             empty_pages = 0
@@ -607,6 +566,7 @@ class AsyncPolymarketClient:
         empty_pages = 0
         total_records: int | None = None
 
+        await self._refresh_client_if_needed()
         client = self._client
         while True:
             params: dict[str, Any] = {
@@ -640,11 +600,11 @@ class AsyncPolymarketClient:
                     extra={"offset": offset, "empty_pages": empty_pages},
                 )
                 self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
                 if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
+                    retry_delay = min(1.0 * (2 ** (empty_pages - 1)), 8.0)
+                    await asyncio.sleep(retry_delay)
+                    if total_records is not None and offset < total_records:
+                        offset += page_size
                     continue
                 break
             empty_pages = 0
@@ -658,15 +618,6 @@ class AsyncPolymarketClient:
                 event_tags = event.get("tags")
                 event_category = event.get("category")
                 event_series = event.get("series")
-                raw_events = event.get("events")
-                event_metadata = _trim_gamma_events(raw_events)
-                if event_metadata is None:
-                    event_metadata = [
-                        {
-                            "slug": event.get("slug"),
-                            "id": event.get("id"),
-                        }
-                    ]
                 for raw in markets:
                     try:
                         if not isinstance(raw, dict):
@@ -679,8 +630,8 @@ class AsyncPolymarketClient:
                         if isinstance(event_series, list) and not enriched.get("series"):
                             enriched["series"] = event_series
                         payload = MarketPayload.from_gamma(enriched)
-                        payload.gamma_events = event_metadata
                         payload.group_slug = event_group_slug
+                        payload.event_key = event_group_slug
                         page_payloads.append(payload)
                     except (ValidationError, ValueError) as exc:  # pragma: no cover - defensive
                         logger.warning("skipping invalid polymarket event record: %s", exc)
@@ -688,11 +639,11 @@ class AsyncPolymarketClient:
             if not page_payloads:
                 empty_pages += 1
                 self._record_empty_page()
-                if total_records is not None and offset < total_records and empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
-                    continue
                 if empty_pages <= self._empty_page_tolerance:
-                    offset += page_size
+                    retry_delay = min(1.0 * (2 ** (empty_pages - 1)), 8.0)
+                    await asyncio.sleep(retry_delay)
+                    if total_records is not None and offset < total_records:
+                        offset += page_size
                     continue
                 break
 
@@ -719,6 +670,17 @@ class AsyncPolymarketClient:
         response.raise_for_status()
         return response
 
+    async def _refresh_client_if_needed(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._client_started_at < self._client_max_age_seconds:
+            return
+        try:
+            await self._client.aclose()
+        except Exception as exc:
+            logger.debug("failed to close polymarket http client", extra={"error": str(exc)})
+        self._client = httpx.AsyncClient(timeout=self.timeout, transport=self._transport)
+        self._client_started_at = now
+
     async def _send_with_retry(self, action: Callable[[], Any]) -> httpx.Response:
         retryer = self._build_retryer()
         try:
@@ -730,6 +692,7 @@ class AsyncPolymarketClient:
             return response
         except Exception:
             self._record_retry_metric("failed")
+            await self._refresh_client_if_needed(force=True)
             raise
 
     def _build_retryer(self):
@@ -1207,9 +1170,7 @@ def _extract_liquidity(raw: dict[str, Any]) -> float | None:
         "liquidity_usd",
         "liquidityUsd",
         "liquidityUSD",
-        "liquidity_clob",
         "liquidityNum",
-        "liquidity_num",
         "liquidity",
     ):
         candidate = _coerce_float(raw.get(key))
@@ -1223,7 +1184,6 @@ def _extract_volume_24h(raw: dict[str, Any]) -> float | None:
         candidate = _coerce_float(raw.get(key))
         if candidate is not None:
             return candidate
-    for key in ("volume_clob", "volumeClob", "volume1mo_clob"):
         candidate = _coerce_float(raw.get(key))
         if candidate is not None:
             return candidate

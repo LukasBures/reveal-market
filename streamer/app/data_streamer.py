@@ -9,14 +9,13 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-import httpx
 from prometheus_client import REGISTRY, Counter
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import BookParams
 
 from .config import Settings
 from .rtds_client import PolymarketRTDSClient, Subscription
-from .state import StreamState, iter_ws
+from .state import StreamState, get_http_client, iter_ws
 
 if TYPE_CHECKING:
     from .metrics import StreamerMetrics
@@ -305,7 +304,7 @@ class DataStreamer:
 
     async def _rest_poll_loop(self) -> None:
         while not self._stop.is_set():
-            if self.state.active_connections <= 0:
+            if self.state.active_connections <= 0 and not self.state.subscriptions.assets:
                 await asyncio.sleep(self.settings.rest_poll_seconds)
                 continue
             self._record_clob_rest_poll(success=False)
@@ -358,42 +357,40 @@ class DataStreamer:
     async def _poll_rest(self) -> None:
         total = 0
         cursor: str | None = None
-        async with httpx.AsyncClient(timeout=10) as client:
-            while True:
-                params = {"limit": CLOB_PAGE_SIZE}
-                if cursor:
-                    # Polymarket CLOB REST expects next_cursor for pagination.
-                    params["next_cursor"] = cursor
-                    # Keep legacy cursor param for compatibility if upstream changes.
-                    params["cursor"] = cursor
-                res = await client.get(str(self.settings.clob_rest_url), params=params)
-                res.raise_for_status()
-                payload = res.json()
-                markets = payload if isinstance(payload, list) else payload.get("data") or []
-                for market in markets:
-                    await self._normalize_and_publish(market, source="rest")
-                total += len(markets)
-                for market in markets:
-                    market_id = str(market.get("id") or market.get("marketId") or "")
-                    tokens = self.state.get_clob_tokens(market_id)
-                    if market_id and tokens and market_id in self.state.subscriptions.assets:
-                        self.state.subscriptions.replace_asset(market_id, tokens)
-                cursor_val = (
-                    payload.get("next_cursor") or payload.get("nextCursor") if isinstance(payload, dict) else None
+        client = await get_http_client(10)
+        while True:
+            params = {"limit": CLOB_PAGE_SIZE}
+            if cursor:
+                # Polymarket CLOB REST expects next_cursor for pagination.
+                params["next_cursor"] = cursor
+                # Keep legacy cursor param for compatibility if upstream changes.
+                params["cursor"] = cursor
+            res = await client.get(str(self.settings.clob_rest_url), params=params)
+            res.raise_for_status()
+            payload = res.json()
+            markets = payload if isinstance(payload, list) else payload.get("data") or []
+            for market in markets:
+                await self._normalize_and_publish(market, source="rest")
+            total += len(markets)
+            for market in markets:
+                market_id = str(market.get("id") or market.get("marketId") or "")
+                tokens = self.state.get_clob_tokens(market_id)
+                if market_id and tokens and market_id in self.state.subscriptions.assets:
+                    self.state.subscriptions.replace_asset(market_id, tokens)
+            cursor_val = payload.get("next_cursor") or payload.get("nextCursor") if isinstance(payload, dict) else None
+            if cursor_val and cursor_val == cursor:
+                logger.warning(
+                    "CLOB REST cursor stalled; ending poll",
+                    extra={"event": "clob.rest.cursor.stalled", "cursor": cursor_val},
                 )
-                if cursor_val and cursor_val == cursor:
-                    logger.warning(
-                        "CLOB REST cursor stalled; ending poll",
-                        extra={"event": "clob.rest.cursor.stalled", "cursor": cursor_val},
-                    )
-                    break
-                cursor = cursor_val or None
-                if cursor is None:
-                    break
-            logger.debug(
-                "REST poll ingested markets",
-                extra={"event": "clob.rest.poll", "count": total, "cursor": cursor},
-            )
+                break
+            cursor = cursor_val or None
+            if cursor is None:
+                break
+        logger.debug(
+            "REST poll ingested markets",
+            extra={"event": "clob.rest.poll", "count": total, "cursor": cursor},
+        )
 
     async def _fetch_midpoints(self, token_ids: list[str]) -> list[Decimal] | None:
         if not self.clob_client:

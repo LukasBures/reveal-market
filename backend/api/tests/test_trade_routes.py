@@ -175,9 +175,11 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
 
     monkeypatch.setattr("app.routes.trade._fetch_escrow_balance", _escrow_balance)
     tx_hash = "0x" + "a" * 64
-    monkeypatch.setattr(
-        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": tx_hash})
-    )
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": tx_hash})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
 
     quote_payload = {
         "stake_zen": 0.1,
@@ -256,9 +258,11 @@ def test_trade_claim_rebuilds_merkle_path(client, db_session, monkeypatch):
     settings = runtime.settings
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     tx_hash = "0x" + "c" * 64
-    monkeypatch.setattr(
-        "app.routes.trade.httpx.AsyncClient", lambda *args, **kwargs: _AsyncClientStub({"txHash": tx_hash})
-    )
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": tx_hash})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
 
     resp = client.post(
         "/trade/claim",
@@ -497,8 +501,9 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
     assert pos["payout_zen"] == 0
 
 
-def test_sync_commitments_endpoint(client, db_session):
+def test_sync_commitments_endpoint(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="sync-mkt", address="0x5555555555555555555555555555555555555555")
+    monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
     payload = {
         "event_id": market.event_id,
         "tickets": [
@@ -515,13 +520,14 @@ def test_sync_commitments_endpoint(client, db_session):
             }
         ],
     }
-    resp = client.post("/commitments/sync", json=payload)
+    resp = client.post("/internal/commitments/sync", json=payload, headers={"X-Internal-Secret": "secret"})
     assert resp.status_code == 200
     assert resp.json()["recorded"] == 1
 
 
-def test_ingest_settlement_endpoint(client, db_session):
+def test_ingest_settlement_endpoint(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="settle-mkt", address="0x6666666666666666666666666666666666666666")
+    monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
     payload = {
         "event_id": market.event_id,
         "merkleRoot": "0x" + "33" * 32,
@@ -531,7 +537,7 @@ def test_ingest_settlement_endpoint(client, db_session):
         "totalEscrow": 100,
         "totalLiability": 100,
     }
-    resp = client.post("/settlements/ingest", json=payload)
+    resp = client.post("/internal/settlements/ingest", json=payload, headers={"X-Internal-Secret": "secret"})
     assert resp.status_code == 200
     assert resp.json()["updated"] is True
     refreshed = db_session.get(models.Settlement, 1)
@@ -567,17 +573,34 @@ def test_trade_status_reads_queue_result(client, monkeypatch):
 def test_relayer_hooks_require_secret(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="hook-mkt", address="0x7777777777777777777777777777777777777777")
     monkeypatch.setattr("app.runtime.settings.relayer_webhook_secret", "secret", raising=False)
+    monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("internal"), raising=False)
 
     # missing secret
-    resp = client.post("/relayer/commitments", json={"event_id": market.event_id, "tickets": []})
+    resp = client.post("/internal/relayer/commitments", json={"event_id": market.event_id, "tickets": []})
     assert resp.status_code == 401
 
     resp_ok = client.post(
-        "/relayer/commitments",
-        headers={"X-Relayer-Secret": "secret"},
+        "/internal/relayer/commitments",
+        headers={"X-Relayer-Secret": "secret", "X-Internal-Secret": "internal"},
         json={"event_id": market.event_id, "tickets": []},
     )
     assert resp_ok.status_code == 200
+
+    settlement_payload = {
+        "event_id": market.event_id,
+        "merkleRoot": "0x" + "11" * 32,
+        "commitmentsCount": 1,
+        "winningOutcomeId": 0,
+        "rakeBps": 200,
+        "totalEscrow": 100,
+        "totalLiability": 100,
+    }
+    resp_settlements = client.post(
+        "/internal/relayer/settlements",
+        headers={"X-Relayer-Secret": "secret", "X-Internal-Secret": "internal"},
+        json=settlement_payload,
+    )
+    assert resp_settlements.status_code == 200
 
 
 class _DummyAsyncCall:

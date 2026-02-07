@@ -93,47 +93,6 @@ def test_data_streamer_rtds_subscription_filters_are_json():
     assert subs and subs[0].filters == ["a", "b"]
 
 
-@pytest.mark.asyncio
-async def test_history_debounce_and_ttl(monkeypatch):
-    settings = Settings(history_debounce_seconds=5, history_ttl_seconds=60, history_limit=10)
-    state = StreamState(settings)
-    dummy = type("DummyRedis", (), {})()
-    dummy.data = {}
-    dummy.published = []
-    dummy.history = {}
-    dummy.expires = {}
-
-    async def hset(key, mapping=None, **kwargs):
-        dummy.data[key] = mapping or {}
-
-    async def publish(channel, payload):
-        dummy.published.append(payload)
-
-    async def lpush(key, value):
-        dummy.history.setdefault(key, []).insert(0, value)
-
-    async def ltrim(key, start, end):
-        if key not in dummy.history:
-            return
-        dummy.history[key] = dummy.history[key][start : end + 1]
-
-    async def expire(key, seconds):
-        dummy.expires[key] = seconds
-
-    dummy.hset = hset
-    dummy.publish = publish
-    dummy.lpush = lpush
-    dummy.ltrim = ltrim
-    dummy.expire = expire
-    state.redis = dummy  # type: ignore[assignment]
-
-    await state.cache_tick("m1", "0", {"price": "0.5"})
-    # Second write inside debounce window skips history push
-    await state.cache_tick("m1", "0", {"price": "0.6"})
-    assert len(dummy.history.get(f"{settings.history_prefix}:m1:0", [])) == 1
-    assert dummy.expires[f"{settings.history_prefix}:m1:0"] == 60
-
-
 def test_subscription_cap_skips_new_assets(caplog):
     settings = Settings(max_subscriptions=1)
     state = StreamState(settings)

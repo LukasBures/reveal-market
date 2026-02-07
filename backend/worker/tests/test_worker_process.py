@@ -268,7 +268,6 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.4, 0.6],
-            gamma_raw={"id": "evt-1"},
         ),
         MarketPayload(
             event_id="evt-2",
@@ -280,7 +279,6 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
             status="commit",
             outcomes=["Up", "Down"],
             outcome_prices=[0.55, 0.45],
-            gamma_raw={"id": "evt-2"},
         ),
     ]
 
@@ -604,7 +602,6 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
         category="sports",
         oracle="polymarket",
         status="commit",
-        gamma_raw={"id": "evt-success"},
     )
 
     async def _fake_events_paginated(self, **_kwargs):
@@ -800,7 +797,6 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
         category="sports",
         oracle="polymarket",
         status="commit",
-        gamma_raw={"id": "evt-retry"},
     )
 
     attempts = {"count": 0}
@@ -1225,7 +1221,6 @@ async def test_enqueue_proof_jobs_dedupes(monkeypatch):
         status="commit",
         outcomes=["Yes", "No"],
         outcome_prices=[0.5, 0.5],
-        gamma_raw={"id": "evt-proof"},
     )
     summary.proof_jobs.append(({"id": 1, "event_id": "evt-proof"}, market_payload, "0xabc"))
     first = await proofs.enqueue_proof_jobs(redis_client, summary)
@@ -1304,7 +1299,6 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.55, 0.45],
-            gamma_raw={"id": "evt-proof-queue"},
         )
     ]
 
@@ -1365,88 +1359,6 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
     assert called["maybe_generate"] >= 1
     assert called["settlements"] >= 1
     assert settlement_worker_task.done()
-
-
-@pytest.mark.asyncio
-async def test_events_ingest_persists_gamma_events_and_enqueues_proof(monkeypatch):
-    # Use in-memory DB
-    engine, session_factory = await create_async_in_memory_db()
-    monkeypatch.setattr(db, "engine", engine, raising=False)
-    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
-    monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
-    monkeypatch.setattr(runtime_module, "PROVER_CLIENT", object(), raising=False)
-
-    events_payload = [
-        {
-            "id": "ev-group",
-            "slug": "grouped-event",
-            "events": [{"slug": "grouped-event", "description": "meta"}],
-            "markets": [
-                {
-                    "id": "m-ev-1",
-                    "question": "Grouped?",
-                    "outcomes": ["Yes", "No"],
-                    "outcomePrices": [0.4, 0.6],
-                },
-                {
-                    "id": "m-ev-2",
-                    "question": "Grouped second",
-                    "outcomes": ["Up", "Down"],
-                    "outcomePrices": [0.5, 0.5],
-                },
-            ],
-        }
-    ]
-
-    async def _fake_events(self, **_kwargs):
-        payloads = []
-        for raw in events_payload[0]["markets"]:
-            payload = MarketPayload.from_gamma({**raw, "events": events_payload[0]["events"]})
-            payload.group_slug = events_payload[0]["slug"]
-            payload.gamma_events = events_payload[0]["events"]
-            payloads.append(payload)
-        yield payloads
-
-    monkeypatch.setattr(
-        runtime_module,
-        "polymarket_client",
-        type("DummyClient", (), {"fetch_events_paginated": _fake_events})(),
-        raising=False,
-    )
-
-    redis_client = DummyRedis()
-    proof_gauge = DummyGauge()
-    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", proof_gauge)
-    monkeypatch.setattr(proofs, "PROOF_QUEUE_OVERFLOW_COUNTER", DummyCounter())
-
-    # Stub proof/settlement to prevent external calls
-    async def fake_generate(redis_client=None, market_snapshot=None, market_payload=None, condition_id=None):
-        return True
-
-    async def fake_settlement(summary, redis_client=None):
-        return 0
-
-    monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
-    monkeypatch.setattr(proofs, "run_settlement_jobs", fake_settlement)
-
-    proof_worker_task = asyncio.create_task(worker_service.run_proof_queue_worker(redis_client))
-    settlement_worker_task = asyncio.create_task(worker_service.run_settlement_queue_worker(redis_client))
-    await worker_service.process_once(redis_client)
-    await asyncio.sleep(0.1)
-    proof_worker_task.cancel()
-    settlement_worker_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await proof_worker_task
-    with contextlib.suppress(asyncio.CancelledError):
-        await settlement_worker_task
-
-    # Validate DB persisted gamma_events and group_slug
-    async with engine.begin() as conn:
-        gamma_rows = (await conn.execute(select(Base.metadata.tables["market_gamma_events"]))).fetchall()
-        group_slug_row = (await conn.execute(select(Base.metadata.tables["markets"].c.group_slug))).fetchall()
-    assert gamma_rows, "gamma events should be persisted"
-    assert group_slug_row[0][0] == "grouped-event"
-    assert await redis_client.llen(runtime_module.settings.proof_queue_key) == 0
 
 
 @pytest.mark.asyncio
@@ -1623,7 +1535,6 @@ async def test_proof_queue_worker_processes_jobs(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.5, 0.5],
-            gamma_raw={"id": "evt-proof"},
         ).model_dump(),
         "condition_id": "0xabc",
     }

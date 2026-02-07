@@ -4,7 +4,7 @@ from sqlalchemy import inspect
 
 
 def test_health_and_metrics_endpoints(client, db_session):
-    response = client.get("/healthz")
+    response = client.get("/healthz/deep")
     assert response.status_code == 200
     assert response.json()["status"] in {"ok", "degraded", "error"}
 

@@ -48,6 +48,8 @@ model_supports_reasoning_summaries = false
 # Force reasoning summary format: none | experimental (default: none)
 model_reasoning_summary_format = "none"
 
+web_search = "live"
+
 ################################################################################
 # Instruction Overrides
 ################################################################################
@@ -200,7 +202,6 @@ unified_exec = true
 shell_snapshot = true
 apply_patch_freeform = true
 view_image_tool = true
-web_search_request = true
 remote_models = true
 undo = true
 experimental_windows_sandbox = false

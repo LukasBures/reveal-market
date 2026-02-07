@@ -51,6 +51,14 @@ def test_health_endpoint_reports_fx(test_app):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     payload = resp.json()
+    assert payload["status"] in {"ok", "stale", "degraded"}
+
+
+def test_health_endpoint_deep_reports_fx(test_app):
+    client, _ = test_app
+    resp = client.get("/healthz/deep")
+    assert resp.status_code == 200
+    payload = resp.json()
     assert "fx_zen_usd" in payload
     assert "status" in payload
 
@@ -91,7 +99,7 @@ def test_health_endpoint_reports_upstream_status(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/healthz")
+        resp = client.get("/healthz/deep")
         payload = resp.json()
         assert payload["clob_ws_connected"] is True
         assert payload["clob_ws_last_message"] == state.clob_ws_last_message.isoformat()
@@ -129,7 +137,7 @@ def test_health_status_stale(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/healthz")
+        resp = client.get("/healthz/deep")
         assert resp.json()["status"] == "stale"
 
 
@@ -159,7 +167,7 @@ def test_health_status_degraded(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/healthz")
+        resp = client.get("/healthz/deep")
         assert resp.json()["status"] == "degraded"
 
 

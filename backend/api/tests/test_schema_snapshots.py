@@ -25,6 +25,7 @@ EXPECTED_SCHEMAS = {
             "description",
             "enable_order_book",
             "event_id",
+            "event_key",
             "factory",
             "featured",
             "id",

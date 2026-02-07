@@ -27,6 +27,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("reveal_market.streamer")
 
+shared_http_clients: dict[float, httpx.AsyncClient] = {}
+shared_http_lock = asyncio.Lock()
+
+
+async def get_http_client(timeout: float) -> httpx.AsyncClient:
+    timeout_value = float(timeout)
+    async with shared_http_lock:
+        client = shared_http_clients.get(timeout_value)
+        if client is not None and getattr(client, "is_closed", False):
+            await client.aclose()
+            shared_http_clients.pop(timeout_value, None)
+            client = None
+        if client is None:
+            client = httpx.AsyncClient(timeout=timeout_value)
+            shared_http_clients[timeout_value] = client
+        return client
+
 
 class FatalWebsocketError(Exception):
     """Raised when a websocket handshake fails with a fatal status code."""
@@ -95,6 +112,8 @@ class StreamState:
         self._last_ws_ping: datetime | None = None
         self._stale_log_last_at: datetime | None = None
         self._stale_log_last_count: int = 0
+        self._health_snapshot: dict | None = None
+        self._health_snapshot_ts: datetime | None = None
 
     async def startup(self) -> None:
         self.redis = Redis.from_url(
@@ -110,22 +129,37 @@ class StreamState:
         if self.redis:
             await self.redis.aclose()
 
+    def cached_health_snapshot(self) -> dict | None:
+        ttl_seconds = max(int(self.settings.health_deep_cache_ttl_seconds or 0), 0)
+        if ttl_seconds <= 0:
+            return None
+        if not self._health_snapshot or not self._health_snapshot_ts:
+            return None
+        age = (datetime.now(UTC) - self._health_snapshot_ts).total_seconds()
+        if age > ttl_seconds:
+            return None
+        return self._health_snapshot
+
+    def store_health_snapshot(self, payload: dict) -> None:
+        self._health_snapshot = payload
+        self._health_snapshot_ts = datetime.now(UTC)
+
     async def _fetch_fx_from_url(self, url: AnyHttpUrl, label: str) -> FxQuote | None:
-        async with httpx.AsyncClient(timeout=self.settings.fx_timeout_seconds) as client:
-            res = await client.get(str(url))
-            res.raise_for_status()
-            data = res.json()
-            price = (
-                data.get("price")
-                or data.get("zen_usd")
-                or data.get("zenUSD")
-                or data.get("horizen", {}).get("usd")
-                or data.get("USD")
-                or data.get("usd")
-            )
-            if price is None:
-                return None
-            return self.register_fx(Decimal(str(price)), source=label, allow_jump=True)
+        client = await get_http_client(self.settings.fx_timeout_seconds)
+        res = await client.get(str(url))
+        res.raise_for_status()
+        data = res.json()
+        price = (
+            data.get("price")
+            or data.get("zen_usd")
+            or data.get("zenUSD")
+            or data.get("horizen", {}).get("usd")
+            or data.get("USD")
+            or data.get("usd")
+        )
+        if price is None:
+            return None
+        return self.register_fx(Decimal(str(price)), source=label, allow_jump=True)
 
     async def refresh_fx(self, *, label: str = "binance_rest") -> FxQuote:
         async with self._fx_lock:

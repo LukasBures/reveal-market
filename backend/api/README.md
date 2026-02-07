@@ -1,64 +1,34 @@
-# Reveal Market API
+# Backend API
 
-Async FastAPI service that exposes market discovery, resolution summaries, signed pricing, commit/claim helpers, and Prometheus/health endpoints. It shares models and caching utilities with the worker and uses Redis key/value caches to keep common payloads hot.
+FastAPI service that exposes market data, pricing, trading, and internal ingestion endpoints.
 
-```
-Clients -> FastAPI -> Redis (caches/heartbeats) -> Postgres (source of truth)
-                     \-> Streamer FX         \-> Relayer (commit/claim)
-```
+**Entrypoint**
+- `backend/api/app/server.py` builds the app, middleware, and background tasks.
 
-## How it’s built
+**Public routes (high level)**
+- `/events` list events with filters and caching.
+- `/events/{event_id}` event detail and grouped markets.
+- `/categories/{category_slug}` category list.
+- `/pricing/*` FX quote and signed quote flow.
+- `/trade/commit` commit a ticket via the relayer.
+- `/trade/claim` initiate claim via the relayer.
+- `/positions` wallet positions.
+- `/claim/bundles` and `/claim/status` claim helpers.
+- `/healthz`, `/healthz/deep`, `/ready`, `/live` health endpoints.
 
-- **App factory**: `app.server.create_app()` wires middleware (request-id/logging, Prometheus, CORS/trusted hosts, rate limiting, security headers), runs startup tasks (migrations, schema tag, cache hydrate, quote sweeper, relayer queue start, circuit-hash validation when configured), and registers routers.
-- **Async stack**: async SQLAlchemy + asyncpg, redis.asyncio, httpx, and background loops (`cache_refresh_loop`, `quote_sweeper_loop`, `metrics_publisher_loop`) managed by the FastAPI lifespan.
-- **Caching**: Redis key/value caches (JSON-serialized payloads) for market list/detail, categories, suggestions, and resolutions with schema + logical tags. Cold misses fall back to Postgres and write-through to Redis; Redis downtime bypasses cache without polluting tags. Startup + interval hydrators keep hot payloads warm.
-- **Logging/metrics**: Structured logs (`timestamp | LEVEL | logger | file:line | event | request_id`) and Prometheus metrics for HTTP, cache hit/miss, rate limits, and quote issuance; API heartbeats stored in Redis for dashboards.
-- **Security**: TrustedHost + CORS + CSP/HSTS/COOP middleware, rate limiting, and bearer token hooks for relayer ingestion. Liveness at `/live`, readiness at `/ready` and `/healthz`.
+**Internal routes**
+- `/internal/commitments/sync` and `/internal/settlements/ingest`.
+- `/internal/relayer/*` relayer hooks.
+- These require `X-Internal-Secret` and are blocked at the edge.
 
-## Responsibilities
+**Key behavior**
+- Cache-aware market list endpoints with Redis tags.
+- Pricing uses FX from streamer and signs QUOTE_V1 digest.
+- Relayer calls use circuit breaker and optional queue.
 
-- **Events/resolutions**: `/events`, `/categories/{slug}`, `/events/suggest`, `/events/{event_id}`, `/resolution/{condition_id}` pull from normalized tables (outcomes, tags, clob tokens, Gamma metadata). Resolved markets drop from cache 12h after `resolved_at`.
-- **Search**: Indexed Postgres queries for full-text search and pagination (intentionally not cached).
-- **Pricing**: `/pricing/preview` (unsigned, non-persistent) and `/pricing/quote` (signed QUOTE_V1 digest, stored in the quote ledger) fetch FX from the streamer endpoint, ignore client-supplied FX, and enforce per-quote/user/market caps. `/pricing/submit` revalidates digest/expiry and optional FX drift.
-- **Trade/relayer**: `/trade/commit` consumes a quote, builds CommitAuth signatures, and forwards to the relayer (Redis queue fallback). `/trade/status` polls queue results; `/trade/claim` + `/claim/bundles` surface settlement/claim state; `/positions` returns user positions, escrow balance, and a `market_summary` payload so dashboards don't need extra market detail calls. On-chain receipts are decoded via an ABI registry (factory, market, escrow, pool, ERC20) so multi-contract logs can be inspected without MismatchedABI noise.
-- **Proofs/treasury/meta**: `/proofs` exposes prover receipts stored by the worker; treasury/meta routes provide version/config metadata.
-- **Health**: `/healthz` checks Postgres, Redis, worker heartbeat, Polymarket reachability, pricing signer, schema revision tag, and CORS/FX CORS. `/metrics` exposes Prometheus counters/gauges/histograms.
+**Config**
+- See `backend/api/app/config.py` for all settings.
+- Important: `RM_INTERNAL_API_SECRET`, `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_DATABASE_URL`, `RM_REDIS_URL`.
 
-## Configuration (common vars)
-
-See `app/config.py` for defaults. Key groups:
-
-- **Core**: `RM_DATABASE_URL`, `RM_REDIS_URL`, `RM_CACHE_TTL_SECONDS`, `RM_CACHE_HYDRATE_ON_STARTUP`, `RM_CACHE_REFRESH_ENABLED`, `RM_CACHE_REFRESH_INTERVAL_SECONDS`, `RM_CACHE_REFRESH_LIMIT`, `RM_CACHE_HYDRATE_LIMIT`, `RM_SCHEMA_VERSION_KEY`.
-- **Security**: `RM_ALLOWED_HOSTS`, `RM_CORS_ALLOW_ORIGINS/METHODS/HEADERS/CREDENTIALS`, `RM_ENABLE_SECURITY_HEADERS`.
-- **Pricing/FX**: `RM_PRICING_SIGNER_PRIVATE_KEY`, `RM_PRICING_CHAIN_ID`, `RM_MAX_STAKE_ZEN`, `RM_MAX_USER_STAKE_PER_MARKET_ZEN`, `RM_MAX_MARKET_STAKE_ZEN`, `RM_HAIRCUT_PERCENT` (stake discount), `RM_PRICING_EDGE_PERCENT` (extra pricing edge). FX is fetched server-side from the streamer (endpoint hard-pinned in `app.pricing`). Odds come from the streamer first (condition_id), falling back to Postgres when unavailable.
-- **Trade/relayer**: `RM_AUTHORIZATION_SIGNER_PRIVATE_KEY`, `RM_AUTHORIZATION_SIGNER`, `RM_RELAYER_BASE_URL`, `RM_RELAYER_BEARER_TOKEN`, `RM_RELAYER_QUEUE_ENABLED`, `RM_RELAYER_QUEUE_KEY`, `RM_RELAYER_QUEUE_MAX_ATTEMPTS`, `RM_RELAYER_QUEUE_RESULT_TTL_SECONDS`, `RM_RELAYER_WEBHOOK_SECRET`, `RM_TICKET_SIZE_WEI`, `RM_COMMIT_NONCE_TTL_SECONDS`, `RM_RELAYER_ESCROW_ADDRESS`.
-- **Polymarket/on-chain**: `RM_POLYMARKET_API_BASE`, `RM_POLYMARKET_TIMEOUT_SECONDS`, order/sort/active/archive filters; optional `RM_RPC_URL`, `RM_FACTORY_ADDRESS`, `RM_MARKET_IMPLEMENTATION_ADDRESS`, `RM_RAKE_MANAGER_ADDRESS`, `RM_VERIFIER_ADDRESS`, `RM_CIRCUIT_HASH` for verifier validation and on-chain helpers.
-- **Rate limit**: `RM_RATE_LIMIT_REQUESTS_PER_WINDOW`, `RM_RATE_LIMIT_WINDOW_SECONDS`, `RM_RATE_LIMIT_WHITELIST`, `RM_RATE_LIMIT_TRUSTED_PROXIES` (disabled when `RM_RATE_LIMIT_REQUESTS_PER_WINDOW=0`).
-
-Notes: rate limiting is enabled by default outside dev/test unless `RM_RATE_LIMIT_ENABLED=false`.
-
-## Running & Testing
-
-```bash
-cd backend/api
-uv sync --extra dev --no-install-project
-uv run uvicorn app.server:app --reload --port 8000
-
-# Tests (pytest -n 4 by default)
-uv run pytest
-# or from repo root: ./backend/run_tests.sh
-```
-
-Docker/compose: `./run_local.sh api` builds and runs the container with Postgres/Redis.
-
-## File Map
-
-- `app/server.py` – app factory + lifespan + middleware wiring
-- `app/routes/` – routers for markets, pricing, trade, proofs, treasury, meta
-- `app/tasks.py` – cache refresh loop, quote sweeper, schema tagging, API heartbeat
-- `app/pricing.py` – FX fetch + QUOTE_V1 digest/signing helpers
-- `app/cache.py` / `app/services/cache_client.py` – Redis helper + tag metadata
-- `app/health.py` – dependency checks for `/healthz`
-- `app/http_middleware.py` / `app/rate_limit.py` / `app/security.py` – logging, Prometheus, CORS/headers, rate limiting
-- `app/repository_async.py` / `app/crud.py` – async Postgres queries
-- `tests/` – async pytest suite (Redis/DB mocked or ephemeral)
+**Tests**
+- `backend/run_tests.sh` (API portion).

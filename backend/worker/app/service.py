@@ -18,6 +18,7 @@ from shared import cache_async as shared_cache
 from shared import models as shared_models
 from shared import repository_async
 from shared.cache_keys import market_stats_cache_key
+from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from shared.logging import log_event, start_heartbeat_logger
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
@@ -58,6 +59,7 @@ logger = runtime.logger
 
 _LAST_CLOSED_RECONCILE_TS: float | None = None
 _LAST_POLYMARKET_UPDATED_AT_TS: float | None = None
+_LAST_MEMORY_PRESSURE_TS: float | None = None
 
 
 class MemoryStats(TypedDict, total=False):
@@ -111,6 +113,24 @@ async def _persist_market_stats(redis_client: Redis | None, markets: list[Market
     return await shared_cache.set_json_many(redis_client, payloads, ttl_seconds=ttl_seconds)
 
 
+def _log_db_metrics(context: str) -> None:
+    from shared.db_metrics import snapshot as snapshot_db_metrics
+
+    metrics = snapshot_db_metrics()
+    threshold = runtime.settings.db_query_warn_threshold
+    max_ms = runtime.settings.db_query_time_warn_ms
+    if metrics.query_count >= threshold or metrics.total_time_ms >= max_ms:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.db.query_budget.exceeded",
+            message="database query budget exceeded",
+            context=context,
+            query_count=metrics.query_count,
+            db_time_ms=round(metrics.total_time_ms, 2),
+        )
+
+
 def _calculate_sleep(start_time: float) -> float:
     """Determine how long the worker should sleep to honour the poll interval."""
     elapsed = time.monotonic() - start_time
@@ -134,18 +154,17 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
         return 0
     try:
         async with session_scope() as session:
-            rows = list(
-                (
-                    await session.execute(
-                        select(shared_models.Market, shared_models.Settlement).where(
-                            shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
-                            shared_models.Settlement.market_id == shared_models.Market.id,
-                            shared_models.Settlement.proof_status
-                            != shared_models.SettlementProofStatus.GENERATED.value,
-                        )
-                    )
-                ).all()
+            stmt = (
+                select(shared_models.Market, shared_models.Settlement)
+                .where(
+                    shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                    shared_models.Settlement.market_id == shared_models.Market.id,
+                    shared_models.Settlement.proof_status != shared_models.SettlementProofStatus.GENERATED.value,
+                )
+                .order_by(shared_models.Market.id.asc())
+                .limit(max(runtime.settings.proof_backfill_page_size, 1))
             )
+            rows = list((await session.execute(stmt)).all())
     except Exception:
         return 0
 
@@ -183,6 +202,27 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
 
     if redis_client is None:
         return 0
+    min_interval = max(runtime.settings.settlement_recovery_min_interval_seconds, 0)
+    if min_interval > 0:
+        key = "reveal_market_worker:settlement_recovery:last"
+        try:
+            last_raw = await redis_client.get(key)
+            last_ts = float(last_raw) if last_raw is not None else None
+        except Exception:
+            last_ts = None
+        now = time.monotonic()
+        if last_ts is not None and (now - last_ts) < min_interval:
+            return 0
+        try:
+            await redis_client.set(key, str(now), ex=max(min_interval * 2, 60))
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.settlement.recovery_cache_failed",
+                message="failed to cache settlement recovery timestamp",
+                error=str(exc),
+            )
     limit = max(runtime.settings.settlement_recovery_limit, 1)
     recovered = 0
     retry_prefix = "reveal_market_worker:settlement_recover:fail"
@@ -330,6 +370,13 @@ def _trim_worker_memory() -> bool:
 
 
 def _count_memory_pressure_objects() -> MemoryPressureStats:
+    if not runtime.settings.worker_memory_log_enabled:
+        return {"market_payload_objects": 0, "market_orm_objects": 0}
+    global _LAST_MEMORY_PRESSURE_TS
+    now = time.monotonic()
+    if _LAST_MEMORY_PRESSURE_TS is not None and (now - _LAST_MEMORY_PRESSURE_TS) < 300:
+        return {"market_payload_objects": 0, "market_orm_objects": 0}
+    _LAST_MEMORY_PRESSURE_TS = now
     counts: MemoryPressureStats = {
         "market_payload_objects": 0,
         "market_orm_objects": 0,
@@ -377,7 +424,11 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
     """Best-effort lease so only one worker paginates Gamma at a time."""
 
     if redis_client is None:
-        return True
+        jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
+        ttl = max(runtime.settings.polymarket_sync_lease_ttl_seconds, 5)
+        wait_for = ttl + (random.uniform(0, jitter) if jitter else 0)  # noqa: S311 - non-crypto jitter
+        await asyncio.sleep(wait_for)
+        return False
     jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
     ttl = max(runtime.settings.polymarket_sync_lease_ttl_seconds, 5)
     ttl_with_jitter = ttl + (random.uniform(0, jitter) if jitter else 0)  # noqa: S311 - non-crypto jitter
@@ -397,7 +448,7 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
             message="failed to acquire polymarket sync lease",
             error=str(exc),
         )
-        return True
+        return False
 
 
 async def _release_sync_lease(redis_client: Redis | None) -> None:
@@ -1073,6 +1124,9 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
 async def process_once(redis_client: Redis | None = None) -> dict[str, float | int | str | bool]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
+    from shared.db_metrics import reset_metrics as reset_db_metrics
+
+    reset_db_metrics()
     log_event(
         logger,
         logging.INFO,
@@ -1091,6 +1145,17 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         previous_revision=schema_state.previous_revision,
     )
     tick_start = time.perf_counter()
+    if runtime.circuit_breaker is None or getattr(runtime.circuit_breaker, "_redis", None) is None:
+        runtime.circuit_breaker = CircuitBreaker(
+            redis_client,
+            CircuitBreakerConfig(
+                key_prefix="reveal_market_worker:circuit",
+                failure_threshold=runtime.settings.circuit_failure_threshold,
+                window_seconds=runtime.settings.circuit_window_seconds,
+                cooldown_seconds=runtime.settings.circuit_cooldown_seconds,
+            ),
+            logger,
+        )
     try:
         summary, total_fetched, gap_count, latency_ms = await _sync_polymarket_feed(redis_client)
     except Exception as exc:  # pragma: no cover - defensive
@@ -1169,7 +1234,6 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         proofs=summary.proofs_generated,
         lock_batches=summary.lock_batches_submitted,
         gamma_metadata_updates=summary.gamma_metadata_updates,
-        gamma_events_written=summary.gamma_events_written,
         latency_ms=round(latency_ms, 2),
         cache_invalidations=summary.cache_invalidations,
         market_errors=summary.failed_markets,
@@ -1195,6 +1259,7 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
             error=str(exc),
         )
     await publish_heartbeat(redis_client, stats)
+    _log_db_metrics("process_once")
     await propagate_schema_revision(redis_client, schema_state)
     await persist_resolution_cache_updates(redis_client, summary)
     return stats

@@ -43,7 +43,19 @@ if [[ -n "${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}" ]]; then
   PYTEST_ARGS+=(-p pytest_asyncio)
 fi
 
-WORKERS="${PYTEST_WORKER_COUNT:-4}"
+if [[ -n "${PYTEST_WORKER_COUNT:-}" ]]; then
+  WORKERS="${PYTEST_WORKER_COUNT}"
+else
+  if command -v nproc >/dev/null 2>&1; then
+    CPU_COUNT="$(nproc)"
+  else
+    CPU_COUNT="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  fi
+  WORKERS=$((CPU_COUNT - 2))
+  if [[ "$WORKERS" -lt 1 ]]; then
+    WORKERS=1
+  fi
+fi
 XDIST_AVAILABLE=$("$PYTHON_BIN" - <<'PY'
 import importlib.util
 print("yes" if importlib.util.find_spec("xdist") or importlib.util.find_spec("pytest_xdist") else "no")

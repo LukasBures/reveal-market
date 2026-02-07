@@ -21,6 +21,7 @@ def test_rest_poll_failure_sets_last_error(caplog, monkeypatch):
     monkeypatch.setattr(streamer, "_poll_rest", _boom)
     caplog.set_level(logging.WARNING, logger="reveal_market.streamer.data")
 
+    state.active_connections = 1
     asyncio.run(streamer._rest_poll_loop())
     assert state.clob_rest_last_error == "boom"
     assert any(getattr(rec, "event", None) == "polymarket.rest.failed" for rec in caplog.records)

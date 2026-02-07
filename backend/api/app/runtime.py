@@ -11,8 +11,10 @@ import asyncio
 import logging
 from threading import Event
 
+import httpx
 from prometheus_fastapi_instrumentator import Instrumentator
 from redis.asyncio import Redis
+from shared.db_metrics import attach_db_metrics
 from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import AsyncGoldskyClient
 
@@ -59,9 +61,15 @@ request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
 
 cache_client: Redis | None = None
 cache_lock = asyncio.Lock()
+shared_http_clients: dict[float, httpx.AsyncClient] = {}
+shared_http_lock = asyncio.Lock()
 heartbeat_stop_event: Event | None = None
 metrics_task: asyncio.Task | None = None
 cache_refresh_task: asyncio.Task | None = None
 quote_sweeper_task: asyncio.Task | None = None
 relayer_queue_task: asyncio.Task | None = None
 goldsky_client: AsyncGoldskyClient | None = None
+
+
+def configure_db_metrics(engine) -> None:
+    attach_db_metrics(engine)

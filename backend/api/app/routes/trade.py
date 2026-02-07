@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, cast
 
-import httpx
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -35,7 +34,7 @@ from app.database import get_session
 from app.routes import pricing as pricing_routes
 from app.runtime import logger
 from app.runtime import settings as runtime_settings
-from app.services.cache_client import get_cache_client
+from app.services.cache_client import get_cache_client, get_http_client
 
 COMMITTED_EVENT_SIG = Web3.keccak(text="Committed(uint256,bytes32,uint256)").hex()
 _RESERVE_TICKET_LUA = """
@@ -628,8 +627,8 @@ async def _call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any
     last_error: Exception | None = None
     for attempt in range(attempts):
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(endpoint, json=payload, headers=headers)
+            client = await get_http_client(20.0)
+            resp = await client.post(endpoint, json=payload, headers=headers)
             if resp.status_code in (200, 202):
                 return resp.json()
             detail_text = resp.text
@@ -2154,10 +2153,20 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     )
 
 
-@router.post("/commitments/sync", response_model=schemas.CommitmentsSyncResponse, tags=["trade"])
-async def sync_commitments(payload: schemas.CommitmentsSyncRequest, session: AsyncSession = Depends(get_session)):
+@router.post(
+    "/internal/commitments/sync",
+    response_model=schemas.CommitmentsSyncResponse,
+    tags=["internal"],
+    include_in_schema=False,
+)
+async def sync_commitments(
+    payload: schemas.CommitmentsSyncRequest,
+    session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+):
     """Ingest commitments pushed by the relayer (for commits that bypassed the API)."""
 
+    _verify_internal_secret(internal_secret)
     market_identifier = payload.event_id or payload.market_id
     if not market_identifier:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
@@ -2185,10 +2194,20 @@ async def sync_commitments(payload: schemas.CommitmentsSyncRequest, session: Asy
     return schemas.CommitmentsSyncResponse(recorded=recorded)
 
 
-@router.post("/settlements/ingest", response_model=schemas.SettlementIngestResponse, tags=["trade"])
-async def ingest_settlement(payload: schemas.SettlementIngestRequest, session: AsyncSession = Depends(get_session)):
+@router.post(
+    "/internal/settlements/ingest",
+    response_model=schemas.SettlementIngestResponse,
+    tags=["internal"],
+    include_in_schema=False,
+)
+async def ingest_settlement(
+    payload: schemas.SettlementIngestRequest,
+    session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+):
     """Persist settlement snapshot from relayer/prover so claims can proceed."""
 
+    _verify_internal_secret(internal_secret)
     market_identifier = payload.event_id or payload.market_id
     if not market_identifier:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
@@ -2222,34 +2241,54 @@ async def ingest_settlement(payload: schemas.SettlementIngestRequest, session: A
     return schemas.SettlementIngestResponse(market_id=market.event_id, updated=True)
 
 
+def _verify_internal_secret(secret_header: str | None) -> None:
+    secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else None
+    if secret and secret_header != secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
+
+
 def _verify_relayer_secret(secret_header: str | None) -> None:
     if settings.relayer_webhook_secret:
         if secret_header != settings.relayer_webhook_secret:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_relayer_secret")
 
 
-@router.post("/relayer/commitments", response_model=schemas.CommitmentsSyncResponse, tags=["trade"])
+@router.post(
+    "/internal/relayer/commitments",
+    response_model=schemas.CommitmentsSyncResponse,
+    tags=["internal"],
+    include_in_schema=False,
+)
 async def relayer_commitments(
     payload: schemas.CommitmentsSyncRequest,
     relayer_secret: str | None = Header(default=None, alias="X-Relayer-Secret"),
     session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
 ):
     """Relayer-protected hook to push commitments."""
 
+    _verify_internal_secret(internal_secret)
     _verify_relayer_secret(relayer_secret)
-    return await sync_commitments(payload, session=session)
+    return await sync_commitments(payload, session=session, internal_secret=internal_secret)
 
 
-@router.post("/relayer/settlements", response_model=schemas.SettlementIngestResponse, tags=["trade"])
+@router.post(
+    "/internal/relayer/settlements",
+    response_model=schemas.SettlementIngestResponse,
+    tags=["internal"],
+    include_in_schema=False,
+)
 async def relayer_settlements(
     payload: schemas.SettlementIngestRequest,
     relayer_secret: str | None = Header(default=None, alias="X-Relayer-Secret"),
     session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
 ):
     """Relayer/prover-protected hook to push settlement snapshots."""
 
+    _verify_internal_secret(internal_secret)
     _verify_relayer_secret(relayer_secret)
-    return await ingest_settlement(payload, session=session)
+    return await ingest_settlement(payload, session=session, internal_secret=internal_secret)
 
 
 @router.get("/trade/status", response_model=schemas.TradeStatusResponse, tags=["trade"])

@@ -17,6 +17,7 @@ class FakeService:
         self.account = type("acct", (), {"address": "0xrelayer"})
         self.escrow = type("escrow", (), {"address": "0xescrow"})
         self.health_called = False
+        self._health_snapshot = None
 
     async def commit(self, payload):
         self.commits.append(payload)
@@ -45,6 +46,12 @@ class FakeService:
             "connected": True,
             "escrowOwner": self.account.address,
         }
+
+    def cached_health_snapshot(self):
+        return self._health_snapshot
+
+    def store_health_snapshot(self, payload):
+        self._health_snapshot = payload
 
     def validate_commit_payload(self, _payload):
         return None
@@ -81,6 +88,14 @@ def test_healthz(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
+    assert body["service"] == "relayer"
+
+
+def test_healthz_deep(client):
+    resp = client.get("/healthz/deep")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
     assert body["relayer"] == "0xrelayer"
     assert body["escrow"] == "0xescrow"
 
@@ -91,7 +106,7 @@ def test_healthz_includes_queue_stats(tmp_path):
     app = create_app(service, 1, "http://localhost", tx_queue=queue)
     client = TestClient(app)
 
-    resp = client.get("/healthz")
+    resp = client.get("/healthz/deep")
     assert resp.status_code == 200
     body = resp.json()
     assert body["queue"]["enabled"] is True

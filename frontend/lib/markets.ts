@@ -5,7 +5,7 @@ const sanitizeNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export type MarketSortOption = "totalVolume";
+export type MarketSortOption = "totalVolume" | "recent" | "popularity";
 export type VolumePreference = "24h" | "total";
 
 export const MARKET_CATEGORY_FILTERS = [

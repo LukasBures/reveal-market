@@ -31,7 +31,7 @@ from app.metrics_registry import MARKET_DETAIL_CACHE_COUNTER, MARKETS_CACHE_COUN
 from app.onchain import fetch_factory_markets
 from app.runtime import goldsky_client, logger, settings
 from app.services import markets as market_svc
-from app.services.cache_client import get_cache_client
+from app.services.cache_client import get_cache_client, get_http_client
 
 router = APIRouter()
 
@@ -77,9 +77,6 @@ async def list_markets(
     order_by: Annotated[str | None, Query(description="Order results (popularity|recent|volume)")] = None,
     trending: Annotated[bool | None, Query(description="Return trending slice first")] = None,
     featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
-    coalesce_groups: Annotated[
-        bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
-    ] = None,
     closes_within_hours: Annotated[
         int | None,
         Query(ge=1, le=168, description="Only return markets closing within this many hours"),
@@ -88,7 +85,6 @@ async def list_markets(
 ) -> list[schemas.EventResponse]:
     """List events with optional filters and heavy reliance on Redis caches."""
 
-    coalesce_mode = bool(coalesce_groups)
     normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
     popularity_mode = normalized_order_by == "popularity" or bool(trending)
     total_volume_mode = normalized_order_by == "volume"
@@ -111,7 +107,6 @@ async def list_markets(
         order_by=normalized_order_by or ("popularity" if popularity_mode else None),
         trending=trending,
         featured=featured,
-        coalesce_groups=coalesce_groups,
         closes_within_hours=closes_within_hours,
     )
     cache = await get_cache_client()
@@ -130,7 +125,6 @@ async def list_markets(
         order_by=normalized_order_by,
         trending=bool(trending),
         featured=featured,
-        coalesce_groups=coalesce_mode,
         closes_within_hours=closes_within_hours,
     )
     closes_after = None
@@ -162,8 +156,8 @@ async def list_markets(
                     ),
                     reverse=True,
                 )
-            cached_models = cached_models[:limit]
             cached_events = market_svc.build_event_responses(cached_models)
+            cached_events = cached_events[offset : offset + limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -180,7 +174,6 @@ async def list_markets(
                 offset=offset,
                 result_count=len(cached_events),
                 featured=featured,
-                coalesce_groups=coalesce_mode,
                 closes_within_hours=closes_within_hours,
             )
             return cached_events
@@ -191,36 +184,56 @@ async def list_markets(
         update_cache_context(request, cache_key=None, hit=False, source="markets:list")
 
     query_limit = limit
-    query_offset = offset
     if popularity_mode:
         query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
-        query_offset = 0
     elif volume_mode:
-        if total_volume_mode and coalesce_mode:
+        if total_volume_mode:
             query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
         else:
             query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
-        query_offset = offset
-    if coalesce_mode:
-        multiplier = 1 if total_volume_mode else 3
-        query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
-    markets = await crud.get_markets(
-        session,
-        status=status,
-        category=category,
-        oracle=oracle,
-        search=normalized_search,
-        featured=featured,
-        limit=query_limit,
-        offset=query_offset,
-        order_by=normalized_order_by,
-        coalesce_groups=coalesce_mode,
-        closes_after=closes_after,
-        closes_before=closes_before,
-    )
-    market_models = await market_svc.enrich_market_models(
-        session, [schemas.MarketResponse.model_validate(m) for m in markets]
-    )
+    multiplier = 1 if total_volume_mode else 3
+    query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
+    target_events = offset + limit
+    batch_limit = query_limit
+    batch_offset = 0
+    collected: list[schemas.MarketResponse] = []
+    seen_groups: set[str] = set()
+    while True:
+        batch = await crud.get_markets(
+            session,
+            status=status,
+            category=category,
+            oracle=oracle,
+            search=normalized_search,
+            featured=featured,
+            limit=batch_limit,
+            offset=batch_offset,
+            order_by=normalized_order_by,
+            closes_after=closes_after,
+            closes_before=closes_before,
+        )
+        if not batch:
+            break
+        for item in batch:
+            collected.append(schemas.MarketResponse.model_validate(item))
+            key = (
+                (
+                    getattr(item, "event_key", None)
+                    or getattr(item, "group_slug", None)
+                    or getattr(item, "event_id", None)
+                    or "unknown"
+                )
+                .strip()
+                .lower()
+            )
+            seen_groups.add(key)
+        if len(seen_groups) >= target_events:
+            break
+        if len(batch) < batch_limit:
+            break
+        batch_offset += batch_limit
+    markets = collected
+    market_models = await market_svc.enrich_market_models(session, markets)
     market_models = market_svc.filter_markets_for_visibility(
         market_models, hide_settled=(status or "").lower() == "active"
     )
@@ -249,8 +262,7 @@ async def list_markets(
             ),
             reverse=True,
         )
-    effective_offset = offset if query_offset == 0 else 0
-    market_models = market_models[effective_offset : effective_offset + limit]
+    # always coalesce groups and slice on events below
     if not market_models:
         log_event(
             logger,
@@ -317,7 +329,8 @@ async def list_markets(
             trending=bool(trending),
             closes_within_hours=closes_within_hours,
         )
-    return market_svc.build_event_responses(market_models)
+    events = market_svc.build_event_responses(market_models)
+    return events[offset : offset + limit]
 
 
 @router.get("/categories/{category_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
@@ -329,9 +342,6 @@ async def list_markets_by_category(
         Query(ge=1, le=settings.max_page_size, description="Maximum number of markets to return"),
     ] = settings.default_page_size,
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
-    coalesce_groups: Annotated[
-        bool | None, Query(description="Return a single representative per group_slug", alias="coalesce_groups")
-    ] = None,
     closes_within_hours: Annotated[
         int | None,
         Query(ge=1, le=168, description="Only return markets closing within this many hours"),
@@ -344,7 +354,6 @@ async def list_markets_by_category(
     normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
     volume_mode = normalized_order_by == "volume"
     total_volume_mode = normalized_order_by == "volume"
-    coalesce_mode = bool(coalesce_groups)
     start = time.perf_counter()
     cache = await get_cache_client()
     log_event(
@@ -356,7 +365,6 @@ async def list_markets_by_category(
         limit=limit,
         offset=offset,
         order_by=normalized_order_by,
-        coalesce_groups=bool(coalesce_groups),
         closes_within_hours=closes_within_hours,
     )
     closes_after = None
@@ -386,7 +394,6 @@ async def list_markets_by_category(
         limit,
         offset,
         order_by=normalized_order_by,
-        coalesce_groups=coalesce_groups,
         closes_within_hours=closes_within_hours,
     )
     cache_enabled = cache is not None and market_svc.should_cache_market_list(limit, offset, None, normalized_order_by)
@@ -397,7 +404,7 @@ async def list_markets_by_category(
             hydrated = await market_svc.enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
             models_from_cache = market_svc.filter_markets_for_visibility(hydrated, hide_settled=False)
-            if coalesce_mode and models_from_cache:
+            if models_from_cache:
                 models_from_cache = market_svc.coalesce_grouped_markets(
                     models_from_cache, use_total_volume=total_volume_mode
                 )
@@ -419,7 +426,6 @@ async def list_markets_by_category(
                 limit=limit,
                 result_count=len(models_from_cache),
                 duration_ms=round((time.perf_counter() - start) * 1000, 2),
-                coalesce_groups=coalesce_mode,
                 closes_within_hours=closes_within_hours,
             )
             return models_from_cache
@@ -430,7 +436,7 @@ async def list_markets_by_category(
     trending_category = category_slug_key == "trending"
     fetch_limit = limit
     fetch_offset = offset
-    if coalesce_mode:
+    if True:
         multiplier = 1 if total_volume_mode else 3
         fetch_limit = min(settings.max_page_size, max(limit * multiplier, settings.default_page_size))
     log_event(
@@ -452,7 +458,6 @@ async def list_markets_by_category(
             limit=fetch_limit,
             offset=fetch_offset,
             order_by=normalized_order_by,
-            coalesce_groups=coalesce_mode,
             closes_after=closes_after,
             closes_before=closes_before,
         )
@@ -463,7 +468,6 @@ async def list_markets_by_category(
             limit=fetch_limit,
             offset=fetch_offset,
             order_by=normalized_order_by,
-            coalesce_groups=coalesce_mode,
             closes_after=closes_after,
             closes_before=closes_before,
         )
@@ -478,7 +482,7 @@ async def list_markets_by_category(
                 await market_svc.enrich_market_models(session, fallback_matches),
                 hide_settled=False,
             )
-    if coalesce_mode and market_models:
+    if market_models:
         market_models = market_svc.coalesce_grouped_markets(market_models, use_total_volume=total_volume_mode)
     if volume_mode and market_models:
         market_models.sort(
@@ -545,29 +549,33 @@ async def get_event_by_key(
     event_key: str,
     session: AsyncSession = Depends(get_session),
 ) -> schemas.EventResponse:
-    """Resolve event detail by group slug (preferred) or event id fallback."""
+    """Resolve event detail by event grouping key (preferred) with event id fallback."""
 
     normalized_key = (event_key or "").strip().lower()
+    request_key = normalized_key or event_key
     cache = await get_cache_client()
     if cache is not None:
-        cached = await get_json(cache, market_svc.market_detail_cache_key(event_key))
-        if cached is None and normalized_key != event_key:
+        cached = await get_json(cache, market_svc.market_detail_cache_key(request_key))
+        if cached is None and normalized_key and normalized_key != request_key:
             cached = await get_json(cache, market_svc.market_detail_cache_key(normalized_key))
         if cached is not None:
             model = schemas.MarketResponse.model_validate(cached)
-            if normalized_key and getattr(model, "group_slug", None) == normalized_key and model.event_id != normalized_key:
-                cached = None
-            else:
-                await market_svc.enrich_market_models(session, [model], include_siblings=True)
-                return market_svc.build_event_responses([model])[0]
-    markets = await crud.get_markets_by_group_slug(session, normalized_key)
+            await market_svc.enrich_market_models(session, [model], include_siblings=True)
+            return market_svc.build_event_responses([model])[0]
+    markets = []
+    if normalized_key:
+        markets = await crud.get_markets_by_event_key(session, normalized_key)
     if not markets:
         market = await crud.get_market_by_event_id(session, event_key)
         if market is None:
+            market = await crud.get_market_by_event_id(session, normalized_key)
+        if market is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
-        group_slug = getattr(market, "group_slug", None)
-        if group_slug:
-            markets = await crud.get_markets_by_group_slug(session, str(group_slug))
+        key = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
+        if key:
+            markets = await crud.get_markets_by_event_key(session, str(key))
+            if not markets and getattr(market, "group_slug", None):
+                markets = await crud.get_markets_by_group_slug(session, str(market.group_slug))
         if not markets:
             markets = [market]
     market_models = await market_svc.enrich_market_models(
@@ -584,8 +592,8 @@ async def get_event_by_key(
                 await add_tag(cache, f"market:{market_model.event_id}", cache_key)
                 if getattr(market_model, "condition_id", None):
                     await add_tag(cache, f"resolution:{str(market_model.condition_id).lower()}", cache_key)
-                if getattr(market_model, "group_slug", None):
-                    await add_tag(cache, f"group:{str(market_model.group_slug)}", cache_key)
+                if getattr(market_model, "event_key", None):
+                    await add_tag(cache, f"group:{str(market_model.event_key)}", cache_key)
     events = market_svc.build_event_responses(market_models)
     return events[0]
 
@@ -1059,8 +1067,8 @@ async def market_price_history(
     host = str(settings.clob_host) if settings.clob_host else CLOB_HISTORY_DEFAULT_HOST
     url = f"{host.rstrip('/')}/prices-history"
     try:
-        async with httpx.AsyncClient(timeout=settings.polymarket_timeout_seconds) as client:
-            clob_response = await client.get(url, params=params)
+        client = await get_http_client(settings.polymarket_timeout_seconds)
+        clob_response = await client.get(url, params=params)
     except httpx.RequestError as exc:
         log_event(
             logger,
@@ -1195,7 +1203,9 @@ async def read_event_by_id(
             await add_tag(cache, f"market:{event_id}", cache_key)
             if getattr(response, "condition_id", None):
                 await add_tag(cache, f"resolution:{str(response.condition_id).lower()}", cache_key)
-            if getattr(response, "group_slug", None):
+            if getattr(response, "event_key", None):
+                await add_tag(cache, f"group:{str(response.event_key)}", cache_key)
+            elif getattr(response, "group_slug", None):
                 await add_tag(cache, f"group:{str(response.group_slug)}", cache_key)
             log_event(
                 logger,
@@ -1292,6 +1302,7 @@ async def upsert_market(
         event_id_value,
         cast(str | None, getattr(market, "condition_id", None)),
         cast(str | None, getattr(market, "group_slug", None)),
+        cast(str | None, getattr(market, "event_key", None)),
     )
     duration = (time.perf_counter() - start) * 1000
     log_event(
@@ -1337,6 +1348,7 @@ async def update_market(
         event_id,
         cast(str | None, getattr(market, "condition_id", None)),
         cast(str | None, getattr(market, "group_slug", None)),
+        cast(str | None, getattr(market, "event_key", None)),
     )
     duration = (time.perf_counter() - start) * 1000
     log_event(

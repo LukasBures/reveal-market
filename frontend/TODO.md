@@ -1,21 +1,32 @@
-# Frontend MVP Checklist (critical)
+# Frontend TODO
 
-Investor-facing gaps that must ship for the MVP. Each item should be validated with `npm run test`, manual QA on `/`, `/search`, `/events/<eventId>`, `/dashboard`, and Lighthouse on mobile + desktop.
+**MVP - Critical**
+- Ensure `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_PRICE_STREAMER_URL` are set in prod.
+- Verify event cards load quickly with cache-friendly API queries.
 
-- None at the moment; see `MVP.md` for cross-service blockers.
+**MVP - High**
+- Validate pagination limits and load-more behavior across all event lists.
 
-## Nice to have (post-MVP)
+**MVP - Medium**
+- Add Lighthouse checks for SEO and performance regressions.
 
-- Streamer/API visibility guardrails: add a user-facing banner when FX/streamer is stale, blocked, or `priceStreamsDisabled` is true; add dev-only CSP/connect-src warnings; include tests for banner visibility toggles.
-- Proof receipts UX: group multi-batch proofs per market, show batch root/index metadata, and add filtering on `/proofs`.
-- Marketing polish: copy tone, illustrations, motion once flows above are live.
-- Expanded search facets (tags, recency, liquidity) and saved searches + persistence.
-- Mobile-first refinements for dashboard/proofs layouts and navigation.
-- Additional analytics/observability for conversion + error funnels (errors, streamer/API reachability).
+**MVP - Low**
+- Add edge caching for event lists if CDN is available.
 
-## Production hardening
+**MVP - Nice to have**
+- Add prefetch for event detail on hover.
 
-- Performance budgets and bundle audits (LCP/TTI, font loading, streaming caches).
-- SLOs + alerting for frontend error rates and streamer/API reachability.
-- Accessibility sweep (keyboard traps, focus states, semantic landmarks, high contrast).
-- Incident playbooks and status messaging for streamer/API/FX outages.
+**Production - Critical**
+- Ensure CSP and security headers allow only required domains.
+
+**Production - High**
+- Add image optimization for event hero images.
+
+**Production - Medium**
+- Add analytics sampling to reduce overhead.
+
+**Production - Low**
+- Add bundle size budgets.
+
+**Production - Nice to have**
+- Add SSR caching for high-traffic pages.

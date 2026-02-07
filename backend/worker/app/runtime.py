@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import signal
 from typing import Any
 
 import httpx
 from py_clob_client.client import ClobClient
+from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from shared.indexers import AsyncGoldskyClient
 from shared.logging import log_event
 
@@ -36,6 +38,9 @@ PROVER_CLIENT: AsyncProverClient | None = None
 polymarket_client: AsyncPolymarketClient
 clob_client: ClobClient | None = None
 goldsky_client: AsyncGoldskyClient | None = None
+shared_http_clients: dict[float, httpx.AsyncClient] = {}
+shared_http_lock = asyncio.Lock()
+circuit_breaker: CircuitBreaker | None = None
 
 
 def _build_polymarket_client() -> AsyncPolymarketClient:
@@ -125,7 +130,7 @@ def reload_worker_settings(
     signum: int | None = None, frame: Any | None = None
 ) -> None:  # pragma: no cover - signal handler
     """Refresh settings + clients on SIGHUP so long-lived processes pick up changes."""
-    global settings, polymarket_client, clob_client, goldsky_client, PROVER_CLIENT
+    global settings, polymarket_client, clob_client, goldsky_client, PROVER_CLIENT, circuit_breaker
     new_settings = reload_settings()
     try:
         validate_required_settings(new_settings)
@@ -143,6 +148,17 @@ def reload_worker_settings(
     clob_client = _build_clob_client()
     goldsky_client = _build_goldsky_client()
     PROVER_CLIENT = _build_prover_client()
+    circuit_breaker = CircuitBreaker(
+        None,
+        CircuitBreakerConfig(
+            key_prefix="reveal_market_worker:circuit",
+            failure_threshold=settings.circuit_failure_threshold,
+            window_seconds=settings.circuit_window_seconds,
+            cooldown_seconds=settings.circuit_cooldown_seconds,
+        ),
+        logger,
+    )
+    shared_http_clients.clear()
     log_event(
         logger,
         logging.DEBUG,
@@ -157,8 +173,32 @@ polymarket_client = _build_polymarket_client()
 clob_client = _build_clob_client()
 PROVER_CLIENT = _build_prover_client()
 goldsky_client = _build_goldsky_client()
+circuit_breaker = CircuitBreaker(
+    None,
+    CircuitBreakerConfig(
+        key_prefix="reveal_market_worker:circuit",
+        failure_threshold=settings.circuit_failure_threshold,
+        window_seconds=settings.circuit_window_seconds,
+        cooldown_seconds=settings.circuit_cooldown_seconds,
+    ),
+    logger,
+)
 
 try:  # pragma: no cover - signal availability depends on platform
     signal.signal(signal.SIGHUP, reload_worker_settings)
 except (AttributeError, ValueError):
     pass
+
+
+async def get_http_client(timeout: float) -> httpx.AsyncClient:
+    timeout_value = float(timeout)
+    async with shared_http_lock:
+        client = shared_http_clients.get(timeout_value)
+        if client is not None and getattr(client, "is_closed", False):
+            await client.aclose()
+            shared_http_clients.pop(timeout_value, None)
+            client = None
+        if client is None:
+            client = httpx.AsyncClient(timeout=timeout_value)
+            shared_http_clients[timeout_value] = client
+        return client

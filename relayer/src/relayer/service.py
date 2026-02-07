@@ -74,13 +74,31 @@ class RelayerService:
     preflight_mode: str = "none"
     api_base_url: str | None = None
     api_bearer_token: str | None = None
+    api_internal_secret: str | None = None
     api_timeout_seconds: int = 10
     _nonce_lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
+    _health_snapshot: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    _health_snapshot_ts: float | None = field(default=None, init=False, repr=False)
+    health_deep_cache_ttl_seconds: int = 10
 
     def _get_nonce_lock(self) -> asyncio.Lock:
         if self._nonce_lock is None:
             self._nonce_lock = asyncio.Lock()
         return self._nonce_lock
+
+    def cached_health_snapshot(self) -> dict[str, Any] | None:
+        ttl_seconds = max(int(self.health_deep_cache_ttl_seconds or 0), 0)
+        if ttl_seconds <= 0:
+            return None
+        if not self._health_snapshot or self._health_snapshot_ts is None:
+            return None
+        if (time.time() - self._health_snapshot_ts) > ttl_seconds:
+            return None
+        return self._health_snapshot
+
+    def store_health_snapshot(self, payload: dict[str, Any]) -> None:
+        self._health_snapshot = payload
+        self._health_snapshot_ts = time.time()
 
     def _require_field(self, payload: Mapping[str, Any], key: str) -> Any:
         if key not in payload or payload[key] is None:
@@ -738,9 +756,11 @@ class RelayerService:
         headers = {}
         if self.api_bearer_token:
             headers["Authorization"] = f"Bearer {self.api_bearer_token}"
+        if self.api_internal_secret:
+            headers["X-Internal-Secret"] = self.api_internal_secret
         try:
             async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
-                resp = await client.post(f"{self.api_base_url}/commitments/sync", json=body, headers=headers)
+                resp = await client.post(f"{self.api_base_url}/internal/commitments/sync", json=body, headers=headers)
             logger.info(
                 "relayer.ingest.commit",
                 status=resp.status_code,
@@ -781,9 +801,11 @@ class RelayerService:
         headers = {}
         if self.api_bearer_token:
             headers["Authorization"] = f"Bearer {self.api_bearer_token}"
+        if self.api_internal_secret:
+            headers["X-Internal-Secret"] = self.api_internal_secret
         try:
             async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
-                resp = await client.post(f"{self.api_base_url}/settlements/ingest", json=body, headers=headers)
+                resp = await client.post(f"{self.api_base_url}/internal/settlements/ingest", json=body, headers=headers)
             logger.info(
                 "relayer.ingest.settlement",
                 status=resp.status_code,
@@ -812,6 +834,7 @@ def build_service(
     preflight_mode: str = "none",
     api_base_url: str | None = None,
     api_bearer_token: str | None = None,
+    api_internal_secret: str | None = None,
     api_timeout_seconds: int = 10,
 ) -> RelayerService:
     escrow_addr: ChecksumAddress = web3.to_checksum_address(escrow_address)
@@ -833,5 +856,6 @@ def build_service(
         preflight_mode=preflight_mode,
         api_base_url=api_base_url,
         api_bearer_token=api_bearer_token,
+        api_internal_secret=api_internal_secret,
         api_timeout_seconds=api_timeout_seconds,
     )

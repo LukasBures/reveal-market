@@ -190,6 +190,10 @@ class Settings(BaseSettings):
     performance_heartbeat_interval_seconds: int = Field(default=60, ge=10)
     worker_heartbeat_stale_seconds: int = Field(default=420, ge=30)
     slow_request_threshold_ms: float = Field(default=500.0, ge=10)
+    health_cache_ttl_seconds: int = Field(default=10, ge=0)
+    health_deep_cache_ttl_seconds: int = Field(default=10, ge=0)
+    db_query_warn_threshold: int = Field(default=50, ge=1)
+    db_query_time_warn_ms: float = Field(default=150.0, ge=0)
     run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
@@ -201,6 +205,9 @@ class Settings(BaseSettings):
     relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
     relayer_retry_attempts: int = Field(default=2, ge=0, description="Retry attempts for relayer commit/claim calls")
     relayer_retry_backoff_seconds: float = Field(default=0.5, ge=0, description="Backoff between relayer retries")
+    relayer_circuit_failure_threshold: int = Field(default=10, ge=1)
+    relayer_circuit_window_seconds: int = Field(default=60, ge=1)
+    relayer_circuit_cooldown_seconds: int = Field(default=90, ge=1)
     relayer_queue_enabled: bool = Field(default=True, description="Enable Redis-backed relayer job queue fallback")
     relayer_queue_key: str = Field(default="reveal_market:relayer_queue", description="Redis list key for relayer jobs")
     relayer_queue_result_ttl_seconds: int = Field(
@@ -211,6 +218,9 @@ class Settings(BaseSettings):
     )
     relayer_webhook_secret: str | None = Field(
         default=None, description="Shared secret for relayer/prover ingestion hooks"
+    )
+    internal_api_secret: SecretStr | None = Field(
+        default=None, description="Shared secret required for internal API endpoints"
     )
     proof_queue_key: str = Field(
         default="reveal_market_worker:proof_queue",

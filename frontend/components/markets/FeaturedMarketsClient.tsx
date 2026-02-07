@@ -50,14 +50,15 @@ export function FeaturedEventsClient({
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [fetchHint, setFetchHint] = useState<"auto" | "manual" | null>(null);
   const [intersectionSupported, setIntersectionSupported] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const setSentinel = useCallback((node: HTMLDivElement | null) => {
     sentinelRef.current = node;
   }, []);
 
-  const batchSize = Math.max(pageSize, 30);
-  const orderBy = "volume";
+  const batchSize = Math.max(pageSize, 1);
+  const orderBy = sortBy === "recent" ? "recent" : sortBy === "popularity" ? "popularity" : "volume";
   const filterSignature = `${searchQuery ?? ""}|${categoryFilter ?? ""}|${pageSize}|${status}|${onlyActive}|${trending ?? "auto"}|${sortBy}|${closesWithinHours ?? "default"}`;
 
   const normalizedCategory = categoryFilter ? categorySlugFromLabel(categoryFilter) ?? categoryFilter : undefined;
@@ -118,7 +119,6 @@ export function FeaturedEventsClient({
         offset: pageParam,
         status,
         trending,
-        coalesceGroups: false,
         orderBy,
         closesWithinHours,
       }),
@@ -131,6 +131,17 @@ export function FeaturedEventsClient({
       const total = allPages.reduce((acc, page) => acc + page.length, 0);
       if (total >= maxItems) return undefined;
       if (lastPage.length === 0) return undefined;
+      const priorIds = new Set(
+        allPages
+          .slice(0, -1)
+          .flatMap((page) => page.map((event) => event.eventId ?? ""))
+          .filter(Boolean),
+      );
+      const hasNewEvent = lastPage.some((event) => {
+        const id = event.eventId ?? "";
+        return id && !priorIds.has(id);
+      });
+      if (!hasNewEvent) return undefined;
       return total;
     },
     staleTime: 30_000,
@@ -159,6 +170,7 @@ export function FeaturedEventsClient({
   const handleLoadMore = useCallback(
     (mode: "auto" | "manual" = "manual") => {
       if (!hasNextPage || isPending || isFetchingNextPage) return;
+      setFetchHint(mode);
       setShowLoadingState(true);
       startTransition(() => {
         fetchNextPage()
@@ -184,10 +196,11 @@ export function FeaturedEventsClient({
   );
 
   const isBusy = isPending || isFetchingNextPage;
+  const isAutoFetching = fetchHint === "auto" && isBusy;
   const canAutoLoad = intersectionSupported && hasNextPage && autoLoadCount < AUTO_LOAD_BATCHES;
-  const showManualButton = events.length > 0 && hasNextPage;
   const showLoadingIndicator =
-    showLoadingState && intersectionSupported && autoLoadCount < AUTO_LOAD_BATCHES;
+    showLoadingState && isAutoFetching && hasNextPage && intersectionSupported && autoLoadCount < AUTO_LOAD_BATCHES;
+  const showManualButton = events.length > 0 && hasNextPage && !showLoadingIndicator && !isAutoFetching;
 
   useEffect(() => {
     if (!canAutoLoad || isBusy) {
@@ -208,10 +221,22 @@ export function FeaturedEventsClient({
           break;
         }
       }
-    }, { rootMargin: "200px" });
+    }, { rootMargin: "400px" });
     observer.observe(target);
     return () => observer.disconnect();
   }, [canAutoLoad, handleLoadMore, isBusy, events.length]);
+
+  useEffect(() => {
+    if (!canAutoLoad || isBusy) return;
+    if (events.length >= pageSize) return;
+    handleLoadMore("auto");
+  }, [canAutoLoad, events.length, handleLoadMore, isBusy, pageSize]);
+
+  useEffect(() => {
+    if (!isBusy) {
+      setFetchHint(null);
+    }
+  }, [isBusy]);
 
   const renderEmptyState = () => {
     if (emptyNotice) {
@@ -221,11 +246,25 @@ export function FeaturedEventsClient({
         </div>
       );
     }
+    const suggestions = ["Crypto", "Finance", "Sports", "Politics"];
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-52 rounded-3xl border border-white/5 bg-white/5" />
-        ))}
+      <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-center text-sm text-slate-300">
+        <p className="text-base font-semibold text-white">No markets match that yet.</p>
+        <p className="mt-2 text-sm text-slate-400">Try a different category or clear filters to explore.</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {suggestions.map((category) => {
+            const slug = categorySlugFromLabel(category) ?? category.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+            return (
+              <a
+                key={category}
+                href={`/?category=${encodeURIComponent(slug)}`}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70 transition hover:border-brand-400/60 hover:text-white"
+              >
+                {category}
+              </a>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -237,6 +276,13 @@ export function FeaturedEventsClient({
       ) : (
         <EventGrid events={events} />
       )}
+      {isBusy && events.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton key={index} className="h-40 animate-pulse rounded-3xl border border-white/5 bg-white/5" />
+          ))}
+        </div>
+      ) : null}
       {hasNextPage && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
       {showLoadingIndicator && (
         <div
@@ -248,18 +294,18 @@ export function FeaturedEventsClient({
         </div>
       )}
       {showManualButton && (
-      <div className="flex items-center justify-center">
-        <button
-          type="button"
-          disabled={!hasNextPage || isBusy}
-          aria-busy={isBusy}
-          onClick={() => handleLoadMore("manual")}
-          className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isBusy ? "Loading..." : hasNextPage ? "Load more events" : "All events loaded"}
-        </button>
-      </div>
-    )}
+        <div className="flex items-center justify-center">
+          <button
+            type="button"
+            disabled={!hasNextPage || isBusy}
+            aria-busy={isBusy}
+            onClick={() => handleLoadMore("manual")}
+            className="appearance-none rounded-full border border-white/20 bg-transparent px-6 py-2 text-sm font-semibold text-white transition hover:border-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {hasNextPage ? "Load more events" : "All events loaded"}
+          </button>
+        </div>
+      )}
   </section>
 );
 }

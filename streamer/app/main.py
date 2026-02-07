@@ -295,7 +295,21 @@ def create_app() -> FastAPI:
 
     @app_instance.get("/healthz")
     async def healthz() -> dict:
-        return await _health_payload()
+        snapshot = state.cached_health_snapshot()
+        return snapshot or await _health_payload()
+
+    @app_instance.get("/healthz/deep")
+    async def healthz_deep(force: bool = False) -> dict:
+        if force:
+            payload = await _health_payload()
+            state.store_health_snapshot(payload)
+            return payload
+        snapshot = state.cached_health_snapshot()
+        if snapshot:
+            return snapshot
+        payload = await _health_payload()
+        state.store_health_snapshot(payload)
+        return payload
 
     async def _fx_payload() -> dict:
         quote = await state.get_fx()

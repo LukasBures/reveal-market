@@ -91,7 +91,6 @@ async def test_sync_market_reuses_prefetched_instance(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.5, 0.5],
-            gamma_raw={"id": "evt-prefetch"},
         )
 
         async with session_factory() as session:
@@ -213,7 +212,6 @@ async def test_sync_market_persists_resolution(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.6, 0.4],
-            gamma_raw={"id": "evt-resolution"},
             condition_id="0x" + "3" * 64,
         )
 
@@ -247,7 +245,6 @@ async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.45, 0.55],
-            gamma_raw={"id": "evt-skip"},
             source_updated_at=updated_at,
             content_hash="hash-1",
         )
@@ -295,7 +292,6 @@ async def test_sync_market_skips_when_source_timestamp_matches_without_hash(monk
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.45, 0.55],
-            gamma_raw={"id": "evt-skip-no-hash"},
             source_updated_at=updated_at,
         )
 

@@ -677,7 +677,7 @@ export function StakeQuoteCard({
 
   return (
     <div
-      className={`md:sticky md:top-40 self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
+      className={`self-start rounded-3xl border border-white/10 bg-slate-950/80 p-5 text-sm text-slate-100 backdrop-blur ${highlightClass}`}
     >
       {marketTitle && (
         <p className="text-sm font-semibold text-white/90">{marketTitle}</p>

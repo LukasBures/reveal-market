@@ -14,6 +14,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from shared.db_metrics import reset_metrics as reset_db_metrics
+from shared.db_metrics import snapshot as snapshot_db_metrics
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.logging_config import setup_logging
@@ -206,6 +208,7 @@ def attach_request_context(app: FastAPI) -> None:
         request_id = request.headers.get("x-request-id") or request.headers.get("traceparent") or str(uuid.uuid4())
         token = set_request_id(request_id)
         start_time = time.perf_counter()
+        reset_db_metrics()
         request.state.cache_context = {
             "cache_hit": None,
             "cache_key": None,
@@ -303,6 +306,24 @@ def attach_request_context(app: FastAPI) -> None:
             reset_request_id(token)
             raise
         cache_meta = extract_cache_metadata(request)
+        db_metrics = snapshot_db_metrics()
+        if (
+            db_metrics.query_count >= settings.db_query_warn_threshold
+            or db_metrics.total_time_ms >= settings.db_query_time_warn_ms
+        ):
+            log_event(
+                logger,
+                logging.WARNING,
+                event="db.query_budget.exceeded",
+                message="database query budget exceeded",
+                query_count=db_metrics.query_count,
+                db_time_ms=round(db_metrics.total_time_ms, 2),
+                path=request.url.path,
+                method=request.method,
+            )
+        if not is_production:
+            response.headers["x-db-queries"] = str(db_metrics.query_count)
+            response.headers["x-db-time-ms"] = f"{db_metrics.total_time_ms:.2f}"
         response.headers["x-request-id"] = request_id
         _log_request_completion(request, response, start_time, cache_meta, request_id)
         reset_request_id(token)

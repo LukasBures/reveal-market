@@ -80,8 +80,21 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict:
-        status = await service.health()
-        return {"status": "ok", "service": "hedger", **status}
+        snapshot = service.cached_health_snapshot()
+        return snapshot or {"status": "ok", "service": "hedger"}
+
+    @app.get("/healthz/deep")
+    async def healthz_deep(force: bool = False) -> dict:
+        if force:
+            payload = await service.health()
+            service.store_health_snapshot(payload)
+            return payload
+        snapshot = service.cached_health_snapshot()
+        if snapshot:
+            return snapshot
+        payload = await service.health()
+        service.store_health_snapshot(payload)
+        return payload
 
     @app.get("/metrics")
     async def metrics() -> Response:

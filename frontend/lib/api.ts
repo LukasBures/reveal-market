@@ -105,10 +105,20 @@ const normalizeNumberArray = (value: any): number[] | undefined => {
   return undefined;
 };
 
+const humanizeGroupSlug = (slug?: string | null): string | undefined => {
+  if (!slug) return undefined;
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
-  const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
+  const eventIdValue = coerceId(payload.event_key ?? payload.eventKey ?? payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
-  const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? null;
+  const eventKey = payload.event_key ?? payload.eventKey ?? payload.extra_data?.event_key ?? null;
+  const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? eventKey ?? null;
   const groupItemTitle = payload.group_item_title ?? payload.groupItemTitle ?? payload.extra_data?.group_item_title ?? null;
   const groupItemThreshold =
     coerceNumber(payload.group_item_threshold ?? payload.groupItemThreshold ?? payload.extra_data?.group_item_threshold) ??
@@ -392,7 +402,6 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
   }
   try {
     const onlyFeatured = options?.onlyFeatured ?? false;
-    const coalesceGroups = options?.coalesceGroups ?? true;
     let endpoint = "/events";
     const params = new URLSearchParams();
     params.set("limit", String(limit));
@@ -412,9 +421,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
     if (onlyFeatured) {
       params.set("only_featured", "1");
     }
-    if (coalesceGroups) {
-      params.set("coalesce_groups", "1");
-    }
+    params.set("coalesce_groups", "1");
     const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));
@@ -431,7 +438,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
     const trendingMode = options?.trending === true;
     if (options?.category) {
       const slug = slugify(options.category);
-      endpoint = `/categories/${encodeURIComponent(slug)}`;
+      params.set("category", slug);
       fetchTags.push(`category:${slug}`);
     } else {
       fetchTags.push("markets:list");
@@ -481,11 +488,18 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
     return items.map((item: any) => {
       const marketsPayload = Array.isArray(item.markets) ? item.markets : [];
       const markets = marketsPayload.map((market: any) => mapApiMarketToSummary(market));
-      const groupSlug = item.group_slug ?? item.groupSlug ?? null;
+      const eventKey = item.event_key ?? item.eventKey ?? null;
+      const groupSlug = item.group_slug ?? item.groupSlug ?? eventKey ?? null;
       const imageUrl = item.image_url ?? item.imageUrl ?? markets[0]?.imageUrl ?? null;
+      const shouldHumanizeTitle = groupSlug && marketsPayload.length > 1;
+      const title =
+        (shouldHumanizeTitle ? humanizeGroupSlug(groupSlug) : null) ??
+        item.title ??
+        markets[0]?.title ??
+        "";
       return {
-        eventId: item.event_id ?? item.eventId ?? groupSlug ?? markets[0]?.eventId ?? "",
-        title: item.title ?? markets[0]?.title ?? "",
+        eventId: item.event_key ?? item.eventKey ?? item.event_id ?? item.eventId ?? groupSlug ?? markets[0]?.eventId ?? "",
+        title,
         category: item.category ?? markets[0]?.category ?? undefined,
         groupSlug: groupSlug ?? markets[0]?.groupSlug ?? null,
         imageUrl,
@@ -909,7 +923,7 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
     const marketsPayload = Array.isArray(payload.markets) ? payload.markets : [];
     const primary = marketsPayload[0] ?? payload;
     const detail: MarketDetail = mapMarketDetailPayload(primary, eventId);
-    detail.groupSlug = payload.group_slug ?? payload.groupSlug ?? detail.groupSlug;
+    detail.groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.event_key ?? payload.eventKey ?? detail.groupSlug;
     detail.siblings = marketsPayload
       .slice(1)
       .map((item: any) => mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""));

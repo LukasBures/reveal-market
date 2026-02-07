@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import httpx
 from eth_account import Account
 from eth_typing import ChecksumAddress
 from redis.asyncio import Redis
@@ -243,10 +242,19 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     try:
         if int(next_ticket_id or 0) > 0:
             total_batches = (int(next_ticket_id) + BATCH_SIZE - 1) // BATCH_SIZE
-            for index in range(total_batches):
-                root_value = await contract.functions.batchRoots(index).call()
-                count_value = await contract.functions.batchCounts(index).call()
-                batch_roots.append(_normalize_bytes32(root_value) or str(root_value))
+
+            async def _fetch_batch(idx: int) -> tuple[str, int]:
+                root_value = await contract.functions.batchRoots(idx).call()
+                count_value = await contract.functions.batchCounts(idx).call()
+                return _normalize_bytes32(root_value) or str(root_value), int(count_value)
+
+            tasks = [_fetch_batch(index) for index in range(total_batches)]
+            results: list[tuple[str, int] | BaseException] = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    continue
+                root_value, count_value = result
+                batch_roots.append(root_value)
                 batch_counts.append(int(count_value))
     except Exception:
         batch_roots = []
@@ -333,15 +341,21 @@ async def _upsert_settlement_from_chain(
 
 
 async def _fetch_relayer_address(relayer_base_url: str) -> str | None:
+    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("relayer"):
+        return None
     try:
-        async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
-            resp = await client.get(relayer_base_url.rstrip("/") + "/healthz")
+        client = await runtime.get_http_client(runtime.settings.relayer_http_timeout_seconds)
+        resp = await client.get(relayer_base_url.rstrip("/") + "/healthz")
         if resp.status_code != 200:
             return None
         payload = resp.json()
         address = payload.get("relayer") or payload.get("address")
+        if runtime.circuit_breaker:
+            await runtime.circuit_breaker.record_success("relayer")
         return str(address) if address else None
     except Exception:
+        if runtime.circuit_breaker:
+            await runtime.circuit_breaker.record_failure("relayer")
         return None
 
 
@@ -353,17 +367,24 @@ async def _poll_relayer_job(
     poll_seconds: float,
     max_attempts: int,
 ) -> dict[str, Any] | None:
-    for _ in range(max_attempts):
+    delay = max(poll_seconds, 0.1)
+    for _attempt in range(max_attempts):
         try:
+            if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("relayer"):
+                return None
             status_url = relayer_base_url.rstrip("/") + "/status"
-            async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
-                resp = await client.post(status_url, json={"jobId": job_id}, headers=headers)
+            client = await runtime.get_http_client(runtime.settings.relayer_http_timeout_seconds)
+            resp = await client.post(status_url, json={"jobId": job_id}, headers=headers)
             if resp.status_code == 200:
                 payload = resp.json()
                 status = str(payload.get("status") or "").lower()
                 if status in {"succeeded", "confirmed"}:
+                    if runtime.circuit_breaker:
+                        await runtime.circuit_breaker.record_success("relayer")
                     return payload
                 if status in {"failed", "deadletter"}:
+                    if runtime.circuit_breaker:
+                        await runtime.circuit_breaker.record_failure("relayer")
                     return payload
         except Exception as exc:
             log_event(
@@ -374,7 +395,10 @@ async def _poll_relayer_job(
                 job_id=job_id,
                 error=str(exc),
             )
-        await asyncio.sleep(poll_seconds)
+            if runtime.circuit_breaker:
+                await runtime.circuit_breaker.record_failure("relayer")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, max(poll_seconds, 1.0) * 8)
     return None
 
 
@@ -412,14 +436,20 @@ async def _call_relayer_lock_batches(
     poll_seconds: float,
     max_attempts: int,
 ) -> dict[str, Any] | None:
-    async with httpx.AsyncClient(timeout=runtime.settings.relayer_http_timeout_seconds) as client:
-        resp = await client.post(relayer_base_url.rstrip("/") + "/lock-batches", json=payload, headers=headers)
+    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("relayer"):
+        raise RuntimeError("relayer_circuit_open")
+    client = await runtime.get_http_client(runtime.settings.relayer_http_timeout_seconds)
+    resp = await client.post(relayer_base_url.rstrip("/") + "/lock-batches", json=payload, headers=headers)
     if resp.status_code in {200, 201}:
+        if runtime.circuit_breaker:
+            await runtime.circuit_breaker.record_success("relayer")
         return resp.json()
     if resp.status_code == 202:
         body = resp.json()
         job_id = body.get("jobId") or body.get("job_id")
         if not job_id:
+            if runtime.circuit_breaker:
+                await runtime.circuit_breaker.record_failure("relayer")
             return body
         return await _poll_relayer_job(
             relayer_base_url,
@@ -428,6 +458,8 @@ async def _call_relayer_lock_batches(
             poll_seconds=poll_seconds,
             max_attempts=max_attempts,
         )
+    if runtime.circuit_breaker:
+        await runtime.circuit_breaker.record_failure("relayer")
     raise RuntimeError(f"relayer_lock_batches_failed:{resp.status_code}")
 
 

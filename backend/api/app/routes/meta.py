@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.config import get_settings
 from app.database import get_session
-from app.health import build_health_response
+from app.health import build_deep_health_response, build_health_response
 from app.services.heartbeat import build_api_dashboard, build_worker_dashboard
 
 router = APIRouter()
@@ -33,6 +33,16 @@ async def health_check(session: AsyncSession = Depends(get_session)) -> schemas.
     """Readiness probe that fans out to DB/Redis/worker/Polymarket checks."""
 
     return await build_health_response(session)
+
+
+@router.get("/healthz/deep", response_model=schemas.HealthResponse, tags=["health"])
+async def health_check_deep(
+    session: AsyncSession = Depends(get_session),
+    force: bool = Query(default=False),
+) -> schemas.HealthResponse:
+    """Deep health probe (cached) for dependency checks."""
+
+    return await build_deep_health_response(session, force=force)
 
 
 @router.get("/ready", response_model=schemas.HealthResponse, tags=["health"])

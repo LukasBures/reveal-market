@@ -47,8 +47,10 @@ service = build_service(
     preflight_mode=cfg.preflight_mode,
     api_base_url=cfg.api_base_url,
     api_bearer_token=cfg.api_bearer_token,
+    api_internal_secret=cfg.api_internal_secret,
     api_timeout_seconds=cfg.api_timeout_seconds,
 )
+service.health_deep_cache_ttl_seconds = cfg.health_deep_cache_ttl_seconds
 
 queue = TxQueue(
     cfg.queue_db_path,
