@@ -318,7 +318,10 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                 try:
                     if not market.market_address or not runtime.settings.rpc_url:
                         raise RuntimeError("missing_market_address_or_rpc")
-                    refreshed = await _upsert_settlement_from_chain(session, market, force=True)
+                    refreshed = await asyncio.wait_for(
+                        _upsert_settlement_from_chain(session, market, force=True),
+                        timeout=runtime.settings.chain_refresh_timeout_seconds,
+                    )
                     if refreshed is not None:
                         settlement = refreshed
                     if settlement.winning_outcome_id is None and market.condition_id:
@@ -658,6 +661,57 @@ def _order_supports_updated_at_cutoff() -> bool:
     return str(order).lower() in {"updatedat", "updated_at"}
 
 
+def _cursor_for_payload(payload: MarketPayload) -> tuple[float | None, str | None]:
+    updated_at_raw = getattr(payload, "updated_at", None)
+    updated_at = _to_timestamp(updated_at_raw) if isinstance(updated_at_raw, datetime) else None
+    event_id = getattr(payload, "event_id", None)
+    if event_id is not None:
+        event_id = str(event_id)
+    return updated_at, event_id
+
+
+async def _get_polymarket_cursor(redis_client: Redis | None) -> tuple[float | None, str | None]:
+    if redis_client is None:
+        return None, None
+    try:
+        raw = await redis_client.get(runtime.settings.polymarket_sync_cursor_key)
+        if not raw:
+            return None, None
+        parts = str(raw).split("|", 1)
+        ts = _parse_timestamp(parts[0]) if parts else None
+        eid = parts[1] if len(parts) > 1 and parts[1] else None
+        return ts, eid
+    except Exception as exc:  # pragma: no cover - best effort
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.fetch.cursor_read_failed",
+            message="failed to read polymarket cursor",
+            error=str(exc),
+        )
+        return None, None
+
+
+async def _record_polymarket_cursor(
+    redis_client: Redis | None, last_seen_ts: float | None, last_seen_id: str | None
+) -> None:
+    if redis_client is None:
+        return
+    if last_seen_ts is None and last_seen_id is None:
+        return
+    cursor_value = f"{last_seen_ts or ''}|{last_seen_id or ''}"
+    try:
+        await redis_client.set(runtime.settings.polymarket_sync_cursor_key, cursor_value)
+    except Exception as exc:  # pragma: no cover - best effort
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.fetch.cursor_write_failed",
+            message="failed to persist polymarket cursor",
+            error=str(exc),
+        )
+
+
 async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float | None:
     if not _order_supports_updated_at_cutoff():
         return None
@@ -952,6 +1006,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         attempt = 0
         last_exc: Exception | None = None
         cutoff_ts = await _get_polymarket_updated_at_cutoff(redis_client)
+        cursor_ts, cursor_event_id = await _get_polymarket_cursor(redis_client)
         while attempt < attempts:
             attempt += 1
             last_exc = None
@@ -961,6 +1016,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             gap_count = 0
             stop_reason: str | None = None
             last_seen_ts: float | None = None
+            last_seen_id: str | None = None
             try:
                 only_open = runtime.settings.polymarket_only_open_markets is True
                 closed_param = False if only_open else None
@@ -1039,7 +1095,24 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         page_min_ts, page_max_ts = _page_updated_at_bounds(page)
                         if page_max_ts is not None:
                             last_seen_ts = max(last_seen_ts or page_max_ts, page_max_ts)
+                        if page:
+                            candidate = max(
+                                page,
+                                key=lambda p: (
+                                    _cursor_for_payload(p)[0] or 0.0,
+                                    _cursor_for_payload(p)[1] or "",
+                                ),
+                            )
+                            candidate_ts, candidate_id = _cursor_for_payload(candidate)
+                            if candidate_ts is not None:
+                                if last_seen_ts is None or candidate_ts > last_seen_ts:
+                                    last_seen_ts = candidate_ts
+                                    last_seen_id = candidate_id
+                                elif candidate_ts == last_seen_ts and candidate_id:
+                                    last_seen_id = max(last_seen_id or "", candidate_id)
                         cutoff_hit = cutoff_ts is not None and page_min_ts is not None and page_min_ts < cutoff_ts
+                        if cursor_ts is not None and page_min_ts is not None and page_min_ts < cursor_ts:
+                            stop_reason = stop_reason or "cursor"
                         stats_written = 0
                         if redis_client is not None:
                             stats_written = await _persist_market_stats(redis_client, page)
@@ -1157,7 +1230,18 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             )
                         if stop_due_to_memory:
                             break
-                        if stop_reason == "updated_at_cutoff":
+                        if stop_reason in {"updated_at_cutoff", "cursor"}:
+                            if stop_reason == "cursor":
+                                log_event(
+                                    logger,
+                                    logging.INFO,
+                                    event="worker.fetch.cursor_stop",
+                                    message="stopping pagination at stored cursor",
+                                    page=page_no,
+                                    total=total_fetched,
+                                    cursor_ts=cursor_ts,
+                                    cursor_event_id=cursor_event_id,
+                                )
                             break
                         if redis_client is not None:
                             now = time.monotonic()
@@ -1199,6 +1283,18 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         break
                 if stop_reason != "memory":
                     await _record_polymarket_updated_at(redis_client, last_seen_ts)
+                    await _record_polymarket_cursor(redis_client, last_seen_ts, last_seen_id)
+                    if cursor_ts is not None and last_seen_ts is not None:
+                        if last_seen_ts < cursor_ts:
+                            gap_count += 1
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                event="worker.fetch.cursor_regress",
+                                message="polymarket cursor moved backwards",
+                                cursor_ts=cursor_ts,
+                                last_seen_ts=last_seen_ts,
+                            )
                 break
             except (httpx.HTTPError, httpx.RequestError, RuntimeError, ValueError) as exc:
                 last_exc = exc

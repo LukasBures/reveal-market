@@ -180,6 +180,10 @@ class Settings(BaseSettings):
         ge=0,
         description="Grace window subtracted from the last updatedAt cutoff to avoid missing ties.",
     )
+    polymarket_sync_cursor_key: str = Field(
+        default="reveal_market_worker:polymarket_sync_cursor",
+        description="Redis key storing last seen polymarket cursor tuple (timestamp/id).",
+    )
     poll_interval_seconds: int = Field(default=300, ge=1)
     poll_interval_jitter_seconds: float = Field(default=3.0, ge=0)
     maintenance_poll_seconds: float = Field(

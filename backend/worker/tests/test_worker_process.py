@@ -144,6 +144,15 @@ class DummyRedis:
         queue = self.store.get(key, [])
         return len(queue) if isinstance(queue, list) else 0
 
+    async def lindex(self, key: str, index: int):
+        queue = self.store.get(key, [])
+        if not isinstance(queue, list):
+            return None
+        try:
+            return queue[index]
+        except IndexError:
+            return None
+
     async def eval(self, script: str, numkeys: int, *args):
         if numkeys != 2:
             raise RuntimeError("unsupported numkeys")

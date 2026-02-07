@@ -123,6 +123,12 @@ PROOF_QUEUE_OVERFLOW_COUNTER = _safe_counter(
     ["outcome"],
 )
 
+PROOF_QUEUE_AGE_GAUGE = _safe_gauge(
+    "worker_proof_queue_oldest_seconds",
+    "Age in seconds of the oldest proof job in the queue",
+    ["queue"],
+)
+
 SETTLEMENT_QUEUE_DEPTH_GAUGE = _safe_gauge(
     "worker_settlement_queue_depth",
     "Number of pending settlement jobs in the worker queue",

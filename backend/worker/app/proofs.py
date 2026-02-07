@@ -24,6 +24,7 @@ from .cache_ops import invalidate_cache_tags
 from .database import session_scope
 from .market_sync import SyncSummary
 from .metrics import (
+    PROOF_QUEUE_AGE_GAUGE,
     PROOF_QUEUE_DEPTH_GAUGE,
     PROOF_QUEUE_DLQ_COUNTER,
     PROOF_QUEUE_OVERFLOW_COUNTER,
@@ -125,7 +126,22 @@ async def _update_queue_depth(redis_client: Redis | None) -> None:
     queue_key, _ = _queue_keys()
     try:
         depth = await _resolve_awaitable(redis_client.llen(queue_key))
-        PROOF_QUEUE_DEPTH_GAUGE.labels(queue=queue_key).set(float(depth))
+        depth_value = int(depth or 0)
+        PROOF_QUEUE_DEPTH_GAUGE.labels(queue=queue_key).set(float(depth_value))
+        if depth_value == 0:
+            PROOF_QUEUE_AGE_GAUGE.labels(queue=queue_key).set(0.0)
+            return
+        head = await _resolve_awaitable(redis_client.lindex(queue_key, 0))
+        if not head:
+            return
+        payload = json.loads(head)
+        if not isinstance(payload, dict):
+            return
+        enqueued_at = payload.get("enqueued_at")
+        if not enqueued_at:
+            return
+        age_seconds = max(0.0, time.time() - float(enqueued_at))
+        PROOF_QUEUE_AGE_GAUGE.labels(queue=queue_key).set(age_seconds)
     except Exception:  # pragma: no cover - metrics best-effort
         return
 
@@ -214,6 +230,7 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
             "market_snapshot": snapshot,
             "market_payload": payload.model_dump(),
             "condition_id": condition,
+            "enqueued_at": time.time(),
         }
         try:
             result = await _resolve_awaitable(
