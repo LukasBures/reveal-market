@@ -76,10 +76,15 @@ class RelayerService:
     api_bearer_token: str | None = None
     api_internal_secret: str | None = None
     api_timeout_seconds: int = 10
+    api_client_max_age_seconds: float = 900.0
+    api_health_failure_cooldown_seconds: float = 15.0
     _nonce_lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
     _health_snapshot: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _health_snapshot_ts: float | None = field(default=None, init=False, repr=False)
     health_deep_cache_ttl_seconds: int = 10
+    _api_client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
+    _api_client_started_at: float | None = field(default=None, init=False, repr=False)
+    _api_health_last_failure_ts: float | None = field(default=None, init=False, repr=False)
 
     def _get_nonce_lock(self) -> asyncio.Lock:
         if self._nonce_lock is None:
@@ -99,6 +104,24 @@ class RelayerService:
     def store_health_snapshot(self, payload: dict[str, Any]) -> None:
         self._health_snapshot = payload
         self._health_snapshot_ts = time.time()
+
+    async def _get_api_client(self) -> httpx.AsyncClient:
+        now = time.monotonic()
+        if (
+            self._api_client is not None
+            and not getattr(self._api_client, "is_closed", False)
+            and self._api_client_started_at is not None
+            and (now - self._api_client_started_at) < self.api_client_max_age_seconds
+        ):
+            return self._api_client
+        if self._api_client is not None:
+            try:
+                await self._api_client.aclose()
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("relayer.api_client.close_failed", error=str(exc))
+        self._api_client = httpx.AsyncClient(timeout=self.api_timeout_seconds)
+        self._api_client_started_at = now
+        return self._api_client
 
     def _require_field(self, payload: Mapping[str, Any], key: str) -> Any:
         if key not in payload or payload[key] is None:
@@ -603,6 +626,11 @@ class RelayerService:
     async def health(self) -> dict[str, Any]:
         issues: list[str] = []
         rpc_timeout = 5.0
+        api_status: str | None = None
+        if self.api_base_url and self.api_health_failure_cooldown_seconds > 0:
+            if self._api_health_last_failure_ts is not None:
+                if (time.time() - self._api_health_last_failure_ts) < self.api_health_failure_cooldown_seconds:
+                    api_status = "cooldown"
 
         async def _call(label: str, func, *args):
             start = time.perf_counter()
@@ -689,6 +717,24 @@ class RelayerService:
         if escrow_owner is not None and str(escrow_owner).lower() != self.account.address.lower():
             issues.append("owner_mismatch")
 
+        if self.api_base_url and api_status != "cooldown":
+            headers = {}
+            if self.api_bearer_token:
+                headers["Authorization"] = f"Bearer {self.api_bearer_token}"
+            if self.api_internal_secret:
+                headers["X-Internal-Secret"] = self.api_internal_secret
+            try:
+                client = await self._get_api_client()
+                resp = await client.get(f"{self.api_base_url}/healthz", headers=headers)
+                api_status = str(resp.status_code)
+                if resp.status_code >= 400:
+                    issues.append("api_health_failed")
+            except Exception as err:  # pragma: no cover - best-effort health check
+                logger.warning("relayer.health.api_failed", error=str(err))
+                api_status = "error"
+                issues.append("api_health_failed")
+                self._api_health_last_failure_ts = time.time()
+
         status = "ok" if connected and not issues else "degraded"
         payload = {
             "status": status,
@@ -706,6 +752,7 @@ class RelayerService:
             "escrowTokenBalanceWei": escrow_token_balance,
             "relayerTokenBalanceWei": relayer_token_balance,
             "relayerTokenAllowanceWei": relayer_token_allowance,
+            "apiStatus": api_status,
         }
         logger.info("relayer.health", **payload)
         HEALTH_CHECKS.labels(status=status).inc()
@@ -759,8 +806,8 @@ class RelayerService:
         if self.api_internal_secret:
             headers["X-Internal-Secret"] = self.api_internal_secret
         try:
-            async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
-                resp = await client.post(f"{self.api_base_url}/internal/commitments/sync", json=body, headers=headers)
+            client = await self._get_api_client()
+            resp = await client.post(f"{self.api_base_url}/internal/commitments/sync", json=body, headers=headers)
             logger.info(
                 "relayer.ingest.commit",
                 status=resp.status_code,
@@ -804,8 +851,8 @@ class RelayerService:
         if self.api_internal_secret:
             headers["X-Internal-Secret"] = self.api_internal_secret
         try:
-            async with httpx.AsyncClient(timeout=self.api_timeout_seconds) as client:
-                resp = await client.post(f"{self.api_base_url}/internal/settlements/ingest", json=body, headers=headers)
+            client = await self._get_api_client()
+            resp = await client.post(f"{self.api_base_url}/internal/settlements/ingest", json=body, headers=headers)
             logger.info(
                 "relayer.ingest.settlement",
                 status=resp.status_code,
@@ -836,6 +883,8 @@ def build_service(
     api_bearer_token: str | None = None,
     api_internal_secret: str | None = None,
     api_timeout_seconds: int = 10,
+    api_client_max_age_seconds: float = 900.0,
+    api_health_failure_cooldown_seconds: float = 15.0,
 ) -> RelayerService:
     escrow_addr: ChecksumAddress = web3.to_checksum_address(escrow_address)
     escrow = web3.eth.contract(address=escrow_addr, abi=COMMIT_ABI)
@@ -858,4 +907,6 @@ def build_service(
         api_bearer_token=api_bearer_token,
         api_internal_secret=api_internal_secret,
         api_timeout_seconds=api_timeout_seconds,
+        api_client_max_age_seconds=api_client_max_age_seconds,
+        api_health_failure_cooldown_seconds=api_health_failure_cooldown_seconds,
     )

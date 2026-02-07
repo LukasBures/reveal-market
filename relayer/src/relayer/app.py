@@ -57,12 +57,17 @@ def create_app(
 
     async def require_write_access(request: Request, _: None = Depends(require_auth)) -> None:
         allowlist = ip_allowlist or []
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded and not trust_x_forwarded_for:
+            logger.warning("x_forwarded_for_ignored", forwarded_for=forwarded)
         client_ip = resolve_client_ip(request, trust_x_forwarded_for)
         if not ip_allowed(client_ip, allowlist):
             logger.warning("ip_not_allowed", client_ip=client_ip, path=request.url.path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ip_not_allowed")
         if rate_limiter:
-            key = client_ip or "unknown"
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", request.url.path)
+            key = f"{client_ip or 'unknown'}:{route_path}"
             if not await rate_limiter.allow(key):
                 logger.warning("rate_limited", client_ip=client_ip, path=request.url.path)
                 raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate_limited")

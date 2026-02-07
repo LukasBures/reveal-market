@@ -49,6 +49,8 @@ service = build_service(
     api_bearer_token=cfg.api_bearer_token,
     api_internal_secret=cfg.api_internal_secret,
     api_timeout_seconds=cfg.api_timeout_seconds,
+    api_client_max_age_seconds=cfg.api_client_max_age_seconds,
+    api_health_failure_cooldown_seconds=cfg.api_health_failure_cooldown_seconds,
 )
 service.health_deep_cache_ttl_seconds = cfg.health_deep_cache_ttl_seconds
 

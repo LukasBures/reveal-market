@@ -108,6 +108,8 @@ class RelayerConfig:
     api_internal_secret: str | None
     api_timeout_seconds: int
     health_deep_cache_ttl_seconds: int
+    api_client_max_age_seconds: int
+    api_health_failure_cooldown_seconds: int
 
 
 def load_config() -> RelayerConfig:
@@ -154,4 +156,6 @@ def load_config() -> RelayerConfig:
         api_internal_secret=os.getenv("RELAYER_API_INTERNAL_SECRET"),
         api_timeout_seconds=_int_env("RELAYER_API_TIMEOUT_SECONDS", 10),
         health_deep_cache_ttl_seconds=_int_env("RELAYER_HEALTH_DEEP_CACHE_TTL_SECONDS", 10),
+        api_client_max_age_seconds=_int_env("RELAYER_API_CLIENT_MAX_AGE_SECONDS", 900),
+        api_health_failure_cooldown_seconds=_int_env("RELAYER_API_HEALTH_COOLDOWN_SECONDS", 15),
     )
