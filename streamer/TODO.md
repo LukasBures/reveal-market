@@ -1,14 +1,14 @@
 # Streamer TODO
 
 **MVP - Critical**
-- Ensure CORS and public URL presets are aligned for WS/SSE.
 - Confirm Redis history trimming is enforced for long-running streams.
 
 **MVP - High**
-- Add optional auth for SSE/WS using access token.
+- Validate rate-limit/connection guard defaults under expected load.
 
 **MVP - Medium**
 - Add metrics for stale market detection and FX staleness.
+- Add tests for control endpoints and subgraph proxy error handling.
 
 **MVP - Low**
 - Add better error surfacing for subgraph endpoints.
