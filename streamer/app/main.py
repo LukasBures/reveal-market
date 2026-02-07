@@ -341,9 +341,10 @@ def create_app() -> FastAPI:
     async def _fx_ws_stream(ws: WebSocket):
         await ws.accept()
         last_sent: datetime | None = None
+        timeout = max(settings.fx_ws_read_timeout_seconds, 1.0)
         try:
             while True:
-                fx = await state.get_fx()
+                fx = await asyncio.wait_for(state.get_fx(), timeout=timeout)
                 updated_at = state.fx_last_update or fx.fetched_at
                 if last_sent is None or (updated_at and updated_at != last_sent):
                     await ws.send_json(
@@ -358,6 +359,9 @@ def create_app() -> FastAPI:
                     )
                     last_sent = updated_at
                 await asyncio.sleep(1)
+        except TimeoutError:
+            logger.warning("FX websocket timed out", extra={"event": "fx.ws.timeout"})
+            return
         except WebSocketDisconnect:
             return
         except Exception as exc:  # pragma: no cover - runtime guard
@@ -765,11 +769,14 @@ def create_app() -> FastAPI:
             },
         )
         bootstrap_payloads = await state.get_bootstrap_payloads(market_id)
+        effective_max_events = max_events
+        if effective_max_events is None and settings.sse_max_events > 0:
+            effective_max_events = settings.sse_max_events
         return StreamingResponse(
             _sse_events(
                 pubsub,
                 heartbeat_seconds=heartbeat,
-                max_events=max_events,
+                max_events=effective_max_events,
                 metrics=metrics,
                 on_close=lambda: (state.release_assets(assets_for_release), _release_connection()),
                 bootstrap_payloads=bootstrap_payloads,

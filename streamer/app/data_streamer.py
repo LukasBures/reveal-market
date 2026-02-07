@@ -369,6 +369,13 @@ class DataStreamer:
             res.raise_for_status()
             payload = res.json()
             markets = payload if isinstance(payload, list) else payload.get("data") or []
+            if not markets:
+                if cursor:
+                    logger.warning(
+                        "CLOB REST returned empty page; stopping poll",
+                        extra={"event": "clob.rest.empty", "cursor": cursor},
+                    )
+                break
             for market in markets:
                 await self._normalize_and_publish(market, source="rest")
             total += len(markets)

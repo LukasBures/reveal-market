@@ -267,10 +267,17 @@ class StreamState:
         }
         if self.settings.signing_secret:
             mapping["sig"] = self._sign_payload(mapping)
-        await self.redis.hset(key, mapping=mapping)
-        if self.settings.cache_ttl_seconds > 0:
-            await self.redis.expire(key, self.settings.cache_ttl_seconds)
-        await self.redis.publish(channel, json.dumps(mapping))
+        try:
+            await self.redis.hset(key, mapping=mapping)
+            if self.settings.cache_ttl_seconds > 0:
+                await self.redis.expire(key, self.settings.cache_ttl_seconds)
+            await self.redis.publish(channel, json.dumps(mapping))
+        except Exception as exc:
+            logger.warning(
+                "cache tick failed",
+                extra={"event": "stream.cache_tick.failed", "market_id": market_id, "error": str(exc)},
+            )
+            return
         self.last_seen[market_id] = now
         self.last_published[market_id] = now
         if self.metrics:

@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     max_active_connections: int = Field(
         default=1000, ge=1, description="Maximum concurrent SSE/WS connections (process-local guard)"
     )
+    sse_max_events: int = Field(
+        default=0,
+        ge=0,
+        description="Optional maximum SSE events before disconnect (0 disables).",
+    )
     rate_limit_per_minute: int = Field(
         default=0, ge=0, description="Optional per-client request/connection cap per minute (0 disables)"
     )
