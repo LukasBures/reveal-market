@@ -1,15 +1,15 @@
 # Worker TODO
 
 **MVP - Critical**
-- Ensure Polymarket sync lease prevents multi-worker stampede during outages.
-- Confirm proof queue depth enforcement is atomic under concurrency.
+- (done) Polymarket sync lease prevents multi-worker stampede during outages.
+- (done) Proof queue depth enforcement is atomic under concurrency.
 
 **MVP - High**
-- Add cooldown on expensive memory scans and recovery loops.
-- Ensure settlement recovery is paced for large datasets.
+- (done) Cooldown on expensive memory scans and recovery loops.
+- (done) Settlement recovery is paced for large datasets.
 
 **MVP - Medium**
-- Add metrics on Gamma empty page tolerance and gap detection.
+- (done) Metrics for queue age + cursor gap detection logging.
 
 **MVP - Low**
 - Add batch-level timing metrics to logs.
