@@ -110,6 +110,9 @@ class RelayerConfig:
     health_deep_cache_ttl_seconds: int
     api_client_max_age_seconds: int
     api_health_failure_cooldown_seconds: int
+    rpc_circuit_breaker_threshold: int
+    rpc_circuit_breaker_window_seconds: float
+    rpc_circuit_breaker_cooldown_seconds: float
 
 
 def load_config() -> RelayerConfig:
@@ -158,4 +161,7 @@ def load_config() -> RelayerConfig:
         health_deep_cache_ttl_seconds=_int_env("RELAYER_HEALTH_DEEP_CACHE_TTL_SECONDS", 10),
         api_client_max_age_seconds=_int_env("RELAYER_API_CLIENT_MAX_AGE_SECONDS", 900),
         api_health_failure_cooldown_seconds=_int_env("RELAYER_API_HEALTH_COOLDOWN_SECONDS", 15),
+        rpc_circuit_breaker_threshold=_int_env("RELAYER_RPC_CIRCUIT_THRESHOLD", 5),
+        rpc_circuit_breaker_window_seconds=_float_env("RELAYER_RPC_CIRCUIT_WINDOW_SECONDS", 30.0),
+        rpc_circuit_breaker_cooldown_seconds=_float_env("RELAYER_RPC_CIRCUIT_COOLDOWN_SECONDS", 30.0),
     )

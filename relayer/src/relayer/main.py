@@ -52,6 +52,9 @@ service = build_service(
     api_client_max_age_seconds=cfg.api_client_max_age_seconds,
     api_health_failure_cooldown_seconds=cfg.api_health_failure_cooldown_seconds,
 )
+service.rpc_circuit_breaker_threshold = cfg.rpc_circuit_breaker_threshold
+service.rpc_circuit_breaker_window_seconds = cfg.rpc_circuit_breaker_window_seconds
+service.rpc_circuit_breaker_cooldown_seconds = cfg.rpc_circuit_breaker_cooldown_seconds
 service.health_deep_cache_ttl_seconds = cfg.health_deep_cache_ttl_seconds
 
 queue = TxQueue(

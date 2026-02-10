@@ -154,7 +154,15 @@ def create_app(
             if str(err) == "job_not_found":
                 raise HTTPException(status_code=404, detail="job_not_found") from err
             raise
-        return job
+        # Provide cache-control + backoff hints for polling clients.
+        return JSONResponse(
+            job,
+            headers={
+                "Cache-Control": "no-store",
+                "Retry-After": "2",
+                "X-Poll-Backoff": "2",
+            },
+        )
 
     @app.post("/commit")
     async def commit(
@@ -285,6 +293,12 @@ def create_app(
             raise HTTPException(status_code=503, detail="queue_disabled")
         deadletter = await tx_queue.list_deadletter()
         return {"deadletter": deadletter}
+
+    @app.get("/admin/queue/stats")
+    async def queue_stats(_: None = Depends(require_write_access)):
+        if not tx_queue:
+            raise HTTPException(status_code=503, detail="queue_disabled")
+        return await tx_queue.get_stats()
 
     @app.post("/admin/queue/deadletter/{job_id}/replay")
     async def replay_deadletter(job_id: int, _: None = Depends(require_write_access)):

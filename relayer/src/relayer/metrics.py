@@ -32,6 +32,27 @@ RPC_ERRORS = Counter(
     labelnames=["label", "error_type"],
 )
 
+RPC_CIRCUIT_STATE = Gauge(
+    "relayer_rpc_circuit_open",
+    "RPC circuit breaker open flag (1=open,0=closed)",
+)
+
+CHAIN_HEAD_LAG_SECONDS = Gauge(
+    "relayer_chain_head_lag_seconds",
+    "Seconds behind latest known chain head (based on block timestamp)",
+)
+
+FEE_BUMP_FACTOR = Gauge(
+    "relayer_fee_bump_factor",
+    "Current fee bump factor applied by the queue",
+)
+
+QUEUE_ERROR_REASONS = Counter(
+    "relayer_queue_error_reasons_total",
+    "Queue error reason aggregation by action",
+    labelnames=["action", "reason"],
+)
+
 QUEUE_OUTCOMES = Counter(
     "relayer_queue_outcomes_total",
     "Queue outcomes by action and status",
