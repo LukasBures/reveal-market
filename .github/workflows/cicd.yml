@@ -266,6 +266,16 @@ jobs:
       - name: Lint, unit tests, and build
         run: ./frontend/run_tests.sh
 
+      - name: Bundle size budgets
+        working-directory: frontend
+        run: npm run bundle:check
+
+      - name: Lighthouse CI
+        working-directory: frontend
+        run: |
+          npm run build
+          npm run lighthouse:ci
+
 
   prover:
     needs: precommit
