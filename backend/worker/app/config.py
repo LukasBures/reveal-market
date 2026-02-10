@@ -288,6 +288,18 @@ class Settings(BaseSettings):
     prover_base_url: AnyHttpUrl | None = Field(default=None)
     prover_timeout_seconds: float = Field(default=5.0, gt=0)
     prover_shared_secret: SecretStr | None = Field(default=None)
+    circuit_hash: str | None = Field(
+        default=None,
+        description="Expected prover circuit hash for validation (0x-prefixed).",
+    )
+    prover_startup_validation_enabled: bool = Field(
+        default=True,
+        description="Validate prover circuit hash alignment on startup.",
+    )
+    worker_mock_mode: bool = Field(
+        default=False,
+        description="Enable mock mode for Gamma/chain to speed local testing.",
+    )
     chain_refresh_timeout_seconds: int = Field(
         default=30,
         ge=5,
@@ -343,6 +355,11 @@ class Settings(BaseSettings):
         ge=0,
         description="TTL for proof queue dead letter entries (0 disables)",
     )
+    proof_queue_dead_letter_trim_interval_seconds: float = Field(
+        default=300.0,
+        ge=0,
+        description="Interval to trim proof queue DLQ outside enqueue (0 disables).",
+    )
     settlement_queue_dead_letter_max_items: int = Field(
         default=2000,
         ge=0,
@@ -353,6 +370,18 @@ class Settings(BaseSettings):
         ge=0,
         description="TTL for settlement dead letter entries (0 disables)",
     )
+    settlement_queue_dead_letter_trim_interval_seconds: float = Field(
+        default=300.0,
+        ge=0,
+        description="Interval to trim settlement DLQ outside enqueue (0 disables).",
+    )
+    maintenance_mode_enabled: bool = Field(
+        default=True,
+        description="Allow maintenance loop to run backfills/cleanup.",
+    )
+    db_latency_pace_enabled: bool = Field(default=True)
+    db_latency_pace_ms: float = Field(default=300.0, ge=0)
+    db_latency_pace_sleep_seconds: float = Field(default=1.0, ge=0)
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
     lock_batches_use_relayer: bool = Field(

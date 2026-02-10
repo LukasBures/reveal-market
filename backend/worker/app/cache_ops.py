@@ -15,7 +15,7 @@ from shared.logging import log_event
 from . import runtime
 from .metrics import CACHE_INVALIDATION_COUNTER, CacheInvalidationReport
 
-logger = runtime.logger
+logger = runtime.logger  # type: ignore[has-type]
 
 if TYPE_CHECKING:
     from .market_sync import SyncSummary

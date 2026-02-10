@@ -21,7 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.logging_config import setup_logging
 from app.metrics import classify_latency_bucket
-from app.metrics_registry import REQUEST_LATENCY
+from app.metrics_registry import CACHE_REQUESTS, DB_QUERY_COUNT, DB_QUERY_MAX_MS, DB_QUERY_TIME_MS, REQUEST_LATENCY
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.runtime import instrumentator, is_production, load_shed_state, logger, preset, sanitized_config, settings
 from app.security import SecurityHeadersMiddleware
@@ -160,10 +160,20 @@ def _log_request_completion(
     bytes_sent = estimate_response_bytes(response)
     latency_bucket = classify_latency_bucket(duration_ms)
     metric_path = _metric_path(request)
+    db_metrics = snapshot_db_metrics()
     try:
         REQUEST_LATENCY.labels(method=request.method, path=metric_path, status_code=str(response.status_code)).observe(
             duration_ms / 1000.0
         )
+        DB_QUERY_COUNT.observe(db_metrics.query_count)
+        DB_QUERY_TIME_MS.observe(db_metrics.total_time_ms)
+        DB_QUERY_MAX_MS.observe(db_metrics.max_time_ms)
+        cache_source = cache_meta.get("cache_source") or "unknown"
+        cache_hit = cache_meta.get("cache_hit")
+        if cache_hit is True:
+            CACHE_REQUESTS.labels(source=cache_source, outcome="hit").inc()
+        elif cache_hit is False:
+            CACHE_REQUESTS.labels(source=cache_source, outcome="miss").inc()
     except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
         logger.debug(
             "failed to emit request latency metric",
@@ -348,9 +358,22 @@ def attach_request_context(app: FastAPI) -> None:
                 path=request.url.path,
                 method=request.method,
             )
+        if db_metrics.max_time_ms >= settings.db_query_slowest_warn_ms:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="db.query_slowest.exceeded",
+                message="database slowest query exceeded budget",
+                query_count=db_metrics.query_count,
+                db_time_ms=round(db_metrics.total_time_ms, 2),
+                max_time_ms=round(db_metrics.max_time_ms, 2),
+                path=request.url.path,
+                method=request.method,
+            )
         if not is_production:
             response.headers["x-db-queries"] = str(db_metrics.query_count)
             response.headers["x-db-time-ms"] = f"{db_metrics.total_time_ms:.2f}"
+            response.headers["x-db-slowest-ms"] = f"{db_metrics.max_time_ms:.2f}"
         response.headers["x-request-id"] = request_id
         _log_request_completion(request, response, start_time, cache_meta, request_id)
         reset_request_id(token)

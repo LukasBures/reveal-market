@@ -32,7 +32,7 @@ from .polymarket import (
 from .resolution import apply_resolution
 from .settlement import _upsert_settlement_from_chain, settlement_needs_refresh
 
-logger = runtime.logger
+logger = runtime.logger  # type: ignore[has-type]
 
 
 @dataclass

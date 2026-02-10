@@ -25,6 +25,8 @@ FastAPI service that exposes market data, pricing, trading, and internal ingesti
 - Cache-aware market list endpoints with Redis tags.
 - Pricing uses FX from streamer and signs QUOTE_V1 digest.
 - Relayer calls use circuit breaker and optional queue.
+- List endpoints emit slow-query alerts and cache observability metrics.
+- Profiling endpoints are available behind internal auth.
 
 **Config**
 - See `backend/api/app/config.py` for all settings.

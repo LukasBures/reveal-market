@@ -39,4 +39,3 @@ class LoadSheddingState:
         if cooldown_seconds <= 0:
             return False
         return time.time() < self.last_shed_at + cooldown_seconds
-

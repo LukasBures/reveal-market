@@ -110,10 +110,13 @@ class ProverClient:
         self.shared_secret = shared_secret
         self._transport = transport
 
-    def _headers(self) -> dict[str, str] | None:
+    def _headers(self, request_id: str | None = None) -> dict[str, str] | None:
+        headers: dict[str, str] = {}
         if self.shared_secret:
-            return {"X-Prover-Secret": self.shared_secret}
-        return None
+            headers["X-Prover-Secret"] = self.shared_secret
+        if request_id:
+            headers["X-Request-Id"] = request_id
+        return headers or None
 
     def generate_settlement_proof(self, request: SettlementProofRequest | dict[str, Any]) -> SettlementProofResponse:
         """Submit a proof job and synchronously retrieve the receipt."""
@@ -138,7 +141,7 @@ class ProverClient:
             payload = {k: v for k, v in request.items() if k in allowed_fields}
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
-                response = client.post(url, json=payload, headers=self._headers())
+                response = client.post(url, json=payload, headers=self._headers(payload.get("request_id")))
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(
@@ -198,10 +201,13 @@ class AsyncProverClient:
         self.shared_secret = shared_secret
         self._transport = transport
 
-    def _headers(self) -> dict[str, str] | None:
+    def _headers(self, request_id: str | None = None) -> dict[str, str] | None:
+        headers: dict[str, str] = {}
         if self.shared_secret:
-            return {"X-Prover-Secret": self.shared_secret}
-        return None
+            headers["X-Prover-Secret"] = self.shared_secret
+        if request_id:
+            headers["X-Request-Id"] = request_id
+        return headers or None
 
     async def generate_settlement_proof(
         self, request: SettlementProofRequest | dict[str, Any]
@@ -227,10 +233,10 @@ class AsyncProverClient:
         try:
             if self._transport is None:
                 client = await runtime.get_http_client(self.timeout_seconds)
-                response = await client.post(url, json=payload, headers=self._headers())
+                response = await client.post(url, json=payload, headers=self._headers(payload.get("request_id")))
             else:
                 async with AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
-                    response = await client.post(url, json=payload, headers=self._headers())
+                    response = await client.post(url, json=payload, headers=self._headers(payload.get("request_id")))
             response.raise_for_status()
         except httpx.HTTPError as exc:
             log_event(

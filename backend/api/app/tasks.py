@@ -185,7 +185,8 @@ async def cache_refresh_loop() -> None:
     interval = max(1, settings.cache_refresh_interval_seconds)
     failure_count = 0
     cache = await get_cache_client()
-    lock_key = "reveal_market:markets_cache_refresh:lock"
+    lock_key = settings.cache_refresh_lock_key
+    lock_ttl = max(settings.cache_refresh_lock_ttl_seconds, interval)
     try:
         while True:
             acquired = True
@@ -196,7 +197,7 @@ async def cache_refresh_loop() -> None:
                             lock_key,
                             str(time.time()),
                             nx=True,
-                            ex=max(int(interval), 5),
+                            ex=max(int(lock_ttl), 5),
                         )
                     )
                 except RedisError as exc:

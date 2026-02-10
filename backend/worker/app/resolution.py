@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import runtime
 from .polymarket import MarketPayload
 
-logger = runtime.logger
+logger = runtime.logger  # type: ignore[has-type]
 goldsky_client = runtime.goldsky_client
 
 T = TypeVar("T")

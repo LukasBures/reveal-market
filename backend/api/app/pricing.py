@@ -25,11 +25,27 @@ STREAMER_FX_URL = "http://streamer:8100/fx/zen-usd"
 def _resolved_fx_url(settings: Settings) -> str:
     """Use the streamer FX endpoint as the single source of truth."""
 
-    _ = settings  # settings kept for future host overrides without API breakage
-    return STREAMER_FX_URL
+    return str(settings.fx_feed_url or STREAMER_FX_URL)
 
 
-async def _get_fx_client(timeout_seconds: float) -> httpx.AsyncClient:
+def _build_fx_timeout(settings: Settings, timeout_seconds: float) -> httpx.Timeout:
+    return httpx.Timeout(
+        timeout_seconds,
+        connect=settings.fx_connect_timeout_seconds,
+        read=settings.fx_read_timeout_seconds,
+        write=settings.fx_write_timeout_seconds,
+        pool=settings.fx_pool_timeout_seconds,
+    )
+
+
+def _build_fx_limits(settings: Settings) -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=settings.fx_max_connections,
+        max_keepalive_connections=settings.fx_max_keepalive_connections,
+    )
+
+
+async def _get_fx_client(timeout_seconds: float, settings: Settings) -> httpx.AsyncClient:
     """Reuse a single AsyncClient so TLS handshakes are not repeated per request."""
 
     global _FX_HTTP_CLIENT, _FX_CLIENT_TIMEOUT, _FX_CLIENT_CLASS
@@ -46,7 +62,10 @@ async def _get_fx_client(timeout_seconds: float) -> httpx.AsyncClient:
             await _FX_HTTP_CLIENT.aclose()
             _FX_HTTP_CLIENT = None
         if needs_new:
-            _FX_HTTP_CLIENT = async_client_cls(timeout=timeout_seconds)
+            _FX_HTTP_CLIENT = async_client_cls(
+                timeout=_build_fx_timeout(settings, timeout_seconds),
+                limits=_build_fx_limits(settings),
+            )
             _FX_CLIENT_TIMEOUT = timeout_seconds
             _FX_CLIENT_CLASS = async_client_cls
         return _FX_HTTP_CLIENT or async_client_cls(timeout=timeout_seconds)
@@ -177,7 +196,7 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
     now = monotonic()
     cache_ttl = float(settings.fx_cache_ttl_seconds)
     url = _resolved_fx_url(settings)
-    client = await _get_fx_client(settings.fx_timeout_seconds)
+    client = await _get_fx_client(settings.fx_timeout_seconds, settings)
 
     async def _request() -> dict[str, object]:
         async for attempt in AsyncRetrying(

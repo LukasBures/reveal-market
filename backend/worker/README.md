@@ -13,6 +13,9 @@ Async worker that syncs markets from Polymarket/Gamma, updates the database, pri
 - Publish Redis heartbeats and batch stats.
 - Enforce lease-based sync and cursor checkpoints to prevent stampedes and gaps.
 - Track proof queue depth and oldest age for backlog visibility.
+- Circuit-break chain hydration calls and enable maintenance mode for backfills.
+- Validate prover artifacts + circuit hash alignment at startup.
+- Support local mock mode for Gamma/chain in tests.
 
 **Config**
 - `backend/worker/app/config.py` for settings.

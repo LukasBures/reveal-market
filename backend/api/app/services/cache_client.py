@@ -89,17 +89,39 @@ async def get_cache_client() -> Redis | None:
     return runtime.cache_client
 
 
+def _build_http_timeout(timeout_seconds: float | None) -> httpx.Timeout:
+    settings = runtime.settings
+    total = float(timeout_seconds or settings.fx_timeout_seconds)
+    return httpx.Timeout(
+        total,
+        connect=settings.fx_connect_timeout_seconds,
+        read=settings.fx_read_timeout_seconds,
+        write=settings.fx_write_timeout_seconds,
+        pool=settings.fx_pool_timeout_seconds,
+    )
+
+
+def _build_http_limits() -> httpx.Limits:
+    settings = runtime.settings
+    return httpx.Limits(
+        max_connections=settings.fx_max_connections,
+        max_keepalive_connections=settings.fx_max_keepalive_connections,
+    )
+
+
 async def get_http_client(timeout_seconds: float | None = None) -> httpx.AsyncClient:
     """Return a shared AsyncClient for outbound HTTP calls."""
 
-    timeout = float(timeout_seconds or runtime.settings.fx_timeout_seconds)
+    timeout = _build_http_timeout(timeout_seconds)
+    limits = _build_http_limits()
+    timeout_key = getattr(timeout, "total", None) or (timeout_seconds or runtime.settings.fx_timeout_seconds)
     async with runtime.shared_http_lock:
-        client = runtime.shared_http_clients.get(timeout)
+        client = runtime.shared_http_clients.get(timeout_key)
         if client is not None and getattr(client, "is_closed", False):
             await client.aclose()
-            runtime.shared_http_clients.pop(timeout, None)
+            runtime.shared_http_clients.pop(timeout_key, None)
             client = None
         if client is None:
-            client = httpx.AsyncClient(timeout=timeout)
-            runtime.shared_http_clients[timeout] = client
+            client = httpx.AsyncClient(timeout=timeout, limits=limits)
+            runtime.shared_http_clients[timeout_key] = client
         return client

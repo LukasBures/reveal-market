@@ -1275,102 +1275,102 @@ async def hydrate_markets_cache(
         summary["status"] = "skipped"
         summary["reason"] = "hydrate_in_progress"
         return summary
-    async with session_scope() as session:
-        records = await crud.get_markets(
-            session,
-            status=target_status,
-            limit=hydrated_limit,
-            offset=0,
-            order_by=target_order_by,
-            coalesce_groups=coalesce_groups,
-        )
-        market_models = filter_markets_for_visibility(
-            await enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
-        )
-    if coalesce_groups:
-        market_models = coalesce_grouped_markets(market_models, use_total_volume=target_order_by == "volume")
-    if target_order_by == "volume":
-        market_models.sort(
-            key=lambda m: (
-                market_volume_value(m, use_total=True),
-                getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
-            ),
-            reverse=True,
-        )
-    if not market_models:
-        if cache is not None and lock_acquired:
-            await cache.delete(lock_key)
-        summary["reason"] = "no_markets"
-        return summary
-    max_items = min(len(market_models), settings.cache_hydrate_limit)
-    market_models = market_models[:max_items]
-    schema_tag = await get_schema_tag(cache, settings.schema_version_key)
-    cache_key = markets_list_cache_key(
-        target_status,
-        None,
-        None,
-        None,
-        hydrated_limit,
-        0,
-        order_by=target_order_by,
-        coalesce_groups=coalesce_groups,
-    )
-    await write_market_list_cache(cache, cache_key, market_models)
-    await add_tag(cache, schema_tag, cache_key)
-    await add_tag(cache, "markets:list", cache_key)
-
-    page_size = min(
-        max(1, settings.cache_hydrate_page_size),
-        settings.cacheable_market_limit,
-        settings.max_page_size,
-        hydrated_limit,
-    )
-    total_to_cache = min(len(market_models), settings.cache_hydrate_limit)
-    page_cache_keys: list[str] = []
-    for start in range(0, total_to_cache, page_size):
-        slice_items = market_models[start : start + page_size]
-        slice_key = markets_list_cache_key(
+    try:
+        async with session_scope() as session:
+            records = await crud.get_markets(
+                session,
+                status=target_status,
+                limit=hydrated_limit,
+                offset=0,
+                order_by=target_order_by,
+                coalesce_groups=coalesce_groups,
+            )
+            market_models = filter_markets_for_visibility(
+                await enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
+            )
+        if coalesce_groups:
+            market_models = coalesce_grouped_markets(market_models, use_total_volume=target_order_by == "volume")
+        if target_order_by == "volume":
+            market_models.sort(
+                key=lambda m: (
+                    market_volume_value(m, use_total=True),
+                    getattr(m, "updated_at", None) or datetime.fromtimestamp(0, tz=UTC),
+                ),
+                reverse=True,
+            )
+        if not market_models:
+            summary["reason"] = "no_markets"
+            return summary
+        max_items = min(len(market_models), settings.cache_hydrate_limit)
+        market_models = market_models[:max_items]
+        schema_tag = await get_schema_tag(cache, settings.schema_version_key)
+        cache_key = markets_list_cache_key(
             target_status,
             None,
             None,
             None,
-            page_size,
-            start,
+            hydrated_limit,
+            0,
             order_by=target_order_by,
             coalesce_groups=coalesce_groups,
         )
-        await write_market_list_cache(cache, slice_key, slice_items)
-        await add_tag(cache, schema_tag, slice_key)
-        await add_tag(cache, "markets:list", slice_key)
-        page_cache_keys.append(slice_key)
+        await write_market_list_cache(cache, cache_key, market_models)
+        await add_tag(cache, schema_tag, cache_key)
+        await add_tag(cache, "markets:list", cache_key)
 
-    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    log_event(
-        logger,
-        logging.INFO,
-        event="markets.cache.hydrate",
-        message="hydrated markets cache from database",
-        source=source,
-        limit=hydrated_limit,
-        order_by=target_order_by,
-        result_count=len(market_models),
-        cache_key=cache_key,
-        page_cache_keys=page_cache_keys,
-        duration_ms=duration_ms,
-    )
-    summary.update(
-        {
-            "status": "hydrated",
-            "limit": hydrated_limit,
-            "result_count": len(market_models),
-            "cache_key": cache_key,
-            "page_cache_keys": page_cache_keys,
-            "duration_ms": duration_ms,
-        }
-    )
-    if cache is not None and lock_acquired:
-        try:
-            await cache.delete(lock_key)
-        except RedisError:
-            pass
-    return summary
+        page_size = min(
+            max(1, settings.cache_hydrate_page_size),
+            settings.cacheable_market_limit,
+            settings.max_page_size,
+            hydrated_limit,
+        )
+        total_to_cache = min(len(market_models), settings.cache_hydrate_limit)
+        page_cache_keys: list[str] = []
+        for start in range(0, total_to_cache, page_size):
+            slice_items = market_models[start : start + page_size]
+            slice_key = markets_list_cache_key(
+                target_status,
+                None,
+                None,
+                None,
+                page_size,
+                start,
+                order_by=target_order_by,
+                coalesce_groups=coalesce_groups,
+            )
+            await write_market_list_cache(cache, slice_key, slice_items)
+            await add_tag(cache, schema_tag, slice_key)
+            await add_tag(cache, "markets:list", slice_key)
+            page_cache_keys.append(slice_key)
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        log_event(
+            logger,
+            logging.INFO,
+            event="markets.cache.hydrate",
+            message="hydrated markets cache from database",
+            source=source,
+            limit=hydrated_limit,
+            order_by=target_order_by,
+            result_count=len(market_models),
+            cache_key=cache_key,
+            page_cache_keys=page_cache_keys,
+            duration_ms=duration_ms,
+        )
+        summary.update(
+            {
+                "status": "hydrated",
+                "limit": hydrated_limit,
+                "result_count": len(market_models),
+                "cache_key": cache_key,
+                "page_cache_keys": page_cache_keys,
+                "duration_ms": duration_ms,
+            }
+        )
+        return summary
+    finally:
+        if cache is not None and lock_acquired:
+            try:
+                await cache.delete(lock_key)
+            except RedisError:
+                pass

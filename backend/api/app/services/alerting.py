@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any
 
-import asyncio
 import httpx
-from shared.logging import log_event
-
 from app.runtime import settings
+from shared.logging import log_event
 
 _ALERT_HTTP_CLIENT: httpx.AsyncClient | None = None
 _ALERT_CLIENT_LOCK: asyncio.Lock | None = None

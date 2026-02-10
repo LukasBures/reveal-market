@@ -140,6 +140,8 @@ class Settings(BaseSettings):
     cache_refresh_enabled: bool = Field(default=True)
     cache_refresh_interval_seconds: int = Field(default=180, ge=15)
     cache_refresh_limit: int = Field(default=180, ge=1, le=1200)
+    cache_refresh_lock_key: str = Field(default="reveal_market:markets_cache_refresh:lock")
+    cache_refresh_lock_ttl_seconds: int = Field(default=300, ge=15)
     cache_hydrate_page_size: int = Field(default=30, ge=1, le=250)
     cache_connect_retries: int = Field(default=3, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
@@ -151,6 +153,12 @@ class Settings(BaseSettings):
     rate_limit_trusted_proxies: list[str] = Field(default_factory=list)
     fx_feed_url: AnyHttpUrl = Field(default=AnyHttpUrl("http://streamer:8100/fx/zen-usd"))
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
+    fx_connect_timeout_seconds: float = Field(default=1.5, gt=0)
+    fx_read_timeout_seconds: float = Field(default=2.5, gt=0)
+    fx_write_timeout_seconds: float = Field(default=2.5, gt=0)
+    fx_pool_timeout_seconds: float = Field(default=1.0, gt=0)
+    fx_max_connections: int = Field(default=50, ge=1)
+    fx_max_keepalive_connections: int = Field(default=10, ge=1)
     fx_fallback_price: float = Field(default=0.0, ge=0)
     fx_cache_ttl_seconds: float = Field(default=60.0, ge=1.0)
     max_stake_zen: float = Field(default=0.1, gt=0, description="Per-quote max stake in ZEN")
@@ -194,6 +202,9 @@ class Settings(BaseSettings):
     health_deep_cache_ttl_seconds: int = Field(default=10, ge=0)
     db_query_warn_threshold: int = Field(default=50, ge=1)
     db_query_time_warn_ms: float = Field(default=150.0, ge=0)
+    db_query_slowest_warn_ms: float = Field(default=250.0, ge=0)
+    db_query_sample_slow_sql: bool = Field(default=False)
+    db_query_sample_max_length: int = Field(default=2000, ge=256)
     run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
@@ -244,6 +255,7 @@ class Settings(BaseSettings):
             "/treasury",
         ]
     )
+    profiling_enabled: bool = Field(default=False)
     alert_webhook_url: AnyHttpUrl | None = Field(
         default=None, description="Optional webhook URL for background task alerts"
     )

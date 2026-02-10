@@ -37,7 +37,7 @@ from .prover_client import ProverError
 from .retry import clear_failure, failure_key, record_failure, should_attempt
 from .settlement import _upsert_settlement_from_chain, run_settlement_jobs
 
-logger = runtime.logger
+logger = runtime.logger  # type: ignore[has-type]
 T = TypeVar("T")
 _PROVER_HEALTH_CACHE_SECONDS = 60.0
 _PROVER_CIRCUIT_CACHE: dict[str, Any] = {"value": None, "expires_at": 0.0}
@@ -93,6 +93,21 @@ async def _get_prover_circuit_hash() -> str | None:
         _PROVER_CIRCUIT_CACHE["expires_at"] = now + _PROVER_HEALTH_CACHE_SECONDS
         return str(circuit_hash)
     return None
+
+
+async def validate_prover_circuit_hash() -> None:
+    """Validate prover circuit hash matches configured chain hash (if present)."""
+
+    expected = runtime.settings.circuit_hash
+    if not expected or runtime.PROVER_CLIENT is None:
+        return
+    actual = await _get_prover_circuit_hash()
+    if not actual:
+        raise RuntimeError("prover_circuit_hash_missing")
+    expected_norm = _normalize_hex(expected)
+    actual_norm = _normalize_hex(actual)
+    if expected_norm != actual_norm:
+        raise RuntimeError("prover_circuit_hash_mismatch")
 
 
 def _queue_keys() -> tuple[str, str]:

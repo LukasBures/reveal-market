@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, cast
 
 from shared.merkle import build_merkle_root_and_paths
@@ -148,6 +149,7 @@ def _build_batch_payloads(
                 "batchIndex": str(batch_index),
                 "commitmentsCount": str(count),
                 "tickets": tickets,
+                "request_id": f"proof-{market_identifier}-{batch_index}-{int(time.time())}",
             }
         )
     return payloads

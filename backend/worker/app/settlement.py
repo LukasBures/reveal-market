@@ -33,7 +33,7 @@ from .merkle import build_merkle_root_and_paths
 from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER
 from .retry import clear_failure, failure_key, record_failure, should_attempt
 
-logger = runtime.logger
+logger = runtime.logger  # type: ignore[has-type]
 
 
 def _normalize_bytes32(value: Any) -> str | None:

@@ -45,6 +45,20 @@ circuit_breaker: CircuitBreaker | None = None
 
 def _build_polymarket_client() -> AsyncPolymarketClient:
     """Create a Gamma client configured with retry + rate-limit counters."""
+    if settings.worker_mock_mode:
+        return AsyncPolymarketClient(
+            "http://mock-polymarket.local",
+            timeout=1.0,
+            request_max_attempts=1,
+            request_backoff_seconds=0.0,
+            request_backoff_max_seconds=0.0,
+            retry_counter=POLYMARKET_RETRY_COUNTER,
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            empty_page_tolerance=settings.polymarket_empty_page_tolerance,
+            rate_limit_counter=POLYMARKET_RATE_LIMIT_COUNTER,
+            empty_page_counter=POLYMARKET_EMPTY_PAGE_COUNTER,
+        )
     return AsyncPolymarketClient(
         str(settings.polymarket_api_base),
         timeout=settings.polymarket_timeout_seconds,
@@ -62,6 +76,8 @@ def _build_polymarket_client() -> AsyncPolymarketClient:
 
 def _build_clob_client() -> ClobClient | None:
     """Create a CLOB client when configured; swallow init errors to keep the worker alive."""
+    if settings.worker_mock_mode:
+        return None
     host = settings.clob_host
     if not host:
         return None
@@ -148,6 +164,19 @@ def reload_worker_settings(
     clob_client = _build_clob_client()
     goldsky_client = _build_goldsky_client()
     PROVER_CLIENT = _build_prover_client()
+    if settings.prover_startup_validation_enabled and PROVER_CLIENT is not None:
+        try:
+            from .proofs import validate_prover_circuit_hash
+
+            asyncio.run(validate_prover_circuit_hash())
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.ERROR,
+                event="worker.startup.prover_validation_failed",
+                message="prover circuit hash validation failed on reload",
+                error=str(exc),
+            )
     circuit_breaker = CircuitBreaker(
         None,
         CircuitBreakerConfig(
@@ -172,6 +201,20 @@ def reload_worker_settings(
 polymarket_client = _build_polymarket_client()
 clob_client = _build_clob_client()
 PROVER_CLIENT = _build_prover_client()
+if settings.prover_startup_validation_enabled and PROVER_CLIENT is not None:
+    try:
+        from .proofs import validate_prover_circuit_hash
+
+        asyncio.run(validate_prover_circuit_hash())
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.startup.prover_validation_failed",
+            message="prover circuit hash validation failed",
+            error=str(exc),
+        )
+        raise
 goldsky_client = _build_goldsky_client()
 circuit_breaker = CircuitBreaker(
     None,
