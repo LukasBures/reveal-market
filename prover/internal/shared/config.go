@@ -46,6 +46,12 @@ type Config struct {
 	MaxRequestBytes     int64
 	HealthCacheSeconds  int
 	StrictValidation    bool
+	QueueMaxDepth       int
+	QueueAcquireTimeout time.Duration
+	CacheTTL            time.Duration
+	CacheMaxEntries     int
+	AsyncQueueEnabled   bool
+	WorkerMode          string
 }
 
 // LoadConfig builds the config struct from environment variables (with sane defaults).
@@ -93,7 +99,16 @@ func LoadConfig() Config {
 		RequestTimeout:      requestTimeout,
 		MaxRequestBytes:     int64(maxRequestBytes),
 		HealthCacheSeconds:  intEnv("PROVER_HEALTH_CACHE_SECONDS", 5),
-		StrictValidation:    boolEnv("PROVER_STRICT_VALIDATION", false),
+		StrictValidation:    boolEnv("PROVER_STRICT_VALIDATION", true),
+		QueueMaxDepth:       intEnv("PROVER_QUEUE_MAX_DEPTH", 32),
+		QueueAcquireTimeout: durationEnv("PROVER_QUEUE_ACQUIRE_TIMEOUT_SECONDS", 2),
+		CacheTTL:            durationEnv("PROVER_CACHE_TTL_SECONDS", 300),
+		CacheMaxEntries:     intEnv("PROVER_CACHE_MAX_ENTRIES", 500),
+		AsyncQueueEnabled:   boolEnv("PROVER_ASYNC_QUEUE_ENABLED", true),
+		WorkerMode:          strings.ToLower(strings.TrimSpace(getenv("PROVER_WORKER_MODE", "inline"))),
+	}
+	if conf.WorkerMode == "" {
+		conf.WorkerMode = "inline"
 	}
 	return conf
 }

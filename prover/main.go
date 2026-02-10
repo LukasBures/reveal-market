@@ -101,6 +101,8 @@ type app struct {
 	artifactCheck   artifactCheck
 	artifactCheckMu sync.Mutex
 	healthCache     healthCache
+	proofQueue      chan struct{}
+	cache           *proofCache
 }
 
 type artifactCheck struct {
@@ -135,6 +137,10 @@ func newApp(cfg shared.Config, prover proverEngine) *app {
 		circuitHash = "0x0"
 	}
 	a.circuitHash = circuitHash
+	if cfg.AsyncQueueEnabled && cfg.QueueMaxDepth > 0 {
+		a.proofQueue = make(chan struct{}, cfg.QueueMaxDepth)
+	}
+	a.cache = newProofCache(cfg.CacheTTL, cfg.CacheMaxEntries)
 	return a
 }
 
@@ -157,6 +163,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/healthz", a.healthHandler)
 	mux.HandleFunc("/heartbeat", a.heartbeatHandler)
 	mux.HandleFunc("/api/v1/proofs/settlement", a.proofHandler)
+	mux.HandleFunc("/api/v1/proofs/preflight", a.preflightHandler)
+	mux.HandleFunc("/api/v1/proofs/warmup", a.warmupHandler)
 	mux.HandleFunc("/metrics", promMetricsHandler)
 	if a.cfg.EnableDebug {
 		mux.Handle("/metrics/expvar", expvar.Handler())
@@ -179,6 +187,11 @@ func main() {
 		"listen_addr":    cfg.ListenAddr,
 		"heartbeat_secs": cfg.HeartbeatSeconds,
 	})
+	if cfg.WorkerMode == "worker" {
+		logLine("info", "prover.worker.mode", map[string]any{
+			"mode": cfg.WorkerMode,
+		})
+	}
 	report := requireArtifactsOrExit(cfg)
 	verifiedCircuitHash := report.Hashes.CircuitHash
 	if cfg.ManualCircuitHash != "" {
@@ -201,6 +214,11 @@ func main() {
 	server.seedArtifactCheck(report)
 
 	go server.heartbeatLoop()
+
+	if cfg.WorkerMode == "worker" {
+		runWorker(server)
+		return
+	}
 
 	logLine("info", "prover.start", map[string]any{
 		"listen_addr": cfg.ListenAddr,
@@ -544,13 +562,17 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := a.nextRequestID()
+	traceID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+	if traceID != "" {
+		requestID = traceID
+	}
 
 	if wantsStream(r) {
-		a.streamProof(w, r, req, requestID, inputBytes)
+		a.streamProof(w, r, req, requestID, inputBytes, traceID)
 		return
 	}
 
-	resp, err := a.generateProofResponse(r.Context(), req, requestID, inputBytes)
+	resp, err := a.generateProofResponse(r.Context(), req, requestID, inputBytes, traceID)
 	if err != nil {
 		var perr *proverError
 		if errors.As(err, &perr) {
@@ -572,7 +594,7 @@ func wantsStream(r *http.Request) bool {
 	return strings.Contains(accept, "text/event-stream")
 }
 
-func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlementProofRequest, requestID string, inputBytes int64) {
+func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlementProofRequest, requestID string, inputBytes int64, traceID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "stream_unavailable", "streaming not supported", nil)
@@ -599,7 +621,7 @@ func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlement
 
 	resultCh := make(chan proofStreamResult, 1)
 	go func() {
-		resp, err := a.generateProofResponse(ctx, req, requestID, inputBytes)
+		resp, err := a.generateProofResponse(ctx, req, requestID, inputBytes, traceID)
 		resultCh <- proofStreamResult{resp: resp, err: err}
 		close(resultCh)
 	}()
@@ -647,9 +669,36 @@ func (a *app) streamProof(w http.ResponseWriter, r *http.Request, req settlement
 	}
 }
 
-func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest, requestID string, inputBytes int64) (settlementProofResponse, error) {
+func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequest, requestID string, inputBytes int64, traceID string) (settlementProofResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 	defer cancel()
+	cacheKey := cacheKeyFor(req, a.circuitHash)
+	if cached, ok := a.cache.get(cacheKey); ok {
+		cached.RequestID = requestID
+		cached.GeneratedAt = formatMillis(time.Now().UTC())
+		logLine("info", "prover.cache.hit", map[string]any{
+			"market_id":   req.MarketID,
+			"merkle_root": req.MerkleRoot,
+			"request_id":  requestID,
+			"trace_id":    traceID,
+		})
+		recordCacheHit()
+		return cached, nil
+	}
+	if a.proofQueue != nil {
+		select {
+		case a.proofQueue <- struct{}{}:
+			defer func() { <-a.proofQueue }()
+		case <-time.After(a.cfg.QueueAcquireTimeout):
+			return settlementProofResponse{}, &proverError{
+				status: http.StatusTooManyRequests,
+				code:   "queue_busy",
+				err:    errors.New("proof queue busy"),
+			}
+		case <-ctx.Done():
+			return settlementProofResponse{}, newInternalError(ctx.Err())
+		}
+	}
 	start := time.Now().UTC()
 	activeProofs.Add(1)
 	defer activeProofs.Add(-1)
@@ -658,6 +707,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		"market_id":   req.MarketID,
 		"merkle_root": req.MerkleRoot,
 		"request_id":  requestID,
+		"trace_id":    traceID,
 		"backend":     a.prover.Backend(),
 		"input_bytes": inputBytes,
 	})
@@ -701,7 +751,7 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	logLine("info", "prover.request.succeeded", logFields)
 	recordProofSuccess(time.Since(start))
 
-	return settlementProofResponse{
+	resp := settlementProofResponse{
 		Proof:         result.Proof,
 		PublicSignals: result.PublicSignals,
 		CircuitHash:   a.circuitHash,
@@ -711,7 +761,9 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		Backend:       a.prover.Backend(),
 		ProofCalldata: result.ProofCalldata,
 		Warnings:      result.Warnings,
-	}, nil
+	}
+	a.cache.set(cacheKey, resp)
+	return resp, nil
 }
 
 func (a *app) nextRequestID() string {
@@ -960,6 +1012,50 @@ func writeError(w http.ResponseWriter, status int, code string, message string, 
 		"message": message,
 	}
 	writeJSON(w, status, payload)
+}
+
+func (a *app) preflightHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+		return
+	}
+	payload := map[string]any{
+		"status":       "ok",
+		"circuit_hash": a.circuitHash,
+		"ready":        a.prover.Ready(),
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *app) warmupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+		return
+	}
+	if !a.prover.Ready() {
+		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
+		return
+	}
+	req, err := loadWarmupRequest(a.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "warmup_unavailable", err.Error(), err)
+		return
+	}
+	resp, err := a.generateProofResponse(r.Context(), req, a.nextRequestID(), r.ContentLength, "")
+	if err != nil {
+		var perr *proverError
+		if errors.As(err, &perr) {
+			writeError(w, perr.status, perr.code, perr.err.Error(), perr.err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "prover_error", "failed to generate proof", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"request_id": resp.RequestID,
+		"circuit":    resp.CircuitHash,
+	})
 }
 
 func getenv(key, fallback string) string {

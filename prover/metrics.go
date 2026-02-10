@@ -57,6 +57,7 @@ func (h *histogram) render(name string, w http.ResponseWriter) {
 var (
 	proofSuccessCounter   = expvar.NewInt("prover_proofs_success_total")
 	proofFailureCounter   = expvar.NewInt("prover_proofs_failure_total")
+	proofCacheHitCounter  = expvar.NewInt("prover_proof_cache_hits_total")
 	lastLatencyMs         = expvar.NewFloat("prover_last_proof_latency_ms")
 	artifactsStatus       = expvar.NewInt("prover_artifacts_ok") // 1 when required artifacts are present
 	lastInputBytes        = expvar.NewFloat("prover_last_input_bytes")
@@ -75,10 +76,15 @@ func recordProofFailure() {
 	proofFailureCounter.Add(1)
 }
 
+func recordCacheHit() {
+	proofCacheHitCounter.Add(1)
+}
+
 func promMetricsHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintf(w, "# TYPE prover_proofs_success_total counter\nprover_proofs_success_total %d\n", proofSuccessCounter.Value())
 	fmt.Fprintf(w, "# TYPE prover_proofs_failure_total counter\nprover_proofs_failure_total %d\n", proofFailureCounter.Value())
+	fmt.Fprintf(w, "# TYPE prover_proof_cache_hits_total counter\nprover_proof_cache_hits_total %d\n", proofCacheHitCounter.Value())
 	fmt.Fprintf(w, "# TYPE prover_last_proof_latency_ms gauge\nprover_last_proof_latency_ms %f\n", lastLatencyMs.Value())
 	fmt.Fprintf(w, "# TYPE prover_artifacts_ok gauge\nprover_artifacts_ok %d\n", artifactsStatus.Value())
 	fmt.Fprintf(w, "# TYPE prover_last_input_bytes gauge\nprover_last_input_bytes %f\n", lastInputBytes.Value())
