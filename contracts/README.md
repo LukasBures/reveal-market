@@ -12,3 +12,6 @@ Foundry workspaces for on-chain components.
 
 **Testing**
 - `forge build` and `forge test` in each workspace.
+
+**Monitoring**
+- One-shot monitoring script: `contracts/scripts/monitoring_report.sh`
