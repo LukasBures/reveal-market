@@ -182,3 +182,40 @@ def test_subgraph_not_configured_returns_503(monkeypatch):
     with TestClient(app) as client:
         resp = client.get("/subgraph/markets")
         assert resp.status_code == 503
+
+
+def test_subgraph_http_error_surfaces_details(monkeypatch):
+    settings = Settings(subgraph_default_url="https://example.com/subgraph")
+    state = StreamState(settings)
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    class DummyStreamer:
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    class DummySubgraph:
+        async def fetch_markets(self, **_kwargs):
+            import httpx
+
+            request = httpx.Request("POST", "https://example.com/subgraph")
+            response = httpx.Response(502, request=request)
+            raise httpx.HTTPStatusError("bad gateway", request=request, response=response)
+
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.SubgraphClient", lambda *_args, **_kwargs: DummySubgraph())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/subgraph/markets")
+        assert resp.status_code == 502
+        payload = resp.json()
+        assert payload["detail"]["error"] == "subgraph_http_error"
+        assert payload["detail"]["status_code"] == 502

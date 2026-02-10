@@ -123,11 +123,60 @@ class StreamState:
             await self.redis.ping()
         except Exception as exc:
             raise RuntimeError(f"Redis unavailable: {exc}") from exc
+        await self._load_cache_snapshot()
         await self.refresh_fx()
 
     async def shutdown(self) -> None:
         if self.redis:
             await self.redis.aclose()
+
+    async def _load_cache_snapshot(self) -> None:
+        if not self.settings.cache_snapshot_path or not self.redis:
+            return
+        path = self.settings.cache_snapshot_path
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError:
+            logger.warning(
+                "cache snapshot file missing",
+                extra={"event": "cache.snapshot.missing", "path": path},
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "cache snapshot load failed",
+                extra={"event": "cache.snapshot.failed", "path": path, "error": str(exc)},
+            )
+            return
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            logger.warning(
+                "cache snapshot invalid",
+                extra={"event": "cache.snapshot.invalid", "path": path},
+            )
+            return
+        restored = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            market_id = str(entry.get("market_id") or "")
+            outcome = str(entry.get("outcome") or "")
+            data = entry.get("data")
+            if not market_id or not outcome or not isinstance(data, dict):
+                continue
+            try:
+                await self.cache_tick(market_id, outcome, data)
+                restored += 1
+            except Exception as exc:
+                logger.debug(
+                    "cache snapshot entry failed",
+                    extra={"event": "cache.snapshot.entry_failed", "market_id": market_id, "error": str(exc)},
+                )
+        logger.info(
+            "cache snapshot restored",
+            extra={"event": "cache.snapshot.restored", "path": path, "count": restored},
+        )
 
     def cached_health_snapshot(self) -> dict | None:
         ttl_seconds = max(int(self.settings.health_deep_cache_ttl_seconds or 0), 0)

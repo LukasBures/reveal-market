@@ -140,18 +140,24 @@ class PriceStreamer:
         self._update_fx_metrics()
 
     async def _fx_ws_loop(self) -> None:
-        if not self.settings.fx_primary_ws_url:
+        urls = []
+        if self.settings.fx_ws_urls:
+            urls = list(self.settings.fx_ws_urls)
+        elif self.settings.fx_primary_ws_url:
+            urls = [self.settings.fx_primary_ws_url]
+        if not urls:
             return
         attempt = 0
         while not self._stop.is_set():
             attempt += 1
+            url = urls[(attempt - 1) % len(urls)]
             logger.info(
                 "Connecting to FX websocket",
-                extra={"event": "fx.ws.connect", "url": self.settings.fx_primary_ws_url, "attempt": attempt},
+                extra={"event": "fx.ws.connect", "url": url, "attempt": attempt},
             )
             try:
                 async for ws in iter_ws(
-                    self.settings.fx_primary_ws_url,
+                    url,
                     name="fx-ws",
                     fatal_status={400, 401, 403, 404, 429},
                     ping_interval=self.settings.fx_ws_ping_interval_seconds,
@@ -163,7 +169,7 @@ class PriceStreamer:
                         "FX websocket connected",
                         extra={
                             "event": "fx.ws.connected",
-                            "url": self.settings.fx_primary_ws_url,
+                            "url": url,
                             "attempt": attempt,
                         },
                     )

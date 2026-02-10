@@ -17,7 +17,11 @@ FastAPI SSE/WS service for real-time market prices and FX.
 **Access control & limits**
 - Optional access token for SSE/WS via `x-access-token` header (`STREAMER_ACCESS_TOKEN`).
 - Optional control token for ops endpoints via `x-control-token` header (`STREAMER_CONTROL_TOKEN`).
-- Process-local guards: `STREAMER_MAX_ACTIVE_CONNECTIONS` and `STREAMER_RATE_LIMIT_PER_MINUTE`.
+- Process-local guards: `STREAMER_MAX_ACTIVE_CONNECTIONS`, `STREAMER_MAX_CONNECTIONS_PER_CLIENT`, and `STREAMER_RATE_LIMIT_PER_MINUTE`.
+- FX websocket failover via `STREAMER_FX_WS_URLS` (CSV list).
+- Streamer regional failover via `STREAMER_PUBLIC_FAILOVER_URLS` (CSV list for clients).
+- Payload sampling via `STREAMER_MESSAGE_SAMPLE_RATE`.
+- Cache prewarm snapshots via `STREAMER_CACHE_SNAPSHOT_PATH`.
 
 **Config**
 - `streamer/app/config.py` and presets in `streamer/app/env_presets.py`.

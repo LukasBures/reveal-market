@@ -87,6 +87,10 @@ class Settings(BaseSettings):
         default="wss://stream.binance.com:9443/ws/zenusdt@ticker",
         description="Primary FX websocket (ZEN/USDT ticker).",
     )
+    fx_ws_urls: list[str] = Field(
+        default_factory=list,
+        description="Optional CSV/list of FX websocket URLs used for failover (overrides fx_primary_ws_url).",
+    )
     fx_ws_stale_ttl_seconds: int = Field(default=5, ge=3, description="Seconds before FX WS is considered stale")
     fx_max_age_seconds: int = Field(default=60, ge=5, description="Max acceptable age for FX quote before refresh")
     fx_max_jump_percent: float = Field(default=20.0, ge=0, description="Max allowed FX price jump percent")
@@ -145,6 +149,9 @@ class Settings(BaseSettings):
     max_active_connections: int = Field(
         default=1000, ge=1, description="Maximum concurrent SSE/WS connections (process-local guard)"
     )
+    max_connections_per_client: int = Field(
+        default=0, ge=0, description="Optional max concurrent SSE/WS connections per client (0 disables)"
+    )
     sse_max_events: int = Field(
         default=0,
         ge=0,
@@ -161,11 +168,18 @@ class Settings(BaseSettings):
         default=cast(AnyHttpUrl, "https://stream.revealmarket.xyz"),
         description="Public HTTPS streamer host used by browsers.",
     )
+    public_failover_urls: list[AnyHttpUrl] = Field(
+        default_factory=list,
+        description="Optional list of failover streamer public URLs for multi-region deployments.",
+    )
     internal_base_url: AnyHttpUrl | None = Field(
         default=cast(AnyHttpUrl, "http://streamer:8100"),
         description="Internal streamer host used by server components.",
     )
     health_deep_cache_ttl_seconds: int = Field(default=10, ge=0, description="TTL for deep health snapshot cache")
+    cache_snapshot_path: str | None = Field(
+        default=None, description="Optional JSON snapshot path for pre-warming cache on startup"
+    )
 
     @property
     def total_monetization(self) -> float:
@@ -179,7 +193,14 @@ class Settings(BaseSettings):
             raise ValueError("STREAMER_MARKET_STALE_EVICT_SECONDS must exceed STREAMER_MARKET_STALE_SECONDS")
         return value
 
-    @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
+    @field_validator(
+        "cors_allow_origins",
+        "cors_allow_methods",
+        "cors_allow_headers",
+        "fx_ws_urls",
+        "public_failover_urls",
+        mode="before",
+    )
     @classmethod
     def _coerce_csv(cls, value):
         if isinstance(value, str):
@@ -210,6 +231,16 @@ class Settings(BaseSettings):
             )
         )
         return normalized
+
+    @field_validator("fx_ws_urls")
+    @classmethod
+    def _normalize_fx_ws_urls(cls, value: list[str]):
+        cleaned: list[str] = []
+        for raw in value or []:
+            normalized = cls._normalize_fx_ws(raw)
+            if normalized:
+                cleaned.append(normalized)
+        return cleaned
 
     @field_validator("clob_ws_url", mode="before")
     @classmethod

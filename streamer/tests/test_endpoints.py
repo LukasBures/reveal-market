@@ -241,6 +241,7 @@ def test_fx_endpoint_reports_stale_and_age(monkeypatch):
         payload = client.get("/fx/zen-usd").json()
         assert payload["stale"] is True
         assert payload["age_seconds"] >= 0
+        assert "fx_age_seconds" in client.get("/healthz/deep").json()
 
 
 def test_subscriptions_endpoint(monkeypatch):
@@ -576,6 +577,44 @@ def test_access_token_and_connection_cap(monkeypatch):
         # exceed connection cap
         state.active_connections = settings.max_active_connections
         assert client.get("/stream", params={"market_id": "m2"}, headers={"x-access-token": "tok"}).status_code == 429
+
+
+def test_per_client_connection_cap(monkeypatch):
+    settings = Settings(access_token="tok", max_active_connections=5, max_connections_per_client=1)  # noqa: S106
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyStreamer:
+        async def start(self): ...
+
+        async def stop(self): ...
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            return None
+
+        async def close(self):
+            return
+
+    async def fake_subscribe(_market_id: str):
+        return DummyPubSub()
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+
+    async def noop():
+        return None
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/stream", params={"market_id": "m1", "max_events": 1}, headers={"x-access-token": "tok"})
+        assert resp.status_code == 200
+        resp2 = client.get("/stream", params={"market_id": "m2", "max_events": 1}, headers={"x-access-token": "tok"})
+        assert resp2.status_code == 429
 
 
 def test_ws_requires_access_token(monkeypatch):
