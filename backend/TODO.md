@@ -5,17 +5,12 @@
 - Confirm database schema matches expected `backend/shared/models.py`.
 
 **MVP - High**
-- Verify cache refresh loop uses distributed locks to avoid multi-worker stampedes.
-- Ensure API pricing uses shared HTTP clients and resilient FX cache.
 
 **MVP - Medium**
-- Add slow query alerts for API list endpoints.
 
 **MVP - Low**
-- Improve cache observability for list endpoints and category caches.
 
 **MVP - Nice to have**
-- Add request profiling endpoints behind internal auth.
 
 **Production - Critical**
 - Formalize migration plan and schema versioning controls.
