@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     health_deep_cache_ttl_seconds: int = Field(default=10)
     run_migrations_on_startup: bool = Field(default=True)
     metrics_enabled: bool = Field(default=True)
+    admin_rate_limit_requests: int = Field(default=30, ge=0)
+    admin_rate_limit_window_seconds: int = Field(default=60, ge=1)
+    admin_read_only: bool = Field(default=False)
+    risk_category_limits: str | None = Field(
+        default=None,
+        description="Optional JSON map of category => max exposure USD.",
+    )
 
     prover_base_url: str = Field(default="http://prover:8085")
     prover_timeout_seconds: int = Field(default=30)

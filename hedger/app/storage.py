@@ -67,6 +67,17 @@ class HedgeActionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
 
 
+class AuditLogRecord(Base):
+    __tablename__ = "hedger_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    actor: Mapped[str | None] = mapped_column(String, nullable=True)
+    market_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
+
+
 class SettlementRecord(Base):
     __tablename__ = "hedger_settlements"
 
@@ -191,6 +202,25 @@ class HedgerRepository:
                     is_unwind=1 if instruction.is_unwind else 0,
                 )
                 session.add(row)
+
+    async def record_audit_log(
+        self,
+        *,
+        event: str,
+        actor: str | None,
+        market_id: str | None,
+        payload: dict | None = None,
+    ) -> None:
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                session.add(
+                    AuditLogRecord(
+                        event=event,
+                        actor=actor,
+                        market_id=market_id,
+                        payload=payload,
+                    )
+                )
 
     async def record_settlement(
         self,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .service import HedgerService
@@ -15,13 +15,22 @@ def get_service(request: Request) -> HedgerService:
     return request.app.state.service  # type: ignore[attr-defined]
 
 
+def require_writable(service: HedgerService = Depends(get_service)) -> None:
+    if service.settings.admin_read_only:
+        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="read_only")
+
+
 @router.get("/exposures")
 async def exposures(service: HedgerService = Depends(get_service)):
     return {"exposures": await service.exposures()}
 
 
 @router.post("/commits")
-async def ingest_commit(commit: CommitEvent, service: HedgerService = Depends(get_service)):
+async def ingest_commit(
+    commit: CommitEvent,
+    service: HedgerService = Depends(get_service),
+    _: None = Depends(require_writable),
+):
     return await service.ingest_commit(commit)
 
 
@@ -57,7 +66,12 @@ async def positions(service: HedgerService = Depends(get_service)):
 
 
 @router.post("/settlements/{market_id}")
-async def trigger_settlement(market_id: str, payload: dict, service: HedgerService = Depends(get_service)):
+async def trigger_settlement(
+    market_id: str,
+    payload: dict,
+    service: HedgerService = Depends(get_service),
+    _: None = Depends(require_writable),
+):
     return await service.trigger_settlement(market_id, payload)
 
 
@@ -68,6 +82,7 @@ async def bridge_liquidity(
     destination: str,
     slippage_bps: int | None = None,
     service: HedgerService = Depends(get_service),
+    _: None = Depends(require_writable),
 ):
     """
     Manually trigger a bridge transfer between USDC and ZEN rails.

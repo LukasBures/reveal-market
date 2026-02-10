@@ -156,6 +156,19 @@ class ExposureLedger:
 
         if self.repository:
             await self.repository.record_commit(commit, stake_usd, idempotency_key=idempotency_key)
+            await self.repository.record_audit_log(
+                event="commit_ingested",
+                actor=commit.account,
+                market_id=commit.market_id,
+                payload={
+                    "stake_zen": str(commit.stake_zen),
+                    "stake_usd": str(stake_usd),
+                    "direction": commit.direction,
+                    "request_id": commit.request_id,
+                    "idempotency_key": idempotency_key,
+                    "category": commit.category,
+                },
+            )
 
         log_event(
             logger,

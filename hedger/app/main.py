@@ -4,7 +4,7 @@ import logging
 from contextlib import suppress
 from uuid import uuid4
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -13,6 +13,7 @@ from .admin import router as admin_router
 from .config import get_settings
 from .local_logging import log_event, reset_request_id, set_request_id, start_heartbeat_logger
 from .logging_config import setup_logging
+from .rate_limit import RateLimiter
 from .service import HedgerService
 
 
@@ -40,11 +41,23 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    admin_rate_limiter = None
+    if settings.admin_rate_limit_requests > 0:
+        admin_rate_limiter = RateLimiter(
+            settings.admin_rate_limit_requests,
+            settings.admin_rate_limit_window_seconds,
+        )
+
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or request.headers.get("traceparent") or f"req-{uuid4().hex}"
         token = set_request_id(request_id)
         try:
+            if admin_rate_limiter and request.url.path.startswith("/admin"):
+                client_ip = request.client.host if request.client else "unknown"
+                key = f"{client_ip}:{request.url.path}"
+                if not admin_rate_limiter.allow(key):
+                    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate_limited")
             response = await call_next(request)
         finally:
             reset_request_id(token)

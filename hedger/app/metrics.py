@@ -57,6 +57,11 @@ HEDGE_EXECUTIONS = Counter(
     "Hedge executions grouped by action and outcome.",
     ["action", "outcome"],
 )
+HEDGE_DECISIONS = Counter(
+    "hedger_hedge_decisions_total",
+    "Hedge decisions grouped by action and reason.",
+    ["action", "reason"],
+)
 
 
 def update_exposure_metrics(market_id: str, yes_usd: float, no_usd: float, coverage_ratio: float | None = None) -> None:
@@ -91,6 +96,10 @@ def record_pnl(realized_usd: float | None = None, unrealized_usd: float | None =
         PNL_REALIZED_GAUGE.set(realized_usd)
     if unrealized_usd is not None:
         PNL_UNREALIZED_GAUGE.set(unrealized_usd)
+
+
+def record_hedge_decision(action: str, reason: str) -> None:
+    HEDGE_DECISIONS.labels(action=action, reason=reason).inc()
 
 
 def record_settlement_latency(seconds: float) -> None:

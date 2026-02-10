@@ -42,6 +42,7 @@ class FxOracle:
         max_age_seconds: int,
         client: httpx.AsyncClient | None = None,
         retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.5,
         fallback_zen_usd: Decimal = Decimal("1"),
     ):
         if client is None and httpx is None:
@@ -59,6 +60,7 @@ class FxOracle:
         self._quote: FxQuote | None = None
         self._lock = asyncio.Lock()
         self._retry_attempts = retry_attempts
+        self._retry_backoff_seconds = retry_backoff_seconds
         self._fallback_zen_usd = fallback_zen_usd
         self._stale_override = False
 
@@ -95,7 +97,7 @@ class FxOracle:
         async def _pull(url: str) -> FxQuote:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self._retry_attempts),
-                wait=wait_exponential(min=0.1, max=2),
+                wait=wait_exponential(multiplier=self._retry_backoff_seconds, min=0.1, max=2),
                 retry=retry_if_exception_type(Exception),
             ):
                 with attempt:

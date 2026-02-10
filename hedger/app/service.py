@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, nullcontext
@@ -22,7 +23,9 @@ from .locks import RedisLockManager
 from .metrics import (
     HEDGE_EXECUTIONS,
     record_event_lag,
+    record_hedge_decision,
     record_pnl,
+    record_risk_breach,
     update_float_and_utilization,
 )
 from .polymarket import PolymarketClient
@@ -51,6 +54,7 @@ class HedgerService:
         self.settings = settings
         self.repository = HedgerRepository(settings.database_url)
         self.risk_engine = RiskEngine(limits)
+        self._category_limits = self._parse_category_limits(settings.risk_category_limits)
         self.redis: Redis | None = None
         self.fx_oracle = FxOracle(
             feed_url=settings.fx_feed_url,
@@ -58,6 +62,7 @@ class HedgerService:
             haircut_bps=settings.fx_haircut_bps,
             timeout_seconds=settings.fx_timeout_seconds,
             max_age_seconds=settings.fx_max_age_seconds,
+            retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
             fallback_zen_usd=settings.fx_fallback_price,
         )
         self.pricing_engine = PricingEngine(
@@ -124,6 +129,15 @@ class HedgerService:
         )
 
     async def ingest_commit(self, commit: CommitEvent) -> dict[str, Any]:
+        if self.settings.admin_read_only:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.read_only",
+                message="rejecting commit during read-only mode",
+                market_id=commit.market_id,
+            )
+            return {"status": "rejected", "reason": "read_only"}
         idemp_key = self._build_idempotency_key(commit)
         if self.lock_manager and not await self.lock_manager.claim_idempotency(idemp_key):
             log_event(
@@ -214,13 +228,39 @@ class HedgerService:
             snapshot, instruction, breaches = await self.exposure_ledger.record_commit(
                 commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc
             )
+            category_breaches = self._check_category_limits(
+                commit.market_id,
+                commit.category,
+                snapshot,
+            )
+            if category_breaches:
+                breaches.extend(category_breaches)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="hedger.category.limit_exceeded",
+                    message="category exposure limit exceeded",
+                    market_id=commit.market_id,
+                    category=commit.category,
+                    limit=category_breaches[0]["detail"]["limit"],
+                    absolute_usd=category_breaches[0]["detail"]["absolute_usd"],
+                )
         response: dict[str, Any] = {
             "snapshot": snapshot,
             "hedge_instruction": instruction,
             "breaches": breaches,
             "pricing": pricing.model_dump(mode="json"),
         }
+        if breaches:
+            for breach in breaches:
+                try:
+                    code = breach.code  # type: ignore[attr-defined]
+                    severity = breach.severity  # type: ignore[attr-defined]
+                    record_risk_breach(str(code), str(severity))
+                except AttributeError:
+                    record_risk_breach(str(breach.get("code", "unknown")), str(breach.get("severity", "warn")))
         if instruction:
+            record_hedge_decision(instruction.action, instruction.reason)
             hedge_result = await self._execute_hedge(instruction)
             response["hedge_execution"] = hedge_result
         if commit.stream_offset:
@@ -338,6 +378,15 @@ class HedgerService:
         return True, None
 
     async def _execute_hedge(self, instruction: HedgeInstruction) -> dict[str, Any]:
+        if self.settings.admin_read_only:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.read_only",
+                message="rejecting hedge during read-only mode",
+                market_id=instruction.market_id,
+            )
+            return {"status": "rejected", "reason": "read_only"}
         lock_ctx = self.lock_manager.lock(f"hedge:{instruction.market_id}") if self.lock_manager else self._noop_lock
         async with lock_ctx:
             quote = await self.polymarket_client.quote_execution(
@@ -406,6 +455,18 @@ class HedgerService:
                 instruction.market_id, filled_size, is_unwind=instruction.is_unwind
             )
             await self.repository.record_hedge_instruction(instruction, response_payload=quote)
+            await self.repository.record_audit_log(
+                event="hedge_executed",
+                actor=None,
+                market_id=instruction.market_id,
+                payload={
+                    "action": instruction.action,
+                    "outcome": instruction.hedge_outcome,
+                    "size_usd": str(filled_size),
+                    "reason": instruction.reason,
+                    "is_unwind": instruction.is_unwind,
+                },
+            )
             utilization = borrow_receipt.get("utilization") if isinstance(borrow_receipt, dict) else None
             if utilization is None:
                 utilization = await self.vault_client.current_utilization()
@@ -442,6 +503,15 @@ class HedgerService:
         return utilization
 
     async def trigger_settlement(self, market_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if self.settings.admin_read_only:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.read_only",
+                message="rejecting settlement during read-only mode",
+                market_id=market_id,
+            )
+            return {"status": "rejected", "reason": "read_only"}
         return await self.settlement.request_settlement(market_id, payload)
 
     async def settle_market(self, market_id: str, outcome: OutcomeSide | str) -> dict[str, Any]:
@@ -494,6 +564,15 @@ class HedgerService:
 
         slippage = slippage_bps if slippage_bps is not None else self.settings.max_slippage_bps
         idempotency = f"{direction}:{destination}:{amount}"
+        if self.settings.admin_read_only:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.read_only",
+                message="rejecting bridge during read-only mode",
+                direction=direction,
+            )
+            return {"status": "rejected", "reason": "read_only"}
         if direction == "usdc_to_zen":
             return await self.bridge_client.bridge_to_zen(
                 amount, destination, slippage_bps=slippage, idempotency=idempotency
@@ -517,7 +596,52 @@ class HedgerService:
             "fx_stale": fx_stale,
             "latest_commit_at": latest_commit_at.isoformat() if latest_commit_at else None,
             "lp_utilization": utilization,
+            "read_only": self.settings.admin_read_only,
         }
+
+    @staticmethod
+    def _parse_category_limits(raw: str | None) -> dict[str, Decimal]:
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"HEDGER_RISK_CATEGORY_LIMITS invalid JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("HEDGER_RISK_CATEGORY_LIMITS must be a JSON object")
+        parsed: dict[str, Decimal] = {}
+        for key, value in data.items():
+            if not isinstance(key, str):
+                continue
+            try:
+                parsed[key.lower()] = Decimal(str(value))
+            except (InvalidOperation, TypeError):
+                continue
+        return parsed
+
+    def _check_category_limits(
+        self,
+        market_id: str,
+        category: str | None,
+        snapshot: MarketExposureSnapshot,
+    ) -> list[dict[str, Any]]:
+        if not self._category_limits or not category:
+            return []
+        limit = self._category_limits.get(category.lower())
+        if limit is None:
+            return []
+        absolute_usd = abs(snapshot.net_usd)
+        if absolute_usd <= limit:
+            return []
+        return [
+            {
+                "code": "category_limit_exceeded",
+                "severity": "warn",
+                "message": "Category exposure cap exceeded",
+                "market_id": market_id,
+                "detail": {"category": category, "limit": str(limit), "absolute_usd": str(absolute_usd)},
+            }
+        ]
 
     def cached_health_snapshot(self) -> dict[str, Any] | None:
         ttl_seconds = max(int(self.settings.health_deep_cache_ttl_seconds or 0), 0)

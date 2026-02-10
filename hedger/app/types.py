@@ -47,6 +47,7 @@ class CommitEvent(BaseModel):
     market_id: str = Field(..., description="RevealMarket identifier")
     stake_zen: Decimal = Field(..., description="Commit stake in ZEN")
     direction: OutcomeSide = Field(..., description="Outcome chosen off-chain (kept private on-chain)")
+    category: str | None = Field(default=None, description="Market category (optional for exposure limits)")
     committed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tx_hash: str | None = Field(default=None, description="Commit transaction hash")
     account: str | None = Field(default=None, description="Committer wallet (hash or pseudonymized)")
