@@ -117,6 +117,110 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         market.verifyAndSettleBatched(proofs, signals, batchIndexes);
     }
 
+    function testVerifyAndSettleBatchedRejectsCircuitHashMismatch() external {
+        _commitTickets(1);
+        vm.warp(commitDeadline + 1);
+
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, "");
+        vm.prank(oracle);
+        market.postResult(0);
+
+        bytes[] memory proofs = new bytes[](1);
+        proofs[0] = "";
+        uint256[10][] memory signals = new uint256[10][](1);
+        signals[0] = _signals(roots[0], 0, _netTicket(), _netTicket());
+        signals[0][8] = uint256(keccak256("bad-circuit"));
+        uint16[] memory batchIndexes = new uint16[](1);
+        batchIndexes[0] = 0;
+
+        vm.expectRevert(RevealMarket.CircuitHashMismatch.selector);
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(proofs, signals, batchIndexes);
+    }
+
+    function testVerifyAndSettleBatchedRejectsTotalsMismatch() external {
+        _commitTickets(1);
+        vm.warp(commitDeadline + 1);
+
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, "");
+        vm.prank(oracle);
+        market.postResult(0);
+
+        bytes[] memory proofs = new bytes[](1);
+        proofs[0] = "";
+        uint256[10][] memory signals = new uint256[10][](1);
+        signals[0] = _signals(roots[0], 0, _netTicket() + 1, _netTicket());
+        uint16[] memory batchIndexes = new uint16[](1);
+        batchIndexes[0] = 0;
+
+        vm.expectRevert(RevealMarket.TotalsMismatch.selector);
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(proofs, signals, batchIndexes);
+    }
+
+    function testVerifyAndSettleBatchedRejectsRakeMismatch() external {
+        _commitTickets(1);
+        vm.warp(commitDeadline + 1);
+
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, "");
+        vm.prank(oracle);
+        market.postResult(0);
+
+        bytes[] memory proofs = new bytes[](1);
+        proofs[0] = "";
+        uint256[10][] memory signals = new uint256[10][](1);
+        signals[0] = _signals(roots[0], 0, _netTicket(), _netTicket());
+        signals[0][5] = signals[0][5] + 1;
+        uint16[] memory batchIndexes = new uint16[](1);
+        batchIndexes[0] = 0;
+
+        vm.expectRevert(RevealMarket.RakeMismatch.selector);
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(proofs, signals, batchIndexes);
+    }
+
+    function testVerifyAndSettleBatchedRejectsInvalidProof() external {
+        _commitTickets(1);
+        vm.warp(commitDeadline + 1);
+
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, "");
+        vm.prank(oracle);
+        market.postResult(0);
+
+        verifier.setShouldVerify(false);
+
+        bytes[] memory proofs = new bytes[](1);
+        proofs[0] = "";
+        uint256[10][] memory signals = new uint256[10][](1);
+        signals[0] = _signals(roots[0], 0, _netTicket(), _netTicket());
+        uint16[] memory batchIndexes = new uint16[](1);
+        batchIndexes[0] = 0;
+
+        vm.expectRevert(RevealMarket.InvalidProof.selector);
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(proofs, signals, batchIndexes);
+    }
+
     function _commitTickets(uint256 count) internal {
         uint256 netAmount = _netTicket();
         token.mint(user, count * ticketSize);

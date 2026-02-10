@@ -13,9 +13,11 @@ from structlog import get_logger
 from web3.exceptions import Web3Exception
 
 from .metrics import (
+    FEE_BUMP_FACTOR,
     QUEUE_DEADLETTER_DEPTH,
     QUEUE_DEADLETTER_TOTAL,
     QUEUE_DEPTH,
+    QUEUE_ERROR_REASONS,
     QUEUE_OLDEST_BACKLOG_AGE_SECONDS,
     QUEUE_OUTCOMES,
 )
@@ -225,6 +227,10 @@ class TxQueue:
         payload: dict[str, Any] = json.loads(row["payload"])
         nonce = row.get("nonce")
         bump_factor = (1 + self.fee_bump_percent) ** max(0, attempts - 1)
+        try:
+            FEE_BUMP_FACTOR.set(bump_factor)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("relayer.metrics.fee_bump_update_failed", error=str(exc))
         summary = self._payload_summary(row["action"], payload)
         logger.info(
             "queue.job.start",
@@ -318,6 +324,7 @@ class TxQueue:
             )
             await asyncio.to_thread(self._mark_failure, row["id"], next_status, attempts, str(err), nonce_to_store)
             QUEUE_OUTCOMES.labels(action=row["action"], status=next_status).inc()
+            QUEUE_ERROR_REASONS.labels(action=row["action"], reason=self._error_reason(err)).inc()
             if next_status == "deadletter":
                 logger.error(
                     "queue.deadletter",
@@ -568,3 +575,9 @@ class TxQueue:
             if payload.get("batch_roots"):
                 summary["batch_count"] = len(payload.get("batch_roots") or [])
         return summary
+
+    @staticmethod
+    def _error_reason(err: Exception) -> str:
+        if isinstance(err, TxSendError):
+            return err.kind or "tx_send_error"
+        return err.__class__.__name__

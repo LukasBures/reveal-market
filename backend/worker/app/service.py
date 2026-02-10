@@ -629,10 +629,53 @@ async def _release_maintenance_lease(redis_client: Redis | None) -> None:
         )
 
 
+async def _resolve_awaitable(value):
+    if asyncio.iscoroutine(value) or isinstance(value, asyncio.Future):
+        return await value
+    return value
+
+
 def _chunked(items: list[str], size: int) -> list[list[str]]:
     if size <= 0:
         return [items]
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+async def _trim_queue_dead_letters(redis_client: Redis | None) -> None:
+    if redis_client is None:
+        return
+    try:
+        proof_key = runtime.settings.proof_queue_dead_letter_key
+        max_items = runtime.settings.proof_queue_dead_letter_max_items
+        if max_items > 0:
+            await _resolve_awaitable(redis_client.ltrim(proof_key, max(-max_items, -1), -1))
+        ttl_seconds = runtime.settings.proof_queue_dead_letter_ttl_seconds
+        if ttl_seconds > 0:
+            await _resolve_awaitable(redis_client.expire(proof_key, ttl_seconds))
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.queue.dead_letter_trim_failed",
+            message="failed to trim proof dead-letter queue",
+            error=str(exc),
+        )
+    try:
+        settlement_key = runtime.settings.settlement_queue_dead_letter_key
+        max_items = runtime.settings.settlement_queue_dead_letter_max_items
+        if max_items > 0:
+            await _resolve_awaitable(redis_client.ltrim(settlement_key, max(-max_items, -1), -1))
+        ttl_seconds = runtime.settings.settlement_queue_dead_letter_ttl_seconds
+        if ttl_seconds > 0:
+            await _resolve_awaitable(redis_client.expire(settlement_key, ttl_seconds))
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.queue.dead_letter_trim_failed",
+            message="failed to trim settlement dead-letter queue",
+            error=str(exc),
+        )
 
 
 def _parse_timestamp(value: str | None) -> float | None:
@@ -1379,8 +1422,12 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
 
     async def _run_proofs_and_settlements(summary_obj: SyncSummary) -> None:
         try:
+            proofs_start = time.perf_counter()
             proofs_generated = await run_prover_jobs(summary_obj, redis_client)
+            proofs_duration_ms = round((time.perf_counter() - proofs_start) * 1000, 2)
+            settlements_start = time.perf_counter()
             settlements_submitted = await run_settlement_jobs(summary_obj, redis_client)
+            settlements_duration_ms = round((time.perf_counter() - settlements_start) * 1000, 2)
             log_event(
                 logger,
                 logging.INFO,
@@ -1388,6 +1435,8 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
                 message="processed settlement proof jobs",
                 proofs_generated=proofs_generated,
                 settlements_submitted=settlements_submitted,
+                proofs_duration_ms=proofs_duration_ms,
+                settlements_duration_ms=settlements_duration_ms,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -1455,6 +1504,7 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         market_errors=summary.failed_markets,
         active_markets=stats.get("active_markets"),
         total_markets=stats.get("total_markets"),
+        tick_duration_ms=round((time.perf_counter() - tick_start) * 1000, 2),
     )
 
     stats["redis_available"] = redis_client is not None
@@ -1476,6 +1526,12 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
         )
     await publish_heartbeat(redis_client, stats)
     _log_db_metrics("process_once")
+    if runtime.settings.db_latency_pace_enabled:
+        from shared.db_metrics import snapshot as snapshot_db_metrics
+
+        metrics = snapshot_db_metrics()
+        if metrics.total_time_ms >= runtime.settings.db_latency_pace_ms:
+            await asyncio.sleep(runtime.settings.db_latency_pace_sleep_seconds)
     await propagate_schema_revision(redis_client, schema_state)
     await persist_resolution_cache_updates(redis_client, summary)
     return stats
@@ -1656,7 +1712,7 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
     """Run retention/backfill maintenance on a fixed cadence."""
 
     interval = runtime.settings.maintenance_poll_seconds
-    if interval <= 0:
+    if interval <= 0 or not runtime.settings.maintenance_mode_enabled:
         log_event(
             logger,
             logging.DEBUG,
@@ -1699,6 +1755,7 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
                     "failed": 0,
                 }
                 try:
+                    await _trim_queue_dead_letters(redis_client)
                     async with session_scope() as session:
                         await apply_retention_cleanup_async(session, summary)
                         if summary.markets_deleted:
@@ -1843,7 +1900,9 @@ async def run_lock_batches_loop(redis_client: Redis | None) -> None:
             loop_start = time.monotonic()
             summary = SyncSummary()
             try:
+                lock_batches_start = time.perf_counter()
                 submitted = await run_lock_batches_jobs(summary, redis_client)
+                lock_batches_duration_ms = round((time.perf_counter() - lock_batches_start) * 1000, 2)
                 cache_invalidations = 0
                 if submitted and redis_client is not None:
                     cache_report = await invalidate_cache_tags(redis_client, summary)
@@ -1856,6 +1915,7 @@ async def run_lock_batches_loop(redis_client: Redis | None) -> None:
                         message="lock-batches loop processed candidates",
                         submitted=submitted,
                         cache_invalidations=cache_invalidations,
+                        duration_ms=lock_batches_duration_ms,
                     )
             except Exception as exc:  # pragma: no cover - defensive
                 log_event(

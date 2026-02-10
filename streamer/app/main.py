@@ -173,14 +173,51 @@ def create_app() -> FastAPI:
     app_instance = FastAPI(title="Reveal Price Streamer", version="0.1.0", lifespan=lifespan)
     app_instance.state.cors_origins = cors_allow_origins
 
-    def _acquire_connection() -> None:
-        state.active_connections += 1
-        if state.active_connections > settings.max_active_connections:
-            state.active_connections -= 1
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many connections")
+    client_connections: dict[str, int] = {}
 
-    def _release_connection() -> None:
+    def _client_key(client_id: str, access_token: str | None) -> str:
+        if access_token:
+            return f"{client_id}:{access_token}"
+        return client_id
+
+    def _acquire_connection(client_id: str, access_token: str | None) -> None:
+        state.active_connections += 1
+        client_key = _client_key(client_id, access_token)
+        client_connections[client_key] = client_connections.get(client_key, 0) + 1
+        if state.active_connections > settings.max_active_connections:
+            _release_connection(client_id, access_token)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many connections",
+                headers={"Retry-After": "3"},
+            )
+        if (
+            settings.max_connections_per_client > 0
+            and client_connections[client_key] > settings.max_connections_per_client
+        ):
+            _release_connection(client_id, access_token)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many connections for client",
+                headers={"Retry-After": "3"},
+            )
+
+    def _release_connection(client_id: str, access_token: str | None) -> None:
         state.active_connections = max(0, state.active_connections - 1)
+        client_key = _client_key(client_id, access_token)
+        if client_key in client_connections:
+            next_val = client_connections[client_key] - 1
+            if next_val <= 0:
+                client_connections.pop(client_key, None)
+            else:
+                client_connections[client_key] = next_val
+
+    def _deferred_release(client_id: str, access_token: str | None, delay_seconds: float) -> None:
+        async def _release_later() -> None:
+            await asyncio.sleep(delay_seconds)
+            _release_connection(client_id, access_token)
+
+        asyncio.create_task(_release_later())
 
     def _require_access_token(token: str | None):
         if settings.access_token and token != settings.access_token:
@@ -205,7 +242,11 @@ def create_app() -> FastAPI:
         rl_buckets[identifier] = [ts for ts in bucket if now - ts < 60]
         bucket = rl_buckets[identifier]
         if len(bucket) >= settings.rate_limit_per_minute:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate limit exceeded")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="rate limit exceeded",
+                headers={"Retry-After": "60"},
+            )
         bucket.append(now)
 
     app_instance.add_middleware(
@@ -264,6 +305,7 @@ def create_app() -> FastAPI:
             status = "stale"
         elif stale_markets:
             status = "degraded"
+        fx_age_seconds = _age_seconds(state.fx_last_update)
         return {
             "status": status,
             "fx_zen_usd": str(fx.zen_usd),
@@ -273,6 +315,7 @@ def create_app() -> FastAPI:
             "fx_ws_connected": state.fx_ws_connected,
             "fx_last_error": state.fx_last_error,
             "fx_last_update": state.fx_last_update.isoformat() if state.fx_last_update else None,
+            "fx_age_seconds": fx_age_seconds,
             "clob_ws_connected": state.clob_ws_connected,
             "clob_ws_last_message": _iso(state.clob_ws_last_message),
             "clob_ws_last_message_age_seconds": _age_seconds(state.clob_ws_last_message),
@@ -315,6 +358,9 @@ def create_app() -> FastAPI:
         quote = await state.get_fx()
         now = datetime.now(UTC)
         age_seconds = (now - (quote.fetched_at or now)).total_seconds()
+        if metrics:
+            with suppress(Exception):
+                metrics.record_fx_age(age_seconds)
         return {
             "pair": "ZEN/USDC",
             "zen_usd": float(quote.zen_usd),
@@ -667,13 +713,22 @@ def create_app() -> FastAPI:
         except httpx.HTTPStatusError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"subgraph HTTP {exc.response.status_code}",
+                detail={
+                    "error": "subgraph_http_error",
+                    "status_code": exc.response.status_code,
+                    "url": str(exc.request.url) if exc.request else None,
+                },
             ) from exc
         except SubgraphError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "subgraph_error", "message": str(exc)},
+            ) from exc
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("subgraph query failed", extra={"event": "subgraph.query.error", "error": str(exc)})
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="subgraph query failed") from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail={"error": "subgraph_query_failed"}
+            ) from exc
 
     async def _subgraph_ws_send(ws: WebSocket, fn, **kwargs):
         await ws.accept()
@@ -681,14 +736,20 @@ def create_app() -> FastAPI:
             data = await fn(**kwargs)
             await ws.send_json({"data": data})
         except SubgraphNotConfiguredError as exc:
-            await ws.send_json({"error": str(exc)})
+            await ws.send_json({"error": "subgraph_not_configured", "message": str(exc)})
         except httpx.HTTPStatusError as exc:
-            await ws.send_json({"error": f"subgraph HTTP {exc.response.status_code}"})
+            await ws.send_json(
+                {
+                    "error": "subgraph_http_error",
+                    "status_code": exc.response.status_code,
+                    "url": str(exc.request.url) if exc.request else None,
+                }
+            )
         except SubgraphError as exc:
-            await ws.send_json({"error": str(exc)})
+            await ws.send_json({"error": "subgraph_error", "message": str(exc)})
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("subgraph ws failed", extra={"event": "subgraph.ws.error", "error": str(exc)})
-            await ws.send_json({"error": "subgraph query failed"})
+            await ws.send_json({"error": "subgraph_query_failed"})
         finally:
             with suppress(Exception):
                 await ws.close()
@@ -739,7 +800,7 @@ def create_app() -> FastAPI:
         assets_acquired = False
         pubsub = None
         try:
-            _acquire_connection()
+            _acquire_connection(client_id, access_token)
             connection_acquired = True
             if assets:
                 state.acquire_assets(assets)
@@ -752,7 +813,7 @@ def create_app() -> FastAPI:
                 with suppress(Exception):
                     await pubsub.close()
             if connection_acquired:
-                _release_connection()
+                _release_connection(client_id, access_token)
             raise
         if symbols_list:
             state.add_rtds_symbols(symbols_list)
@@ -778,7 +839,10 @@ def create_app() -> FastAPI:
                 heartbeat_seconds=heartbeat,
                 max_events=effective_max_events,
                 metrics=metrics,
-                on_close=lambda: (state.release_assets(assets_for_release), _release_connection()),
+                on_close=lambda: (
+                    state.release_assets(assets_for_release),
+                    _deferred_release(client_id, access_token, heartbeat),
+                ),
                 bootstrap_payloads=bootstrap_payloads,
             ),
             media_type="text/event-stream",
@@ -792,7 +856,8 @@ def create_app() -> FastAPI:
         assets_ids: str | None = None,
         symbols: str | None = None,
     ):
-        if settings.access_token and websocket.headers.get("x-access-token") != settings.access_token:
+        access_token = websocket.headers.get("x-access-token")
+        if settings.access_token and access_token != settings.access_token:
             await websocket.accept()
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
@@ -826,7 +891,7 @@ def create_app() -> FastAPI:
         assets_acquired = False
         pubsub = None
         try:
-            _acquire_connection()
+            _acquire_connection(client_id, access_token)
             connection_acquired = True
             if assets:
                 state.acquire_assets(assets)
@@ -840,7 +905,7 @@ def create_app() -> FastAPI:
                 with suppress(Exception):
                     await pubsub.close()
             if connection_acquired:
-                _release_connection()
+                _release_connection(client_id, access_token)
             raise
         if symbols_list:
             state.add_rtds_symbols(symbols_list)
@@ -889,7 +954,7 @@ def create_app() -> FastAPI:
                 await websocket.close()
             with suppress(Exception):
                 state.release_assets(assets_for_release)
-            _release_connection()
+            _release_connection(client_id, access_token)
 
     @app_instance.websocket("/data/stream/ws")
     async def data_stream_ws(

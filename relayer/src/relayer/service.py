@@ -15,7 +15,14 @@ from web3.exceptions import TimeExhausted, TransactionNotFound, Web3Exception
 from web3.types import BlockData, TxParams, TxReceipt, Wei
 
 from .abi import CLAIM_ABI, COMMIT_ABI, LOCK_BATCHES_ABI
-from .metrics import HEALTH_CHECKS, RPC_ERRORS, TX_LATENCY, TX_OUTCOMES
+from .metrics import (
+    CHAIN_HEAD_LAG_SECONDS,
+    HEALTH_CHECKS,
+    RPC_CIRCUIT_STATE,
+    RPC_ERRORS,
+    TX_LATENCY,
+    TX_OUTCOMES,
+)
 from .poseidon import BATCH_SIZE, build_batch_root, compute_leaf, int_to_hex32
 
 logger = get_logger()
@@ -78,6 +85,11 @@ class RelayerService:
     api_timeout_seconds: int = 10
     api_client_max_age_seconds: float = 900.0
     api_health_failure_cooldown_seconds: float = 15.0
+    rpc_circuit_breaker_threshold: int = 5
+    rpc_circuit_breaker_window_seconds: float = 30.0
+    rpc_circuit_breaker_cooldown_seconds: float = 30.0
+    rpc_circuit_open_until: float = field(default=0, init=False, repr=False)
+    rpc_error_times: list[float] = field(default_factory=list, init=False, repr=False)
     _nonce_lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
     _health_snapshot: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _health_snapshot_ts: float | None = field(default=None, init=False, repr=False)
@@ -122,6 +134,26 @@ class RelayerService:
         self._api_client = httpx.AsyncClient(timeout=self.api_timeout_seconds)
         self._api_client_started_at = now
         return self._api_client
+
+    def _rpc_circuit_open(self) -> bool:
+        open_now = time.time() < self.rpc_circuit_open_until
+        try:
+            RPC_CIRCUIT_STATE.set(1 if open_now else 0)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("relayer.metrics.rpc_circuit_state_failed", error=str(exc))
+        return open_now
+
+    def _record_rpc_error(self) -> None:
+        now = time.time()
+        window_start = now - self.rpc_circuit_breaker_window_seconds
+        self.rpc_error_times = [ts for ts in self.rpc_error_times if ts >= window_start]
+        self.rpc_error_times.append(now)
+        if len(self.rpc_error_times) >= self.rpc_circuit_breaker_threshold:
+            self.rpc_circuit_open_until = now + self.rpc_circuit_breaker_cooldown_seconds
+        try:
+            RPC_CIRCUIT_STATE.set(1 if self._rpc_circuit_open() else 0)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("relayer.metrics.rpc_circuit_state_failed", error=str(exc))
 
     def _require_field(self, payload: Mapping[str, Any], key: str) -> Any:
         if key not in payload or payload[key] is None:
@@ -324,6 +356,8 @@ class RelayerService:
     async def _build_base_tx(
         self, value: int = 0, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> TxParams:
+        if self._rpc_circuit_open():
+            raise TxSendError("rpc_circuit_open", kind="circuit", permanent=False)
         nonce = nonce_override
         if nonce is None:
             nonce = await asyncio.to_thread(self.web3.eth.get_transaction_count, self.account.address, "pending")
@@ -423,6 +457,7 @@ class RelayerService:
                     break
             except TimeExhausted as err:
                 last_err = err
+                self._record_rpc_error()
                 logger.warning(
                     f"relayer.{action}.timeout",
                     attempt=attempt,
@@ -433,6 +468,7 @@ class RelayerService:
                 TX_OUTCOMES.labels(action=action, outcome="timeout").inc()
             except (Web3Exception, ValueError, Exception) as err:
                 last_err = err
+                self._record_rpc_error()
                 logger.warning(
                     f"relayer.{action}.error",
                     attempt=attempt,
@@ -496,6 +532,7 @@ class RelayerService:
                 last_err = err
             except (Web3Exception, ValueError) as err:
                 last_err = err
+                self._record_rpc_error()
             except TimeoutError as err:
                 last_err = err
 
@@ -666,6 +703,10 @@ class RelayerService:
                 block_ts = int(block_data["timestamp"])
                 now = int(datetime.now(UTC).timestamp())
                 block_age = max(0, now - block_ts)
+                try:
+                    CHAIN_HEAD_LAG_SECONDS.set(block_age)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("relayer.metrics.chain_head_lag_failed", error=str(exc))
                 if block_age > self.max_block_age_seconds:
                     issues.append("block_stale")
             except (KeyError, TypeError, ValueError) as err:

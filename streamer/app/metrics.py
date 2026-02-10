@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +14,7 @@ class StreamerMetrics:
 
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
         registry = registry or REGISTRY
+        self.sample_rate = _load_sample_rate()
         self.stream_deliveries = Counter(
             "streamer_stream_deliveries_total",
             "Events delivered to clients",
@@ -82,6 +85,23 @@ class StreamerMetrics:
             "RTDS enabled flag (1=enabled,0=disabled)",
             registry=registry,
         )
+        self.payload_samples = Counter(
+            "streamer_payload_samples_total",
+            "Sampled payload count for sizing analysis",
+            ["transport"],
+            registry=registry,
+        )
+        self.payload_bytes = Counter(
+            "streamer_payload_sample_bytes_total",
+            "Sampled payload bytes for sizing analysis",
+            ["transport"],
+            registry=registry,
+        )
+        self.fx_age_seconds = Gauge(
+            "streamer_fx_age_seconds",
+            "Seconds since last FX update",
+            registry=registry,
+        )
 
     def record_delivery(self, transport: str, payload: Any) -> None:
         """Increment delivery counter with parsed labels."""
@@ -112,6 +132,7 @@ class StreamerMetrics:
             )
             source = str(parsed.get("source") or parsed.get("type") or parsed.get("event_type") or "unknown")
         self.stream_deliveries.labels(transport=transport, market_id=market_id, source=source).inc()
+        self._sample_payload(transport, raw)
 
     def record_drop(self, transport: str, reason: str) -> None:
         self.stream_dropped.labels(transport=transport, reason=reason).inc()
@@ -152,6 +173,48 @@ class StreamerMetrics:
 
     def record_rtds_enabled(self, enabled: bool) -> None:
         self.rtds_enabled.set(1 if enabled else 0)
+
+    def record_fx_age(self, age_seconds: float | None) -> None:
+        if age_seconds is None:
+            return
+        try:
+            self.fx_age_seconds.set(max(0.0, float(age_seconds)))
+        except Exception:
+            return
+
+    def _sample_payload(self, transport: str, payload: Any) -> None:
+        if self.sample_rate <= 0:
+            return
+        if self.sample_rate < 1 and secrets.SystemRandom().random() > self.sample_rate:
+            return
+        try:
+            if isinstance(payload, bytes):
+                size = len(payload)
+            elif isinstance(payload, str):
+                size = len(payload.encode("utf-8"))
+            elif isinstance(payload, dict):
+                size = len(json.dumps(payload).encode("utf-8"))
+            else:
+                size = len(str(payload).encode("utf-8"))
+        except Exception:
+            return
+        self.payload_samples.labels(transport=transport).inc()
+        self.payload_bytes.labels(transport=transport).inc(size)
+
+
+def _load_sample_rate() -> float:
+    raw = os.getenv("STREAMER_MESSAGE_SAMPLE_RATE", "").strip()
+    if not raw:
+        return 0.01
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.01
+    if value <= 0:
+        return 0.0
+    if value > 1:
+        return 1.0
+    return value
 
 
 _metrics: StreamerMetrics | None = None

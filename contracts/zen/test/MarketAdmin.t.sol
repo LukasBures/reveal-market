@@ -355,4 +355,68 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(address(this));
         factory.updateAuthorizationSigner(address(market), makeAddr("newerSigner"));
     }
+
+    function testPauseControlsBlockCommitsAndClaims() external {
+        bytes32 leaf = _leaf(0, 0, ticketSize, ticketSize, bytes32("pause-commit"), user);
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: leaf,
+            user: user,
+            nonce: 55,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+
+        vm.prank(address(this));
+        factory.setMarketCommitsPaused(address(market), true);
+
+        bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(relayerOwner);
+        vm.expectRevert(RevealMarket.CommitsPaused.selector);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+
+        vm.prank(address(this));
+        factory.setMarketCommitsPaused(address(market), false);
+
+        vm.prank(relayerOwner);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+
+        vm.warp(commitDeadline + 1);
+        bytes32 root = _lockSingleBatch(oracle, auth.commitment);
+        vm.prank(oracle);
+        market.postResult(0);
+        uint256 netTicket = ticketSize - (ticketSize * market.rakeBps()) / 10_000;
+        uint256[10] memory signals = [
+            uint256(root),
+            market.marketId(),
+            uint256(0),
+            netTicket,
+            netTicket,
+            market.rakeBps(),
+            netTicket,
+            uint256(0),
+            uint256(circuitHash),
+            uint256(0)
+        ];
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = auth.commitment;
+        bytes32[] memory proof = _buildMerkleProof(leaves, 1, 0);
+
+        vm.prank(address(this));
+        factory.setMarketClaimsPaused(address(market), true);
+        vm.prank(relayerOwner);
+        vm.expectRevert(RevealMarket.ClaimsPaused.selector);
+        market.claim(user, 0, 0, netTicket, netTicket, bytes32("pause-commit"), proof);
+
+        vm.prank(address(this));
+        factory.setMarketClaimsPaused(address(market), false);
+    }
 }

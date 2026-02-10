@@ -79,4 +79,23 @@ contract MarketFactoryViewsTest is Test {
         vm.expectRevert(MarketFactory.UnknownMarket.selector);
         factory.getMarketParams(99);
     }
+
+    function testCreateMarketEmitsMarketCreated() external {
+        MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
+            oracle: oracle,
+            verifier: address(verifier),
+            circuitHash: circuitHash,
+            commitDeadline: block.timestamp + 2 days,
+            fixedTicketSize: 0.1 ether,
+            maxCommitments: 5,
+            authorizationSigner: signer,
+            protocolLiabilityCap: 1 ether
+        });
+
+        address predicted = factory.predictMarketAddress(2);
+        vm.expectEmit(true, true, true, true, address(factory));
+        emit MarketFactory.MarketCreated(2, predicted, oracle, circuitHash, 0.1 ether, params.commitDeadline, 1 ether);
+        vm.prank(owner);
+        factory.createMarket(params);
+    }
 }
