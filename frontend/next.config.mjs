@@ -179,6 +179,36 @@ const nextConfig = (phase) => {
     },
     headers: async () => [
       {
+        source: '/',
+        headers: [
+          ...securityHeaders,
+          {
+            key: 'Cache-Control',
+            value: 'public, s-maxage=120, stale-while-revalidate=600',
+          },
+        ],
+      },
+      {
+        source: '/search',
+        headers: [
+          ...securityHeaders,
+          {
+            key: 'Cache-Control',
+            value: 'public, s-maxage=120, stale-while-revalidate=600',
+          },
+        ],
+      },
+      {
+        source: '/events/:path*',
+        headers: [
+          ...securityHeaders,
+          {
+            key: 'Cache-Control',
+            value: 'public, s-maxage=60, stale-while-revalidate=300',
+          },
+        ],
+      },
+      {
         source: '/docs/:path*',
         headers: [
           ...securityHeaders,

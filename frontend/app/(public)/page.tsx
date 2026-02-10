@@ -26,7 +26,7 @@ export const metadata: Metadata = buildMetadata({
 });
 
 export const revalidate = 60;
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
 
 const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Sports", "Politics", "Geopolitics", "Tech", "Elections"];
 

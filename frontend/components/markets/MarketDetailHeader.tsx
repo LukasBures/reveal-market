@@ -1,6 +1,7 @@
 import type { MarketDetail } from "@/lib/api-types";
 import { formatDateTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
 import { getCommitDeadline } from "@/lib/markets";
+import Image from "next/image";
 import { MarketArtwork } from "./MarketArtwork";
 
 type Props = {
@@ -41,19 +42,24 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   const commitDeadline = getCommitDeadline(market);
   const resolutionStatus = (market.resolutionStatus ?? "").toLowerCase();
   const resolutionReason = market.resolutionReason ?? null;
-  const backgroundStyle = coverImage
-    ? {
-        backgroundImage: `linear-gradient(120deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.75) 45%, rgba(0,0,0,0.6) 100%), url(${coverImage})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }
-    : undefined;
-
   return (
     <header
-      className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 px-5 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:px-8 sm:py-8"
-      style={backgroundStyle}
+      className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 px-5 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:px-8 sm:py-8"
     >
+      {coverImage ? (
+        <>
+          <Image
+            src={coverImage}
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 1024px) 100vw, 1024px"
+            className="pointer-events-none absolute inset-0 z-0 object-cover"
+          />
+          <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-slate-950/95 via-slate-950/75 to-black/60" />
+        </>
+      ) : null}
+      <div className="relative z-20">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
         <div className="flex min-w-0 flex-1 gap-4">
           <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} sizeClass="w-20 h-20 sm:w-24 sm:h-24" />
@@ -89,6 +95,7 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
           value={commitDeadline ? formatDateTime(commitDeadline) : "TBA"}
           compact
         />
+      </div>
       </div>
     </header>
   );

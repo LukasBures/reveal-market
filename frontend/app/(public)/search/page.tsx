@@ -6,7 +6,8 @@ import { buildMetadata } from "@/lib/seo";
 import { DEFAULT_PAGE_SIZE } from "@/components/markets/constants";
 import { parseCategorySlug } from "@/lib/slugs";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
+export const dynamic = "force-static";
 
 export const metadata: Metadata = buildMetadata({
   title: "Search Events | Reveal Market",

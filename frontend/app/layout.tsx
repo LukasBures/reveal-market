@@ -32,6 +32,13 @@ const SEARCH_URL = absoluteUrl("/search");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const SHOULD_LOAD_GA = IS_PRODUCTION && GA_MEASUREMENT_ID;
+const GA_SAMPLE_RATE = (() => {
+  const raw = process.env.NEXT_PUBLIC_GA_SAMPLE_RATE;
+  if (!raw) return 50;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(parsed, 1), 100);
+})();
 const SHOULD_SUPPRESS_LIT_WARNING = true;
 const isBrowserResolvableHost = (hostname: string) => {
   const normalized = hostname.toLowerCase();
@@ -179,7 +186,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 window.dataLayer = window.dataLayer || [];
                 function gtag(){dataLayer.push(arguments);}
                 gtag('js', new Date());
-                gtag('config', '${GA_MEASUREMENT_ID}');
+                gtag('config', '${GA_MEASUREMENT_ID}', {
+                  sample_rate: ${GA_SAMPLE_RATE},
+                  anonymize_ip: true
+                });
               `}
             </Script>
           </>

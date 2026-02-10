@@ -22,3 +22,10 @@ Next.js 15 + TypeScript + Tailwind app for the marketing site and event browsing
 
 **Tests**
 - `cd frontend && npm run test`
+
+**Performance tooling**
+- Lighthouse CI: `cd frontend && npm run lighthouse:ci`
+- Bundle budgets: `cd frontend && npm run bundle:check`
+
+**Analytics sampling**
+- Set `NEXT_PUBLIC_GA_SAMPLE_RATE` (1-100) to control GA sampling in production.
