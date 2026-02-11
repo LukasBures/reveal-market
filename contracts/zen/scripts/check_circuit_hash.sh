@@ -12,6 +12,14 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 RPC_URL="${RPC_URL:-${RM_RPC_URL:-}}"
+expected_chain_id="${EXPECTED_CHAIN_ID:-${CHAIN_ID:-}}"
+if [[ -n "${expected_chain_id}" ]]; then
+  actual_chain_id="$(cast chain-id --rpc-url "${RPC_URL}" 2>/dev/null || true)"
+  if [[ -n "${actual_chain_id}" && "${actual_chain_id}" != "${expected_chain_id}" ]]; then
+    echo "RPC chain id mismatch: expected ${expected_chain_id}, got ${actual_chain_id}" >&2
+    exit 1
+  fi
+fi
 VERIFIER_ADDRESS="${VERIFIER_ADDRESS:-${RM_VERIFIER_ADDRESS:-}}"
 FACTORY_ADDRESS="${FACTORY_ADDRESS:-${RM_FACTORY_ADDRESS:-}}"
 FACTORY_MARKET_ID="${FACTORY_MARKET_ID:-${MARKET_ID:-}}"

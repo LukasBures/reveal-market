@@ -90,6 +90,11 @@ export PROTOCOL_LIABILITY_CAP_WEI
 expected_market_id="$(cast call "${FACTORY_ADDRESS}" "nextMarketId()(uint256)" --rpc-url "${RPC_URL}")"
 predicted_address="$(cast call "${FACTORY_ADDRESS}" "predictMarketAddress(uint256)(address)" "${expected_market_id}" --rpc-url "${RPC_URL}")"
 chain_id="$(cast chain-id --rpc-url "${RPC_URL}" 2>/dev/null || true)"
+expected_chain_id="${EXPECTED_CHAIN_ID:-${CHAIN_ID:-}}"
+if [[ -n "${expected_chain_id}" && "${chain_id}" != "${expected_chain_id}" ]]; then
+  echo "RPC chain id mismatch: expected ${expected_chain_id}, got ${chain_id}" >&2
+  exit 1
+fi
 global_rake_bps="$(cast call "${FACTORY_ADDRESS}" "globalRakeBps()(uint256)" --rpc-url "${RPC_URL}" 2>/dev/null || true)"
 
 CAST_SEND_ARGS_ARRAY=()

@@ -88,6 +88,14 @@ export COLLATERAL_TOKEN
 export USE_STUB_VERIFIER
 export SETTLEMENT_VK_JSON
 export CHAIN_ID
+expected_chain_id="${EXPECTED_CHAIN_ID:-${CHAIN_ID:-}}"
+if [[ -n "${expected_chain_id}" ]]; then
+  actual_chain_id="$(cast chain-id --rpc-url "${RPC_URL}" 2>/dev/null || true)"
+  if [[ -n "${actual_chain_id}" && "${actual_chain_id}" != "${expected_chain_id}" ]]; then
+    echo "RPC chain id mismatch: expected ${expected_chain_id}, got ${actual_chain_id}" >&2
+    exit 1
+  fi
+fi
 export SETTLEMENT_VK_PATH
 
 FOUNDRY_ARGS=(script script/Deploy.s.sol --tc Deploy --rpc-url "${RPC_URL}" --broadcast --private-key "${DEPLOYER_KEY}")
