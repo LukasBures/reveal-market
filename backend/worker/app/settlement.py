@@ -889,6 +889,8 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                         headers = {}
                         if runtime.settings.relayer_bearer_token:
                             headers["Authorization"] = f"Bearer {runtime.settings.relayer_bearer_token}"
+                        if runtime.settings.relayer_internal_secret:
+                            headers["X-Internal-Secret"] = runtime.settings.relayer_internal_secret.get_secret_value()
                         ticket_payloads = []
                         for commitment in commitments:
                             if not commitment.user_address or not commitment.salt:
