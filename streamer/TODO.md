@@ -1,26 +1,16 @@
 # Streamer TODO
 
-**MVP - Critical**
+**MVP Critical**
 - Confirm Redis history trimming is enforced for long-running streams.
 
-**MVP - High**
+**MVP High**
 - Validate rate-limit/connection guard defaults under expected load.
 
-**MVP - Medium**
+**MVP Medium**
 - Add tests for control endpoints and subgraph proxy error handling.
 
-**MVP - Low**
-
-**MVP - Nice to have**
+**MVP Nice to have**
 - Add backpressure when active connections exceed capacity.
 
-**Production - Critical**
+**Production Critical**
 - Ensure WS/SSE reconnect policies are tuned for prod traffic.
-
-**Production - High**
-
-**Production - Medium**
-
-**Production - Low**
-
-**Production - Nice to have**

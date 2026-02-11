@@ -1,16 +1,8 @@
 # Contracts TODO
 
-**MVP - Critical**
+**MVP Critical**
 - Validate deployment scripts against current chain IDs.
 - Confirm ownership transfers and admin keys are secured.
 
-**MVP - High**
+**MVP High**
 - Ensure settlement and verification flow matches prover circuit hash.
-
-**MVP - Medium**
-
-**MVP - Low**
-
-**MVP - Nice to have**
-
-**Production - Low**
