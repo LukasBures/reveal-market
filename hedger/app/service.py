@@ -690,6 +690,18 @@ class HedgerService:
             )
             latest_commit_at = None
         fx_stale = self.fx_oracle.stale()
+        if fx_stale:
+            try:
+                await self.fx_oracle.refresh()
+                fx_stale = self.fx_oracle.stale()
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="hedger.health.fx_refresh_failed",
+                    message="failed to refresh fx quote during health check",
+                    error=str(exc),
+                )
         utilization = None
         if self.vault_client:
             try:
