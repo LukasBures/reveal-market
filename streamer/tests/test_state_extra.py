@@ -160,5 +160,6 @@ async def test_state_startup_fails_when_redis_unreachable(monkeypatch):
         return None
 
     state.refresh_fx = fake_refresh  # type: ignore[assignment]
-    with pytest.raises(RuntimeError):
-        await state.startup()
+    await state.startup()
+    assert state.redis is None
+    assert state.redis_error is not None

@@ -76,6 +76,7 @@ class StreamState:
     def __init__(self, settings: Settings | None = None, metrics: StreamerMetrics | None = None):
         self.settings = settings or get_settings()
         self.redis: Redis | None = None
+        self.redis_error: str | None = None
         self.fx_quote: FxQuote | None = None
         self.fx_last_update: datetime | None = None
         self.fx_ws_last_update: datetime | None = None
@@ -116,13 +117,19 @@ class StreamState:
         self._health_snapshot_ts: datetime | None = None
 
     async def startup(self) -> None:
-        self.redis = Redis.from_url(
-            self.settings.redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5
-        )
         try:
+            self.redis = Redis.from_url(
+                self.settings.redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5
+            )
             await self.redis.ping()
+            self.redis_error = None
         except Exception as exc:
-            raise RuntimeError(f"Redis unavailable: {exc}") from exc
+            self.redis = None
+            self.redis_error = str(exc)
+            logger.warning(
+                "redis unavailable; continuing in degraded mode",
+                extra={"event": "streamer.redis.unavailable", "error": str(exc)},
+            )
         await self._load_cache_snapshot()
         await self.refresh_fx()
 

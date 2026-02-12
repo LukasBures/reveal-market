@@ -157,9 +157,27 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        await state.startup()
-        await data_streamer.start()
-        await price_streamer.start()
+        try:
+            await state.startup()
+        except Exception as exc:
+            logger.error(
+                "streamer startup failed; continuing without cache",
+                extra={"event": "streamer.startup.failed", "error": str(exc)},
+            )
+        try:
+            await data_streamer.start()
+        except Exception as exc:
+            logger.error(
+                "data streamer failed to start",
+                extra={"event": "streamer.data.start_failed", "error": str(exc)},
+            )
+        try:
+            await price_streamer.start()
+        except Exception as exc:
+            logger.error(
+                "price streamer failed to start",
+                extra={"event": "streamer.price.start_failed", "error": str(exc)},
+            )
         logger.info("streamer ready", extra={"event": "streamer.ready"})
         try:
             yield
@@ -306,8 +324,11 @@ def create_app() -> FastAPI:
         elif stale_markets:
             status = "degraded"
         fx_age_seconds = _age_seconds(state.fx_last_update)
+        cache_status = "ok" if state.redis else "unavailable"
         return {
             "status": status,
+            "cache_status": cache_status,
+            "cache_error": state.redis_error,
             "fx_zen_usd": str(fx.zen_usd),
             "fx_raw_zen_usd": str(fx.raw_zen_usd or fx.zen_usd),
             "fx_stale": fx.stale,
@@ -768,6 +789,8 @@ def create_app() -> FastAPI:
         access_token: str | None = Header(default=None, alias="x-access-token"),
     ):
         _require_access_token(access_token)
+        if not state.redis:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="cache unavailable")
         connection_id = f"conn-{uuid4().hex}"
         client_id = request.client.host if request and request.client else "unknown"
         _rate_limit(client_id)
@@ -860,6 +883,10 @@ def create_app() -> FastAPI:
         if settings.access_token and access_token != settings.access_token:
             await websocket.accept()
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if not state.redis:
+            await websocket.accept()
+            await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
             return
         connection_id = f"conn-{uuid4().hex}"
         client_id = websocket.client.host if websocket.client else "unknown"

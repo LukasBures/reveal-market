@@ -11,6 +11,18 @@ from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
 
 
+class DummyRedis:
+    async def hgetall(self, _key):
+        return {}
+
+    async def lrange(self, _key, _start, _end):
+        return []
+
+    async def scan_iter(self, *args, **kwargs):
+        if False:  # pragma: no cover - empty async generator
+            yield None
+
+
 @pytest.fixture()
 def test_app(monkeypatch):
     # Use in-memory state with no Redis connection.
@@ -99,6 +111,7 @@ def test_health_endpoint_reports_upstream_status(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         resp = client.get("/healthz/deep")
         payload = resp.json()
         assert payload["clob_ws_connected"] is True
@@ -268,6 +281,7 @@ def test_subscriptions_endpoint(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         resp = client.get("/subscriptions")
         assert resp.status_code == 200
         data = resp.json()
@@ -277,6 +291,7 @@ def test_subscriptions_endpoint(monkeypatch):
 
 def test_stream_endpoint_connects(test_app):
     client, state = test_app
+    state.redis = DummyRedis()
 
     # Set up a dummy redis pubsub to avoid actual Redis.
     class DummyPubSub:
@@ -301,6 +316,7 @@ def test_stream_endpoint_connects(test_app):
 
 def test_stream_sse_bootstrap_payloads(test_app):
     client, state = test_app
+    state.redis = DummyRedis()
 
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
@@ -336,6 +352,7 @@ def test_stream_sse_bootstrap_payloads(test_app):
 
 def test_stream_websocket_sends_messages(test_app):
     client, state = test_app
+    state.redis = DummyRedis()
 
     class DummyPubSub:
         def __init__(self):
@@ -377,6 +394,7 @@ def test_stream_websocket_sends_messages(test_app):
 
 def test_stream_ws_bootstrap_payloads(test_app):
     client, state = test_app
+    state.redis = DummyRedis()
 
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
@@ -518,6 +536,7 @@ def test_control_symbols_respect_cap_and_bump_version(monkeypatch):
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         start_version = state.rtds_symbols_version
         resp = client.post(
             "/control/subscriptions",
@@ -568,6 +587,7 @@ def test_access_token_and_connection_cap(monkeypatch):
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         state.subscribe = fake_subscribe  # ensure patched after app creation
         # missing token
         assert client.get("/stream", params={"market_id": "m1"}).status_code == 403
@@ -611,6 +631,7 @@ def test_per_client_connection_cap(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         resp = client.get("/stream", params={"market_id": "m1", "max_events": 1}, headers={"x-access-token": "tok"})
         assert resp.status_code == 200
         resp2 = client.get("/stream", params={"market_id": "m2", "max_events": 1}, headers={"x-access-token": "tok"})
@@ -654,6 +675,7 @@ def test_ws_requires_access_token(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         with client.websocket_connect("/stream/ws?market_id=m1&heartbeat=1", headers={"x-access-token": "tok"}) as ws:
             msg = ws.receive_json()
             assert "ping" in msg.get("event", "")
@@ -684,6 +706,7 @@ def test_stream_releases_assets_on_subscribe_error(monkeypatch):
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
     with TestClient(app, raise_server_exceptions=False) as client:
+        state.redis = DummyRedis()
         resp = client.get("/stream", params={"market_id": "m1", "assets_ids": "a1", "max_events": 1})
         assert resp.status_code == 500
     assert "a1" not in state.subscriptions.assets
@@ -723,6 +746,7 @@ def test_rate_limit_overflow(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
     app = create_app()
     with TestClient(app) as client:
+        state.redis = DummyRedis()
         resp = client.get("/stream", params={"market_id": "m1", "max_events": 1})
         assert resp.status_code == 200
         resp2 = client.get("/stream", params={"market_id": "m1", "max_events": 1})
