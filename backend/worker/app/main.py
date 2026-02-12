@@ -47,6 +47,8 @@ def main() -> None:  # pragma: no cover - CLI bootstrap
         asyncio.run(run_worker())
     except KeyboardInterrupt:  # pragma: no cover - graceful shutdown
         logger.info("worker interrupted, shutting down")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("worker crashed", extra={"event": "worker.crash", "error": str(exc)})
 
 
 def __getattr__(name: str) -> Any:

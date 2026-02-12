@@ -98,13 +98,22 @@ async def lifespan(app: FastAPI):
         event="service.lifespan.start",
         message="api lifespan starting",
     )
-    await run_startup_tasks()
-    log_event(
-        logger,
-        logging.INFO,
-        event="service.lifespan.ready",
-        message="api startup complete; serving traffic",
-    )
+    try:
+        await run_startup_tasks()
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.lifespan.ready",
+            message="api startup complete; serving traffic",
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="service.startup.failed",
+            message="api startup tasks failed; continuing in degraded mode",
+            error=str(exc),
+        )
     try:
         yield
     finally:
