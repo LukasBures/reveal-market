@@ -241,7 +241,6 @@ services:
       dockerfile: docker/hedger/Dockerfile
       args:
         BUILDKIT_INLINE_CACHE: 1
-    profiles: ["hedger"]
     container_name: reveal-market-hedger
     restart: unless-stopped
     init: true
@@ -409,7 +408,7 @@ services:
       PROVER_HEARTBEAT_SECONDS: 60
       PROVER_VERSION: ${PROVER_VERSION}
       PROVER_CIRCUIT_HASH: ${PROVER_CIRCUIT_HASH}
-      PROVER_SHARED_SECRET: ${PROVER_SHARED_SECRET}
+      RM_PROVER_SHARED_SECRET: ${RM_PROVER_SHARED_SECRET}
       PROVER_BACKEND: ${PROVER_BACKEND}
       PYTHONUNBUFFERED: 1
     deploy:

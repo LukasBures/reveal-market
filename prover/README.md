@@ -16,7 +16,7 @@ Go-based Groth16 prover service that generates settlement proofs. It validates c
 - `GET /debug/pprof/*` – pprof endpoints (only when `PROVER_ENABLE_DEBUG=true`).
 
 **Auth**
-- If `PROVER_SHARED_SECRET` is set, requests must include `X-Prover-Secret`.
+- If `RM_PROVER_SHARED_SECRET` is set, requests must include `X-Prover-Secret`.
 
 **Operational behavior**
 - Requires artifacts under `prover/circuits/build` (or `PROVER_CIRCUIT_DIR`). Startup fails if required artifacts are missing or hash mismatches are detected.
@@ -26,7 +26,7 @@ Go-based Groth16 prover service that generates settlement proofs. It validates c
 
 **Key configuration**
 - `PROVER_LISTEN_ADDR` (default `0.0.0.0:8085`)
-- `PROVER_SHARED_SECRET` (optional)
+- `RM_PROVER_SHARED_SECRET` (optional)
 - `PROVER_ENABLE_DEBUG` (default `false`)
 - `PROVER_MAX_CONCURRENCY`
 - `PROVER_PROOF_TIMEOUT_SECONDS`

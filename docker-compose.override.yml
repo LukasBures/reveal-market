@@ -64,7 +64,6 @@ services:
       - ./backend/migrations:/worker/migrations
 
   hedger:
-    profiles: ["hedger"]
     volumes:
       - ./hedger/app:/hedger/app
       - ./backend/shared:/hedger/shared

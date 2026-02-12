@@ -77,7 +77,7 @@ func LoadConfig() Config {
 		ManualCircuitHash:   getenv("PROVER_CIRCUIT_HASH", ""),
 		HeartbeatSeconds:    intEnv("PROVER_HEARTBEAT_SECONDS", 60),
 		BackendMode:         parseBackendMode(getenv("PROVER_BACKEND", "groth16")),
-		SharedSecret:        getenv("PROVER_SHARED_SECRET", ""),
+		SharedSecret:        getenv("RM_PROVER_SHARED_SECRET", ""),
 		EnableDebug:         boolEnv("PROVER_ENABLE_DEBUG", false),
 		ReadHeaderTimeout:   readHeaderTimeout,
 		ReadTimeout:         readTimeout,
