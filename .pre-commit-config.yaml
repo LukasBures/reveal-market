@@ -76,6 +76,14 @@ repos:
         types_or: [python]
         pass_filenames: false
         require_serial: true
+      - id: mypy-hedger
+        name: mypy (hedger)
+        description: "Static type checks for hedger"
+        entry: bash -c 'set -euo pipefail; unset VIRTUAL_ENV; MYPY_CACHE_DIR=/tmp/.mypy_cache uv run --project hedger -- mypy --config-file pyproject.toml hedger/app'
+        language: system
+        types_or: [python]
+        pass_filenames: false
+        require_serial: true
 
   # Gas snapshots (slowest)
   - repo: local
