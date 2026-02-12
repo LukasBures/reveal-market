@@ -20,16 +20,12 @@ export default function GettingStartedPage() {
   return (
     <>
       <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Getting started</p>
-      <h1 className="text-4xl font-semibold text-white">From access code to first claim</h1>
+      <h1 className="text-4xl font-semibold text-white">From account setup to first claim</h1>
       <ol className="list-decimal space-y-6 pl-6 text-lg text-slate-300">
         <li>
-          <h3 className="font-semibold text-white">Unlock access</h3>
+          <h3 className="font-semibold text-white">Open the app</h3>
           <p className="text-slate-300">
-            Enter your access code on the landing page. If you need one, use the{" "}
-            <Link href="/contact" className="text-brand-300 underline">
-              contact form
-            </Link>{" "}
-            and we’ll help.
+            Visit the homepage and connect your wallet when you are ready to participate.
           </p>
         </li>
         <li>
@@ -62,7 +58,7 @@ export default function GettingStartedPage() {
         and we’ll get you set up quickly.
       </div>
       <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
-        Checklist: access code, wallet, deposit ready, signed quote, fixed ticket size understood.
+        Checklist: wallet, deposit ready, signed quote, fixed ticket size understood.
       </div>
       <DocsStructuredData slug="getting-started" />
     </>

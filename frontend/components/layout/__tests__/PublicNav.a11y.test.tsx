@@ -21,7 +21,7 @@ describe("PublicNav accessibility", () => {
 
     // Shift+Tab at first element should wrap to last link
     await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
-    const lastLink = screen.getByRole("link", { name: /Request access/i });
+    const lastLink = screen.getByRole("link", { name: /receipts/i });
     expect(lastLink).toHaveFocus();
 
     // Escape closes and returns focus to trigger

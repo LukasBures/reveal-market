@@ -2,7 +2,6 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 import { AppProviders } from "@/components/providers/AppProviders";
-import { getCookieValue } from "@/lib/cookies";
 
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
 
@@ -11,10 +10,6 @@ vi.mock("@/lib/env-presets", () => ({
     mode: "prod",
     siteUrl: "http://localhost:3000",
   }),
-}));
-
-vi.mock("@/lib/cookies", () => ({
-  getCookieValue: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -39,8 +34,6 @@ describe("MainNav", () => {
     pathnameState.value = "/";
     process.env.RM_ENVIRONMENT = "prod";
     vi.resetModules();
-    vi.mocked(getCookieValue).mockReset();
-    vi.mocked(getCookieValue).mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -72,33 +65,5 @@ describe("MainNav", () => {
     const { MainNav } = await import("@/components/layout/MainNav");
     renderWithProviders(<MainNav />);
     expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
-  });
-
-  it("shows the minimal landing header when gate is enabled without access", async () => {
-    pathnameState.value = "/";
-
-    const { MainNav } = await import("@/components/layout/MainNav");
-    renderWithProviders(<MainNav initialHasAccess={false} gateEnabled />);
-
-    expect(screen.getByRole("link", { name: /reveal market/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /reveal market/i })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: /request access/i })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /search/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /proofs/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /dashboard/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /connect wallet/i })).not.toBeInTheDocument();
-  });
-
-  it("renders the full nav when gate is enabled and access is granted", async () => {
-    pathnameState.value = "/";
-
-    vi.mocked(getCookieValue).mockReturnValue("granted");
-    const { MainNav } = await import("@/components/layout/MainNav");
-    renderWithProviders(<MainNav initialHasAccess gateEnabled />);
-
-    expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: /search/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /proofs/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /dashboard/i })).toBeInTheDocument();
   });
 });

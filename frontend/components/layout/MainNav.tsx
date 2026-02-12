@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCookieValue } from "@/lib/cookies";
-import { LANDING_ACCESS_COOKIE_NAME } from "@/lib/access-gate";
 import Link from "next/link";
 import Image from "next/image";
 import type { Route } from "next";
@@ -10,11 +8,6 @@ import { usePathname } from "next/navigation";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { HeroSearch } from "@/components/marketing/HeroSearch";
 import { resolveUrlConfig } from "@/lib/env-presets";
-
-type MainNavProps = {
-  initialHasAccess?: boolean;
-  gateEnabled?: boolean;
-};
 
 const resolvedUrls = resolveUrlConfig();
 const resolvedSiteUrl = (resolvedUrls.siteUrl ?? "").trim();
@@ -29,9 +22,8 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
  * Top navigation with logo, menu links, and Connect Wallet CTA.
  * Sticks to the viewport top so users can access nav/actions while scrolling.
  */
-export function MainNav({ initialHasAccess = false, gateEnabled = false }: MainNavProps) {
+export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [clientHasAccess, setClientHasAccess] = useState<boolean | null>(null);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -46,62 +38,6 @@ export function MainNav({ initialHasAccess = false, gateEnabled = false }: MainN
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMobileMenuOpen]);
-  const isLanding = pathname === "/";
-  useEffect(() => {
-    if (!gateEnabled) return;
-    const cookieValue = getCookieValue(LANDING_ACCESS_COOKIE_NAME);
-    setClientHasAccess(cookieValue === "granted");
-  }, [gateEnabled]);
-
-  const resolvedAccess =
-    clientHasAccess === null ? Boolean(initialHasAccess) : clientHasAccess;
-  const hasAccess = gateEnabled ? resolvedAccess : true;
-
-  const showLandingMinimal =
-    gateEnabled && isLanding && !hasAccess && resolvedUrls.mode === "prod";
-  if (showLandingMinimal) {
-    return (
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
-        <div className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
-          <Link
-            href="/"
-            className="flex flex-shrink-0 items-center gap-3 text-white transition hover:opacity-90 cursor-pointer select-none"
-            onClick={() => setIsMobileMenuOpen(false)}
-          >
-            <div className="relative aspect-[25/7] w-[160px] sm:w-[200px]">
-              <Image
-                src="/brand/reveal-logo-wordmark.svg"
-                alt="Reveal Market"
-                fill
-                sizes="(min-width: 640px) 200px, 160px"
-                priority
-                className="select-none object-contain"
-              />
-            </div>
-          </Link>
-          <div className="flex items-center gap-2">
-            <a
-              href="https://x.com/RevealMarket"
-              target="_blank"
-              rel="noreferrer"
-              className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300 md:inline-flex"
-            >
-              Request access
-            </a>
-            <a
-              href="https://x.com/RevealMarket"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
-            >
-              Request
-            </a>
-          </div>
-        </div>
-      </header>
-    );
-  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">

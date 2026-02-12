@@ -1,13 +1,10 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import { Suspense } from "react";
 import Link from "next/link";
 
-import { LandingGate } from "@/components/landing/LandingGate";
 import { FeaturedEventsSection, FeaturedEventsSkeleton } from "@/components/markets/FeaturedMarketsSection";
 import { fetchHealthSnapshot } from "@/lib/api";
 import { buildMetadata } from "@/lib/seo";
-import { LANDING_ACCESS_COOKIE_NAME, isLandingGateEnabled } from "@/lib/access-gate";
 import { categorySlugFromLabel, parseCategorySlug } from "@/lib/slugs";
 import type { Route } from "next";
 
@@ -35,20 +32,6 @@ type PageProps = {
 };
 
 export default async function HomePage({ searchParams }: PageProps) {
-  const gateEnabled = isLandingGateEnabled();
-  let hasAccess = true;
-  if (gateEnabled) {
-    try {
-      const cookieStore = await cookies();
-      hasAccess = cookieStore.get(LANDING_ACCESS_COOKIE_NAME)?.value === "granted";
-    } catch {
-      hasAccess = true;
-    }
-  }
-  if (gateEnabled && !hasAccess) {
-    return <LandingGate />;
-  }
-
   // Avoid blocking the home render on a health probe.
   const resolvedParams = (await searchParams) ?? {};
   const rawSearchQuery = typeof resolvedParams.q === "string" ? resolvedParams.q : undefined;

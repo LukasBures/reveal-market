@@ -97,48 +97,6 @@ body::after {
   }
 }
 
-.landing-noise {
-  position: relative;
-}
-
-.landing-noise::before {
-  content: "";
-  position: absolute;
-  inset: -35%;
-  background:
-    radial-gradient(circle at 15% 25%, rgba(12, 39, 177, 0.35), transparent 60%),
-    radial-gradient(circle at 80% 10%, rgba(123, 240, 94, 0.25), transparent 55%),
-    radial-gradient(circle at 55% 80%, rgba(2, 12, 76, 0.35), transparent 60%),
-    linear-gradient(185deg, rgba(3, 6, 28, 0.95), rgba(2, 8, 34, 0.98));
-  animation: landingGradient 30s ease-in-out infinite alternate;
-  opacity: 0.9;
-  z-index: 0;
-  filter: blur(0px);
-}
-
-.landing-noise::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Crect width='160' height='160' fill='none'/%3E%3Cpath d='M0 .5h.5v-.5H0V.5Zm80 0h.5v-.5H80V.5Zm80 0h.5v-.5H160V.5Zm-40 40h.5v-.5H120V40.5Zm-80 0h.5v-.5H40V40.5Zm120 40h.5v-.5H160V80.5Zm-160 0h.5v-.5H0V80.5Zm40 40h.5v-.5H40V120.5Zm80 0h.5v-.5H120V120.5Zm-80 40h.5v-.5H40V160.5Zm80 0h.5v-.5H120V160.5Z' stroke='rgba(226,232,240,0.05)' stroke-width='0.5'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  opacity: 0.35;
-  mix-blend-mode: soft-light;
-  pointer-events: none;
-  z-index: 0;
-}
-
-@keyframes landingGradient {
-  0% {
-    transform: translate3d(-12%, -8%, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(10%, 6%, 0) scale(1.08);
-  }
-  100% {
-    transform: translate3d(-4%, 10%, 0) scale(1);
-  }
-}
 
 a {
   color: inherit;

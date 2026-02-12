@@ -11,8 +11,6 @@ import { AppProviders } from "@/components/providers/AppProviders";
 import { HeartbeatClient } from "@/components/providers/HeartbeatClient";
 import { MainNav } from "@/components/layout/MainNav";
 import { Footer } from "@/components/layout/Footer";
-import { cookies } from "next/headers";
-import { isLandingGateEnabled, LANDING_ACCESS_COOKIE_NAME } from "@/lib/access-gate";
 
 export const revalidate = 60;
 
@@ -126,9 +124,6 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const gateEnabled = isLandingGateEnabled();
-  const initialHasAccess = gateEnabled ? await hasLandingAccess() : true;
-
   return (
     <html lang="en" className={`${font.variable} ${displayFont.variable}`}>
       <head>
@@ -170,7 +165,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <AppProviders>
           <HeartbeatClient />
           <div className="flex min-h-screen flex-col">
-            <MainNav initialHasAccess={initialHasAccess} gateEnabled={gateEnabled} />
+            <MainNav />
             <main className="flex-1">{children}</main>
             <Footer />
           </div>
@@ -197,14 +192,4 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </body>
     </html>
   );
-}
-
-async function hasLandingAccess(): Promise<boolean> {
-  try {
-    const cookieStore = await cookies();
-    const cookie = cookieStore.get(LANDING_ACCESS_COOKIE_NAME);
-    return cookie?.value === "granted";
-  } catch {
-    return false;
-  }
 }

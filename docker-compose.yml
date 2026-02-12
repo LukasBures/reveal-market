@@ -367,7 +367,6 @@ services:
       HOSTNAME: 0.0.0.0
       NODE_OPTIONS: --max-old-space-size=256
       RUNNING_IN_DOCKER: "true"
-      LANDING_ACCESS_CODE: ${LANDING_ACCESS_CODE}
       NEXT_PUBLIC_ZEN_TOKEN_ADDRESS: ${NEXT_PUBLIC_ZEN_TOKEN_ADDRESS}
     depends_on:
       api:

@@ -9,7 +9,6 @@ import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
-import { LANDING_ACCESS_COOKIE_NAME, isLandingGateEnabled } from "@/lib/access-gate";
 
 const navLinks: { href: Route; label: string }[] = [
   { href: "/search", label: "Search" },
@@ -23,12 +22,6 @@ export function PublicNav() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
   const pathname = usePathname();
-  const gateEnabled = isLandingGateEnabled();
-  const [hasAccess, setHasAccess] = useState<boolean>(() => {
-    if (!gateEnabled) return true;
-    if (typeof document === "undefined") return true;
-    return document.cookie.includes(`${LANDING_ACCESS_COOKIE_NAME}=granted`);
-  });
 
   useEffect(() => {
     if (!isMobileMenuOpen) return;
@@ -60,13 +53,6 @@ export function PublicNav() {
     return () => window.removeEventListener("keydown", handler);
   }, [isMobileMenuOpen]);
 
-  useEffect(() => {
-    if (!gateEnabled || typeof document === "undefined") return;
-    const cookieString = document.cookie ?? "";
-    const granted = cookieString.includes(`${LANDING_ACCESS_COOKIE_NAME}=granted`);
-    setHasAccess(granted);
-  }, [gateEnabled]);
-
   const isLandingPage = pathname === "/";
 
   if (isLandingPage) {
@@ -87,31 +73,27 @@ export function PublicNav() {
               className="h-auto w-[160px] max-w-full select-none sm:w-[200px]"
             />
           </Link>
-          <div className="flex items-center gap-2">
-            <a
-              href="https://x.com/RevealMarket"
-              target="_blank"
-              rel="noreferrer"
-              className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300 md:inline-flex"
-            >
-              Request access
-            </a>
-            <a
-              href="https://x.com/RevealMarket"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
-            >
-              Request
-            </a>
-          </div>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://x.com/RevealMarket"
+            target="_blank"
+            rel="noreferrer"
+            className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300 md:inline-flex"
+          >
+            Follow updates
+          </a>
+          <a
+            href="https://x.com/RevealMarket"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+          >
+            Follow
+          </a>
+        </div>
         </div>
       </header>
     );
-  }
-
-  if (gateEnabled && !hasAccess) {
-    return null;
   }
 
   return (
@@ -153,7 +135,7 @@ export function PublicNav() {
             rel="noreferrer"
             className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300 md:inline-flex"
           >
-            Request access
+            Follow updates
           </a>
           <button
             type="button"
@@ -190,13 +172,6 @@ export function PublicNav() {
                     {link.label}
                   </Link>
                 ))}
-                <Link
-                  href="/contact"
-                  className="rounded-full border border-brand-400/50 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] text-white transition hover:border-white hover:text-white"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Request access
-                </Link>
               </div>
             </nav>
           </div>
