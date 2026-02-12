@@ -177,6 +177,7 @@ class EventResponse(BaseModel):
     closes_at: datetime | None = None
     markets: list[MarketResponse]
     aggregate_volume_24h_usd: float | None = None
+    aggregate_volume_total_usd: float | None = None
     aggregate_liquidity_usd: float | None = None
 
 
@@ -184,6 +185,7 @@ class GroupedMarketsResponse(BaseModel):
     group_slug: str
     markets: list[MarketResponse]
     aggregate_volume_24h_usd: float | None = None
+    aggregate_volume_total_usd: float | None = None
     aggregate_liquidity_usd: float | None = None
 
 

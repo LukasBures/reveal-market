@@ -80,7 +80,9 @@ export function EventCardHeadToHead({ event, market }: Props) {
       </div>
       <div className="mt-2 flex items-center justify-between text-xs text-white/60">
         <span>Volume</span>
-        <span className="font-semibold text-white/80">{formatStatValue(event.aggregateVolume24hUsd)}</span>
+        <span className="font-semibold text-white/80">
+          {formatStatValue(event.aggregateVolumeTotalUsd ?? event.aggregateVolume24hUsd)}
+        </span>
       </div>
     </div>
   );

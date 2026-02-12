@@ -338,6 +338,9 @@ def build_event_responses(
                     closes_at=market.closes_at,
                     markets=[market],
                     aggregate_volume_24h_usd=market.volume_24h_usd,
+                    aggregate_volume_total_usd=market.volume
+                    if market.volume is not None
+                    else market.orderbook_volume_usd,
                     aggregate_liquidity_usd=market.liquidity_usd,
                 )
             )
@@ -370,14 +373,25 @@ def build_event_responses(
             aggregate_volume = float(volumes[0])
         else:
             aggregate_volume = float(sum(volumes)) if volumes else None
+        total_volumes = [item.volume for item in items if item.volume is not None]
+        if total_volumes and len({float(value) for value in total_volumes}) == 1:
+            aggregate_volume_total = float(total_volumes[0])
+        else:
+            aggregate_volume_total = float(sum(total_volumes)) if total_volumes else None
         if liquidities and len({float(value) for value in liquidities}) == 1:
             aggregate_liquidity = float(liquidities[0])
         else:
             aggregate_liquidity = float(sum(liquidities)) if liquidities else None
         if aggregate_volume is None and primary.volume_24h_usd is not None:
             aggregate_volume = primary.volume_24h_usd
+        if aggregate_volume_total is None and primary.volume is not None:
+            aggregate_volume_total = primary.volume
+        if aggregate_volume_total is None and primary.orderbook_volume_usd is not None:
+            aggregate_volume_total = primary.orderbook_volume_usd
         if aggregate_liquidity is None and primary.liquidity_usd is not None:
             aggregate_liquidity = primary.liquidity_usd
+        if aggregate_volume_total is not None and aggregate_volume is None:
+            aggregate_volume = aggregate_volume_total
         title_value = group_titles.get(key) or primary.title
         grouped_events.append(
             schemas.EventResponse(
@@ -390,6 +404,7 @@ def build_event_responses(
                 closes_at=primary.closes_at,
                 markets=items,
                 aggregate_volume_24h_usd=aggregate_volume,
+                aggregate_volume_total_usd=aggregate_volume_total,
                 aggregate_liquidity_usd=aggregate_liquidity,
             )
         )

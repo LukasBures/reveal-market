@@ -101,6 +101,7 @@ export type GroupedMarkets = {
   groupSlug: string;
   markets: MarketDetail[];
   aggregateVolume24hUsd?: number | null;
+  aggregateVolumeTotalUsd?: number | null;
   aggregateLiquidityUsd?: number | null;
 };
 
@@ -114,6 +115,7 @@ export type EventSummary = {
   closesAt?: string | null;
   markets: MarketSummary[];
   aggregateVolume24hUsd?: number | null;
+  aggregateVolumeTotalUsd?: number | null;
   aggregateLiquidityUsd?: number | null;
 };
 

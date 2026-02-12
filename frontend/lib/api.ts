@@ -507,6 +507,13 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
         closesAt: item.closes_at ?? item.closesAt ?? markets[0]?.closesAt ?? null,
         markets,
         aggregateVolume24hUsd: coerceNumber(item.aggregate_volume_24h_usd ?? item.aggregateVolume24hUsd) ?? null,
+        aggregateVolumeTotalUsd:
+          coerceNumber(item.aggregate_volume_total_usd ?? item.aggregateVolumeTotalUsd) ??
+          markets.reduce((max: number, market: MarketSummary) => {
+            const candidate =
+              coerceNumber(market.volume ?? market.orderbookVolumeUsd ?? market.volume24hUsd) ?? 0;
+            return Math.max(max, candidate);
+          }, 0),
         aggregateLiquidityUsd: coerceNumber(item.aggregate_liquidity_usd ?? item.aggregateLiquidityUsd) ?? null,
       } as EventSummary;
     });
