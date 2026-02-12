@@ -465,7 +465,7 @@ async def test_prime_markets_cache_stores_payload(monkeypatch):
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/markets"
+        assert request.url.path == "/events"
         assert request.url.params["limit"] == "7"
         assert request.url.params["order_by"] == "volume"
         return httpx.Response(status_code=200, json=payload)
@@ -598,7 +598,7 @@ async def test_prime_featured_views_prefetches_categories_and_suggestions(monkey
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
-        if "/markets/suggest" in request.url.path:
+        if "/events/suggest" in request.url.path:
             key = suggest_cache_key("Alpha query", runtime_module.settings.suggest_cache_limit)
             dummy._ttls[key] = 30
         return httpx.Response(status_code=200, json=[])
@@ -616,7 +616,7 @@ async def test_prime_featured_views_prefetches_categories_and_suggestions(monkey
     assert summary["suggestions_primed"] == 1
     assert summary["suggestion_ttls"]["Alpha query"] == 30
     assert any("/categories/Politics" in url and "limit=7" in url for url in requests)
-    assert any("/markets/suggest" in url and "limit=4" in url for url in requests)
+    assert any("/events/suggest" in url and "limit=4" in url for url in requests)
 
 
 def _fetch_counter(outcome: str) -> float:

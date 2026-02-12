@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import logging
 import re
 import time
@@ -211,6 +212,7 @@ class MarketPayload(BaseModel):
         group_item_title = _clean_string(raw.get("groupItemTitle") or raw.get("group_item_title"))
         raw_group_threshold = raw.get("groupItemThreshold") or raw.get("group_item_threshold")
         group_item_threshold = _parse_group_threshold(raw_group_threshold)
+        group_item_threshold_raw = _stringify_group_threshold(raw_group_threshold)
         group_position = None
         if group_item_threshold is not None:
             try:
@@ -239,7 +241,7 @@ class MarketPayload(BaseModel):
             "clob_token_id_yes": clob_token_ids[0] if clob_token_ids and clob_token_ids[0] is not None else None,
             "clob_token_id_no": clob_token_ids[1] if clob_token_ids and len(clob_token_ids) > 1 else None,
             "group_item_title": group_item_title,
-            "group_item_threshold": group_item_threshold,
+            "group_item_threshold": group_item_threshold_raw,
             "group_slug": group_slug,
             "best_bid": None,
             "best_ask": None,
@@ -912,6 +914,25 @@ def _parse_group_threshold(value: Any) -> float | None:
             return float(match.group(0)) * multiplier
         except Exception:
             return None
+    return None
+
+
+def _stringify_group_threshold(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, (int, float)):
+        try:
+            numeric = float(value)
+        except Exception:
+            return None
+        if not math.isfinite(numeric):
+            return None
+        if numeric.is_integer():
+            return str(int(numeric))
+        return str(numeric)
     return None
 
 

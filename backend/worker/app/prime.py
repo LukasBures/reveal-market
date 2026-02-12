@@ -64,7 +64,7 @@ async def prime_markets_cache(
         summary["reason"] = "api_base_url_missing"
         return summary
 
-    url = f"{runtime.settings.api_base_url.rstrip('/')}/markets"
+    url = f"{runtime.settings.api_base_url.rstrip('/')}/events"
     start = time.perf_counter()
     page_summaries: list[dict[str, Any]] = []
     try:
@@ -214,7 +214,7 @@ async def prime_featured_views(
         for query in runtime.settings.featured_suggest_queries:
             suggest_params: dict[str, str | int] = {"q": query, "limit": runtime.settings.suggest_cache_limit}
             try:
-                response = await client.get(f"{base_url}/markets/suggest", params=suggest_params)
+                response = await client.get(f"{base_url}/events/suggest", params=suggest_params)
                 if response.is_success:
                     summary["suggestions_primed"] += 1
                     key = suggest_cache_key(query, runtime.settings.suggest_cache_limit)
