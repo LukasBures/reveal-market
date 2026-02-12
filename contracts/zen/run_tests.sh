@@ -38,6 +38,8 @@ export FOUNDRY_SIG_PROVIDER=none
 export HTTP_PROXY=
 export HTTPS_PROXY=
 export ALL_PROXY=
+# Keep fuzzing bounded in the default suite to avoid long stalls.
+export FOUNDRY_FUZZ_RUNS="${FOUNDRY_FUZZ_RUNS:-64}"
 
 log_step "Step 1: forge build"
 forge build

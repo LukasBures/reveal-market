@@ -516,7 +516,7 @@ Stack ready. Useful URLs:
     • Streamer history:     http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
   Infra:
     • Relayer health:       http://localhost:${RELAYER_PORT}/healthz
-    • Hedger health:        http://localhost:${HEDGER_API_PORT}/health
+    • Hedger health:        http://localhost:${HEDGER_API_PORT}/healthz
     • Prover health:        http://localhost:8085/healthz
 
 Internal service ports (for debugging):
@@ -527,7 +527,7 @@ Internal service ports (for debugging):
     • Frontend direct:      http://localhost:${FRONTEND_PORT}
   Infra:
     • Relayer (internal):   http://relayer:${RELAYER_PORT}/healthz
-    • Hedger (internal):    http://hedger:${HEDGER_API_PORT}/health
+    • Hedger (internal):    http://hedger:${HEDGER_API_PORT}/healthz
     • Prover (internal):    http://prover:8085/healthz
 
 Datastores:

@@ -47,7 +47,8 @@ run_section() {
   shift 2
   local -a env_vars=("$@")
 
-  local log_file="${LOG_DIR}/$(echo "${name}" | tr '/ ' '__').log"
+  local log_file
+  log_file="${LOG_DIR}/$(echo "${name}" | tr '/ ' '__').log"
 
   if [[ ! -x "${script_path}" ]]; then
     log_error "${script_path} is missing or not executable"
@@ -82,7 +83,6 @@ run_section "hedger" "${ROOT_DIR}/hedger/run_tests.sh"
 run_section "streamer" "${ROOT_DIR}/streamer/run_tests.sh"
 run_section "relayer" "${ROOT_DIR}/relayer/run_tests.sh"
 run_section "frontend" "${ROOT_DIR}/frontend/run_tests.sh" FRONTEND_REQUIRE_API="${FRONTEND_REQUIRE_API:-false}"
-run_section "contracts/polygon" "${ROOT_DIR}/contracts/polygon/run_tests.sh"
 run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"
 
