@@ -23,9 +23,9 @@ export const metadata: Metadata = buildMetadata({
 });
 
 export const revalidate = 60;
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
-const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Sports", "Politics", "Geopolitics", "Tech", "Elections"];
+const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Sports", "Geopolitics"];
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -86,15 +86,13 @@ export default async function HomePage({ searchParams }: PageProps) {
                     <Link
                       key={category}
                       href={href}
-                      className={`relative snap-start rounded-full border px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
+                      className={`relative snap-start rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
                         isActive
                           ? "border-brand-400/80 bg-brand-400/20 text-white"
                           : "border-white/10 bg-white/5 text-white/80 hover:border-brand-400/60 hover:text-white hover:bg-white/10"
                       }`}
                     >
-                      {isActive ? (
-                        <span className="pointer-events-none absolute inset-x-2 -bottom-2 h-[2px] rounded-full bg-brand-400/80 shadow-[0_0_12px_rgba(92,124,255,0.6)]" />
-                      ) : null}
+                      {null}
                       <span className="relative">{category}</span>
                     </Link>
                   );
@@ -135,7 +133,7 @@ export default async function HomePage({ searchParams }: PageProps) {
               {hasActiveFilters ? (
                 <Link
                   href="/"
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70 transition hover:border-white/40 hover:text-white"
+                  className="rounded-full border border-red-400/60 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-red-100 transition hover:border-red-300 hover:text-white hover:bg-red-500/20"
                 >
                   Clear
                 </Link>
