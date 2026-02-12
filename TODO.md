@@ -19,8 +19,6 @@
 - Validate cross-service internal network paths in docker compose and Caddy.
 `prover`
 - Ensure circuit artifacts in `prover/circuits/build` match the deployed contracts (hashes + version).
-- Lock down internal endpoints (`/debug/pprof/*`, `/metrics/expvar`) to trusted networks or `PROVER_ENABLE_DEBUG`.
-- Validate proof requests from the worker with `PROVER_SHARED_SECRET` set in prod.
 `repo`
 - Confirm production env secrets for API/worker/relayer/prover and deploy with `RM_INTERNAL_API_SECRET`.
 - Verify prover artifacts and circuit hash are aligned across contracts, prover, and API.

@@ -2,8 +2,6 @@
 
 **MVP Critical**
 - Ensure circuit artifacts in `prover/circuits/build` match the deployed contracts (hashes + version).
-- Lock down internal endpoints (`/debug/pprof/*`, `/metrics/expvar`) to trusted networks or `PROVER_ENABLE_DEBUG`.
-- Validate proof requests from the worker with `PROVER_SHARED_SECRET` set in prod.
 
 **MVP Nice to have**
 - Add structured logging to include proof input sizes and queue wait times.
