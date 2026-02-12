@@ -70,7 +70,16 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup() -> None:
-        await service.startup()
+        try:
+            await service.startup()
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="hedger.startup.failed",
+                message="hedger startup failed; continuing in degraded mode",
+                error=str(exc),
+            )
         nonlocal heartbeat_stop
         heartbeat_stop = start_heartbeat_logger(
             logger,

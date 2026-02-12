@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -25,18 +26,23 @@ class RedisLockManager:
     async def lock(self, key: str) -> AsyncIterator[None]:
         if self.redis:
             token = str(time.time())
-            acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)
-            if not acquired:
-                # Wait briefly then retry once to avoid thundering herds in tests/local
-                await asyncio.sleep(0.05)
-                acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)
-            if not acquired:
-                raise RuntimeError(f"Failed to acquire lock for {key}")
             try:
-                yield
-            finally:
-                await self.redis.delete(f"lock:{key}")
-            return
+                acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)
+                if not acquired:
+                    # Wait briefly then retry once to avoid thundering herds in tests/local
+                    await asyncio.sleep(0.05)
+                    acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)
+                if not acquired:
+                    raise RuntimeError(f"Failed to acquire lock for {key}")
+                try:
+                    yield
+                finally:
+                    await self.redis.delete(f"lock:{key}")
+                return
+            except Exception as exc:
+                # Fall back to process-local lock if Redis is unavailable.
+                logger = logging.getLogger("reveal_market.hedger.locks")
+                logger.warning("redis lock failed; using fallback lock", extra={"error": str(exc), "key": key})
 
         # Fallback to process-local locks
         lock = self._fallback_locks.setdefault(key, asyncio.Lock())

@@ -39,6 +39,8 @@ async def risk(service: HedgerService = Depends(get_service)):
     snapshots = await service.exposures()
     total_abs = sum([abs(s.net_usd) for s in snapshots], start=Decimal("0"))
     breaches = []
+    if not service.vault_client:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="vault_unavailable")
     lp_utilization = await service.vault_client.current_utilization()
     for snap in snapshots:
         breaches.extend(
@@ -58,6 +60,8 @@ async def risk(service: HedgerService = Depends(get_service)):
 @router.get("/positions")
 async def positions(service: HedgerService = Depends(get_service)):
     exposures = await service.exposures()
+    if not service.vault_client:
+        return {"exposures": exposures, "lp_utilization": None, "vault_unavailable": True}
     utilization = await service.vault_client.current_utilization()
     return {
         "exposures": exposures,
