@@ -944,6 +944,17 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
     detail.groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.event_key ?? payload.eventKey ?? detail.groupSlug;
     detail.groupTitle = groupTitle ?? detail.groupTitle ?? null;
     detail.groupMarkets = groupMarkets;
+    // Group-level resolution/heartbeat may exist only on the parent event payload.
+    if (!detail.resolution && payload.extra_data?.resolution) {
+      detail.resolution = payload.extra_data.resolution;
+    }
+    if (!detail.heartbeat && payload.extra_data?.heartbeat) {
+      const hb = payload.extra_data.heartbeat;
+      detail.heartbeat = {
+        timestamp: hb.timestamp ?? hb.checkedAt ?? null,
+        latencyMs: coerceNumber(hb.latency_ms ?? hb.latencyMs),
+      };
+    }
     // Enrich with subgraph orderbook + OI when available (best-effort).
     try {
       if (!detail.clobTokenIds?.length && detail.conditionId) {

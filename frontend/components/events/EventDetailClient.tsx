@@ -163,7 +163,7 @@ export function EventDetailClient({
                 onSelect={handleSelect}
                 labelOverride="Grouped market"
                 titleOverride={market.groupSlug ? undefined : market.title}
-                subtitleOverride="Choose a sub-market within this event bundle."
+                subtitleOverride="Choose a sub-market within this event."
                 forceShow
               />
               <MarketDetailChart

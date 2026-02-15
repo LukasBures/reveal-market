@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import type { UrlObject } from "url";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MarketSibling } from "@/lib/api-types";
 import { formatDate, formatUsd } from "@/lib/formatters";
 
@@ -96,11 +96,12 @@ export function GroupedMarketSelector({
       const sb = score(b as MarketSibling & { _label?: string });
       if (sa.rank !== sb.rank) return sa.rank - sb.rank;
       if (typeof sa.value === "number" && typeof sb.value === "number") return sa.value - sb.value;
-      return String(sa.value).localeCompare(String(sb.value));
+      const byValue = String(sa.value).localeCompare(String(sb.value));
+      if (byValue !== 0) return byValue;
+      return String(a.eventId).localeCompare(String(b.eventId));
     });
   }, [siblings]);
 
-  const now = useMemo(() => Date.now(), []);
   const isSelectable = useMemo(() => {
     return (sibling: MarketSibling) => {
       const status = (sibling.status ?? "").toLowerCase();
@@ -122,15 +123,18 @@ export function GroupedMarketSelector({
         .map((value) => (value ? Date.parse(value) : NaN))
         .filter((value) => Number.isFinite(value));
       if (!candidates.length) return status === "" || status === "open" || status === "commit";
-      return Math.min(...candidates) >= now;
+      return Math.min(...candidates) >= Date.now();
     };
-  }, [now]);
+  }, []);
 
   const activeEnded = useMemo(
     () => labeledSiblings.some((sibling) => sibling.eventId === activeEventId && !isSelectable(sibling)),
     [activeEventId, labeledSiblings, isSelectable],
   );
-  const [showEnded, setShowEnded] = useState(activeEnded);
+  const [showEnded, setShowEnded] = useState(false);
+  useEffect(() => {
+    if (activeEnded) setShowEnded(true);
+  }, [activeEnded]);
 
   const { activeSiblings, endedSiblings } = useMemo(() => {
     const active: (MarketSibling & { _label?: string })[] = [];
@@ -149,7 +153,6 @@ export function GroupedMarketSelector({
   if (!shouldShow) return null;
 
   const title = titleOverride ?? formatGroupTitle(groupSlug);
-  const label = labelOverride ?? "Grouped market";
   const subtitle = subtitleOverride ?? "Select a threshold to jump between sub-markets.";
   const countLabel = endedSiblings.length
     ? `${activeSiblings.length} active · ${endedSiblings.length} ended`
@@ -159,8 +162,6 @@ export function GroupedMarketSelector({
     <section className="rounded-3xl border border-white/10 bg-slate-950/40 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-200/70">{label}</p>
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
           <p className="text-sm text-emerald-100/80">{subtitle}</p>
         </div>
         <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
@@ -186,7 +187,7 @@ export function GroupedMarketSelector({
           if (onSelect) {
             return (
               <button
-                key={`${sibling.eventId}-${label}-summary`}
+                key={`summary-${sibling.eventId}`}
                 type="button"
                 onClick={() => onSelect(sibling.eventId)}
                 className={className}
@@ -199,7 +200,7 @@ export function GroupedMarketSelector({
             );
           }
           return (
-            <Link key={`${sibling.eventId}-${label}-summary`} href={href} scroll={false} className={className}>
+            <Link key={`summary-${sibling.eventId}`} href={href} scroll={false} className={className}>
               <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
               <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
               <span className="text-sm text-white sm:text-right">No {noPrice}</span>
@@ -239,7 +240,7 @@ export function GroupedMarketSelector({
                   : "border-amber-400/40 bg-amber-500/5 hover:border-amber-400/60 hover:bg-amber-500/10"
               }`;
               return (
-                <div key={`${sibling.eventId}-${label}-ended`} className={className}>
+                <div key={`ended-${sibling.eventId}`} className={className}>
                   <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
                   <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
                   <span className="text-sm text-white sm:text-right">No {noPrice}</span>

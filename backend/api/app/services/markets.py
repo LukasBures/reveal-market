@@ -368,6 +368,7 @@ def build_event_responses(
         volumes = [item.volume_24h_usd for item in items if item.volume_24h_usd is not None]
         liquidities = [item.liquidity_usd for item in items if item.liquidity_usd is not None]
         aggregate_volume: float | None
+        aggregate_volume_total: float | None
         aggregate_liquidity: float | None
         if volumes and len({float(value) for value in volumes}) == 1:
             aggregate_volume = float(volumes[0])
@@ -710,13 +711,16 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         closes_seed = closes_at.isoformat() if closes_at is not None else ""
         return f"{title_seed}|{price_seed}|{closes_seed}"
 
-    deduped_siblings: dict[str, tuple[
-        schemas.MarketSibling,
-        datetime | None,
-        str | None,
-        float | None,
-        str | None,
-    ]] = {}
+    deduped_siblings: dict[
+        str,
+        tuple[
+            schemas.MarketSibling,
+            datetime | None,
+            str | None,
+            float | None,
+            str | None,
+        ],
+    ] = {}
     for item in siblings_raw:
         sibling, closes_at, slug_value, position_value, status_value = item
         key = _sibling_dedupe_key(sibling, closes_at)
@@ -737,9 +741,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
                 deduped_siblings[key] = item
     siblings_raw = list(deduped_siblings.values())
 
-    def _sort_key(
-        item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None, str | None]
-    ):
+    def _sort_key(item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None, str | None]):
         sibling, closes_at, slug_value, position_value, _status_value = item
         primary = position_value if position_value is not None else float("inf")
         close_ts = closes_at or datetime.max.replace(tzinfo=UTC)
