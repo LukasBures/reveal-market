@@ -86,13 +86,13 @@ class PricingEngine:
     def total_monetization(self) -> Decimal:
         return self.rake_percent + self.haircut_percent + self.worsen_percent
 
-    def quote(self, stake_zen: Decimal, zen_usd: Decimal, price: Decimal) -> PricingQuoteResponse:
+    def quote(self, stake_zen: Decimal, zen_usd: Decimal, outcome_price: Decimal) -> PricingQuoteResponse:
         if stake_zen <= 0:
             raise ValueError("stake_zen must be positive")
         if zen_usd <= 0:
             raise ValueError("zen_usd must be positive")
-        if price <= 0:
-            raise ValueError("price must be positive")
+        if outcome_price <= 0:
+            raise ValueError("outcome_price must be positive")
 
         displayed_multiplier = Decimal("1") - self.worsen_percent
         rake_zen = (stake_zen * self.rake_percent).quantize(Decimal("0.00000001"))
@@ -103,7 +103,7 @@ class PricingEngine:
         net_stake = stake_zen - rake_zen
         discounted = net_stake * (Decimal("1") - self.haircut_percent)
         discounted = max(discounted, Decimal("0"))
-        payout_zen = (discounted / (price * (Decimal("1") + self.edge_percent))).quantize(
+        payout_zen = (discounted / (outcome_price * (Decimal("1") + self.edge_percent))).quantize(
             Decimal("0.001"), rounding=ROUND_DOWN
         )
 

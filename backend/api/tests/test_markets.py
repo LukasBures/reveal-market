@@ -23,6 +23,8 @@ def _make_market(
     volume_24h_usd: float | None = None,
     orderbook_volume_usd: float | None = None,
     liquidity_usd: float | None = None,
+    event_key: str | None = None,
+    closes_at: datetime | None = None,
 ) -> models.Market:
     now = datetime.now(tz=UTC)
     return models.Market(
@@ -31,12 +33,14 @@ def _make_market(
         category=category,
         oracle=oracle,
         status=status,
+        event_key=event_key,
         rake_bps=rake_bps,
         group_slug=group_slug,
         group_position=group_position,
         volume_24h_usd=volume_24h_usd,
         orderbook_volume_usd=orderbook_volume_usd,
         liquidity_usd=liquidity_usd,
+        closes_at=closes_at,
         created_at=now,
         updated_at=now,
     )
@@ -229,6 +233,76 @@ def test_market_detail_includes_grouping_and_siblings(client, db_session):
     assert markets[0]["group_item_title"] == ">$1.5M"
     assert markets[0]["outcome_prices"] == [0.55, 0.45]
     assert markets[1]["group_position"] == 2000000
+
+
+def test_market_group_siblings_deduplicates_duplicate_records(client, db_session):
+    group_slug = "dota2-liquid-vs-navi-dup"
+    close_time = datetime.now(tz=UTC) + timedelta(hours=4)
+    primary = _make_market(
+        "evt-dup-1",
+        "First Blood in Game 1?",
+        category="sports",
+        oracle="0xgroup",
+        status="commit",
+        event_key=group_slug,
+        group_slug=group_slug,
+        closes_at=close_time,
+        volume_24h_usd=2.0,
+        liquidity_usd=10.0,
+    )
+    duplicate = _make_market(
+        "evt-dup-2",
+        "First Blood in Game 1?",
+        category="sports",
+        oracle="0xgroup",
+        status="commit",
+        event_key=group_slug,
+        group_slug=group_slug,
+        closes_at=close_time,
+        volume_24h_usd=9.0,
+        liquidity_usd=20.0,
+    )
+    unique = _make_market(
+        "evt-dup-3",
+        "Dota 2: Team Liquid vs Natus Vincere - Game 1 Winner",
+        category="sports",
+        oracle="0xgroup",
+        status="commit",
+        event_key=group_slug,
+        group_slug=group_slug,
+        closes_at=close_time,
+        volume_24h_usd=3.0,
+        liquidity_usd=15.0,
+    )
+    db_session.add_all([primary, duplicate, unique])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketOutcome(market_id=primary.id, outcome_id=0, label="Yes", price=0.62),
+            models.MarketOutcome(market_id=primary.id, outcome_id=1, label="No", price=0.38),
+            models.MarketOutcome(market_id=duplicate.id, outcome_id=0, label="Yes", price=0.62),
+            models.MarketOutcome(market_id=duplicate.id, outcome_id=1, label="No", price=0.38),
+            models.MarketOutcome(market_id=unique.id, outcome_id=0, label="Yes", price=0.55),
+            models.MarketOutcome(market_id=unique.id, outcome_id=1, label="No", price=0.45),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(f"/events/by-key/{group_slug}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["markets"]) == 3
+
+    expected_siblings = {duplicate.event_id, unique.event_id}
+    for market in payload["markets"]:
+        sibling_ids = [item["event_id"] for item in market["siblings"]]
+        assert len(sibling_ids) == len(set(sibling_ids))
+        assert set(sibling_ids) == expected_siblings
+        assert len(sibling_ids) == 2
+        sibling_map = {item["event_id"]: item for item in market["siblings"]}
+        assert sibling_map[duplicate.event_id]["volume_24h_usd"] == 9.0
+        assert duplicate.event_id in sibling_map
+        assert primary.event_id not in sibling_map
 
 
 def test_patch_market_and_stats(client, db_session):

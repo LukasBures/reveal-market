@@ -14,6 +14,7 @@ vi.mock("@/lib/env-presets", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameState.value,
+  useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({
     push: vi.fn(),
     replace: vi.fn(),

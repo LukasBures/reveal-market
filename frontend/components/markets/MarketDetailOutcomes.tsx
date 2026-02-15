@@ -14,7 +14,7 @@ import { seedInitialOutcomes, usePriceStreamStore } from "@/hooks/usePriceStream
 import { useFxStream } from "@/hooks/useFxStream";
 import { useChainId, useConnection, useSwitchChain, useSignMessage } from "wagmi";
 import { formatZenUsd } from "@/lib/fx";
-import { formatTime, normalizeTxHash } from "@/lib/formatters";
+import { normalizeTxHash } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
 import { ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { defaultChain } from "@/lib/wagmi";
@@ -453,67 +453,6 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
 
   return (
     <section className="rounded-3xl border border-white/10 bg-slate-950/50 p-4 sm:p-6">
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
-        <span
-          className={`rounded-full px-3 py-1 ${
-            liveStore.connected ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100"
-          }`}
-        >
-          {liveStore.connected ? "Live from streamer" : "Streaming reconnecting"}
-        </span>
-        {liveStore.transport && (
-          <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Transport {liveStore.transport}</span>
-        )}
-        {lastUpdateTs && (
-          <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">
-            Last tick {formatTime(lastUpdateTs)}
-          </span>
-        )}
-        <span
-          className={`rounded-full px-3 py-1 ${
-            fxStaleCombined ? "bg-amber-500/20 text-amber-100" : "bg-emerald-500/15 text-emerald-100"
-          }`}
-        >
-          {fxBadge}
-        </span>
-        {streamError && (
-          <span className="rounded-full bg-rose-500/15 px-3 py-1 text-rose-100">Stream error: {streamError}</span>
-        )}
-        {fxStaleCombined && <span className="rounded-full bg-amber-500/15 px-3 py-1 text-amber-100">FX stale</span>}
-        {isResolved && <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">Market resolved</span>}
-        {isPendingResolution && (
-          <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Waiting for resolution</span>
-        )}
-        {isDisputed && (
-          <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">
-            Disputed{resolutionReason ? `: ${resolutionReason}` : ""}
-          </span>
-        )}
-        {commitsBlocked && !isPendingResolution && !isDisputed && (
-          <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Commits halted</span>
-        )}
-        {isLocked && !isResolved && (
-          <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-100">Trading locked</span>
-        )}
-        {tradingHaltedByStream && !isResolved && (
-          <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">Market closed</span>
-        )}
-        {liveStore.status && (
-          <span
-            className={`rounded-full px-3 py-1 ${
-              liveStore.status === "halted" || liveStore.status === "closed"
-                ? "bg-rose-500/20 text-rose-100"
-                : "bg-emerald-500/15 text-emerald-100"
-            }`}
-          >
-            Status: {liveStore.status}
-          </span>
-        )}
-        {liveStore.tickSize && (
-          <span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Tick size: {liveStore.tickSize}</span>
-        )}
-      </div>
-
       <div className="flex flex-col gap-1">
         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Tradable outcomes</p>
         <h2 className="text-2xl font-semibold leading-snug text-white">{market.title}</h2>
@@ -550,10 +489,6 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
             bestBid !== undefined && bestAsk !== undefined && bestAsk > 0
               ? `${(((bestAsk - bestBid) / bestAsk) * 100).toFixed(2)}%`
               : "—";
-          const updatedAt =
-            outcomeState.updatedAt && !Number.isNaN(Date.parse(outcomeState.updatedAt))
-              ? formatTime(outcomeState.updatedAt)
-              : null;
           const isSelected = selectedOutcome === idx;
 
           return (
@@ -602,9 +537,6 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                       Status: {outcomeState.status}
                     </span>
                   )}
-                  {updatedAt && (
-                    <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">Updated {updatedAt}</span>
-                  )}
                   {!isTradable && (
                     <span className="rounded-full bg-rose-500/20 px-3 py-1 text-rose-100">Not tradable</span>
                   )}
@@ -628,9 +560,6 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                         <StatTile label="Spread" value={spread} />
                         <StatTile label="FX status" value={fxStaleCombined ? "Stale FX" : "Fresh"} />
                       </div>
-                      {updatedAt && (
-                        <p className="mt-3 text-xs text-slate-400">Last streamer tick: {updatedAt}</p>
-                      )}
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
@@ -721,8 +650,7 @@ export function MarketDetailOutcomes({ market, initialOutcomeId = 0 }: Props) {
                         {expiresLabel && <span className="rounded-full bg-white/5 px-2 py-1">{expiresLabel}</span>}
                         {fxReceivedAt && (
                           <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">
-                            FX {formatTime(fxReceivedAt)}{" "}
-                            {fxAgeSeconds !== null ? `(${fxAgeSeconds.toFixed(0)}s ago)` : ""}
+                            FX updated {fxAgeSeconds !== null ? `${fxAgeSeconds.toFixed(0)}s ago` : "recently"}
                           </span>
                         )}
                         <span className="rounded-full bg-white/5 px-2 py-1 text-white/70">

@@ -40,6 +40,10 @@ body {
   overflow-y: auto;
 }
 
+#__next {
+  min-height: 100%;
+}
+
 img:not([data-nimg]),
 video {
   max-width: 100%;

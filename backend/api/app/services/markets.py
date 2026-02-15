@@ -659,13 +659,16 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
     event_ids = [record.event_id for record in markets if isinstance(record.event_id, str)]
     stats_map = await _fetch_market_stats(cache, event_ids)
 
-    siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None]] = []
+    siblings_raw: list[tuple[schemas.MarketSibling, datetime | None, str | None, float | None, str | None]] = []
     for record in markets:
         meta = meta_map.get(record.id)
         outcomes = outcome_map.get(getattr(record, "id", -1), [])
         prices_raw = [float(row.price) if row.price is not None else None for row in outcomes]
         title_value = getattr(meta, "group_item_title", None) if meta else None
         position = getattr(record, "group_position", None)
+        status_raw = getattr(record, "status", None)
+        status_value = status_raw.value if isinstance(status_raw, models.MarketStatusEnum) else status_raw
+        closes_at = getattr(record, "closes_at", None)
         outcome_prices: list[float] | None = None
         if any(p is not None for p in prices_raw):
             outcome_prices = [float(p) for p in prices_raw if p is not None]
@@ -687,14 +690,57 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         siblings_raw.append(
             (
                 sibling,
-                normalize_datetime(getattr(record, "closes_at", None)),
+                normalize_datetime(closes_at),
                 getattr(record, "slug", None) or sibling.event_id,
                 position,
+                cast(str | None, status_value) if status_value is not None else None,
             )
         )
 
-    def _sort_key(item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None]):
-        sibling, closes_at, slug_value, position_value = item
+    def _is_sibling_ended(status_value: str | None) -> bool:
+        normalized_status = (status_value or "").strip().lower()
+        return normalized_status in {"settled", "resolved", "cancelled", "canceled", "voided", "closed"}
+
+    def _sibling_dedupe_key(sibling: schemas.MarketSibling, closes_at: datetime | None) -> str:
+        title_seed = (sibling.group_item_title or sibling.title or "").strip().lower()
+        price_seed = "|".join(
+            f"{safe_float(value):.6f}" if safe_float(value) is not None else "na"
+            for value in (sibling.outcome_prices or [])[:2]
+        )
+        closes_seed = closes_at.isoformat() if closes_at is not None else ""
+        return f"{title_seed}|{price_seed}|{closes_seed}"
+
+    deduped_siblings: dict[str, tuple[
+        schemas.MarketSibling,
+        datetime | None,
+        str | None,
+        float | None,
+        str | None,
+    ]] = {}
+    for item in siblings_raw:
+        sibling, closes_at, slug_value, position_value, status_value = item
+        key = _sibling_dedupe_key(sibling, closes_at)
+        existing = deduped_siblings.get(key)
+        if existing is None:
+            deduped_siblings[key] = item
+            continue
+        existing_status = existing[4]
+        existing_is_ended = _is_sibling_ended(existing_status)
+        candidate_is_ended = _is_sibling_ended(status_value)
+        if existing_is_ended and not candidate_is_ended:
+            deduped_siblings[key] = item
+            continue
+        if existing_is_ended == candidate_is_ended:
+            existing_volume = safe_float(getattr(existing[0], "volume_24h_usd", None)) or -1
+            candidate_volume = safe_float(getattr(sibling, "volume_24h_usd", None)) or -1
+            if candidate_volume > existing_volume:
+                deduped_siblings[key] = item
+    siblings_raw = list(deduped_siblings.values())
+
+    def _sort_key(
+        item: tuple[schemas.MarketSibling, datetime | None, str | None, float | None, str | None]
+    ):
+        sibling, closes_at, slug_value, position_value, _status_value = item
         primary = position_value if position_value is not None else float("inf")
         close_ts = closes_at or datetime.max.replace(tzinfo=UTC)
         return primary, close_ts, slug_value or sibling.event_id

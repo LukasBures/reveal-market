@@ -24,6 +24,7 @@ describe("fetchMarketByEventId", () => {
   it("normalizes resolution metadata and fallbacks", async () => {
     const payload = {
       event_id: "evt-detail",
+      group_slug: "group-1",
       title: "Detail Market",
       category: "Crypto",
       oracle: "0xoracle",
@@ -31,6 +32,29 @@ describe("fetchMarketByEventId", () => {
       updated_at: "2024-05-02T00:00:00.000Z",
       outcomes: ["Yes", "No"],
       outcome_prices: [0.7, 0.3],
+      markets: [
+        {
+          event_id: "evt-detail",
+          title: "Detail Market",
+          category: "Crypto",
+          oracle: "0xoracle",
+          outcomes: ["Yes", "No"],
+          outcome_prices: [0.7, 0.3],
+          extra_data: {
+            gamma: {
+              description: "Gamma description",
+            },
+          },
+        },
+        {
+          event_id: "evt-2",
+          title: "Second Market",
+          category: "Crypto",
+          oracle: "0xoracle",
+          outcomes: ["Yes", "No"],
+          outcome_prices: [0.4, 0.6],
+        },
+      ],
       extra_data: {
         gamma: {
           description: "Gamma description",
@@ -64,6 +88,8 @@ describe("fetchMarketByEventId", () => {
     expect(detail.resolution?.resolved).toBe(true);
     expect(detail.resolution?.winners?.[0]).toEqual({ index: 1, label: "No", payout: 1 });
     expect(detail.heartbeat?.latencyMs).toBe(120);
+    expect(detail.groupMarkets?.length).toBe(2);
+    expect(detail.groupMarkets?.[0]?.eventId).toBe("evt-detail");
     expect(fetchMock).toHaveBeenCalled();
     expect(fetchMock.mock.calls[0][0]).toContain("/events/by-key/evt-detail");
   });

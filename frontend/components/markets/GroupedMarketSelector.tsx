@@ -48,7 +48,6 @@ export function GroupedMarketSelector({
   onSelect,
 }: Props) {
   const labeledSiblings = useMemo(() => {
-    const used = new Set<string>();
     const formatDay = (value?: string | null) => {
       const formatted = value ? formatDate(value, { dateStyle: "medium" }) : "—";
       return formatted !== "—" ? formatted : null;
@@ -68,12 +67,7 @@ export function GroupedMarketSelector({
         `Market ${index + 1}`,
       ].filter((opt): opt is string => Boolean(opt));
 
-      let label = options.find((opt) => !used.has(opt)) ?? options[0] ?? `Market ${index + 1}`;
-      if (used.has(label)) {
-        label = `${label} #${index + 1}`;
-      }
-      used.add(label);
-
+      const label = options[0] ?? `Market ${index + 1}`;
       return { ...sibling, _label: label };
     });
     const parseDate = (value?: string | null) => {
@@ -106,24 +100,35 @@ export function GroupedMarketSelector({
     });
   }, [siblings]);
 
-  const now = Date.now();
-  const isEnded = useMemo(() => {
+  const now = useMemo(() => Date.now(), []);
+  const isSelectable = useMemo(() => {
     return (sibling: MarketSibling) => {
       const status = (sibling.status ?? "").toLowerCase();
-      if (["settled", "resolved", "cancelled", "canceled", "voided", "closed"].includes(status)) {
-        return true;
+      if (
+        [
+          "locked",
+          "settled",
+          "resolved",
+          "cancelled",
+          "canceled",
+          "voided",
+          "closed",
+          "ended",
+        ].includes(status)
+      ) {
+        return false;
       }
       const candidates = [sibling.commitDeadline, sibling.closesAt]
         .map((value) => (value ? Date.parse(value) : NaN))
         .filter((value) => Number.isFinite(value));
-      if (!candidates.length) return false;
-      return Math.min(...candidates) < now;
+      if (!candidates.length) return status === "" || status === "open" || status === "commit";
+      return Math.min(...candidates) >= now;
     };
   }, [now]);
 
   const activeEnded = useMemo(
-    () => labeledSiblings.some((sibling) => sibling.eventId === activeEventId && isEnded(sibling)),
-    [activeEventId, labeledSiblings, isEnded],
+    () => labeledSiblings.some((sibling) => sibling.eventId === activeEventId && !isSelectable(sibling)),
+    [activeEventId, labeledSiblings, isSelectable],
   );
   const [showEnded, setShowEnded] = useState(activeEnded);
 
@@ -131,14 +136,14 @@ export function GroupedMarketSelector({
     const active: (MarketSibling & { _label?: string })[] = [];
     const ended: (MarketSibling & { _label?: string })[] = [];
     labeledSiblings.forEach((sibling) => {
-      if (isEnded(sibling)) {
-        ended.push(sibling);
-      } else {
+      if (isSelectable(sibling)) {
         active.push(sibling);
+      } else {
+        ended.push(sibling);
       }
     });
     return { activeSiblings: active, endedSiblings: ended };
-  }, [labeledSiblings, isEnded]);
+  }, [labeledSiblings, isSelectable]);
 
   const shouldShow = forceShow || (!!groupSlug && siblings.length > 1);
   if (!shouldShow) return null;
@@ -181,7 +186,7 @@ export function GroupedMarketSelector({
           if (onSelect) {
             return (
               <button
-                key={`${sibling.eventId}-summary`}
+                key={`${sibling.eventId}-${label}-summary`}
                 type="button"
                 onClick={() => onSelect(sibling.eventId)}
                 className={className}
@@ -194,7 +199,7 @@ export function GroupedMarketSelector({
             );
           }
           return (
-            <Link key={`${sibling.eventId}-summary`} href={href} scroll={false} className={className}>
+            <Link key={`${sibling.eventId}-${label}-summary`} href={href} scroll={false} className={className}>
               <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
               <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
               <span className="text-sm text-white sm:text-right">No {noPrice}</span>
@@ -231,30 +236,15 @@ export function GroupedMarketSelector({
               const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                 active
                   ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"
-                  : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
+                  : "border-amber-400/40 bg-amber-500/5 hover:border-amber-400/60 hover:bg-amber-500/10"
               }`;
-              if (onSelect) {
-                return (
-                  <button
-                    key={`${sibling.eventId}-ended`}
-                    type="button"
-                    onClick={() => onSelect(sibling.eventId)}
-                    className={className}
-                  >
-                    <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
-                    <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
-                    <span className="text-sm text-white sm:text-right">No {noPrice}</span>
-                    <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
-                  </button>
-                );
-              }
               return (
-                <Link key={`${sibling.eventId}-ended`} href={href} scroll={false} className={className}>
+                <div key={`${sibling.eventId}-${label}-ended`} className={className}>
                   <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
                   <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
                   <span className="text-sm text-white sm:text-right">No {noPrice}</span>
                   <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
-                </Link>
+                </div>
               );
             })
           : null}

@@ -213,6 +213,39 @@ class MarketPayload(BaseModel):
         raw_group_threshold = raw.get("groupItemThreshold") or raw.get("group_item_threshold")
         group_item_threshold = _parse_group_threshold(raw_group_threshold)
         group_item_threshold_raw = _stringify_group_threshold(raw_group_threshold)
+
+        def _looks_like_threshold_text(value: str | None) -> bool:
+            if not value:
+                return False
+            lowered = value.lower()
+            keywords = (
+                "price",
+                "above",
+                "below",
+                "over",
+                "under",
+                "between",
+                "reach",
+                "dip",
+                "greater",
+                "less",
+                "at least",
+                "at most",
+            )
+            return "$" in value or "%" in value or any(word in lowered for word in keywords)
+
+        if group_item_threshold is None:
+            question_text = _clean_string(raw.get("question"))
+            if _looks_like_threshold_text(group_item_title):
+                derived = _parse_group_threshold(group_item_title)
+            elif _looks_like_threshold_text(question_text):
+                derived = _parse_group_threshold(question_text)
+            else:
+                derived = None
+            if derived is not None:
+                group_item_threshold = derived
+                group_item_threshold_raw = _stringify_group_threshold(derived)
+
         group_position = None
         if group_item_threshold is not None:
             try:
@@ -616,7 +649,7 @@ class AsyncPolymarketClient:
                 markets = event.get("markets")
                 if not markets:
                     continue
-                event_group_slug = (event.get("slug") or event.get("id")) if len(markets) > 1 else None
+                event_group_slug = _derive_event_group_slug(event) if len(markets) > 1 else None
                 event_tags = event.get("tags")
                 event_category = event.get("category")
                 event_series = event.get("series")
@@ -860,11 +893,137 @@ def _looks_like_range_token(token: str | None) -> bool:
 
 
 def _derive_group_slug(slug: str | None, question: str | None, group_item_title: str | None) -> str | None:
-    if not group_item_title:
-        return None
     base_slug = _slugify(slug) or _slugify(question)
     if not base_slug:
         return None
+
+    def _extract_date_token(value: str | None) -> str | None:
+        if not value:
+            return None
+        month_map = {
+            "january": "01",
+            "jan": "01",
+            "february": "02",
+            "feb": "02",
+            "march": "03",
+            "mar": "03",
+            "april": "04",
+            "apr": "04",
+            "may": "05",
+            "june": "06",
+            "jun": "06",
+            "july": "07",
+            "jul": "07",
+            "august": "08",
+            "aug": "08",
+            "september": "09",
+            "sep": "09",
+            "sept": "09",
+            "october": "10",
+            "oct": "10",
+            "november": "11",
+            "nov": "11",
+            "december": "12",
+            "dec": "12",
+        }
+        match = re.search(
+            r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+            r"sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*\d{4})?\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        month = month_map.get(match.group(1).lower())
+        if not month:
+            return None
+        day = int(match.group(2))
+        if day < 1 or day > 31:
+            return None
+        return f"{month}-{day:02d}"
+
+    def _strip_time_tokens(value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = re.sub(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", " ", value, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bET\b", " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(r"[,\-–—]\s*$", "", cleaned).strip()
+        return cleaned or None
+
+    def _has_time_tokens(value: str | None) -> bool:
+        if not value:
+            return False
+        if re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", value, flags=re.IGNORECASE):
+            return True
+        if re.search(
+            r"\b\d{1,2}(:\d{2})?\s*(am|pm)\s*-\s*\d{1,2}(:\d{2})?\s*(am|pm)\b",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        return False
+
+    def _strip_thresholds(value: str | None) -> str | None:
+        if not value:
+            return None
+        lowered = value.lower()
+        keywords = (
+            "price",
+            "above",
+            "below",
+            "over",
+            "under",
+            "between",
+            "reach",
+            "dip",
+            "greater",
+            "less",
+            "at least",
+            "at most",
+        )
+        if "$" not in value and not any(word in lowered for word in keywords):
+            return None
+        # Remove money/percentage-like thresholds but keep dates.
+        cleaned = re.sub(r"\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?", " $X ", value)
+        cleaned = re.sub(r"\$?\d+(?:\.\d+)?\s*[kmb]\b", " $X ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\d+(?:\.\d+)?%", " X% ", cleaned)
+        cleaned = re.sub(
+            r"\b(above|below|over|under|between|reach|dip|greater\s+than|less\s+than|at\s+least|at\s+most)\b",
+            " ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\$X\s*-\s*\$X", "$X-$X", cleaned)
+        cleaned = re.sub(r"\s*-\s*", "-", cleaned)
+        cleaned = re.sub(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bET\b", " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            return None
+        return cleaned
+
+    stripped = _strip_thresholds(question or slug)
+    if stripped:
+        date_token = _extract_date_token(stripped)
+        if date_token:
+            stripped = f"{stripped} {date_token}"
+        stripped_slug = _slugify(stripped)
+        if stripped_slug and stripped_slug != base_slug:
+            return stripped_slug
+
+    stripped = _strip_time_tokens(question or slug)
+    if stripped and not _has_time_tokens(question or slug):
+        date_token = _extract_date_token(stripped)
+        if date_token:
+            stripped = f"{stripped} {date_token}"
+            stripped_slug = _slugify(stripped)
+            if stripped_slug and stripped_slug != base_slug:
+                return stripped_slug
+
+    if not group_item_title:
+        return None
+
     if "committed-to-the-" in base_slug:
         _, remainder = base_slug.split("committed-to-the-", 1)
         base_slug = remainder or base_slug
@@ -884,6 +1043,17 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
             parts.pop()
     trimmed = "-".join(parts).strip("-")
     return trimmed or base_slug
+
+
+def _derive_event_group_slug(event: dict[str, Any]) -> str | None:
+    title = _clean_string(event.get("title") or event.get("name"))
+    if title:
+        return _slugify(title)
+    question = _clean_string(event.get("question"))
+    if question:
+        return _slugify(question)
+    fallback = _clean_string(event.get("slug") or event.get("id"))
+    return _slugify(fallback)
 
 
 def _parse_group_threshold(value: Any) -> float | None:

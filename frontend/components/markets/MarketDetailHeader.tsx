@@ -64,7 +64,9 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
         <div className="flex min-w-0 flex-1 gap-4">
           <MarketArtwork src={coverImage} alt={`Artwork for ${market.title}`} sizeClass="w-20 h-20 sm:w-24 sm:h-24" />
           <div className="min-w-0 space-y-3">
-            <h1 className="break-words text-2xl font-semibold text-white sm:text-3xl">{market.title}</h1>
+            <h1 className="break-words text-2xl font-semibold text-white sm:text-3xl">
+              {market.groupTitle || market.groupSlug || market.title}
+            </h1>
             {market.status && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-400">
                 {market.category && (

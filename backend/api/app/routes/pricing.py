@@ -378,10 +378,10 @@ async def pricing_quote(
                 include_stake=True,
             )
 
-        price = None
+        outcome_price = None
         if payload.market_id is not None:
-            price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
-        if price is None or price <= 0:
+            outcome_price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
+        if outcome_price is None or outcome_price <= 0:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
@@ -401,7 +401,11 @@ async def pricing_quote(
         zen_usd_scaled = _scale_fx_value(zen_usd)
         engine = PricingEngine(settings)
         try:
-            quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
+            quote = engine.quote(
+                Decimal(str(payload.stake_zen)),
+                Decimal(str(zen_usd)),
+                Decimal(str(outcome_price)),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         payout_zen = quote.payout_zen
@@ -627,10 +631,10 @@ async def pricing_quote_preview(
             include_stake=True,
         )
 
-    price = None
+    outcome_price = None
     if payload.market_id is not None:
-        price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
-    if price is None or price <= 0:
+        outcome_price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
+    if outcome_price is None or outcome_price <= 0:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
@@ -651,7 +655,11 @@ async def pricing_quote_preview(
     zen_usd_scaled = _scale_fx_value(zen_usd)
     engine = PricingEngine(settings)
     try:
-        quote = engine.quote(Decimal(str(payload.stake_zen)), Decimal(str(zen_usd)), Decimal(str(price)))
+        quote = engine.quote(
+            Decimal(str(payload.stake_zen)),
+            Decimal(str(zen_usd)),
+            Decimal(str(outcome_price)),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     payout_zen = quote.payout_zen

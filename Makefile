@@ -1,5 +1,7 @@
 PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
+ENV_FILE ?= .env.local
+COMPOSE_ENV_FILE := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
 INFRA_SERVICES ?= postgres redis
 ALL_SERVICES := postgres redis api worker hedger frontend prover streamer
 
@@ -7,34 +9,34 @@ ALL_SERVICES := postgres redis api worker hedger frontend prover streamer
 .PHONY: test-backend test-api test-worker test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover
 
 api:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) api
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) api
 
 worker:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) worker
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) worker
 
 stack:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) api worker frontend
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) api worker frontend
 
 hedger:
-	COMPOSE_PROFILES=hedger $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) hedger
+	COMPOSE_PROFILES=hedger $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) hedger
 
 frontend:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(INFRA_SERVICES) frontend
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) frontend
 
 caddy:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml up --build caddy
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml $(COMPOSE_ENV_FILE) up --build caddy
 
 prover:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build prover
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build prover
 
 streamer:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build streamer
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build streamer
 
 all:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up --build $(ALL_SERVICES)
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(ALL_SERVICES)
 
 down:
-	$(COMPOSE) down
+	$(COMPOSE) $(COMPOSE_ENV_FILE) down
 
 test:
 	./run_tests.sh

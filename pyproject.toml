@@ -1,6 +1,6 @@
 [project]
 name = "reveal-market"
-version = "0.3.0"
+version = "0.4.0"
 description = "Reveal Market delivers private, commit-and-reveal prediction markets with live odds streaming, signed quotes, and end-to-end settlement built for institutional-grade trading."
 authors = [
     {name = "Lukas Bures, Ph.D.",email = "me@lukasbures.com"}
@@ -8,8 +8,8 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pre-commit>=4.5.0",
-    "web3>=7.14.0",
+    "pre-commit>=4.5.1",
+    "web3>=7.14.1",
 ]
 
 # ---------------------------------------------------------------------

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { EventSummary } from "@/lib/api-types";
 import { EventGrid } from "@/components/events/EventGrid";
-import { Skeleton } from "../ui/Skeleton";
 import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 import { logger } from "@/lib/logging";
 import { fetchFeaturedEvents } from "@/lib/api";
@@ -276,13 +275,6 @@ export function FeaturedEventsClient({
       ) : (
         <EventGrid events={events} />
       )}
-      {isBusy && events.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-40 animate-pulse rounded-3xl border border-white/5 bg-white/5" />
-          ))}
-        </div>
-      ) : null}
       {hasNextPage && <div ref={setSentinel} aria-hidden className="h-6 w-full" />}
       {showLoadingIndicator && (
         <div

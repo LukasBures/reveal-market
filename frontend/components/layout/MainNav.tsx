@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import type { Route } from "next";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
 import { HeroSearch } from "@/components/marketing/HeroSearch";
 import { resolveUrlConfig } from "@/lib/env-presets";
+import { categorySlugFromLabel, parseCategorySlug } from "@/lib/slugs";
 
 const resolvedUrls = resolveUrlConfig();
 const resolvedSiteUrl = (resolvedUrls.siteUrl ?? "").trim();
@@ -17,6 +18,7 @@ const rawHomeLink = isTestEnv ? "/" : resolvedSiteUrl;
 const internalHomeHref: Route =
   rawHomeLink && rawHomeLink.startsWith("/") ? (rawHomeLink as Route) : fallbackHomeRoute;
 const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
+const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Sports", "Geopolitics"];
 
 /**
  * Top navigation with logo, menu links, and Connect Wallet CTA.
@@ -25,6 +27,9 @@ const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHom
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
+  const isLandingPage = pathname === "/";
+  const headerHeightClass = isLandingPage ? "h-[120px]" : "h-[72px]";
+  const spacerClass = isLandingPage ? "h-[120px]" : "h-[72px] bg-[#010314]";
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -40,10 +45,19 @@ export function MainNav() {
   }, [isMobileMenuOpen]);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+    <>
+      <header
+        className={`fixed top-0 left-0 right-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] ${headerHeightClass}`}
+      >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
-      <div className="relative mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-4" data-testid="main-nav">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[72px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
+      {isLandingPage ? (
+        <div className="pointer-events-none absolute inset-x-0 top-[72px] h-[48px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
+      ) : null}
+      <div
+        className="relative mx-auto flex h-[72px] max-w-7xl flex-wrap items-center gap-4 px-4"
+        data-testid="main-nav"
+      >
         {externalHomeHref ? (
           <a
             href={externalHomeHref}
@@ -127,6 +141,11 @@ export function MainNav() {
           </div>
         </div>
       </div>
+      {isLandingPage ? (
+        <Suspense fallback={null}>
+          <HomeFiltersBar />
+        </Suspense>
+      ) : null}
       {isMobileMenuOpen ? (
         <>
           <div className="relative z-50 md:hidden">
@@ -167,6 +186,113 @@ export function MainNav() {
           <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
         </>
       ) : null}
-    </header>
+      </header>
+      {/* Offset page content for the fixed header. */}
+      <div className={spacerClass} aria-hidden="true" />
+    </>
+  );
+}
+
+function HomeFiltersBar() {
+  const searchParams = useSearchParams();
+  const rawSearchQuery = searchParams.get("q") ?? "";
+  const normalizedSearch = rawSearchQuery.trim();
+  const hasShortSearch = normalizedSearch.length > 0 && normalizedSearch.length < 2;
+  const effectiveSearchQuery = hasShortSearch ? "" : normalizedSearch;
+  const rawCategoryParam = searchParams.get("category");
+  const parsedCategory = rawCategoryParam ? parseCategorySlug(rawCategoryParam) : null;
+  const rawSortParam = searchParams.get("sort");
+  const sortBy = (() => {
+    if (rawSortParam === "newest") return "recent";
+    if (rawSortParam === "trending") return "popularity";
+    return "totalVolume";
+  })();
+  const hasActiveFilters = Boolean(parsedCategory) || Boolean(effectiveSearchQuery);
+
+  return (
+    <div className="h-[48px] border-t border-white/5 bg-black/80 text-xs text-white/80 backdrop-blur">
+      <div className="mx-auto flex h-full w-full max-w-7xl items-center px-4">
+        <div className="flex w-full flex-wrap items-center gap-3">
+          <div className="relative flex-1">
+            <div className="pointer-events-none absolute left-0 top-0 h-full w-10 bg-gradient-to-r from-black/80 to-transparent opacity-90" />
+            <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-black/80 to-transparent opacity-90" />
+            <div className="no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pr-6">
+              {HERO_CATEGORY_FILTERS.map((category) => {
+                const isAll = category.toLowerCase() === "all";
+                const slug =
+                  categorySlugFromLabel(category) ?? category.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+                const isActive = isAll ? !parsedCategory : parsedCategory?.slug === slug;
+                const params = new URLSearchParams();
+                if (effectiveSearchQuery) {
+                  params.set("q", effectiveSearchQuery);
+                }
+                if (sortBy === "recent") {
+                  params.set("sort", "newest");
+                } else if (sortBy === "popularity") {
+                  params.set("sort", "trending");
+                }
+                if (!isAll) {
+                  params.set("category", slug);
+                }
+                const href = (isAll ? "/" : params.toString() ? `/?${params.toString()}` : "/") as Route;
+                return (
+                  <Link
+                    key={category}
+                    href={href}
+                    className={`relative snap-start rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
+                      isActive
+                        ? "border-brand-400/80 bg-brand-400/20 text-white"
+                        : "border-white/10 bg-white/5 text-white/80 hover:border-brand-400/60 hover:text-white hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="relative">{category}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { label: "Trending", value: "trending", active: sortBy === "popularity" },
+              { label: "Volume", value: "volume", active: sortBy === "totalVolume" },
+              { label: "Newest", value: "newest", active: sortBy === "recent" },
+            ].map((pill) => {
+              const params = new URLSearchParams();
+              if (effectiveSearchQuery) {
+                params.set("q", effectiveSearchQuery);
+              }
+              if (parsedCategory) {
+                params.set("category", parsedCategory.slug);
+              }
+              if (pill.value !== "volume") {
+                params.set("sort", pill.value);
+              }
+              const href = (params.toString() ? `/?${params.toString()}` : "/") as Route;
+              return (
+                <Link
+                  key={pill.value}
+                  href={href}
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
+                    pill.active
+                      ? "border-emerald-400/70 bg-emerald-400/20 text-emerald-100"
+                      : "border-white/10 bg-white/5 text-white/70 hover:border-emerald-300/60 hover:text-white"
+                  }`}
+                >
+                  {pill.label}
+                </Link>
+              );
+            })}
+            {hasActiveFilters ? (
+              <Link
+                href="/"
+                className="rounded-full border border-red-400/60 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-red-100 transition hover:border-red-300 hover:text-white hover:bg-red-500/20"
+              >
+                Clear
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

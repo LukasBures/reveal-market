@@ -78,6 +78,7 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     item.extra_data?.gamma?.coverImage;
   const eventKey = item.event_key ?? item.eventKey ?? null;
   const groupSlug = item.group_slug ?? item.groupSlug ?? eventKey ?? null;
+  const groupTitle = item.group_title ?? item.groupTitle ?? null;
   const rawGroupThreshold = Number(item.group_item_threshold ?? item.groupItemThreshold);
   const groupItemThreshold = Number.isFinite(rawGroupThreshold) ? rawGroupThreshold : null;
   const rawGroupPosition = Number(item.group_position ?? item.groupPosition);
@@ -101,7 +102,7 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
       })
     : undefined;
   return {
-    eventId: item.event_key ?? item.eventKey ?? item.event_id ?? item.eventId ?? "unknown",
+    eventId: item.event_id ?? item.eventId ?? item.event_key ?? item.eventKey ?? "unknown",
     title: item.title ?? "Untitled market",
     category: item.category ?? item.tags?.[0] ?? "General",
     tags: item.tags ?? item.extra_data?.tags ?? [],
@@ -186,6 +187,7 @@ export function mapApiMarketToSummary(item: any): MarketSummary {
     volume: volume ?? null,
     openInterest: openInterest ?? null,
     groupSlug,
+    groupTitle,
     groupItemTitle: item.group_item_title ?? item.groupItemTitle ?? null,
     groupItemThreshold,
     groupPosition,

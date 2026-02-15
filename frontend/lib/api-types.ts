@@ -51,6 +51,7 @@ export type MarketSummary = {
   volume?: number | null;
   openInterest?: number | null;
   groupSlug?: string | null;
+  groupTitle?: string | null;
   groupItemTitle?: string | null;
   groupItemThreshold?: number | null;
   groupPosition?: number | null;
@@ -95,6 +96,7 @@ export type MarketDetail = MarketSummary & {
   enableOrderBook?: boolean | null;
   clobTokenIds?: string[] | null;
   imageVariants?: string[] | null;
+  groupMarkets?: MarketDetail[];
 };
 
 export type GroupedMarkets = {

@@ -177,6 +177,17 @@
             ],
             "title": "Aggregate Volume 24H Usd"
           },
+          "aggregate_volume_total_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Volume Total Usd"
+          },
           "category": {
             "anyOf": [
               {

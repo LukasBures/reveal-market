@@ -115,10 +115,11 @@ const humanizeGroupSlug = (slug?: string | null): string | undefined => {
 };
 
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
-  const eventIdValue = coerceId(payload.event_key ?? payload.eventKey ?? payload.event_id ?? payload.eventId, eventId);
+  const eventIdValue = coerceId(payload.event_id ?? payload.eventId ?? payload.event_key ?? payload.eventKey, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
   const eventKey = payload.event_key ?? payload.eventKey ?? payload.extra_data?.event_key ?? null;
   const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? eventKey ?? null;
+  const groupTitle = payload.group_title ?? payload.groupTitle ?? payload.extra_data?.group_title ?? null;
   const groupItemTitle = payload.group_item_title ?? payload.groupItemTitle ?? payload.extra_data?.group_item_title ?? null;
   const groupItemThreshold =
     coerceNumber(payload.group_item_threshold ?? payload.groupItemThreshold ?? payload.extra_data?.group_item_threshold) ??
@@ -232,7 +233,7 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
     null;
 
   return {
-    eventId: eventIdValue,
+    eventId: coerceId(payload.event_id ?? payload.eventId ?? eventIdValue),
     title: payload.title ?? "Untitled market",
     category: payload.category ?? undefined,
     tags: payload.tags ?? payload.extra_data?.tags ?? [],
@@ -331,6 +332,7 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
       undefined,
     imageVariants: payload.image_variants ?? undefined,
     groupSlug,
+    groupTitle,
     groupItemTitle,
     groupItemThreshold,
     groupPosition,
@@ -493,9 +495,9 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       const imageUrl = item.image_url ?? item.imageUrl ?? markets[0]?.imageUrl ?? null;
       const shouldHumanizeTitle = groupSlug && marketsPayload.length > 1;
       const title =
-        (shouldHumanizeTitle ? humanizeGroupSlug(groupSlug) : null) ??
         item.title ??
         markets[0]?.title ??
+        (shouldHumanizeTitle ? humanizeGroupSlug(groupSlug) : null) ??
         "";
       return {
         eventId: item.event_key ?? item.eventKey ?? item.event_id ?? item.eventId ?? groupSlug ?? markets[0]?.eventId ?? "",
@@ -899,13 +901,14 @@ export async function fetchInvestorKpis(
   return snapshot;
 }
 
-export async function fetchMarketByEventId(eventId: string): Promise<MarketDetail | null> {
+export async function fetchMarketByEventId(eventId: string, eventKey?: string | null): Promise<MarketDetail | null> {
   if (maybeShortCircuitOffline("fetchMarketByEventId")) {
     return null;
   }
   try {
-    const detailUrl = `${DEFAULT_API_BASE}/events/by-key/${eventId}`;
-    logger.info("fetchMarketByEventId:request", { eventId, endpoint: detailUrl });
+    const lookupKey = (eventKey ?? eventId).trim();
+    const detailUrl = `${DEFAULT_API_BASE}/events/by-key/${lookupKey}`;
+    logger.info("fetchMarketByEventId:request", { eventId, eventKey: lookupKey, endpoint: detailUrl });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(detailUrl, {
@@ -927,13 +930,20 @@ export async function fetchMarketByEventId(eventId: string): Promise<MarketDetai
       return null;
     }
     const payload = await response.json();
+    const groupTitle =
+      payload.group_title ?? payload.groupTitle ?? payload.extra_data?.group_title ?? payload.extraData?.groupTitle ?? null;
     const marketsPayload = Array.isArray(payload.markets) ? payload.markets : [];
-    const primary = marketsPayload[0] ?? payload;
-    const detail: MarketDetail = mapMarketDetailPayload(primary, eventId);
+    const groupMarkets = marketsPayload.length
+      ? marketsPayload.map((item: any) =>
+          mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""),
+        )
+      : [mapMarketDetailPayload(payload, eventId)];
+    const selected =
+      groupMarkets.find((item: MarketDetail) => String(item.eventId) === String(eventId)) ?? groupMarkets[0] ?? null;
+    const detail: MarketDetail = selected ?? mapMarketDetailPayload(payload, eventId);
     detail.groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.event_key ?? payload.eventKey ?? detail.groupSlug;
-    detail.siblings = marketsPayload
-      .slice(1)
-      .map((item: any) => mapMarketDetailPayload(item, item.event_id ?? item.eventId ?? ""));
+    detail.groupTitle = groupTitle ?? detail.groupTitle ?? null;
+    detail.groupMarkets = groupMarkets;
     // Enrich with subgraph orderbook + OI when available (best-effort).
     try {
       if (!detail.clobTokenIds?.length && detail.conditionId) {
