@@ -28,6 +28,7 @@ type Props = {
   isResolved?: boolean | null;
   tradingHalted?: boolean | null;
   initialTxHash?: string | null;
+  onOutcomeChange?: (outcomeId: number) => void;
 };
 
 const TICKET_SIZE_ZEN = 0.1;
@@ -103,6 +104,7 @@ export function StakeQuoteCard({
   isResolved,
   tradingHalted = null,
   initialTxHash = null,
+  onOutcomeChange,
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
   const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
@@ -178,6 +180,12 @@ export function StakeQuoteCard({
       setSelectedOutcome(0);
     }
   }, [outcomeOptions, selectedOutcome]);
+
+  useEffect(() => {
+    if (typeof onOutcomeChange === "function") {
+      onOutcomeChange(selectedOutcome);
+    }
+  }, [selectedOutcome, onOutcomeChange]);
 
   useEffect(() => {
     let cancelled = false;

@@ -22,6 +22,13 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
     }
     return null;
   };
+  const groupMarkets = Array.isArray(market.groupMarkets) && market.groupMarkets.length > 0 ? market.groupMarkets : [market];
+  const sumFromGroup = (selector: (item: MarketDetail) => unknown): number => {
+    const values = groupMarkets
+      .map((item) => toNumber(selector(item)))
+      .filter((value): value is number => value !== null);
+    return values.reduce((acc, value) => acc + value, 0);
+  };
   const liquidity =
     toNumber(market.liquidityUsd) ??
     toNumber(market.liquidityUsd) ??
@@ -39,6 +46,12 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
     0;
   const openInterest =
     toNumber(market.openInterestUsd) ?? toNumber(extraData?.openInterest) ?? toNumber(gamma?.openInterest) ?? 0;
+  const aggregateLiquidity =
+    sumFromGroup((item) => item.liquidityUsd) || liquidity;
+  const aggregateVolume24h =
+    sumFromGroup((item) => item.volume24hUsd ?? item.orderbookVolumeUsd) || volume24h;
+  const aggregateOpenInterest =
+    sumFromGroup((item) => item.openInterestUsd ?? item.openInterest) || openInterest;
   const commitDeadline = getCommitDeadline(market);
   const resolutionStatus = (market.resolutionStatus ?? "").toLowerCase();
   const resolutionReason = market.resolutionReason ?? null;
@@ -89,9 +102,9 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
         </div>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Liquidity" value={formatUsd(liquidity)} />
-        <Stat label="24h volume" value={formatUsd(volume24h)} />
-        <Stat label="Open interest" value={formatUsdCompact(openInterest)} />
+        <Stat label="Liquidity" value={formatUsd(aggregateLiquidity)} />
+        <Stat label="24h volume" value={formatUsd(aggregateVolume24h)} />
+        <Stat label="Open interest" value={formatUsdCompact(aggregateOpenInterest)} />
         <Stat
           label="Commit deadline"
           value={commitDeadline ? formatDateTime(commitDeadline) : "TBA"}

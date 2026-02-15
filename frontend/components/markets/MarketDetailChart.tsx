@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePriceStream, type PriceHistoryRange } from "@/hooks/usePriceStream";
-import { usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
+import { seedHistory, usePriceStreamStore } from "@/hooks/usePriceStreamConnection";
+import { fetchPriceHistory, type PriceHistoryInterval } from "@/lib/pricing-client";
 import { formatTime } from "@/lib/formatters";
 import { MarketFomoOverlay } from "./MarketFomoOverlay";
 import uPlot from "uplot";
@@ -13,6 +14,7 @@ type Props = {
   outcomePrices?: number[];
   outcomes?: string[];
   initialOutcome?: number;
+  selectedOutcome?: number;
 };
 
 export function MarketDetailChart({
@@ -21,6 +23,7 @@ export function MarketDetailChart({
   outcomePrices = [],
   outcomes = [],
   initialOutcome = 0,
+  selectedOutcome: selectedOutcomeOverride,
 }: Props) {
   const [range, setRange] = useState<PriceHistoryRange>("24H");
   const [selectedOutcome, setSelectedOutcome] = useState(0);
@@ -31,6 +34,11 @@ export function MarketDetailChart({
       setSelectedOutcome(Math.max(0, Math.min(initialOutcome, Math.max(outcomes.length - 1, 0))));
     }
   }, [initialOutcome, outcomes.length]);
+  useEffect(() => {
+    if (typeof selectedOutcomeOverride === "number" && Number.isFinite(selectedOutcomeOverride)) {
+      setSelectedOutcome(Math.max(0, Math.min(selectedOutcomeOverride, Math.max(outcomes.length - 1, 0))));
+    }
+  }, [selectedOutcomeOverride, outcomes.length]);
   const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds, range);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -106,15 +114,151 @@ export function MarketDetailChart({
       ? ((latestPrice - firstPrice) / firstPrice) * 100
       : null;
 
-  const dataSeries = useMemo(() => {
-    const xs = filteredHistory.map((p) => p.x);
-    const ys = filteredHistory.map((p) => p.y);
-    return [xs, ys];
-  }, [filteredHistory]);
+  const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : []), [outcomes]);
+  const outcomeIndices = useMemo(
+    () => (outcomeOptions.length ? outcomeOptions.map((_, idx) => idx) : [0]),
+    [outcomeOptions],
+  );
 
+  const rangeConfig = useMemo(() => {
+    const config: Record<PriceHistoryRange, { interval: PriceHistoryInterval; fidelity: number }> = {
+      "1H": { interval: "1h", fidelity: 1 },
+      "24H": { interval: "1d", fidelity: 5 },
+      "7D": { interval: "1w", fidelity: 30 },
+      "MAX": { interval: "max", fidelity: 240 },
+    };
+    return config[range] ?? config["24H"];
+  }, [range]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadHistories = async () => {
+      await Promise.all(
+        outcomeIndices.map(async (idx) => {
+          try {
+            const tokenId = tokenIds[idx];
+            const data = await fetchPriceHistory(marketId, idx, {
+              interval: rangeConfig.interval,
+              fidelity: rangeConfig.fidelity,
+              tokenId,
+            });
+            if (cancelled) return;
+            seedHistory(
+              marketId,
+              idx,
+              data
+                .map((entry) => ({
+                  timestamp: entry.timestamp,
+                  price: Number(entry.price),
+                  display_price: Number(entry.display_price),
+                  fx_stale: entry.fx_stale,
+                }))
+                .filter((p) => Number.isFinite(p.price)),
+              tokenIds,
+            );
+          } catch {
+            // best-effort; fall back to live stream or seed data already present
+          }
+        }),
+      );
+    };
+    loadHistories();
+    return () => {
+      cancelled = true;
+    };
+  }, [marketId, outcomeIndices, rangeConfig.interval, rangeConfig.fidelity, tokenIds]);
+
+  const historiesByOutcome = useMemo(() => {
+    return outcomeIndices.map((idx) =>
+      (streamState.histories[idx] ?? []).map((point) => ({
+        x: new Date(point.timestamp).getTime(),
+        y: point.display_price || point.price,
+        fx_stale: point.fx_stale,
+        timestamp: point.timestamp,
+      })),
+    );
+  }, [streamState.histories, outcomeIndices]);
+
+  const maxTimestamp = useMemo(() => {
+    const lastValues = historiesByOutcome
+      .map((series) => (series.length ? series[series.length - 1].x : null))
+      .filter((value): value is number => value !== null);
+    if (!lastValues.length) return null;
+    return Math.max(...lastValues);
+  }, [historiesByOutcome]);
+
+  const filteredHistories = useMemo(() => {
+    if (!maxTimestamp) return historiesByOutcome;
+    if (range === "MAX") return historiesByOutcome;
+    const windowMs =
+      range === "1H" ? 60 * 60 * 1000 : range === "24H" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    const cutoff = maxTimestamp - windowMs;
+    return historiesByOutcome.map((series) => {
+      if (!series.length) return series;
+      const sliced = series.filter((p) => p.x >= cutoff);
+      return sliced.length >= 2 ? sliced : series;
+    });
+  }, [historiesByOutcome, maxTimestamp, range]);
+
+  const dataSeries = useMemo(() => {
+    const xSet = new Set<number>();
+    filteredHistories.forEach((series) => {
+      series.forEach((point) => xSet.add(point.x));
+    });
+    const xs = Array.from(xSet).sort((a, b) => a - b);
+    const ys = filteredHistories.map((series) => {
+      if (!series.length) return xs.map(() => null);
+      const sorted = [...series].sort((a, b) => a.x - b.x);
+      let idx = 0;
+      let lastValue: number | null = null;
+      return xs.map((x) => {
+        while (idx < sorted.length && sorted[idx].x <= x) {
+          if (sorted[idx].x === x) {
+            lastValue = sorted[idx].y;
+            idx += 1;
+            return lastValue;
+          }
+          lastValue = sorted[idx].y;
+          idx += 1;
+        }
+        return lastValue;
+      });
+    });
+    return [xs, ...ys];
+  }, [filteredHistories]);
+
+  const alignedXs = dataSeries[0] as number[] | undefined;
+  const selectedSeries =
+    (dataSeries[selectedOutcome + 1] as Array<number | null> | undefined) ?? [];
+  const selectedHistory = filteredHistories[selectedOutcome] ?? [];
   const activeIndex =
-    hoverIndex !== null && filteredHistory[hoverIndex] ? hoverIndex : Math.max(filteredHistory.length - 1, 0);
-  const activePoint = filteredHistory[activeIndex];
+    hoverIndex !== null && alignedXs && alignedXs[hoverIndex] !== undefined
+      ? hoverIndex
+      : Math.max((alignedXs?.length ?? 0) - 1, 0);
+  const activeX = alignedXs && alignedXs[activeIndex] !== undefined ? alignedXs[activeIndex] : null;
+  const activeY =
+    selectedSeries && selectedSeries[activeIndex] !== undefined ? selectedSeries[activeIndex] : null;
+  const activePoint =
+    activeX !== null && activeY !== null
+      ? {
+          x: activeX,
+          y: activeY,
+          timestamp: new Date(activeX).toISOString(),
+          fx_stale: selectedHistory[activeIndex]?.fx_stale,
+        }
+      : null;
+  const hoverActive = hoverIndex !== null && cursorPos !== null;
+  const hoverValues = useMemo(() => {
+    if (!alignedXs || activeX === null) return [];
+    return outcomeOptions.map((label, idx) => {
+      const series = dataSeries[idx + 1] as Array<number | null> | undefined;
+      const value = series && series[activeIndex] !== undefined ? series[activeIndex] : null;
+      const normalized = label.trim().toLowerCase();
+      const color =
+        normalized === "yes" || idx === 0 ? "#34d399" : normalized === "no" || idx === 1 ? "#fb7185" : "#94a3b8";
+      return { label, value, color };
+    });
+  }, [activeIndex, activeX, alignedXs, dataSeries, outcomeOptions]);
 
   const parseNum = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
   const bestBid = parseNum(outcomeState.bestBid);
@@ -129,10 +273,7 @@ export function MarketDetailChart({
       : undefined;
 
   const coverageMs =
-    filteredHistory.length > 1 ? filteredHistory[filteredHistory.length - 1].x - filteredHistory[0].x : 0;
-
-  const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : []), [outcomes]);
-  const canSelectOutcome = outcomeOptions.length > 1;
+    selectedHistory.length > 1 ? selectedHistory[selectedHistory.length - 1].x - selectedHistory[0].x : 0;
 
   const chartRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -141,7 +282,7 @@ export function MarketDetailChart({
 
   useEffect(() => {
     if (!chartRef.current) return;
-    if (filteredHistory.length < 2) {
+    if ((alignedXs?.length ?? 0) < 2) {
       if (plotRef.current) {
         plotRef.current.destroy();
         plotRef.current = null;
@@ -151,9 +292,10 @@ export function MarketDetailChart({
     }
 
     const container = chartRef.current;
-    const basePadding = { top: 10, right: 10, bottom: 28, left: 42 };
+    const basePadding = { top: 0, right: 0, bottom: 0, left: 0 };
 
-    const formatAxisTime = (value: number) => formatTime(new Date(value));
+    const formatAxisTime = (value: number) =>
+      formatTime(new Date(value), { hour: "2-digit", minute: "2-digit", second: undefined });
     const formatOutcomeLabels = (values: number[]) => {
       if (outcomeOptions.length >= 2) {
         return values.map((_, idx) => {
@@ -164,6 +306,45 @@ export function MarketDetailChart({
       }
       return values.map((value) => value.toFixed(3));
     };
+
+    const splinePath =
+      (uPlot as any).paths?.spline ? (uPlot as any).paths.spline() : undefined;
+    const linePath =
+      (uPlot as any).paths?.linear ? (uPlot as any).paths.linear() : undefined;
+    const pathFn = splinePath ?? linePath;
+    const yesColor = "#34d399";
+    const noColor = "#fb7185";
+    const outcomeColors = outcomeOptions.map((label, idx) => {
+      const normalized = label.trim().toLowerCase();
+      if (normalized === "yes" || idx === 0) return yesColor;
+      if (normalized === "no" || idx === 1) return noColor;
+      return "#94a3b8";
+    });
+    const series = outcomeOptions.length
+      ? outcomeOptions.map((label, idx) => {
+          const isActive = idx === selectedOutcome;
+          const color = outcomeColors[idx] ?? "#94a3b8";
+          return {
+            label,
+            stroke: color,
+            width: isActive ? 2.5 : 1.5,
+            fill: "transparent",
+            paths: pathFn,
+            spanGaps: true,
+            points: { show: false },
+          };
+        })
+      : [
+          {
+            label: "Price",
+            stroke: yesColor,
+            width: 2,
+            fill: "transparent",
+            paths: pathFn,
+            spanGaps: true,
+            points: { show: false },
+          },
+        ];
 
     const options: uPlot.Options = {
       width: container.clientWidth,
@@ -181,26 +362,19 @@ export function MarketDetailChart({
       },
       axes: [
         {
+          show: false,
           stroke: "rgba(148,163,184,0.6)",
-          grid: { stroke: "rgba(148,163,184,0.18)", width: 1 },
+          grid: { show: true, stroke: "rgba(148,163,184,0.18)", width: 1 },
           values: (_u, vals) => vals.map((v) => formatAxisTime(v)),
         },
         {
-          stroke: "rgba(148,163,184,0.6)",
-          grid: { stroke: "rgba(148,163,184,0.14)", width: 1 },
+          show: false,
+          stroke: "transparent",
+          grid: { show: true, stroke: "rgba(148,163,184,0.14)", width: 1 },
           values: (_u, vals) => formatOutcomeLabels(vals),
         },
       ],
-      series: [
-        {},
-        {
-          label: "Price",
-          stroke: "#34d399",
-          width: 2,
-          fill: "rgba(52,211,153,0.22)",
-          points: { show: false },
-        },
-      ],
+      series: [{}, ...series],
       hooks: {
         setCursor: [
           (u) => {
@@ -224,6 +398,24 @@ export function MarketDetailChart({
     }
 
     plotRef.current = new uPlot(options, dataSeries as uPlot.AlignedData, container);
+    const overlay = plotRef.current.over;
+    if (overlay) {
+      const existing = overlay.querySelector(".chart-outcome-labels");
+      if (existing) {
+        existing.remove();
+      }
+      const labels = document.createElement("div");
+      labels.className =
+        "chart-outcome-labels pointer-events-none absolute left-3 top-3 flex flex-col gap-1 text-[10px] uppercase tracking-[0.2em]";
+      outcomeOptions.forEach((label, idx) => {
+        const color = outcomeColors[idx] ?? "#94a3b8";
+        const span = document.createElement("span");
+        span.textContent = label;
+        span.style.color = color;
+        labels.appendChild(span);
+      });
+      overlay.appendChild(labels);
+    }
 
     if (resizeObserverRef.current) {
       resizeObserverRef.current.disconnect();
@@ -243,7 +435,7 @@ export function MarketDetailChart({
     return () => {
       observer.disconnect();
     };
-  }, [filteredHistory.length, plotKey, outcomeOptions, dataSeries]);
+  }, [alignedXs?.length, plotKey, outcomeOptions, dataSeries, selectedOutcome]);
 
   useEffect(() => {
     if (!plotRef.current) return;
@@ -255,9 +447,9 @@ export function MarketDetailChart({
       <div className="flex flex-col gap-3 text-sm text-slate-200">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-baseline gap-3">
-            <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Price history</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Implied probability</span>
             <span className="text-2xl font-semibold text-white tabular-nums">
-              {latestPrice !== null ? latestPrice.toFixed(3) : "—"} ZEN
+              {latestPrice !== null ? `${(latestPrice * 100).toFixed(2)}%` : "—"}
             </span>
             {changePct !== null && (
               <span
@@ -276,21 +468,6 @@ export function MarketDetailChart({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canSelectOutcome &&
-              outcomeOptions.map((option, idx) => (
-                <button
-                  key={`${option}-${idx}`}
-                  type="button"
-                  onClick={() => setSelectedOutcome(idx)}
-                  className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.2em] ${
-                    selectedOutcome === idx
-                      ? "bg-emerald-400 text-slate-900"
-                      : "bg-white/10 text-white/80 hover:bg-white/20"
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
             <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-1">
               {(["1H", "24H", "7D", "MAX"] as const).map((option) => (
                 <button
@@ -309,37 +486,39 @@ export function MarketDetailChart({
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-500">
-            <span className="rounded-full bg-white/5 px-3 py-1 tabular-nums">
-              {hasStaleFx ? "FX stale" : "Live"} {latestTs ? `· ${formatTime(latestTs)}` : ""}
-            </span>
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
-                Bid {bestBid !== undefined ? bestBid.toFixed(3) : "—"}
-              </span>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
-                Ask {bestAsk !== undefined ? bestAsk.toFixed(3) : "—"}
-              </span>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-white/70 tabular-nums">
-                Spread {spread !== undefined ? spread.toFixed(3) : "—"}
-              </span>
-            </div>
-        </div>
       </div>
-      <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 p-2 shadow-inner shadow-black/40">
+      <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 shadow-inner shadow-black/40">
         <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} />
         {filteredHistory.length >= 2 ? (
           <div className="relative h-full w-full">
             <div ref={chartRef} className="market-chart h-full w-full" />
-            {activePoint && (
+            {activePoint && hoverActive && (
               <div
                 className="pointer-events-none absolute rounded-lg border border-white/10 bg-slate-900/85 px-3 py-1 text-[11px] text-slate-100 shadow-lg"
                 style={{
-                  left: Math.max(10, Math.min((cursorPos?.x ?? 0) - 60, chartSize.width - 150)),
-                  top: Math.max(8, Math.min((cursorPos?.y ?? 0) - 34, chartSize.height - 40)),
+                  left: Math.max(
+                    10,
+                    Math.min((cursorPos?.x ?? 0) - 60, chartSize.width - 150),
+                  ),
+                  top: Math.max(
+                    8,
+                    Math.min((cursorPos?.y ?? 0) - 34, chartSize.height - 40),
+                  ),
                 }}
               >
-                {formatTime(activePoint.timestamp)} · {activePoint.y.toFixed(4)} ZEN
+                <div className="text-[11px] text-slate-200">{formatTime(activePoint.timestamp)}</div>
+                <div className="mt-1 space-y-0.5">
+                  {hoverValues.map((row) => (
+                    <div key={row.label} className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] uppercase tracking-[0.2em]" style={{ color: row.color }}>
+                        {row.label}
+                      </span>
+                      <span className="text-[11px] text-white">
+                        {row.value !== null && row.value !== undefined ? row.value.toFixed(4) : "—"} ZEN
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -349,31 +528,6 @@ export function MarketDetailChart({
           </div>
         )}
       </div>
-      {(activePoint || coverageMs > 0) && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-          {activePoint && (
-            <>
-              <span className="rounded-full bg-white/5 px-3 py-1">
-                {formatTime(activePoint.timestamp)}
-              </span>
-              <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-emerald-100">
-                {activePoint.y.toFixed(4)} ZEN
-              </span>
-              {activePoint.fx_stale && (
-                <span className="rounded-full bg-amber-500/15 px-3 py-1 text-amber-100">FX stale</span>
-              )}
-            </>
-          )}
-          {coverageMs > 0 && (
-            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
-              Coverage ~
-              {coverageMs >= 86_400_000
-                ? `${(coverageMs / 86_400_000).toFixed(1)}d`
-                : `${(coverageMs / 3_600_000).toFixed(1)}h`}
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

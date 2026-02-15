@@ -7,7 +7,7 @@ import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
 import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
 import { buildBreadcrumbJsonLd } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
 
@@ -37,6 +37,9 @@ export function EventDetailClient({
   const [activeEventId, setActiveEventId] = useState<string>(initialMarket.eventId ?? fallbackEventId);
   const [requestedOutcome, setRequestedOutcome] = useState<number | null>(
     typeof initialOutcome === "number" && Number.isFinite(initialOutcome) ? initialOutcome : null,
+  );
+  const [selectedOutcome, setSelectedOutcome] = useState<number>(
+    typeof initialOutcome === "number" && Number.isFinite(initialOutcome) ? initialOutcome : 0,
   );
   const [groupMarkets, setGroupMarkets] = useState<MarketDetail[]>(
     Array.isArray(initialMarket.groupMarkets) && initialMarket.groupMarkets.length > 0
@@ -84,6 +87,7 @@ export function EventDetailClient({
     setMarket(next);
     setActiveEventId(eventId);
     setRequestedOutcome(null);
+    setSelectedOutcome(0);
   }, [activeEventId, groupMarkets, isSelectableMarket]);
 
   if (!market) {
@@ -103,6 +107,23 @@ export function EventDetailClient({
     typeof requestedOutcome === "number" && Number.isFinite(requestedOutcome) && requestedOutcome >= 0
       ? Math.min(requestedOutcome, (market.outcomes?.length ?? 1) - 1)
       : 0;
+  useEffect(() => {
+    if (typeof requestedOutcome === "number" && Number.isFinite(requestedOutcome)) {
+      setSelectedOutcome(Math.min(Math.max(requestedOutcome, 0), (market.outcomes?.length ?? 1) - 1));
+    }
+  }, [requestedOutcome, market.outcomes?.length]);
+  const resolutionCheckedAt = market.resolution?.checkedAt ?? null;
+  const resolutionLabel = market.resolution?.resolved ? "Resolved" : market.status ?? "Active";
+  const detailRows = [
+    { label: "Open interest", value: formatUsdCompact(market.openInterestUsd ?? market.openInterest) },
+    { label: "24h volume", value: formatUsd(market.volume24hUsd ?? market.orderbookVolumeUsd) },
+    { label: "Total volume", value: formatUsd(market.volume ?? market.orderbookVolumeUsd) },
+    { label: "Liquidity", value: formatUsd(market.liquidityUsd) },
+    { label: "Status", value: resolutionLabel },
+    { label: "Commit deadline", value: commitDeadline ? formatDateTime(commitDeadline) : "TBA" },
+    { label: "Reveal deadline", value: market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA" },
+    { label: "Resolved at", value: resolutionCheckedAt ? formatDateTime(resolutionCheckedAt) : "—" },
+  ];
   const selectorSiblings: MarketSibling[] =
     groupMarkets.length > 0
       ? groupMarkets.map((item) => ({
@@ -173,6 +194,7 @@ export function EventDetailClient({
                 outcomePrices={market.outcomePrices ?? []}
                 outcomes={market.outcomes ?? []}
                 initialOutcome={initialOutcomeId}
+                selectedOutcome={selectedOutcome}
               />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -181,13 +203,19 @@ export function EventDetailClient({
                     <div className="mt-3 space-y-3 text-slate-200">
                       <p className="text-sm font-semibold text-white">Resolution criteria</p>
                       <div className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{contextCopy}</div>
-                      <ul className="mt-2 space-y-1 text-xs text-slate-400">
-                        <li>Resolver source: {resolverLabel}</li>
-                        <li>Commit deadline: {commitDeadline ? formatDateTime(commitDeadline) : "TBA"}</li>
-                        <li>Reveal deadline: {market.revealDeadline ? formatDateTime(market.revealDeadline) : "TBA"}</li>
-                      </ul>
                     </div>
                   </div>
+                </div>
+              </section>
+              <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
+                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Market details</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {detailRows.map((row) => (
+                    <div key={row.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
+                      <span className="text-xs uppercase tracking-[0.2em] text-slate-500">{row.label}</span>
+                      <span className="text-sm font-semibold text-white">{row.value}</span>
+                    </div>
+                  ))}
                 </div>
               </section>
             </div>
@@ -205,6 +233,7 @@ export function EventDetailClient({
                     marketTitle={market.title}
                     marketStatus={market.status}
                     isResolved={market.resolution?.resolved ?? null}
+                    onOutcomeChange={setSelectedOutcome}
                   />
                 </div>
               </div>
