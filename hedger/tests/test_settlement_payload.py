@@ -22,10 +22,7 @@ class StubSettler:
 @pytest.mark.asyncio
 async def test_builds_prover_payload_and_marks_resolved(tmp_path):
     settings = Settings(
-        vault_rpc_url="http://localhost:8545",
-        vault_private_key="0x" + "11" * 32,
-        vault_sender_address="0x" + "01" * 20,
-        lp_vault_address="0x" + "02" * 20,
+        hedger_private_key="0x" + "11" * 32,
     )
     service = HedgerService(settings)
     service.repository = HedgerRepository(f"sqlite+aiosqlite:///{tmp_path}/settle.db")  # type: ignore

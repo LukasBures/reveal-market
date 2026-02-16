@@ -230,6 +230,20 @@ class Settings(BaseSettings):
     relayer_webhook_secret: str | None = Field(
         default=None, description="Shared secret for relayer/prover ingestion hooks"
     )
+    hedger_base_url: AnyHttpUrl | None = Field(
+        default=None, description="Base URL for the hedger service (post-commit hedging)"
+    )
+    hedger_internal_secret: SecretStr | None = Field(
+        default=None, description="Optional shared secret for hedger admin endpoints"
+    )
+    hedger_queue_enabled: bool = Field(default=True, description="Enable Redis-backed hedger retry queue")
+    hedger_queue_key: str = Field(
+        default="reveal_market:hedger_queue",
+        description="Redis list key for hedger retry jobs",
+    )
+    hedger_queue_result_ttl_seconds: int = Field(default=3600, ge=60, description="TTL for hedger job results in Redis")
+    hedger_queue_max_attempts: int = Field(default=5, ge=1, description="Max attempts before marking hedger job failed")
+    hedger_retry_backoff_seconds: float = Field(default=1.0, ge=0, description="Backoff between hedger retry attempts")
     internal_api_secret: SecretStr | None = Field(
         default=None, description="Shared secret required for internal API endpoints"
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .service import HedgerService
@@ -20,6 +20,17 @@ def require_writable(service: HedgerService = Depends(get_service)) -> None:
         raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="read_only")
 
 
+def require_internal_secret(
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+    service: HedgerService = Depends(get_service),
+) -> None:
+    required = service.settings.admin_internal_secret
+    if not required:
+        return
+    if not internal_secret or internal_secret != required:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
+
+
 @router.get("/exposures")
 async def exposures(service: HedgerService = Depends(get_service)):
     return {"exposures": await service.exposures()}
@@ -29,7 +40,8 @@ async def exposures(service: HedgerService = Depends(get_service)):
 async def ingest_commit(
     commit: CommitEvent,
     service: HedgerService = Depends(get_service),
-    _: None = Depends(require_writable),
+    _secret: None = Depends(require_internal_secret),
+    _write: None = Depends(require_writable),
 ):
     return await service.ingest_commit(commit)
 
@@ -39,9 +51,6 @@ async def risk(service: HedgerService = Depends(get_service)):
     snapshots = await service.exposures()
     total_abs = sum([abs(s.net_usd) for s in snapshots], start=Decimal("0"))
     breaches = []
-    if not service.vault_client:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="vault_unavailable")
-    lp_utilization = await service.vault_client.current_utilization()
     for snap in snapshots:
         breaches.extend(
             service.risk_engine.check_limits(
@@ -50,7 +59,6 @@ async def risk(service: HedgerService = Depends(get_service)):
                 absolute_market_usd=abs(snap.net_usd),
                 total_absolute_usd=total_abs,
                 coverage_ratio=snap.coverage_ratio,
-                lp_utilization=lp_utilization,
                 float_balance_zen=Decimal("0"),
             )
         )
@@ -59,14 +67,8 @@ async def risk(service: HedgerService = Depends(get_service)):
 
 @router.get("/positions")
 async def positions(service: HedgerService = Depends(get_service)):
-    exposures = await service.exposures()
-    if not service.vault_client:
-        return {"exposures": exposures, "lp_utilization": None, "vault_unavailable": True}
-    utilization = await service.vault_client.current_utilization()
-    return {
-        "exposures": exposures,
-        "lp_utilization": utilization,
-    }
+    exposure_list = await service.exposures()
+    return {"exposures": exposure_list}
 
 
 @router.post("/settlements/{market_id}")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .admin import router as admin_router
 from .config import get_settings
@@ -28,18 +29,49 @@ def create_app() -> FastAPI:
     }
     log_event(logger, logging.INFO, event="service.config", message="hedger configuration", config=sanitized_config)
 
-    app = FastAPI(title="Reveal Hedger", version="0.1.0")
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=["*"],
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            await service.startup()
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                event="hedger.startup.failed",
+                message="hedger startup failed; continuing in degraded mode",
+                error=str(exc),
+            )
+        nonlocal heartbeat_stop
+        heartbeat_stop = start_heartbeat_logger(
+            logger,
+            "hedger",
+            interval_seconds=settings.heartbeat_interval_seconds,
+            message="hedger running",
+        )
+        log_event(logger, logging.INFO, event="hedger.ready", message="hedger api is ready")
+        try:
+            yield
+        finally:
+            if heartbeat_stop:
+                heartbeat_stop.set()
+            with suppress(Exception):
+                await service.fx_oracle.client.aclose()
+                await service.settlement.client.aclose()
+                await service.bridge_client.client.aclose()
+                if service.redis:
+                    await service.redis.aclose()
+
+    middleware = [
+        Middleware(TrustedHostMiddleware, allowed_hosts=["*"]),
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        ),
+    ]
+    app = FastAPI(title="Reveal Hedger", version="0.1.0", lifespan=lifespan, middleware=middleware)
 
     admin_rate_limiter = None
     if settings.admin_rate_limit_requests > 0:
@@ -67,38 +99,6 @@ def create_app() -> FastAPI:
     service = HedgerService(settings)
     app.state.service = service
     heartbeat_stop = None
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        try:
-            await service.startup()
-        except Exception as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                event="hedger.startup.failed",
-                message="hedger startup failed; continuing in degraded mode",
-                error=str(exc),
-            )
-        nonlocal heartbeat_stop
-        heartbeat_stop = start_heartbeat_logger(
-            logger,
-            "hedger",
-            interval_seconds=settings.heartbeat_interval_seconds,
-            message="hedger running",
-        )
-        log_event(logger, logging.INFO, event="hedger.ready", message="hedger api is ready")
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        if heartbeat_stop:
-            heartbeat_stop.set()
-        with suppress(Exception):
-            await service.fx_oracle.client.aclose()
-            await service.settlement.client.aclose()
-            await service.bridge_client.client.aclose()
-            if service.redis:
-                await service.redis.aclose()
 
     @app.get("/healthz")
     async def healthz() -> dict:

@@ -17,21 +17,13 @@ COVERAGE_RATIO_GAUGE = Gauge(
     "Hedging coverage ratio by market.",
     ["market_id"],
 )
-LP_UTILIZATION_GAUGE = Gauge(
-    "hedger_lp_vault_utilization_ratio",
-    "Utilized USDC / total LP vault capacity.",
-)
 FLOAT_BALANCE_GAUGE = Gauge(
     "hedger_float_balance_zen",
     "Available ZEN float for payouts on Horizen.",
 )
-PNL_UNREALIZED_GAUGE = Gauge(
-    "hedger_unrealized_pnl_usd",
-    "Unrealized PnL across hedging positions, in USD.",
-)
-PNL_REALIZED_GAUGE = Gauge(
-    "hedger_realized_pnl_usd",
-    "Realized PnL across hedging positions, in USD.",
+HOT_WALLET_BALANCE_GAUGE = Gauge(
+    "hedger_hot_wallet_usdc_balance",
+    "USDC.e balance in the hedger hot wallet.",
 )
 RISK_BREACH_COUNTER = Counter(
     "hedger_risk_breaches_total",
@@ -80,22 +72,13 @@ def record_risk_breach(code: str, severity: str) -> None:
     RISK_BREACH_COUNTER.labels(code=code, severity=severity).inc()
 
 
-def update_float_and_utilization(float_zen: float | None, lp_utilization: float | None) -> None:
-    if float_zen is not None:
-        FLOAT_BALANCE_GAUGE.set(float_zen)
-    if lp_utilization is not None:
-        LP_UTILIZATION_GAUGE.set(lp_utilization)
+def update_hot_wallet_balance(balance_usdc: float | None) -> None:
+    if balance_usdc is not None:
+        HOT_WALLET_BALANCE_GAUGE.set(balance_usdc)
 
 
 def record_event_lag(seconds: float) -> None:
     EVENT_LAG_GAUGE.set(seconds)
-
-
-def record_pnl(realized_usd: float | None = None, unrealized_usd: float | None = None) -> None:
-    if realized_usd is not None:
-        PNL_REALIZED_GAUGE.set(realized_usd)
-    if unrealized_usd is not None:
-        PNL_UNREALIZED_GAUGE.set(unrealized_usd)
 
 
 def record_hedge_decision(action: str, reason: str) -> None:

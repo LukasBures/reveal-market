@@ -28,7 +28,6 @@ async def test_record_commit_updates_exposure_and_builds_instruction():
         max_global_exposure_usd=Decimal("100000"),
         max_per_market_usd=Decimal("10000"),
         coverage_ratio_target=0.98,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("100"),
     )
     ledger = ExposureLedger(
@@ -65,7 +64,6 @@ async def test_instruction_direction_and_fill_updates_coverage():
         max_global_exposure_usd=Decimal("100000"),
         max_per_market_usd=Decimal("10000"),
         coverage_ratio_target=0.9,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("100"),
     )
     ledger = ExposureLedger(
@@ -99,7 +97,6 @@ async def test_overhedged_triggers_unwind_instruction():
         max_global_exposure_usd=Decimal("100000"),
         max_per_market_usd=Decimal("10000"),
         coverage_ratio_target=0.5,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("100"),
     )
     ledger = ExposureLedger(

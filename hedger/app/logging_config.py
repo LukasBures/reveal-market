@@ -22,9 +22,10 @@ class RequestContextFilter(logging.Filter):
 def resolve_log_level(default: str = "INFO") -> tuple[str, int]:
     """Normalize LOG_LEVEL/HEDGER_LOG_LEVEL to a valid logging level."""
 
-    env_level = logging.getLevelName(level.upper()) if (level := os.getenv("HEDGER_LOG_LEVEL") or None) else None
+    level = os.getenv("HEDGER_LOG_LEVEL")
+    env_level = logging.getLevelName(level.upper()) if level else None
     if isinstance(env_level, int):
-        return (os.getenv("HEDGER_LOG_LEVEL", default).upper(), env_level)
+        return os.getenv("HEDGER_LOG_LEVEL", default).upper(), env_level
     level_name = default.upper()
     return level_name, int(logging.getLevelName(level_name))
 

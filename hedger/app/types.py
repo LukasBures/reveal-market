@@ -58,6 +58,7 @@ class CommitEvent(BaseModel):
     market_address: str | None = Field(default=None, description="On-chain market address")
     outcome_id: int | None = Field(default=None, description="Outcome id used for the commitment")
     wallet_address: str | None = Field(default=None, description="Wallet that submitted the on-chain commit")
+    clob_token_id: str | None = Field(default=None, description="CLOB token id used for hedging")
     signed_quote: SignedQuotePayload | None = Field(
         default=None,
         description="Pricing quote payload that matches the on-chain commit",
@@ -94,6 +95,7 @@ class HedgeInstruction(BaseModel):
     slippage_bps: int
     reason: str
     target_coverage: float
+    clob_token_id: str | None = Field(default=None, description="CLOB token id to hedge with")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     is_unwind: bool = Field(default=False, description="Whether this instruction reduces an existing hedge")
 
@@ -107,7 +109,7 @@ class RiskBreach(BaseModel):
     severity: RiskSeverity
     message: str
     market_id: str | None = None
-    detail: dict[str, Any] | None = None
+    detail: dict[str, Any] | None = Field(default_factory=dict)
     triggered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -118,7 +120,6 @@ class RiskReport(BaseModel):
     max_global_exposure_usd: Decimal
     max_per_market_usd: Decimal
     coverage_ratio_target: float
-    lp_utilization_limit: float
     float_min_zen: Decimal
 
 

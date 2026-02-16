@@ -11,7 +11,6 @@ def test_risk_engine_flags_excess_exposure_and_liquidity():
         max_global_exposure_usd=Decimal("100"),
         max_per_market_usd=Decimal("50"),
         coverage_ratio_target=0.9,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("10"),
     )
     engine = RiskEngine(limits)
@@ -22,7 +21,6 @@ def test_risk_engine_flags_excess_exposure_and_liquidity():
         absolute_market_usd=Decimal("60"),
         total_absolute_usd=Decimal("120"),
         coverage_ratio=0.5,
-        lp_utilization=0.9,
         float_balance_zen=Decimal("5"),
     )
 
@@ -31,7 +29,6 @@ def test_risk_engine_flags_excess_exposure_and_liquidity():
         "max_per_market_exceeded",
         "max_global_exceeded",
         "coverage_below_target",
-        "lp_utilization_high",
         "float_low",
     }
     severity_by_code = {b.code: b.severity for b in breaches}

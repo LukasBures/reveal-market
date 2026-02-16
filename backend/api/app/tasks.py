@@ -25,7 +25,7 @@ from app import repository_async
 from app.database import run_migrations, session_scope
 from app.metrics_registry import PRICING_COUNTER
 from app.onchain import validate_verifier_circuit_hash
-from app.routes.trade import _call_relayer
+from app.routes.trade import _call_hedger, _call_relayer
 from app.runtime import logger, request_metrics
 from app.runtime import settings as runtime_settings
 from app.services.alerting import alert_background_failure
@@ -368,6 +368,117 @@ async def relayer_queue_loop() -> None:
         raise
 
 
+async def hedger_queue_loop() -> None:
+    """Drain hedger retry queue from Redis and call the hedger service."""
+
+    if not settings.hedger_queue_enabled:
+        return
+    client = await get_cache_client()
+    if client is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="hedger.queue.disabled",
+            message="hedger queue disabled (redis unavailable)",
+        )
+        return
+    queue_key = settings.hedger_queue_key
+    failure_count = 0
+    circuit = CircuitBreaker(
+        client,
+        CircuitBreakerConfig(
+            key_prefix="reveal_market:hedger_circuit",
+            failure_threshold=settings.relayer_circuit_failure_threshold,
+            window_seconds=settings.relayer_circuit_window_seconds,
+            cooldown_seconds=settings.relayer_circuit_cooldown_seconds,
+        ),
+        logger,
+    )
+    try:
+        while True:
+            try:
+                if await circuit.is_open("hedger_queue"):
+                    await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
+                    continue
+                item = await cast(Awaitable[Any], client.brpop([queue_key], timeout=5))
+                if item is None:
+                    continue
+                _, raw = item
+                payload = None
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="hedger.queue.payload_parse_error",
+                        message="failed to parse hedger queue payload",
+                        error=str(exc),
+                    )
+                if payload is None:
+                    continue
+                job_id = payload.get("job_id")
+                endpoint = payload.get("endpoint")
+                body = payload.get("payload") or {}
+                attempts = int(payload.get("attempts") or 0)
+                try:
+                    result = await _call_hedger(endpoint, body)
+                    await client.set(
+                        f"{queue_key}:result:{job_id}",
+                        json.dumps(result),
+                        ex=settings.hedger_queue_result_ttl_seconds,
+                    )
+                    failure_count = 0
+                    await circuit.record_success("hedger_queue")
+                except Exception as exc:  # pragma: no cover - network retry guard
+                    attempts += 1
+                    failure_count += 1
+                    opened = await circuit.record_failure("hedger_queue")
+                    if attempts >= settings.hedger_queue_max_attempts:
+                        await client.set(
+                            f"{queue_key}:result:{job_id}",
+                            json.dumps({"status": "failed", "error": str(exc)}),
+                            ex=settings.hedger_queue_result_ttl_seconds,
+                        )
+                    else:
+                        payload["attempts"] = attempts
+                        await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
+                    await alert_background_failure(
+                        "hedger_queue_loop",
+                        exc,
+                        {"job_id": job_id, "attempts": attempts, "failures": failure_count},
+                    )
+                    backoff = min(settings.hedger_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
+                    await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive loop guard
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="hedger.queue.error",
+                    message="hedger queue loop error; continuing",
+                    error=str(exc),
+                )
+                failure_count += 1
+                await alert_background_failure(
+                    "hedger_queue_loop",
+                    exc,
+                    {"failures": failure_count, "interval_seconds": settings.hedger_retry_backoff_seconds},
+                )
+                backoff = min(settings.hedger_retry_backoff_seconds * (2 ** max(failure_count - 1, 0)), 60)
+                opened = await circuit.record_failure("hedger_queue")
+                await asyncio.sleep(backoff if not opened else settings.relayer_circuit_cooldown_seconds)
+    except asyncio.CancelledError:
+        log_event(
+            logger,
+            logging.INFO,
+            event="hedger.queue.stop",
+            message="hedger queue loop stopping",
+        )
+        raise
+
+
 async def quote_sweeper_loop(*, run_once: bool = False) -> None:
     """Expire stale quotes from Postgres on an interval or a single run for tests."""
 
@@ -497,6 +608,16 @@ async def start_background_tasks() -> None:
             task="relayer_queue",
             queue_key=settings.relayer_queue_key,
         )
+    if settings.hedger_queue_enabled and runtime.hedger_queue_task is None:
+        runtime.hedger_queue_task = asyncio.create_task(hedger_queue_loop(), name="hedger-queue")
+        log_event(
+            logger,
+            logging.INFO,
+            event="service.background.task_started",
+            message="started background task",
+            task="hedger_queue",
+            queue_key=settings.hedger_queue_key,
+        )
 
 
 async def stop_background_tasks() -> None:
@@ -520,7 +641,7 @@ async def stop_background_tasks() -> None:
                 await task
             except asyncio.CancelledError:
                 pass
-    for task in (runtime.relayer_queue_task,):
+    for task in (runtime.relayer_queue_task, runtime.hedger_queue_task):
         if task:
             task.cancel()
             try:
@@ -531,6 +652,7 @@ async def stop_background_tasks() -> None:
     runtime.cache_refresh_task = None
     runtime.quote_sweeper_task = None
     runtime.relayer_queue_task = None
+    runtime.hedger_queue_task = None
     log_event(
         logger,
         logging.DEBUG,

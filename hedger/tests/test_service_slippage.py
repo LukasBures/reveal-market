@@ -8,36 +8,30 @@ from app.service import HedgerService
 from app.types import HedgeAction, HedgeInstruction, OutcomeSide
 
 
-class StubPolymarketClient:
-    def __init__(self, slippage_bps: int):
-        self.slippage_bps = slippage_bps
-
-    async def quote_execution(
-        self, market_id: str, outcome: OutcomeSide, action: HedgeAction, size_usd: Decimal
-    ) -> dict:
-        return {"slippage_bps": self.slippage_bps}
-
-    async def execute_order(
-        self, market_id: str, outcome: OutcomeSide, action: HedgeAction, size_usd: Decimal, **_: Decimal
-    ) -> dict:
-        # Mirror a full fill to keep the hedge path simple for this test.
-        return {"filled_size": float(size_usd)}
-
-
 @pytest.mark.asyncio
-async def test_execute_hedge_rejects_high_slippage(monkeypatch):
+async def test_execute_hedge_rejects_when_clob_missing(monkeypatch):
     settings = Settings(
-        vault_rpc_url="http://localhost:8545",
-        vault_private_key="0x" + "11" * 32,
-        vault_sender_address="0x" + "01" * 20,
-        lp_vault_address="0x" + "02" * 20,
+        hedger_private_key="0x" + "11" * 32,
+        polymarket_api_key="key",
+        polymarket_api_secret="secret",  # noqa: S106 - test fixture
+        polymarket_api_passphrase="passphrase",  # noqa: S106 - test fixture
     )
     service = HedgerService(settings)
     service.lock_manager = None
-    service.polymarket_client = StubPolymarketClient(slippage_bps=settings.max_slippage_bps + 50)  # type: ignore[assignment]
+    service.clob = None
+
+    class DummyWallet:
+        def has_sufficient_balance(self, required_usdc: Decimal):
+            return True, Decimal("100")
+
+        def ensure_allowance(self):
+            return None
+
+    service.wallet = DummyWallet()
 
     instr = HedgeInstruction(
-        market_id="m1",
+        market_id="123",
+        clob_token_id="123",  # noqa: S106 - test fixture, not a secret
         hedge_outcome=OutcomeSide.YES,
         action=HedgeAction.BUY,
         size_usd=Decimal("1.0"),
@@ -48,4 +42,4 @@ async def test_execute_hedge_rejects_high_slippage(monkeypatch):
 
     result = await service._execute_hedge(instr)
     assert result["status"] == "rejected"
-    assert result["reason"] == "slippage_limit"
+    assert result["reason"] == "read_only"

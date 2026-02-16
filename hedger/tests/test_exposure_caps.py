@@ -27,7 +27,6 @@ async def test_exposure_caps_surface_breaches():
         max_global_exposure_usd=Decimal("3"),
         max_per_market_usd=Decimal("3"),
         coverage_ratio_target=0.9,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("0"),
     )
     ledger = ExposureLedger(

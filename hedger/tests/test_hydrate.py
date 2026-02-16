@@ -14,7 +14,6 @@ async def test_hydrate_restores_market_state():
         max_global_exposure_usd=Decimal("100000"),
         max_per_market_usd=Decimal("10000"),
         coverage_ratio_target=0.98,
-        lp_utilization_limit=0.8,
         float_min_zen=Decimal("100"),
     )
     ledger = ExposureLedger(

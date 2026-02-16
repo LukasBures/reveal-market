@@ -504,6 +504,14 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
 def test_sync_commitments_endpoint(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="sync-mkt", address="0x5555555555555555555555555555555555555555")
     monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
+    monkeypatch.setattr("app.routes.trade.settings.hedger_base_url", "http://hedger", raising=False)
+    monkeypatch.setattr("app.routes.trade.settings.hedger_internal_secret", SecretStr("hedger-secret"), raising=False)
+    monkeypatch.setattr("app.routes.trade.settings.hedger_queue_enabled", False, raising=False)
+
+    async def _fake_hedger(*_args, **_kwargs):
+        return {"status": "ok"}
+
+    monkeypatch.setattr("app.routes.trade._call_hedger", _fake_hedger, raising=False)
     payload = {
         "event_id": market.event_id,
         "tickets": [

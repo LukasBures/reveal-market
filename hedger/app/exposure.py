@@ -91,7 +91,6 @@ class ExposureLedger:
         self.repository = repository
         self._markets: dict[str, MarketExposure] = {}
         self._lock = asyncio.Lock()
-        self._lp_utilization = 0.0
         self._float_balance_zen = Decimal("0")
 
     async def hydrate_market(
@@ -118,10 +117,6 @@ class ExposureLedger:
             self._markets[market_id] = market
             update_exposure_metrics(market_id, float(yes_usd), float(no_usd), market.coverage_ratio)
 
-    async def set_lp_utilization(self, utilization: float) -> None:
-        async with self._lock:
-            self._lp_utilization = utilization
-
     async def set_float_balance(self, balance_zen: Decimal) -> None:
         async with self._lock:
             self._float_balance_zen = balance_zen
@@ -132,6 +127,7 @@ class ExposureLedger:
         *,
         idempotency_key: str | None = None,
         stake_usd: Decimal | None = None,
+        persist: bool = True,
     ) -> tuple[MarketExposureSnapshot, HedgeInstruction | None, list[RiskBreach]]:
         quote = await self.fx_oracle.get_quote() if stake_usd is None else None
         stake_usd = stake_usd if stake_usd is not None else self.fx_oracle.usd_from_zen(commit.stake_zen, quote)
@@ -148,13 +144,12 @@ class ExposureLedger:
                 absolute_market_usd=market.absolute_usd,
                 total_absolute_usd=total_absolute,
                 coverage_ratio=coverage_ratio,
-                lp_utilization=self._lp_utilization,
                 float_balance_zen=self._float_balance_zen,
             )
-            instruction = self._plan_instruction(market)
+            instruction = self._plan_instruction(market, commit=commit)
             update_exposure_metrics(commit.market_id, float(market.yes_usd), float(market.no_usd), coverage_ratio)
 
-        if self.repository:
+        if self.repository and persist:
             await self.repository.record_commit(commit, stake_usd, idempotency_key=idempotency_key)
             await self.repository.record_audit_log(
                 event="commit_ingested",
@@ -182,12 +177,52 @@ class ExposureLedger:
         )
         return market.snapshot(), instruction, breaches
 
+    async def preview_commit(
+        self,
+        commit: CommitEvent,
+        *,
+        stake_usd: Decimal,
+    ) -> tuple[MarketExposureSnapshot, HedgeInstruction | None, list[RiskBreach]]:
+        """Compute exposure + hedge instruction without mutating state or persisting."""
+
+        async with self._lock:
+            market = self._markets.get(commit.market_id)
+            shadow = MarketExposure(commit.market_id)
+            if market:
+                shadow.yes_zen = market.yes_zen
+                shadow.no_zen = market.no_zen
+                shadow.yes_usd = market.yes_usd
+                shadow.no_usd = market.no_usd
+                shadow.hedged_usd = market.hedged_usd
+            shadow.apply_commit(commit.direction, commit.stake_zen, stake_usd)
+            total_absolute = (
+                sum([m.absolute_usd for m in self._markets.values()], start=Decimal("0"))
+                - (market.absolute_usd if market else Decimal("0"))
+                + shadow.absolute_usd
+            )
+            breaches = self.risk_engine.check_limits(
+                market_id=commit.market_id,
+                market_net_usd=shadow.net_usd,
+                absolute_market_usd=shadow.absolute_usd,
+                total_absolute_usd=total_absolute,
+                coverage_ratio=shadow.coverage_ratio,
+                float_balance_zen=self._float_balance_zen,
+            )
+            instruction = self._plan_instruction(shadow, commit=commit)
+            snapshot = shadow.snapshot()
+        return snapshot, instruction, breaches
+
     def _total_absolute_usd(self) -> Decimal:
         return sum([market.absolute_usd for market in self._markets.values()], start=Decimal("0"))
 
-    def _plan_instruction(self, market: MarketExposure) -> HedgeInstruction | None:
+    def _plan_instruction(
+        self, market: MarketExposure, *, commit: CommitEvent | None = None
+    ) -> HedgeInstruction | None:
         if market.absolute_usd == 0:
             return None
+        clob_token_id = None
+        if commit and commit.clob_token_id:
+            clob_token_id = commit.clob_token_id
         desired_coverage = Decimal(str(self.limits.coverage_ratio_target)) * market.absolute_usd
         delta = desired_coverage - market.hedged_usd
         if delta <= Decimal("0"):
@@ -201,6 +236,7 @@ class ExposureLedger:
                 slippage_bps=30,
                 reason="reduce_overhedge",
                 target_coverage=float(self.limits.coverage_ratio_target),
+                clob_token_id=clob_token_id,
                 is_unwind=True,
             )
         action = HedgeAction.SELL if market.net_usd > 0 else HedgeAction.BUY
@@ -213,6 +249,7 @@ class ExposureLedger:
             slippage_bps=30,
             reason="exposure_change",
             target_coverage=float(self.limits.coverage_ratio_target),
+            clob_token_id=clob_token_id,
         )
 
     async def register_fill(

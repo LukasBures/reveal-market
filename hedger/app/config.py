@@ -25,10 +25,13 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://redis:6379/0")
 
-    polymarket_api_base: str = Field(default="https://gamma-api.polymarket.com")
     polymarket_timeout_seconds: int = Field(default=10)
     polymarket_retry_attempts: int = Field(default=3)
     polymarket_retry_backoff_seconds: float = Field(default=0.5)
+    polymarket_clob_base: str = Field(default="https://clob.polymarket.com")
+    polymarket_api_key: str | None = Field(default=None)
+    polymarket_api_secret: str | None = Field(default=None)
+    polymarket_api_passphrase: str | None = Field(default=None)
 
     fx_feed_url: str = Field(
         default="http://streamer:8100/fx/zen-usd",
@@ -51,11 +54,11 @@ class Settings(BaseSettings):
     commit_stream_name: str = Field(default="horizen_commits")
 
     max_slippage_bps: int = Field(default=100, description="Maximum acceptable slippage for hedges")
+    min_fill_percent: int = Field(default=90, ge=1, le=100)
 
     risk_max_global_exposure_usd: Decimal = Field(default=Decimal("250000"))
     risk_max_per_market_usd: Decimal = Field(default=Decimal("75000"))
     risk_coverage_ratio_target: float = Field(default=0.98)
-    risk_lp_utilization_limit: float = Field(default=0.85)
     float_min_zen: Decimal = Field(default=Decimal("5000"))
     risk_max_commit_zen: Decimal = Field(
         default=Decimal("1000"),
@@ -66,11 +69,14 @@ class Settings(BaseSettings):
     haircut_percent: Decimal = Field(default=Decimal("0.12"), ge=Decimal("0"), lt=Decimal("0.25"))
     worsen_percent: Decimal = Field(default=Decimal("0.03"), ge=Decimal("0"), lt=Decimal("0.25"))
     lp_share_percent: Decimal = Field(default=Decimal("0.18"), ge=Decimal("0"), lt=Decimal("0.5"))
-    vault_rpc_url: str | None = Field(default="http://localhost:8545")
-    vault_private_key: str | None = Field(default="0x" + "00" * 31 + "01")
-    vault_sender_address: str | None = Field(default="0x" + "00" * 19 + "01")
-    vault_chain_id: int = Field(default=1337, ge=1)
-    vault_gas_price_gwei: int | None = Field(default=5, ge=0)
+    polygon_chain_id: int = Field(default=137, ge=1)
+    polygon_rpc_url: str = Field(default="https://polygon-rpc.com")
+    hedger_private_key: str | None = Field(default=None)
+    hedger_address: str | None = Field(default=None)
+    usdc_address: str = Field(default="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+    usdc_decimals: int = Field(default=6, ge=0)
+    polymarket_exchange: str = Field(default="0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
+    auto_approve: bool = Field(default=True)
 
     settlement_poll_seconds: int = Field(default=20)
     heartbeat_interval_seconds: int = Field(default=60)
@@ -81,6 +87,9 @@ class Settings(BaseSettings):
     admin_rate_limit_requests: int = Field(default=30, ge=0)
     admin_rate_limit_window_seconds: int = Field(default=60, ge=1)
     admin_read_only: bool = Field(default=False)
+    admin_internal_secret: str | None = Field(
+        default=None, description="Shared secret required for admin ingest endpoints"
+    )
     risk_category_limits: str | None = Field(
         default=None,
         description="Optional JSON map of category => max exposure USD.",
@@ -90,7 +99,6 @@ class Settings(BaseSettings):
     prover_timeout_seconds: int = Field(default=30)
     prover_shared_secret: str | None = Field(default=None)
     bridge_endpoint: str = Field(default="https://bridge.revealmarket.xyz/submit")
-    lp_vault_address: str = Field(default="0x0000000000000000000000000000000000000000")
 
     @property
     def total_monetisation(self) -> Decimal:

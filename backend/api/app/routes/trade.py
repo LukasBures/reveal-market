@@ -29,11 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 from web3.exceptions import Web3RPCError
 
-from app import repository_async, schemas
+from app import crud, repository_async, schemas
 from app.database import get_session
 from app.routes import pricing as pricing_routes
 from app.runtime import logger
 from app.runtime import settings as runtime_settings
+from app.services.alerting import alert_background_failure
 from app.services.cache_client import get_cache_client, get_http_client
 
 COMMITTED_EVENT_SIG = Web3.keccak(text="Committed(uint256,bytes32,uint256)").hex()
@@ -614,6 +615,27 @@ async def _enqueue_relayer_job(kind: str, endpoint: str, payload: dict[str, Any]
     return job_id
 
 
+async def _enqueue_hedger_job(kind: str, endpoint: str, payload: dict[str, Any]) -> str:
+    """Enqueue a hedger job in Redis when immediate call fails."""
+
+    if not settings.hedger_queue_enabled:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="hedger_unavailable")
+    cache = await get_cache_client()
+    if cache is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="hedger_queue_unavailable")
+    job_id = secrets.token_hex(16)
+    body = {
+        "job_id": job_id,
+        "kind": kind,
+        "endpoint": endpoint,
+        "payload": payload,
+        "attempts": 0,
+        "enqueued_at": int(time.time()),
+    }
+    await cast(Awaitable[Any], cache.lpush(settings.hedger_queue_key, json.dumps(body)))
+    return job_id
+
+
 async def _call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     """POST to the relayer with simple retries and friendlier errors."""
 
@@ -664,6 +686,60 @@ async def _call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY, detail=str(last_error) if last_error else "relayer_failed"
+    )
+
+
+async def _call_hedger(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST to the hedger with simple retries and friendlier errors."""
+
+    if not settings.hedger_base_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="hedger_unconfigured")
+    headers = {}
+    if settings.hedger_internal_secret:
+        token = settings.hedger_internal_secret.get_secret_value()
+        headers["X-Internal-Secret"] = token
+    attempts = max(1, int(getattr(settings, "relayer_retry_attempts", 0) or 0) + 1)
+    backoff = float(getattr(settings, "relayer_retry_backoff_seconds", 0.0) or 0.0)
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            client = await get_http_client(20.0)
+            resp = await client.post(endpoint, json=payload, headers=headers)
+            if resp.status_code in (200, 202):
+                return resp.json()
+            detail_text = resp.text
+            try:
+                parsed = resp.json()
+                if isinstance(parsed, dict) and parsed.get("detail"):
+                    detail_text = str(parsed.get("detail"))
+                elif isinstance(parsed, dict) and parsed.get("error"):
+                    detail_text = str(parsed.get("error"))
+            except Exception as exc:  # pragma: no cover - defensive parse
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="hedger.response.parse_error",
+                    message="failed to parse hedger response body",
+                    error=str(exc),
+                    status_code=resp.status_code,
+                )
+            if resp.status_code in {502, 503, 504} and attempt + 1 < attempts:
+                await asyncio.sleep(backoff)
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"hedger_error:{resp.status_code}:{detail_text}",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # pragma: no cover - network errors
+            last_error = exc
+            if attempt + 1 < attempts:
+                await asyncio.sleep(backoff)
+                continue
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY, detail=str(last_error) if last_error else "hedger_failed"
     )
 
 
@@ -2065,7 +2141,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     market_identifier = payload.event_id or payload.market_id
     if not market_identifier:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
-    market = await repository_async.get_market_by_event_id(session, market_identifier)
+    market = await crud.get_market_by_event_id(session, market_identifier)
     if market is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
     if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
@@ -2191,6 +2267,84 @@ async def sync_commitments(
             }
         )
     recorded = await repository_async.record_commitments(session, market.id, tickets)
+
+    if settings.hedger_base_url:
+        hedge_attempts: list[dict[str, Any]] = []
+        for ticket in payload.tickets:
+            outcome_id = ticket.outcome_id
+            if outcome_id is None:
+                hedge_attempts.append({"status": "skipped", "reason": "outcome_missing"})
+                continue
+            if int(outcome_id) not in (0, 1):
+                hedge_attempts.append({"status": "skipped", "reason": "outcome_invalid"})
+                continue
+            if not ticket.user:
+                hedge_attempts.append({"status": "skipped", "reason": "user_missing"})
+                continue
+            direction = "yes" if int(outcome_id) == 0 else "no"
+            token_id = None
+            gamma_meta = getattr(market, "gamma_metadata_rel", None)
+            if gamma_meta is not None:
+                token_id = str(gamma_meta.clob_token_id_yes) if direction == "yes" else str(gamma_meta.clob_token_id_no)
+            if not token_id:
+                token_rows = list(getattr(market, "clob_tokens_rel", []) or [])
+                side_match = next(
+                    (row.token_id for row in token_rows if row.side == direction and row.token_id),
+                    None,
+                )
+                if side_match:
+                    token_id = side_match
+                elif len(token_rows) >= 2:
+                    token_id = token_rows[0].token_id if direction == "yes" else token_rows[1].token_id
+            if not token_id:
+                hedge_attempts.append({"status": "skipped", "reason": "clob_token_missing"})
+                continue
+            commit_payload = {
+                "market_id": market.event_id,
+                "stake_zen": str(Decimal(ticket.amount_wei or 0) / Decimal("1e18")),
+                "direction": direction,
+                "category": market.category,
+                "committed_at": datetime.now(UTC).isoformat(),
+                "tx_hash": ticket.tx_hash,
+                "account": ticket.user,
+                "market_address": market.market_address,
+                "outcome_id": int(outcome_id),
+                "wallet_address": ticket.user,
+                "clob_token_id": token_id,
+                "idempotency_key": ticket.ticket_hash or ticket.leaf,
+            }
+            try:
+                hedger_endpoint = f"{settings.hedger_base_url}/admin/commits"
+                response = await _call_hedger(hedger_endpoint, commit_payload)
+                hedge_attempts.append({"status": "ok", "response": response})
+            except Exception as exc:
+                try:
+                    job_id = await _enqueue_hedger_job(
+                        "commit", f"{settings.hedger_base_url}/admin/commits", commit_payload
+                    )
+                    hedge_attempts.append({"status": "queued", "job_id": job_id})
+                except Exception as queue_exc:
+                    hedge_attempts.append({"status": "failed", "error": str(queue_exc)})
+                await alert_background_failure(
+                    "hedger.commit.ingest",
+                    exc,
+                    {
+                        "market_id": market.event_id,
+                        "ticket_hash": ticket.ticket_hash or ticket.leaf,
+                        "tx_hash": ticket.tx_hash,
+                        "direction": direction,
+                        "token_id": token_id,
+                    },
+                )
+        log_event(
+            logger,
+            logging.INFO,
+            event="trade.hedge.dispatch",
+            message="hedger dispatch attempts completed",
+            market_id=market.event_id,
+            attempts=hedge_attempts,
+        )
+
     return schemas.CommitmentsSyncResponse(recorded=recorded)
 
 

@@ -15,7 +15,13 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.exc import ArgumentError
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .types import CommitEvent, HedgeInstruction
@@ -141,7 +147,7 @@ def ensure_async_db_url(database_url: str) -> str:
 
     try:
         url = make_url(database_url)
-    except Exception:
+    except ArgumentError:
         return database_url
     driver = url.drivername or ""
     if driver.startswith("postgresql") and "asyncpg" not in driver:
@@ -161,11 +167,12 @@ class HedgerRepository:
         self.SessionLocal = async_sessionmaker(bind=self.engine, expire_on_commit=False, class_=AsyncSession)
 
     async def create_schema(self) -> None:
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        async with self.engine.connect() as conn:
+            async with conn.begin():
+                await conn.run_sync(Base.metadata.create_all)
 
     async def check_connection(self) -> None:
-        async with self.engine.begin() as conn:
+        async with self.engine.connect() as conn:
             await conn.execute(select(1))
 
     async def record_commit(self, commit: CommitEvent, stake_usd: Decimal, idempotency_key: str | None = None) -> None:
@@ -197,7 +204,7 @@ class HedgerRepository:
                     size_usd=instruction.size_usd,
                     slippage_bps=instruction.slippage_bps,
                     reason=instruction.reason,
-                    target_coverage=instruction.target_coverage,
+                    target_coverage=Decimal(str(instruction.target_coverage)),
                     response_payload=response_payload,
                     is_unwind=1 if instruction.is_unwind else 0,
                 )

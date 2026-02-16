@@ -39,10 +39,10 @@ class StubBridge:
 @pytest.mark.asyncio
 async def test_request_bridge_dispatches_to_client():
     settings = Settings(
-        vault_rpc_url="http://localhost:8545",
-        vault_private_key="0x" + "11" * 32,
-        vault_sender_address="0x" + "01" * 20,
-        lp_vault_address="0x" + "02" * 20,
+        hedger_private_key="0x" + "11" * 32,
+        polymarket_api_key="key",
+        polymarket_api_secret="secret",  # noqa: S106 - test fixture
+        polymarket_api_passphrase="passphrase",  # noqa: S106 - test fixture
     )
     service = HedgerService(settings)
     bridge = StubBridge()

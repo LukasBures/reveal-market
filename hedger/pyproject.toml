@@ -20,6 +20,7 @@ dependencies = [
     "tenacity>=9.0,<10.0",
     "python-json-logger>=2.0,<3.0",
     "web3>=7.0,<8.0",
+    "py-clob-client>=0.28.0,<0.29",
 ]
 
 [project.optional-dependencies]

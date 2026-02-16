@@ -69,6 +69,7 @@ metrics_task: asyncio.Task | None = None
 cache_refresh_task: asyncio.Task | None = None
 quote_sweeper_task: asyncio.Task | None = None
 relayer_queue_task: asyncio.Task | None = None
+hedger_queue_task: asyncio.Task | None = None
 goldsky_client: AsyncGoldskyClient | None = None
 load_shed_state = LoadSheddingState()
 

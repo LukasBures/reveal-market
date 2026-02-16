@@ -51,8 +51,8 @@ class PricingEngine:
             total_monetisation=self.total_monetisation,
         )
 
+    @staticmethod
     def _validate_percent(
-        self,
         value: Decimal,
         label: str,
         *,

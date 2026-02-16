@@ -80,10 +80,7 @@ async def test_validate_signed_quote_accepts_valid_signature(monkeypatch):
     )
 
     settings = Settings(
-        vault_rpc_url="http://localhost:8545",
-        vault_private_key="0x" + "01" * 32,
-        vault_sender_address="0x" + "02" * 20,
-        lp_vault_address="0x" + "03" * 20,
+        hedger_private_key="0x" + "01" * 32,
         pricing_signer_address=signer.address,
         database_url="sqlite+aiosqlite://",
     )
@@ -155,10 +152,7 @@ async def test_validate_signed_quote_rejects_stake_mismatch(monkeypatch):
         },
     )
     settings = Settings(
-        vault_rpc_url="http://localhost:8545",
-        vault_private_key="0x" + "04" * 32,
-        vault_sender_address="0x" + "05" * 20,
-        lp_vault_address="0x" + "06" * 20,
+        hedger_private_key="0x" + "04" * 32,
         pricing_signer_address=signer.address,
         database_url="sqlite+aiosqlite://",
     )

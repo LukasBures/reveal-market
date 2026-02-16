@@ -1016,6 +1016,7 @@ def _extract_date_window_key(value: str | None) -> str | None:
 
     return None
 
+
 def _looks_like_range_token(token: str | None) -> bool:
     if not token:
         return False

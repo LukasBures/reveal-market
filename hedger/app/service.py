@@ -14,28 +14,26 @@ from tenacity import RetryError
 
 from .bet_processor_zen import BetProcessorZen
 from .bridge import BridgeClient
+from .clob import ClobConfig, HedgerClob
 from .config import Settings
 from .exposure import ExposureLedger
 from .fx import FxOracle
-from .hedger_usdc import HedgerUSDC
 from .local_logging import log_event
 from .locks import RedisLockManager
 from .metrics import (
     HEDGE_EXECUTIONS,
     record_event_lag,
     record_hedge_decision,
-    record_pnl,
     record_risk_breach,
-    update_float_and_utilization,
+    update_hot_wallet_balance,
 )
-from .polymarket import PolymarketClient
 from .pricing_engine import PricingEngine
 from .risk import RiskEngine, RiskLimits
 from .settlement import SettlementCoordinator
 from .storage import HedgerRepository
 from .treasury_manager import TreasuryManager
 from .types import CommitEvent, HedgeInstruction, MarketExposureSnapshot, OutcomeSide, RiskBreach, RiskSeverity
-from .vault import OnChainLpVaultClient, VaultTxConfig
+from .wallet import HedgerWallet, WalletConfig
 
 logger = logging.getLogger("reveal_market.hedger.service")
 
@@ -48,7 +46,6 @@ class HedgerService:
             max_global_exposure_usd=settings.risk_max_global_exposure_usd,
             max_per_market_usd=settings.risk_max_per_market_usd,
             coverage_ratio_target=settings.risk_coverage_ratio_target,
-            lp_utilization_limit=settings.risk_lp_utilization_limit,
             float_min_zen=settings.float_min_zen,
         )
         self.settings = settings
@@ -72,41 +69,60 @@ class HedgerService:
         )
         self.treasury = TreasuryManager(lp_share_percent=settings.lp_share_percent)
         self.bet_processor = BetProcessorZen(self.pricing_engine, self.treasury)
-        self.polymarket_client = PolymarketClient(
-            base_url=settings.polymarket_api_base,
-            timeout_seconds=settings.polymarket_timeout_seconds,
-            retry_attempts=settings.polymarket_retry_attempts,
-            retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
-        )
         self.bridge_client = BridgeClient(
             base_url=settings.bridge_endpoint,
             timeout_seconds=settings.polymarket_timeout_seconds,
             retry_attempts=settings.polymarket_retry_attempts,
             retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
         )
-        if not (self.settings.vault_rpc_url and self.settings.vault_private_key and self.settings.vault_sender_address):
+        if not self.settings.hedger_private_key:
             log_event(
                 logger,
                 logging.ERROR,
-                event="hedger.config.missing_vault",
-                message="vault RPC/key/sender missing; running in read-only mode",
+                event="hedger.config.missing_wallet",
+                message="hedger private key missing; running in read-only mode",
             )
             self.settings = self.settings.model_copy(update={"admin_read_only": True}, deep=True)
-        self.vault_client: OnChainLpVaultClient | None
-        self.hedger_usdc: HedgerUSDC | None
-        if self.settings.vault_rpc_url and self.settings.vault_private_key and self.settings.vault_sender_address:
-            tx_cfg = VaultTxConfig(
-                rpc_url=self.settings.vault_rpc_url,
-                chain_id=self.settings.vault_chain_id,
-                private_key=self.settings.vault_private_key,
-                sender=self.settings.vault_sender_address,
-                gas_price_gwei=self.settings.vault_gas_price_gwei,
+        self.wallet: HedgerWallet | None = None
+        self.clob: HedgerClob | None = None
+        if self.settings.hedger_private_key:
+            wallet_cfg = WalletConfig(
+                rpc_url=self.settings.polygon_rpc_url,
+                chain_id=self.settings.polygon_chain_id,
+                private_key=self.settings.hedger_private_key,
+                usdc_address=self.settings.usdc_address,
+                usdc_decimals=self.settings.usdc_decimals,
+                polymarket_exchange=self.settings.polymarket_exchange,
+                auto_approve=self.settings.auto_approve,
             )
-            self.vault_client = OnChainLpVaultClient(self.settings.lp_vault_address, tx_cfg)
-            self.hedger_usdc = HedgerUSDC(self.vault_client, max_utilization=limits.lp_utilization_limit)
-        else:
-            self.vault_client = None
-            self.hedger_usdc = None
+            self.wallet = HedgerWallet(wallet_cfg)
+            if not (
+                self.settings.polymarket_api_key
+                and self.settings.polymarket_api_secret
+                and self.settings.polymarket_api_passphrase
+            ):
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="hedger.config.missing_clob_creds",
+                    message="polymarket clob api credentials missing; running in read-only mode",
+                )
+                self.settings = self.settings.model_copy(update={"admin_read_only": True}, deep=True)
+            if (
+                self.settings.polymarket_api_key
+                and self.settings.polymarket_api_secret
+                and self.settings.polymarket_api_passphrase
+            ):
+                clob_cfg = ClobConfig(
+                    host=self.settings.polymarket_clob_base,
+                    chain_id=self.settings.polygon_chain_id,
+                    private_key=self.settings.hedger_private_key,
+                    api_key=self.settings.polymarket_api_key,
+                    api_secret=self.settings.polymarket_api_secret,
+                    api_passphrase=self.settings.polymarket_api_passphrase,
+                    funder=self.wallet.address,
+                )
+                self.clob = HedgerClob(clob_cfg)
         self.exposure_ledger = ExposureLedger(
             fx_oracle=self.fx_oracle,
             limits=limits,
@@ -121,6 +137,8 @@ class HedgerService:
         )
         self.lock_manager: RedisLockManager | None = None
         self._noop_lock = self._noop_async_lock()
+        self._health_snapshot: dict[str, Any] | None = None
+        self._health_snapshot_ts: datetime | None = None
 
     async def startup(self) -> None:
         if self.settings.run_migrations_on_startup:
@@ -165,7 +183,6 @@ class HedgerService:
             logging.INFO,
             event="hedger.startup",
             message="hedger service initialised",
-            polymarket_api=self.settings.polymarket_api_base,
             redis_url=self.settings.redis_url,
         )
 
@@ -255,22 +272,23 @@ class HedgerService:
             )
             return {"status": "rejected", "reason": str(exc)}
 
-        if not self.hedger_usdc:
-            return {"status": "rejected", "reason": "vault_unavailable"}
-        lp_ok, projected_util = await self.hedger_usdc.can_hedge(pricing.hedge_usdc)
-        if not lp_ok:
+        if not self.wallet:
+            return {"status": "rejected", "reason": "wallet_unavailable"}
+        balance_ok, balance = self.wallet.has_sufficient_balance(pricing.hedge_usdc)
+        update_hot_wallet_balance(float(balance))
+        if not balance_ok:
             return {
                 "status": "rejected",
-                "reason": "lp_unavailable",
-                "projected_utilization": projected_util,
+                "reason": "insufficient_usdc",
+                "balance_usdc": str(balance),
                 "pricing": pricing.model_dump(mode="json"),
             }
 
         lock_ctx = self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else nullcontext()
         try:
             async with lock_ctx:
-                snapshot, instruction, breaches = await self.exposure_ledger.record_commit(
-                    commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc
+                snapshot, instruction, breaches = await self.exposure_ledger.preview_commit(
+                    commit, stake_usd=pricing.hedge_usdc
                 )
                 category_breaches = self._check_category_limits(
                     commit.market_id,
@@ -295,12 +313,13 @@ class HedgerService:
             log_event(
                 logger,
                 logging.WARNING,
-                event="hedger.commit.process_failed",
-                message="failed to persist commit",
+                event="hedger.commit.preview_failed",
+                message="failed to preview commit",
                 market_id=commit.market_id,
                 error=str(exc),
             )
             return {"status": "rejected", "reason": "commit_failed", "error": str(exc)}
+
         response: dict[str, Any] = {
             "snapshot": snapshot,
             "hedge_instruction": instruction,
@@ -310,10 +329,35 @@ class HedgerService:
         if breaches:
             for breach in breaches:
                 record_risk_breach(str(breach.code), str(breach.severity))
+
         if instruction:
             record_hedge_decision(instruction.action, instruction.reason)
             hedge_result = await self._execute_hedge(instruction)
             response["hedge_execution"] = hedge_result
+            if hedge_result.get("status") == "rejected":
+                response["status"] = "rejected"
+                response["reason"] = hedge_result.get("reason")
+                return response
+
+        try:
+            async with lock_ctx:
+                snapshot, _, _ = await self.exposure_ledger.record_commit(
+                    commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc, persist=True
+                )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.commit.persist_failed",
+                message="failed to persist commit after hedge",
+                market_id=commit.market_id,
+                error=str(exc),
+            )
+            response["status"] = "rejected"
+            response["reason"] = "commit_failed"
+            response["error"] = str(exc)
+            return response
+
         if commit.stream_offset:
             await self.repository.set_replay_offset(self.settings.commit_stream_name, commit.stream_offset)
         return response
@@ -445,80 +489,64 @@ class HedgerService:
             return {"status": "rejected", "reason": "read_only"}
         lock_ctx = self.lock_manager.lock(f"hedge:{instruction.market_id}") if self.lock_manager else self._noop_lock
         async with lock_ctx:
-            quote = await self.polymarket_client.quote_execution(
-                instruction.market_id,
-                outcome=instruction.hedge_outcome,
-                action=instruction.action,
-                size_usd=instruction.size_usd,
-            )
-            if not self._quote_within_slippage(quote):
+            if not self.wallet:
                 log_event(
                     logger,
                     logging.WARNING,
-                    event="hedger.hedge.rejected",
-                    message="hedge aborted due to slippage limit",
+                    event="hedger.wallet.unavailable",
+                    message="wallet unavailable; rejecting hedge execution",
                     market_id=instruction.market_id,
-                    slippage_bps=quote.get("slippage_bps"),
-                    max_slippage_bps=self.settings.max_slippage_bps,
                 )
-                return {"status": "rejected", "reason": "slippage_limit", "quote": quote}
+                return {"status": "rejected", "reason": "wallet_unavailable"}
 
-            order_payload: dict = {}
-            filled_size = instruction.size_usd
-            client_order_id = f"{instruction.market_id}:{int(instruction.created_at.timestamp() * 1000)}"
-            if hasattr(self.polymarket_client, "execute_order"):
-                try:
-                    order_payload = await self.polymarket_client.execute_order(  # type: ignore[attr-defined]
-                        instruction.market_id,
-                        outcome=instruction.hedge_outcome,
-                        action=instruction.action,
-                        size_usd=instruction.size_usd,
-                        max_slippage_bps=self.settings.max_slippage_bps,
-                        client_order_id=client_order_id,
-                    )
-                    filled_size = self._extract_filled_size(order_payload, instruction.size_usd)
-                except (
-                    httpx.HTTPError,
-                    RuntimeError,
-                    ValueError,
-                ) as exc:  # pragma: no cover - network errors handled via retry
-                    log_event(
-                        logger,
-                        logging.ERROR,
-                        event="hedger.hedge.order_failed",
-                        message="polymarket order failed",
-                        market_id=instruction.market_id,
-                        error=str(exc),
-                    )
-                    return {"status": "rejected", "reason": "order_failed", "error": str(exc)}
+            balance_ok, balance = self.wallet.has_sufficient_balance(instruction.size_usd)
+            update_hot_wallet_balance(float(balance))
+            if not balance_ok:
+                return {"status": "rejected", "reason": "insufficient_usdc", "balance_usdc": str(balance)}
+
+            if not self.clob:
+                return {"status": "rejected", "reason": "clob_unavailable"}
+            approval_tx = self.wallet.ensure_allowance()
+            try:
+                token_id = instruction.clob_token_id
+                if not token_id:
+                    return {"status": "rejected", "reason": "clob_token_missing"}
+                order_response = self.clob.place_market_order(
+                    token_id=str(token_id),
+                    amount_usd=instruction.size_usd,
+                    action=instruction.action,
+                )
+            except (RuntimeError, ValueError) as exc:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="hedger.hedge.order_failed",
+                    message="polymarket clob order failed",
+                    market_id=instruction.market_id,
+                    error=str(exc),
+                )
+                return {"status": "rejected", "reason": "order_failed", "error": str(exc)}
+
+            filled_size = self._extract_filled_size(order_response, instruction.size_usd)
+            fill_ratio = float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0
+            min_fill_ratio = float(self.settings.min_fill_percent) / 100.0
+            if fill_ratio < min_fill_ratio:
+                return {
+                    "status": "rejected",
+                    "reason": "fill_below_threshold",
+                    "filled_size_usd": str(filled_size),
+                    "required_fill_percent": str(self.settings.min_fill_percent),
+                }
 
             if filled_size <= 0:
                 return {
                     "status": "rejected",
                     "reason": "no_fill",
-                    "order": order_payload,
-                    "quote": quote,
+                    "order": order_response,
                 }
 
-        if not self.hedger_usdc or not self.vault_client:
-            log_event(
-                logger,
-                logging.WARNING,
-                event="hedger.vault.unavailable",
-                message="vault client unavailable; rejecting hedge execution",
-                market_id=instruction.market_id,
-            )
-            return {"status": "rejected", "reason": "vault_unavailable"}
-
-        if instruction.is_unwind:
-            borrow_receipt = await self.hedger_usdc.repay(filled_size)
-        else:
-            borrow_receipt = await self.hedger_usdc.borrow(filled_size)
-            if borrow_receipt.get("status") == "rejected":
-                return borrow_receipt
-
         await self.exposure_ledger.register_fill(instruction.market_id, filled_size, is_unwind=instruction.is_unwind)
-        await self.repository.record_hedge_instruction(instruction, response_payload=quote)
+        await self.repository.record_hedge_instruction(instruction, response_payload=order_response)
         await self.repository.record_audit_log(
             event="hedge_executed",
             actor=None,
@@ -531,12 +559,6 @@ class HedgerService:
                 "is_unwind": instruction.is_unwind,
             },
         )
-        utilization = borrow_receipt.get("utilization") if isinstance(borrow_receipt, dict) else None
-        if utilization is None:
-            utilization = await self.vault_client.current_utilization()
-        update_float_and_utilization(float_zen=None, lp_utilization=utilization)
-        realized, unrealized = await self.vault_client.get_pnl()
-        record_pnl(realized_usd=realized, unrealized_usd=unrealized)
         HEDGE_EXECUTIONS.labels(action=instruction.action, outcome=instruction.hedge_outcome).inc()
         log_event(
             logger,
@@ -546,33 +568,16 @@ class HedgerService:
             market_id=instruction.market_id,
             action=instruction.action,
             size_usd=str(filled_size),
-            utilization=utilization,
             partial_fill=float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0,
         )
         return {
-            "borrow": borrow_receipt,
-            "quote": quote,
-            "order": order_payload,
+            "order": order_response,
             "filled_size_usd": str(filled_size),
-            "utilization": utilization,
+            "approval_tx": approval_tx,
         }
 
     async def exposures(self) -> list[MarketExposureSnapshot]:
         return await self.exposure_ledger.snapshot()
-
-    async def reconcile_lp_utilization(self) -> float:
-        if not self.vault_client:
-            log_event(
-                logger,
-                logging.WARNING,
-                event="hedger.vault.unavailable",
-                message="vault client unavailable; skipping utilization reconcile",
-            )
-            return 0.0
-        utilization = await self.vault_client.current_utilization()
-        await self.exposure_ledger.set_lp_utilization(utilization)
-        update_float_and_utilization(float_zen=None, lp_utilization=utilization)
-        return utilization
 
     async def trigger_settlement(self, market_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         if self.settings.admin_read_only:
@@ -702,32 +707,33 @@ class HedgerService:
                     message="failed to refresh fx quote during health check",
                     error=str(exc),
                 )
-        utilization = None
-        if self.vault_client:
+        balance = None
+        if self.wallet:
             try:
-                utilization = await self.vault_client.current_utilization()
+                balance = self.wallet.get_usdc_balance()
+                update_hot_wallet_balance(float(balance))
             except Exception as exc:
                 log_event(
                     logger,
                     logging.WARNING,
-                    event="hedger.health.vault_failed",
-                    message="failed to fetch vault utilization",
+                    event="hedger.health.wallet_failed",
+                    message="failed to fetch wallet balance",
                     error=str(exc),
                 )
         if latest_commit_at:
             lag_seconds = (datetime.now(UTC) - latest_commit_at).total_seconds()
             record_event_lag(lag_seconds)
         status = "ok"
-        if utilization is None or not self.vault_client:
+        if balance is None or not self.wallet:
             status = "degraded"
         return {
             "status": status,
             "service": "hedger",
             "fx_stale": fx_stale,
             "latest_commit_at": latest_commit_at.isoformat() if latest_commit_at else None,
-            "lp_utilization": utilization,
             "read_only": self.settings.admin_read_only,
-            "vault_unavailable": self.vault_client is None,
+            "wallet_unavailable": self.wallet is None,
+            "hot_wallet_balance_usdc": str(balance) if balance is not None else None,
         }
 
     @staticmethod
@@ -778,9 +784,9 @@ class HedgerService:
         ttl_seconds = max(int(self.settings.health_deep_cache_ttl_seconds or 0), 0)
         if ttl_seconds <= 0:
             return None
-        snapshot = getattr(self, "_health_snapshot", None)
-        ts = getattr(self, "_health_snapshot_ts", None)
-        if not snapshot or not ts:
+        snapshot = self._health_snapshot
+        ts = self._health_snapshot_ts
+        if snapshot is None or ts is None:
             return None
         age = (datetime.now(UTC) - ts).total_seconds()
         if age > ttl_seconds:
@@ -815,19 +821,13 @@ class HedgerService:
             markets=len(aggregates),
         )
 
-    def _build_idempotency_key(self, commit: CommitEvent) -> str:
+    @staticmethod
+    def _build_idempotency_key(commit: CommitEvent) -> str:
         if commit.idempotency_key:
             return commit.idempotency_key
         if commit.tx_hash:
             return f"tx:{commit.tx_hash}"
         return f"{commit.market_id}:{commit.account or 'unknown'}:{commit.committed_at.isoformat()}:{commit.stake_zen}"
-
-    def _quote_within_slippage(self, quote: dict) -> bool:
-        slippage = quote.get("slippage_bps") or quote.get("priceImpactBps") or 0
-        try:
-            return int(slippage) <= self.settings.max_slippage_bps
-        except (TypeError, ValueError):
-            return False
 
     @staticmethod
     def _extract_filled_size(order_payload: dict, requested: Decimal) -> Decimal:
@@ -882,9 +882,8 @@ class HedgerService:
             quote = await self.fx_oracle.get_quote()
         except (RetryError, httpx.HTTPError, InvalidOperation, ValueError):
             return None
-        if not self.vault_client:
-            return None
-        realized, unrealized = await self.vault_client.get_pnl()
+        realized = 0.0
+        unrealized = 0.0
         expected_usdc_payout_if_win = expected_payout + Decimal(str(max(unrealized, 0.0)))
         pricing = self.pricing_engine.quote_bet(stake_for_calc, quote.zen_usd)
         breakdown = self.bet_processor.settlement_breakdown(

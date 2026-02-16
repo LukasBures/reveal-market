@@ -44,7 +44,8 @@ class TreasuryManager:
     def snapshot(self) -> TreasurySnapshot:
         return TreasurySnapshot(zen_balance=self.zen_ledger, usdc_balance=self.usdc_ledger)
 
-    def _validate_percent(self, value: Decimal) -> Decimal:
+    @staticmethod
+    def _validate_percent(value: Decimal) -> Decimal:
         try:
             pct = Decimal(value)
         except InvalidOperation as exc:
