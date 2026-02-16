@@ -90,10 +90,6 @@ export function EventDetailClient({
     setSelectedOutcome(0);
   }, [activeEventId, groupMarkets, isSelectableMarket]);
 
-  if (!market) {
-    return null;
-  }
-
   const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
   const priceStreamEventId = resolvePriceStreamMarketId(market, activeEventId);
   const resolverSource =
@@ -112,6 +108,9 @@ export function EventDetailClient({
       setSelectedOutcome(Math.min(Math.max(requestedOutcome, 0), (market.outcomes?.length ?? 1) - 1));
     }
   }, [requestedOutcome, market.outcomes?.length]);
+  if (!market) {
+    return null;
+  }
   const resolutionCheckedAt = market.resolution?.checkedAt ?? null;
   const resolutionLabel = market.resolution?.resolved ? "Resolved" : market.status ?? "Active";
   const detailRows = [
