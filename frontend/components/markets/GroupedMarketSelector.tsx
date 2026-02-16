@@ -158,6 +158,7 @@ export function GroupedMarketSelector({
   const didAutoSelectRef = useRef(false);
   useEffect(() => {
     if (!onSelect || didAutoSelectRef.current) return;
+    if (activeSiblings.some((sibling) => sibling.eventId === activeEventId)) return;
     const firstActive = activeSiblings[0];
     if (!firstActive) return;
     if (firstActive.eventId !== activeEventId) {

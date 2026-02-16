@@ -214,7 +214,6 @@ export function EventDetailClient({
             <div className="relative space-y-4 lg:self-stretch">
               <div id="trade-panel" className="sticky top-[88px] self-start">
                 <StakeQuoteCard
-                  key={activeEventId}
                   marketAddress={market.marketAddress}
                   marketId={activeEventId}
                   outcomes={market.outcomes ?? []}
