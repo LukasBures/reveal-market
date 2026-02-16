@@ -292,7 +292,7 @@ export function MarketDetailChart({
     }
 
     const container = chartRef.current;
-    const basePadding = { top: 0, right: 0, bottom: 0, left: 0 };
+    const basePadding = { top: 12, right: 12, bottom: 12, left: 12 };
 
     const formatAxisTime = (value: number) =>
       formatTime(new Date(value), { hour: "2-digit", minute: "2-digit", second: undefined });
@@ -443,7 +443,7 @@ export function MarketDetailChart({
   }, [dataSeries]);
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">
+    <div className="rounded-2xl bg-transparent p-0">
       <div className="flex flex-col gap-3 text-sm text-slate-200">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-baseline gap-3">
@@ -487,7 +487,7 @@ export function MarketDetailChart({
           </div>
         </div>
       </div>
-      <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 shadow-inner shadow-black/40">
+      <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 shadow-inner shadow-black/40 overflow-hidden">
         <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} />
         {filteredHistory.length >= 2 ? (
           <div className="relative h-full w-full">
@@ -514,7 +514,9 @@ export function MarketDetailChart({
                         {row.label}
                       </span>
                       <span className="text-[11px] text-white">
-                        {row.value !== null && row.value !== undefined ? row.value.toFixed(4) : "—"} ZEN
+                        {row.value !== null && row.value !== undefined
+                          ? `${(row.value * 100).toFixed(2)}%`
+                          : "—"}
                       </span>
                     </div>
                   ))}

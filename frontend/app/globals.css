@@ -21,7 +21,8 @@
 
 html {
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
+  overflow-y: auto;
   scrollbar-gutter: stable both-edges;
 }
 
@@ -36,8 +37,8 @@ body {
   font-feature-settings: "cv11", "ss01", "ss02";
   letter-spacing: 0.01em;
   position: relative;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 #__next {

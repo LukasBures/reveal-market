@@ -4,13 +4,17 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { UrlObject } from "url";
 import { useEffect, useMemo, useState } from "react";
-import type { MarketSibling } from "@/lib/api-types";
+import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { formatDate, formatUsd } from "@/lib/formatters";
+import { resolvePriceStreamMarketId } from "@/lib/markets";
+import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 
 type Props = {
   groupSlug?: string | null;
   siblings: MarketSibling[];
   activeEventId: string;
+  marketDetails?: MarketDetail[];
+  selectedOutcome?: number;
   linkToGroupPage?: boolean;
   labelOverride?: string;
   titleOverride?: string;
@@ -40,6 +44,8 @@ export function GroupedMarketSelector({
   groupSlug,
   siblings,
   activeEventId,
+  marketDetails = [],
+  selectedOutcome,
   linkToGroupPage = false,
   labelOverride,
   titleOverride,
@@ -158,54 +164,189 @@ export function GroupedMarketSelector({
     ? `${activeSiblings.length} active · ${endedSiblings.length} ended`
     : `${siblings.length} sub-market${siblings.length === 1 ? "" : "s"}`;
 
+  const showHeader = siblings.length > 1;
+
   return (
-    <section className="rounded-3xl border border-white/10 bg-slate-950/40 px-5 py-5 shadow-inner shadow-emerald-500/10 sm:px-7 sm:py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section
+      className={`rounded-3xl bg-slate-950/40 shadow-inner shadow-emerald-500/10 ${
+        siblings.length > 1 ? "border border-white/10 px-5 py-5 sm:px-7 sm:py-6" : "px-0 py-0"
+      }`}
+    >
+      {showHeader ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-emerald-100/80">{subtitle}</p>
+            </div>
+            <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
+              {countLabel}
+            </span>
+          </div>
+          <div className="mt-4 space-y-2">
+            {activeSiblings.map((sibling) => {
+              const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
+              const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
+              const volume = sibling.volume ?? 0;
+              const active = sibling.eventId === activeEventId;
+              const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+              const detail = marketDetails.find((item) => String(item.eventId) === String(sibling.eventId));
+              const href: UrlObject | Route =
+                linkToGroupPage && groupSlug
+                  ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+                  : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
+              const cardClassName = `rounded-2xl border transition ring-1 ${
+                active
+                  ? "border-white/10 bg-emerald-500/10 shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-emerald-400/30"
+                  : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10 ring-white/5"
+              }`;
+              const rowClassName =
+                "flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center";
+              const chart = detail ? (
+                <div className="mt-3">
+                <MarketDetailChart
+                  key={`${sibling.eventId}-${detail.conditionId ?? "market"}`}
+                  marketId={resolvePriceStreamMarketId(detail, sibling.eventId)}
+                  tokenIds={detail.clobTokenIds ?? []}
+                  outcomePrices={detail.outcomePrices ?? []}
+                  outcomes={detail.outcomes ?? []}
+                  initialOutcome={0}
+                  selectedOutcome={selectedOutcome}
+                />
+                </div>
+              ) : null;
+              if (onSelect) {
+                return (
+                  <div key={`summary-${sibling.eventId}`} className={cardClassName}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(sibling.eventId)}
+                      className={rowClassName}
+                    >
+                      <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
+                      <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+                      <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+                      <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
+                    </button>
+                    {active ? <div className="px-3 pb-3">{chart}</div> : null}
+                  </div>
+                );
+              }
+              return (
+                <div key={`summary-${sibling.eventId}`} className={cardClassName}>
+                  <Link href={href} scroll={false} className={rowClassName}>
+                    <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
+                    <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+                    <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+                    <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
+                  </Link>
+                  {active ? <div className="px-3 pb-3">{chart}</div> : null}
+                </div>
+              );
+            })}
+            {endedSiblings.length > 0 ? (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEnded((prev) => !prev)}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white/80 transition hover:border-emerald-400/60 hover:text-white"
+                  aria-expanded={showEnded}
+                >
+                  {showEnded ? "Hide ended markets" : "Show ended markets"}
+                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/70">
+                    {endedSiblings.length}
+                  </span>
+                </button>
+              </div>
+            ) : null}
+            {showEnded
+              ? endedSiblings.map((sibling) => {
+                  const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
+                  const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
+                  const volume = sibling.volume ?? 0;
+                  const active = sibling.eventId === activeEventId;
+                  const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+                  const href: UrlObject | Route =
+                    linkToGroupPage && groupSlug
+                      ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+                      : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
+                  const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
+                    active
+                      ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"
+                      : "border-amber-400/40 bg-amber-500/5 hover:border-amber-400/60 hover:bg-amber-500/10"
+                  }`;
+                  return (
+                    <div key={`ended-${sibling.eventId}`} className={className}>
+                      <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
+                      <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+                      <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+                      <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
+                    </div>
+                  );
+                })
+              : null}
+          </div>
+        </>
+      ) : null}
+      {!showHeader ? (
         <div>
-          <p className="text-sm text-emerald-100/80">{subtitle}</p>
-        </div>
-        <span className="rounded-full border border-emerald-700 bg-emerald-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-50">
-          {countLabel}
-        </span>
-      </div>
-      <div className="mt-4 space-y-2">
         {activeSiblings.map((sibling) => {
           const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
           const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
           const volume = sibling.volume ?? 0;
           const active = sibling.eventId === activeEventId;
           const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+          const detail = marketDetails.find((item) => String(item.eventId) === String(sibling.eventId));
           const href: UrlObject | Route =
             linkToGroupPage && groupSlug
               ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
               : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
-          const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
+          const cardClassName = `rounded-2xl border transition ring-1 ${
             active
-              ? "border-emerald-400 bg-emerald-500/10 shadow-md shadow-emerald-500/20"
-              : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10"
+              ? "border-white/10 bg-emerald-500/10 shadow-[0_20px_60px_rgba(16,185,129,0.25)] ring-emerald-400/30"
+              : "border-white/5 bg-white/5 hover:border-emerald-400/60 hover:bg-white/10 ring-white/5"
           }`;
+          const rowClassName =
+            "flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center";
+          const chart = detail ? (
+            <div className="mt-3">
+                <MarketDetailChart
+                  key={`${sibling.eventId}-${detail.conditionId ?? "market"}`}
+                  marketId={resolvePriceStreamMarketId(detail, sibling.eventId)}
+                  tokenIds={detail.clobTokenIds ?? []}
+                  outcomePrices={detail.outcomePrices ?? []}
+                  outcomes={detail.outcomes ?? []}
+                  initialOutcome={0}
+                  selectedOutcome={selectedOutcome}
+                />
+            </div>
+          ) : null;
           if (onSelect) {
             return (
-              <button
-                key={`summary-${sibling.eventId}`}
-                type="button"
-                onClick={() => onSelect(sibling.eventId)}
-                className={className}
-              >
+              <div key={`summary-${sibling.eventId}`} className={cardClassName}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(sibling.eventId)}
+                  className={rowClassName}
+                >
+                  <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
+                  <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+                  <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+                  <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
+                </button>
+                {active ? <div className="px-3 pb-3">{chart}</div> : null}
+              </div>
+            );
+          }
+          return (
+            <div key={`summary-${sibling.eventId}`} className={cardClassName}>
+              <Link href={href} scroll={false} className={rowClassName}>
                 <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
                 <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
                 <span className="text-sm text-white sm:text-right">No {noPrice}</span>
                 <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
-              </button>
-            );
-          }
-          return (
-            <Link key={`summary-${sibling.eventId}`} href={href} scroll={false} className={className}>
-              <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
-              <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
-              <span className="text-sm text-white sm:text-right">No {noPrice}</span>
-              <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
-            </Link>
+              </Link>
+              {active ? <div className="px-3 pb-3">{chart}</div> : null}
+            </div>
           );
         })}
         {endedSiblings.length > 0 ? (
@@ -249,7 +390,53 @@ export function GroupedMarketSelector({
               );
             })
           : null}
-      </div>
+        </div>
+      ) : null}
+      {!showHeader ? (
+        <>
+          {endedSiblings.length > 0 ? (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowEnded((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white/80 transition hover:border-emerald-400/60 hover:text-white"
+                aria-expanded={showEnded}
+              >
+                {showEnded ? "Hide ended markets" : "Show ended markets"}
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/70">
+                  {endedSiblings.length}
+                </span>
+              </button>
+            </div>
+          ) : null}
+          {showEnded
+            ? endedSiblings.map((sibling) => {
+                const yesPrice = formatPrice(sibling.outcomePrices?.[0] ?? null);
+                const noPrice = formatPrice(sibling.outcomePrices?.[1] ?? null);
+                const volume = sibling.volume ?? 0;
+                const active = sibling.eventId === activeEventId;
+                const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
+                const href: UrlObject | Route =
+                  linkToGroupPage && groupSlug
+                    ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
+                    : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
+                const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
+                  active
+                    ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"
+                    : "border-amber-400/40 bg-amber-500/5 hover:border-amber-400/60 hover:bg-amber-500/10"
+                }`;
+                return (
+                  <div key={`ended-${sibling.eventId}`} className={className}>
+                    <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
+                    <span className="text-sm text-white sm:text-right">Yes {yesPrice}</span>
+                    <span className="text-sm text-white sm:text-right">No {noPrice}</span>
+                    <span className="text-xs text-slate-200 sm:text-right">Volume {formatUsd(volume)}</span>
+                  </div>
+                );
+              })
+            : null}
+        </>
+      ) : null}
     </section>
   );
 }

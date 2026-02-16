@@ -176,25 +176,18 @@ export function EventDetailClient({
             coverImage={coverImage}
           />
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
-            <div className="space-y-6">
+            <div className="space-y-6 lg:self-start">
               <GroupedMarketSelector
                 groupSlug={market.groupSlug ?? canonicalEventId}
                 siblings={selectorSiblings}
                 activeEventId={activeEventId}
                 onSelect={handleSelect}
+                marketDetails={groupMarkets}
+                selectedOutcome={selectedOutcome}
                 labelOverride="Grouped market"
                 titleOverride={market.groupSlug ? undefined : market.title}
                 subtitleOverride="Choose a sub-market within this event."
                 forceShow
-              />
-              <MarketDetailChart
-                key={`${activeEventId}-${market.conditionId ?? "market"}`}
-                marketId={priceStreamEventId}
-                tokenIds={tokenIds}
-                outcomePrices={market.outcomePrices ?? []}
-                outcomes={market.outcomes ?? []}
-                initialOutcome={initialOutcomeId}
-                selectedOutcome={selectedOutcome}
               />
               <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-sm text-slate-300">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -219,23 +212,20 @@ export function EventDetailClient({
                 </div>
               </section>
             </div>
-            <div className="space-y-4">
-              <div id="trade-panel" className="relative">
-                <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-slate-950/95 to-transparent" aria-hidden />
-                <div className="sticky top-6 z-10 self-start">
-                  <StakeQuoteCard
-                    key={activeEventId}
-                    marketAddress={market.marketAddress}
-                    marketId={activeEventId}
-                    outcomes={market.outcomes ?? []}
-                    outcomePrices={market.outcomePrices ?? []}
-                    initialOutcomeId={initialOutcomeId}
-                    marketTitle={market.title}
-                    marketStatus={market.status}
-                    isResolved={market.resolution?.resolved ?? null}
-                    onOutcomeChange={setSelectedOutcome}
-                  />
-                </div>
+            <div className="relative space-y-4 lg:self-stretch">
+              <div id="trade-panel" className="sticky top-[88px] self-start">
+                <StakeQuoteCard
+                  key={activeEventId}
+                  marketAddress={market.marketAddress}
+                  marketId={activeEventId}
+                  outcomes={market.outcomes ?? []}
+                  outcomePrices={market.outcomePrices ?? []}
+                  initialOutcomeId={initialOutcomeId}
+                  marketTitle={market.title}
+                  marketStatus={market.status}
+                  isResolved={market.resolution?.resolved ?? null}
+                  onOutcomeChange={setSelectedOutcome}
+                />
               </div>
             </div>
           </div>
