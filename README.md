@@ -31,9 +31,17 @@ Reveal Market is a multi-service stack for event-based prediction markets with o
 - `RM_RPC_URL`, `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` for on-chain operations.
 - `RM_PRICING_SIGNER_PRIVATE_KEY` for quotes.
 - `RM_INTERNAL_API_SECRET` for internal hooks.
+- `RM_HEDGER_BASE_URL`, `RM_HEDGER_INTERNAL_SECRET` for post-commit hedging.
+- `RM_HEDGER_QUEUE_ENABLED`, `RM_HEDGER_QUEUE_KEY` for hedger retry queue.
 - `RELAYER_BEARER_TOKEN` or `RELAYER_ALLOW_INSECURE_AUTH=true` for relayer writes.
 - `STREAMER_ACCESS_TOKEN` for streamer private access if enabled.
 - `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRICE_STREAMER_URL` for frontend.
+
+**Post-commit hedging (v1)**
+- Commit tx is mined by the relayer (`status=1`) and then pushed to `POST /internal/commitments/sync`.
+- The API records the commitment, then dispatches a hedger call to `POST /admin/commits`.
+- Hedge failures never reject on-chain ingest; they are logged, alerted, and queued for retry.
+- Hedger retries are processed by the API background loop `hedger_queue_loop`.
 
 **Repo layout**
 - `backend/` API + worker + shared models.
