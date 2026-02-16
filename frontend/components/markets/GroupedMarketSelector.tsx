@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import type { UrlObject } from "url";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { formatDate, formatUsd } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
@@ -154,6 +154,17 @@ export function GroupedMarketSelector({
     });
     return { activeSiblings: active, endedSiblings: ended };
   }, [labeledSiblings, isSelectable]);
+
+  const didAutoSelectRef = useRef(false);
+  useEffect(() => {
+    if (!onSelect || didAutoSelectRef.current) return;
+    const firstActive = activeSiblings[0];
+    if (!firstActive) return;
+    if (firstActive.eventId !== activeEventId) {
+      didAutoSelectRef.current = true;
+      onSelect(firstActive.eventId);
+    }
+  }, [activeEventId, activeSiblings, onSelect]);
 
   const shouldShow = forceShow || (!!groupSlug && siblings.length > 1);
   if (!shouldShow) return null;
