@@ -63,6 +63,8 @@ async def upsert_market(
         "spread",
         "volume",
         "open_interest",
+        "grouping_window_key",
+        "grouping_resolution_source",
     ):
         payload.pop(legacy, None)
     market = existing or await get_market_by_event_id(session, payload["event_id"])

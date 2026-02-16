@@ -154,6 +154,8 @@ class MarketPayload(BaseModel):
     volume_24h_usd: float | None = None
     orderbook_volume_usd: float | None = None
     trades_quantity: int | None = None
+    grouping_window_key: str | None = None
+    grouping_resolution_source: str | None = None
 
     @classmethod
     def from_gamma(cls, raw: dict[str, Any]) -> MarketPayload:
@@ -254,6 +256,8 @@ class MarketPayload(BaseModel):
                 group_position = None
         raw_group_slug = _clean_string(raw.get("group_slug"))
         group_slug = raw_group_slug or _derive_group_slug(slug, raw.get("question"), group_item_title)
+        grouping_window_key = _extract_date_window_key(title)
+        grouping_resolution_source = _normalize_resolution_source(resolution_source)
 
         closed_flag = closed if isinstance(closed, bool) else None
         gamma_metadata = {
@@ -360,6 +364,8 @@ class MarketPayload(BaseModel):
             group_position=group_position,
             group_item_title=group_item_title,
             group_item_threshold=group_item_threshold,
+            grouping_window_key=grouping_window_key,
+            grouping_resolution_source=grouping_resolution_source,
         )
         market.content_hash = _compute_market_hash(_build_market_hash_payload(market))
         return market
@@ -574,6 +580,29 @@ class AsyncPolymarketClient:
                 except (ValidationError, ValueError) as exc:
                     logger.warning("skipping polymarket record: %s", exc)
 
+            derived_candidates: dict[tuple[str, str, str], list[MarketPayload]] = {}
+            for payload in page_payloads:
+                if payload.group_slug:
+                    continue
+                if not payload.grouping_window_key or not payload.grouping_resolution_source:
+                    continue
+                if not payload.group_item_title and payload.group_item_threshold is None:
+                    continue
+                slug_key = _derive_group_slug(payload.slug, payload.title, payload.group_item_title)
+                if not slug_key:
+                    continue
+                derived_candidates.setdefault(
+                    (slug_key, payload.grouping_window_key, payload.grouping_resolution_source),
+                    [],
+                ).append(payload)
+
+            for (slug_key, _window_key, _source_key), bucket in derived_candidates.items():
+                if len(bucket) < 2:
+                    continue
+                for payload in bucket:
+                    payload.group_slug = slug_key
+                    payload.event_key = slug_key
+
             yield page_payloads
 
             offset += len(records)
@@ -681,6 +710,29 @@ class AsyncPolymarketClient:
                         offset += page_size
                     continue
                 break
+
+            derived_candidates: dict[tuple[str, str, str], list[MarketPayload]] = {}
+            for payload in page_payloads:
+                if payload.group_slug:
+                    continue
+                if not payload.grouping_window_key or not payload.grouping_resolution_source:
+                    continue
+                if not payload.group_item_title and payload.group_item_threshold is None:
+                    continue
+                slug_key = _derive_group_slug(payload.slug, payload.title, payload.group_item_title)
+                if not slug_key:
+                    continue
+                derived_candidates.setdefault(
+                    (slug_key, payload.grouping_window_key, payload.grouping_resolution_source),
+                    [],
+                ).append(payload)
+
+            for (slug_key, _window_key, _source_key), bucket in derived_candidates.items():
+                if len(bucket) < 2:
+                    continue
+                for payload in bucket:
+                    payload.group_slug = slug_key
+                    payload.event_key = slug_key
 
             yield page_payloads
 
@@ -884,6 +936,86 @@ def _slugify(value: str | None) -> str | None:
     return slug or None
 
 
+def _normalize_resolution_source(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"/+$", "", cleaned)
+    return cleaned or None
+
+
+def _extract_date_window_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    month_map = {
+        "january": "01",
+        "jan": "01",
+        "february": "02",
+        "feb": "02",
+        "march": "03",
+        "mar": "03",
+        "april": "04",
+        "apr": "04",
+        "may": "05",
+        "june": "06",
+        "jun": "06",
+        "july": "07",
+        "jul": "07",
+        "august": "08",
+        "aug": "08",
+        "september": "09",
+        "sep": "09",
+        "sept": "09",
+        "october": "10",
+        "oct": "10",
+        "november": "11",
+        "nov": "11",
+        "december": "12",
+        "dec": "12",
+    }
+
+    range_match = re.search(
+        r"\b(?:(?:from|between)\s+)?"
+        r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*(\d{4}))?"
+        r"\s*(?:to|through|and|–|—|-)\s*"
+        r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*(\d{4}))?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if range_match:
+        month1 = month_map.get(range_match.group(1).lower())
+        month2 = month_map.get(range_match.group(4).lower())
+        if not month1 or not month2:
+            return None
+        day1 = int(range_match.group(2))
+        day2 = int(range_match.group(5))
+        year1 = range_match.group(3)
+        year2 = range_match.group(6)
+        year = year2 or year1
+        if not year:
+            return None
+        return f"{year}-{month1}-{day1:02d}:{year}-{month2}-{day2:02d}"
+
+    single_match = re.search(
+        r"\b(?:on\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}),\s*(\d{4})\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if single_match:
+        month = month_map.get(single_match.group(1).lower())
+        if not month:
+            return None
+        day = int(single_match.group(2))
+        year = single_match.group(3)
+        return f"{year}-{month}-{day:02d}:{year}-{month}-{day:02d}"
+
+    return None
+
 def _looks_like_range_token(token: str | None) -> bool:
     if not token:
         return False
@@ -1020,9 +1152,6 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
             stripped_slug = _slugify(stripped)
             if stripped_slug and stripped_slug != base_slug:
                 return stripped_slug
-
-    if not group_item_title:
-        return None
 
     if "committed-to-the-" in base_slug:
         _, remainder = base_slug.split("committed-to-the-", 1)

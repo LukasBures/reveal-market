@@ -292,7 +292,7 @@ export function MarketDetailChart({
     }
 
     const container = chartRef.current;
-    const basePadding = { top: 0, right: 0, bottom: 0, left: 0 };
+    const basePadding = { top: 12, right: 12, bottom: 12, left: 12 };
 
     const formatAxisTime = (value: number) =>
       formatTime(new Date(value), { hour: "2-digit", minute: "2-digit", second: undefined });
@@ -491,7 +491,7 @@ export function MarketDetailChart({
         </div>
       </div>
       <div className="relative mt-4 h-72 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950/90 to-black/90 shadow-inner shadow-black/40 overflow-hidden">
-        <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} />
+        <MarketFomoOverlay marketId={marketId} tokenIds={tokenIds} outcomes={outcomes} />
         {filteredHistory.length >= 2 ? (
           <>
             <div ref={chartRef} className="market-chart absolute inset-0" />

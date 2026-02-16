@@ -8,6 +8,7 @@ import { FX_DEFAULT_PATH } from "@/lib/pricing-client";
 type Props = {
   marketId: string;
   tokenIds?: string[];
+  outcomes?: string[];
 };
 
 const formatUsdCompact = (value: number | undefined): string => {
@@ -17,7 +18,7 @@ const formatUsdCompact = (value: number | undefined): string => {
   return `$${value.toFixed(2)}`;
 };
 
-export function MarketFomoOverlay({ marketId, tokenIds = [] }: Props) {
+export function MarketFomoOverlay({ marketId, tokenIds = [], outcomes = [] }: Props) {
   const stream = usePriceStreamStore(marketId, tokenIds);
   const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxRate = fx?.zen_usd ?? 1;
@@ -32,9 +33,20 @@ export function MarketFomoOverlay({ marketId, tokenIds = [] }: Props) {
         // Best-effort stake approximation; Polymarket uses size * price as notional.
         const stakeZen = Number.isFinite(price) && Number.isFinite(size) ? price * size : Number.isFinite(size) ? size : Number.isFinite(price) ? price : 0;
         const stakeUsd = stakeZen * fxRate;
+        const buyLabel = outcomes[0] || "BUY";
+        const sellLabel = outcomes[1] || "SELL";
+        const sideLabel =
+          trade.side === "BUY"
+            ? buyLabel
+            : trade.side === "SELL"
+              ? sellLabel
+              : trade.side
+                ? trade.side
+                : "TRADE";
         return {
           label: formatUsdCompact(stakeUsd > 0 ? stakeUsd : undefined),
           side: trade.side,
+          sideLabel,
           ts: trade.timestamp,
         };
       })
@@ -49,11 +61,15 @@ export function MarketFomoOverlay({ marketId, tokenIds = [] }: Props) {
         <span
           key={`${pill.ts}-${idx}`}
           className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 font-semibold shadow-lg ${
-            pill.side === "BUY" ? "bg-emerald-500/20 text-emerald-100" : "bg-sky-500/20 text-sky-100"
+            pill.side === "BUY"
+              ? "bg-emerald-500/20 text-emerald-100"
+              : pill.side === "SELL"
+                ? "bg-rose-500/20 text-rose-100"
+                : "bg-slate-500/20 text-slate-100"
           }`}
         >
           {pill.label}
-          <span className="text-[10px] uppercase tracking-[0.15em] text-white/70">{pill.side ?? "trade"}</span>
+          <span className="text-[10px] uppercase tracking-[0.15em] text-white/70">{pill.sideLabel}</span>
           {!fxFresh && <span className="text-[10px] text-amber-200">fx stale</span>}
         </span>
       ))}
