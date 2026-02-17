@@ -3,24 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
-class OutcomeSide(str, Enum):
+class OutcomeSide(StrEnum):
     YES = "yes"
     NO = "no"
 
 
-class HedgeAction(str, Enum):
+class HedgeAction(StrEnum):
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
 
 
-class RiskSeverity(str, Enum):
+class RiskSeverity(StrEnum):
     INFO = "info"
     WARN = "warn"
     CRITICAL = "critical"

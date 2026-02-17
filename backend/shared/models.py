@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -32,14 +32,14 @@ class Base(DeclarativeBase):
 BigIntPk = BigInteger().with_variant(Integer, "sqlite")
 
 
-class MarketStatusEnum(str, Enum):
+class MarketStatusEnum(StrEnum):
     COMMIT = "commit"
     LOCKED = "locked"
     SETTLED = "settled"
     CANCELLED = "cancelled"
 
 
-class ResolutionStatusEnum(str, Enum):
+class ResolutionStatusEnum(StrEnum):
     PENDING = "pending_resolution"
     DISPUTED = "disputed"
     FINAL = "final"
@@ -284,7 +284,7 @@ class CommitmentMerklePath(Base):
     sibling_hash: Mapped[str] = mapped_column(String(66), nullable=False)
 
 
-class SettlementProofStatus(str, Enum):
+class SettlementProofStatus(StrEnum):
     NONE = "none"
     PENDING = "pending"
     GENERATING = "generating"
@@ -293,7 +293,7 @@ class SettlementProofStatus(str, Enum):
     FAILED = "failed"
 
 
-class SettlementSubmissionStatus(str, Enum):
+class SettlementSubmissionStatus(StrEnum):
     NONE = "none"
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -374,7 +374,7 @@ class HedgerTreasurySnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-class QuoteStatusEnum(str, Enum):
+class QuoteStatusEnum(StrEnum):
     ISSUED = "issued"
     CONSUMED = "consumed"
     EXPIRED = "expired"

@@ -43,7 +43,7 @@ _PROVER_HEALTH_CACHE_SECONDS = 60.0
 _PROVER_CIRCUIT_CACHE: dict[str, Any] = {"value": None, "expires_at": 0.0}
 
 
-async def _resolve_awaitable(value: Awaitable[T] | T) -> T:
+async def _resolve_awaitable[T](value: Awaitable[T] | T) -> T:
     """Handle Redis' async-or-pipeline return types safely for mypy."""
 
     if inspect.isawaitable(value):

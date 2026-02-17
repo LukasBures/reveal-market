@@ -29,7 +29,7 @@ repos:
         language: python
         types_or: [python, pyi, jupyter]
         require_serial: true
-        additional_dependencies: ["ruff>=0.6.9"]
+        additional_dependencies: ["ruff==0.15.1"]
       - id: ruff-lint
         name: ruff check
         description: "Run 'ruff check' for extremely fast Python linting"
@@ -37,7 +37,7 @@ repos:
         language: python
         types_or: [python, pyi, jupyter]
         require_serial: true
-        additional_dependencies: ["ruff>=0.6.9"]
+        additional_dependencies: ["ruff==0.15.1"]
       - id: gofmt-prover
         name: gofmt (prover)
         description: "Format Go files under prover/"
