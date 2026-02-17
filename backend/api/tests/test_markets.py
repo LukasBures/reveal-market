@@ -333,6 +333,42 @@ def test_patch_market_and_stats(client, db_session):
     assert stats.get("total") == 1
 
 
+def test_events_count_coalesces_groups(client, db_session):
+    db_session.add_all(
+        [
+            _make_market(
+                "evt-count-1",
+                "Count Alpha A",
+                category="sports",
+                oracle="0xaaa",
+                status="commit",
+                event_key="group-alpha",
+            ),
+            _make_market(
+                "evt-count-2",
+                "Count Alpha B",
+                category="sports",
+                oracle="0xaaa",
+                status="settled",
+                event_key="group-alpha",
+            ),
+            _make_market(
+                "evt-count-3",
+                "Count Beta",
+                category="politics",
+                oracle="0xbbb",
+                status="settled",
+                event_key="group-beta",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events/count", params={"status": "any"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+
+
 def test_onchain_markets_unconfigured(client):
     response = client.get("/events/onchain")
     assert response.status_code == 503

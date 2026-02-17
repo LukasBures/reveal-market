@@ -16,6 +16,7 @@ from py_clob_client.client import ClobClient
 from shared.cache_async import add_tag, add_tags, get_json, get_schema_tag, set_json
 from shared.cache_keys import (
     clob_prices_history_cache_key,
+    events_count_cache_key,
     markets_list_cache_key,
     resolution_cache_key,
     suggest_cache_key,
@@ -676,6 +677,60 @@ async def market_stats(
         cache_key = None
     update_cache_context(request, cache_key=cache_key, hit=False, source="markets:stats")
     return stats
+
+
+@router.get("/events/count", response_model=schemas.EventCountResponse, tags=["events"])
+async def count_events(
+    request: Request,
+    status: Annotated[str | None, Query(description="Filter markets by status")] = None,
+    category: Annotated[str | None, Query(description="Filter markets by category")] = None,
+    oracle: Annotated[str | None, Query(description="Filter markets by oracle address")] = None,
+    search: Annotated[
+        str | None,
+        Query(min_length=2, max_length=200, description="Case-insensitive search over market titles"),
+    ] = None,
+    featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
+    session: AsyncSession = Depends(get_session),
+) -> schemas.EventCountResponse:
+    """Return distinct event group count for sitemap paging."""
+
+    normalized_search = search
+    if search is not None:
+        normalized = search.strip().lower()
+        if len(normalized) > 120:
+            normalized = normalized[:120]
+        normalized_search = normalized
+
+    cache_key = events_count_cache_key(
+        status=status,
+        category=category,
+        oracle=oracle,
+        search=normalized_search,
+        featured=featured,
+    )
+    cache = await get_cache_client()
+    cached = await get_json(cache, cache_key)
+    if cached is not None:
+        update_cache_context(request, cache_key=cache_key, hit=True, source="events:count")
+        return schemas.EventCountResponse.model_validate(cached)
+
+    total = await crud.count_events(
+        session,
+        status=status,
+        category=category,
+        oracle=oracle,
+        search=normalized_search,
+        featured=featured,
+    )
+
+    payload = jsonable_encoder({"total": total})
+    if cache is not None:
+        schema_tag = await get_schema_tag(cache, settings.schema_version_key)
+        await set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+        await add_tag(cache, schema_tag, cache_key)
+        await add_tag(cache, "events:count", cache_key)
+    update_cache_context(request, cache_key=cache_key, hit=False, source="events:count")
+    return schemas.EventCountResponse(total=total)
 
 
 @router.get("/events/suggest", response_model=list[schemas.MarketResponse], tags=["events"])

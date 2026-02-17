@@ -167,6 +167,10 @@ class MarketStatusBreakdown(BaseModel):
     count: int
 
 
+class EventCountResponse(BaseModel):
+    total: int
+
+
 class EventResponse(BaseModel):
     event_id: str
     title: str

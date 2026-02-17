@@ -11,6 +11,7 @@ PROOF_PREFIX = f"{CACHE_VERSION}:proofs:receipt"
 GROUP_PREFIX = f"{CACHE_VERSION}:markets:group"
 MARKET_STATS_PREFIX = f"{CACHE_VERSION}:market:stats"
 CLOB_PRICES_HISTORY_PREFIX = f"{CACHE_VERSION}:clob:prices-history"
+EVENTS_COUNT_PREFIX = f"{CACHE_VERSION}:events:count"
 
 
 def markets_list_cache_key(
@@ -105,6 +106,25 @@ def clob_prices_history_cache_key(
         f"{CLOB_PRICES_HISTORY_PREFIX}:{normalized_token}:"
         f"{normalized_interval}:{normalized_fidelity}:{normalized_start}:{normalized_end}"
     )
+
+
+def events_count_cache_key(
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    search: str | None,
+    featured: bool | None = None,
+) -> str:
+    normalized_search = (search or "").strip().lower() or "*"
+    parts = [
+        f"status={status or '*'}",
+        f"category={category or '*'}",
+        f"oracle={oracle or '*'}",
+        f"search={normalized_search}",
+    ]
+    if featured is not None:
+        parts.append(f"featured={int(bool(featured))}")
+    return f"{EVENTS_COUNT_PREFIX}:" + "|".join(parts)
 
 
 def _slugify(value: str | None) -> str:

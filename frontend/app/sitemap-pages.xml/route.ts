@@ -1,12 +1,7 @@
 import type { MetadataRoute } from "next";
-import { DEFAULT_API_BASE } from "@/lib/api";
 import { resolveUrlConfig } from "@/lib/env-presets";
 
 export const revalidate = 3600;
-
-const urls = resolveUrlConfig();
-const BASE_URL = urls.siteUrl;
-const API_BASE_OVERRIDE = (urls.apiBaseInternal || DEFAULT_API_BASE).replace(/\/$/, "");
 
 const DOC_PATHS = [
   "/docs",
@@ -28,7 +23,8 @@ const DOC_PATHS = [
 
 const STATIC_PATHS = ["/", "/about", "/contact", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer", "/proofs"];
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+export default function sitemap(): MetadataRoute.Sitemap {
+  const { siteUrl } = resolveUrlConfig();
   const now = new Date().toISOString();
 
   const createEntry = (
@@ -37,17 +33,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] = "weekly",
     lastModified = now,
   ): MetadataRoute.Sitemap[number] => ({
-    url: `${BASE_URL}${path}`,
+    url: `${siteUrl}${path}`,
     lastModified,
     changeFrequency,
     priority,
   });
 
-  const entries: MetadataRoute.Sitemap = [
+  return [
     createEntry("/", 1, "daily"),
     ...STATIC_PATHS.filter((path) => path !== "/").map((path) => createEntry(path, 0.8)),
     ...DOC_PATHS.map((path) => createEntry(path, path === "/docs" ? 0.75 : 0.6)),
   ];
-
-  return entries;
 }

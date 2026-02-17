@@ -3,7 +3,14 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /api/*
+Disallow: /app/api/
+Disallow: /app/api/*
 Disallow: /healthz/
+Disallow: /api/healthz/
+Disallow: /app/api/healthz/
+Disallow: /_next/
+Disallow: /_next/*
 
 # Explicitly allow reputable AI crawlers for content indexing
 User-agent: GPTBot

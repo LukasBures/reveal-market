@@ -98,6 +98,24 @@ async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBr
     ]
 
 
+async def count_events(
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    category: str | None = None,
+    oracle: str | None = None,
+    search: str | None = None,
+    featured: bool | None = None,
+) -> int:
+    group_expr = _volume_group_expression()
+    stmt = select(func.count(func.distinct(group_expr)))
+    stmt = stmt.select_from(models.Market)
+    stmt = stmt.outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+    stmt = _apply_common_filters(stmt, status=status, category=category, oracle=oracle, featured=featured)
+    stmt = _apply_text_search(session, stmt, search, apply_default_order=False)
+    return int((await session.execute(stmt)).scalar_one() or 0)
+
+
 async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models.Market | None:
     stmt = select(models.Market).where(models.Market.event_id == event_id)
     return (await session.scalars(stmt)).first()

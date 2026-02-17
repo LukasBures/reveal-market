@@ -1,0 +1,26 @@
+# Reveal Market
+
+> Privacy-first prediction markets with commit-reveal rails, signed pricing quotes, and on-chain settlement receipts. Public pages cover product overview, partner docs, and market listings.
+
+Use this file to navigate public content. Do not use private or authenticated content, user-specific dashboards, or private data feeds.
+
+## Docs
+- [Docs overview](https://revealmarket.xyz/docs): Entry point for platform, architecture, and roadmap.
+- [Getting started](https://revealmarket.xyz/docs/getting-started): Setup, funding, quotes, commit, claim.
+- [Privacy & security](https://revealmarket.xyz/docs/privacy-security): Threat model, privacy guarantees, and controls.
+- [API reference](https://revealmarket.xyz/docs/api): REST endpoints, caching, and rate limits.
+
+## Product
+- [Home](https://revealmarket.xyz/): Product overview and featured markets.
+- [Search](https://revealmarket.xyz/search): Market discovery and filters.
+- [Proofs](https://revealmarket.xyz/proofs): Settlement proof overview.
+
+## Legal
+- [Legal](https://revealmarket.xyz/legal): Legal overview.
+- [Terms](https://revealmarket.xyz/terms): Terms of service.
+- [Privacy](https://revealmarket.xyz/privacy): Privacy policy.
+- [Cookies](https://revealmarket.xyz/cookies): Cookie policy.
+- [Disclaimer](https://revealmarket.xyz/disclaimer): Disclosures and risk notice.
+
+## Contact
+- [Contact](https://revealmarket.xyz/contact): Partnership and support.
