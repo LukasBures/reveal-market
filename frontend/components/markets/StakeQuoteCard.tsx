@@ -756,95 +756,17 @@ export function StakeQuoteCard({
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Buy with ZEN</span>
           <input
-            type="number"
+            type="text"
             name="stakeZen"
-            min={0}
-            max={effectiveMaxStake}
-            step="0.01"
-            value={stakeInput}
-            onFocus={() => {
-              if (stakeInput === "0" || stakeInput === "0.00") {
-                setStakeInput("");
-              }
-            }}
-            disabled={tradingDisabled}
-            onChange={(e) => {
-              const raw = e.target.value;
-              const normalizedInput = raw.replace(",", ".");
-              const pattern = /^\d*(?:\.\d{0,2})?$/;
-              if (normalizedInput !== "" && !pattern.test(normalizedInput)) {
-                return;
-              }
-              setStakeInput(raw);
-              if (normalizedInput === "") {
-                setStakeZen(0);
-                setStakeError(STAKE_RANGE_ERROR);
-                return;
-              }
-              const next = Number(normalizedInput);
-              if (Number.isNaN(next)) {
-                setStakeZen(0);
-                setStakeError(STAKE_RANGE_ERROR);
-                return;
-              }
-              const rounded = Math.round(next * 100) / 100;
-              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              const snapped = capped > 0 ? TICKET_SIZE_ZEN : 0;
-              setStakeZen(snapped);
-              setStakeInput(snapped.toFixed(2));
-              if (snapped !== TICKET_SIZE_ZEN || snapped > effectiveMaxStake) {
-                setStakeError(STAKE_RANGE_ERROR);
-              } else {
-                setStakeError(null);
-              }
-            }}
-            onBlur={() => {
-              const normalizedInput = stakeInput.replace(",", ".");
-              const next = Number(normalizedInput);
-              if (Number.isNaN(next)) {
-                setStakeInput("0.00");
-                setStakeZen(0);
-                setStakeError(STAKE_RANGE_ERROR);
-                return;
-              }
-              const rounded = Math.round(next * 100) / 100;
-              const capped = Math.min(Math.max(rounded, 0), effectiveMaxStake);
-              const snapped = capped > 0 ? TICKET_SIZE_ZEN : 0;
-              setStakeZen(snapped);
-              setStakeInput(snapped.toFixed(2));
-              if (snapped !== TICKET_SIZE_ZEN || snapped > effectiveMaxStake) {
-                setStakeError(STAKE_RANGE_ERROR);
-              } else {
-                setStakeError(null);
-              }
-            }}
-            className={`w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white outline-none transition focus:border-emerald-400 ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
-            inputMode="decimal"
-            aria-label="Stake in ZEN"
-            placeholder="0.00 ZEN"
+            value={`${TICKET_SIZE_ZEN.toFixed(2)} ZEN`}
+            readOnly
+            disabled
+            className="w-full rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-white/70"
+            aria-label="Fixed stake in ZEN"
           />
-          <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
-            {[TICKET_SIZE_ZEN, TICKET_SIZE_ZEN, TICKET_SIZE_ZEN].map((preset, idx) => (
-              <button
-                key={`${preset}-${idx}`}
-                type="button"
-                onClick={() => {
-                  const capped = Math.min(preset, effectiveMaxStake);
-                  setStakeZen(capped);
-                  setStakeInput(capped.toFixed(2));
-                  if (capped < MIN_STAKE_ZEN || capped > effectiveMaxStake) {
-                    setStakeError(STAKE_RANGE_ERROR);
-                  } else {
-                    setStakeError(null);
-                  }
-                }}
-                disabled={tradingDisabled}
-                className={`w-full rounded-full bg-white/5 px-3 py-1 text-center font-semibold uppercase tracking-[0.2em] text-white/80 hover:bg-white/15 ${tradingDisabled ? "cursor-not-allowed opacity-60" : ""}`}
-              >
-                {preset} ZEN
-              </button>
-            ))}
-          </div>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Fixed ticket size
+          </p>
         </label>
         <div className="grid grid-cols-1 gap-3 text-xs">
           <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 3)} ZEN`} highlight />

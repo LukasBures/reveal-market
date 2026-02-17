@@ -59,16 +59,29 @@ export function resolveUrlConfig() {
   const runningInDocker = (process.env.RUNNING_IN_DOCKER ?? "").toLowerCase() === "true";
   const apiBaseOverride = (process.env.RM_API_BASE_URL ?? "").trim() ||
     (process.env.NEXT_PUBLIC_API_BASE_URL ?? "");
-  const apiBaseUrl = coalesceUrl(apiBaseOverride, preset.apiBase, "API base URL");
+
+  const safeCoalesce = (candidate: string | undefined | null, fallback: string, label: string) => {
+    try {
+      return coalesceUrl(candidate, fallback, label);
+    } catch {
+      const nodeEnv = (process.env.NODE_ENV ?? "").toLowerCase();
+      if (mode === "prod" || nodeEnv === "production") {
+        throw new Error(`${label} is invalid: ${candidate ?? ""}`);
+      }
+      return assertValidUrl(fallback, label);
+    }
+  };
+
+  const apiBaseUrl = safeCoalesce(apiBaseOverride, preset.apiBase, "API base URL");
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
-  const siteUrl = coalesceUrl(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
-  const streamerPublic = coalesceUrl(
+  const siteUrl = safeCoalesce(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
+  const streamerPublic = safeCoalesce(
     process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ??
       (runningInDocker ? process.env.STREAMER_PUBLIC_BASE_URL : undefined),
     preset.streamerPublic,
     "Streamer URL",
   );
-  const streamerInternal = coalesceUrl(
+  const streamerInternal = safeCoalesce(
     process.env.STREAMER_INTERNAL_URL ?? (runningInDocker ? preset.streamerInternal : streamerPublic),
     runningInDocker ? preset.streamerInternal : streamerPublic,
     "Streamer internal URL",

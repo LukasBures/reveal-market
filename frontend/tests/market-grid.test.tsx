@@ -27,4 +27,10 @@ describe("EventGrid", () => {
     render(<EventGrid events={sampleMarkets} />);
     expect(screen.getAllByRole("link")).toHaveLength(2);
   });
+
+  it("preserves event ids for hrefs when priority is applied", () => {
+    render(<EventGrid events={sampleMarkets} />);
+    const firstLink = screen.getAllByRole("link")[0];
+    expect(firstLink).toHaveAttribute("href", "/events/evt-a");
+  });
 });

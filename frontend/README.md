@@ -15,7 +15,7 @@ Next.js 15 + TypeScript + Tailwind app for the marketing site and event browsing
 
 **SEO**
 - Metadata and canonical config live in `frontend/lib/seo.ts`.
-- `frontend/app/sitemap.ts` and `frontend/app/robots.ts` are generated from metadata.
+- Sitemaps live under `frontend/app/sitemap.xml/route.ts`, `frontend/app/sitemap-events.xml/route.ts`, and `frontend/app/sitemap-pages.xml/route.ts`.
 
 **Run**
 - `cd frontend && npm run dev`

@@ -2,7 +2,12 @@ module.exports = {
   ci: {
     collect: {
       numberOfRuns: 3,
-      url: ["http://localhost:3000/", "http://localhost:3000/search"],
+      url: [
+        "http://localhost:3000/",
+        "http://localhost:3000/search",
+        "http://localhost:3000/docs",
+        "http://localhost:3000/events/sample-event",
+      ],
       startServerCommand: "npm run start",
       startServerReadyPattern: "ready - started server on",
       startServerReadyTimeout: 120000,

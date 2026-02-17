@@ -51,7 +51,7 @@ export function MarketFomoOverlay({ marketId, tokenIds = [], outcomes = [] }: Pr
         };
       })
       .filter((pill) => pill.label !== "$—");
-  }, [stream.trades, fxRate]);
+  }, [stream.trades, fxRate, outcomes]);
 
   if (pills.length === 0) return null;
 

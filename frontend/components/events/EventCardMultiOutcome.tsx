@@ -6,6 +6,7 @@ import { formatUsdCompact } from "@/lib/formatters";
 
 type Props = {
   event: EventSummary;
+  priority?: boolean;
 };
 
 const buildHref = (event: EventSummary) => {
@@ -18,10 +19,10 @@ const formatProbability = (value?: number | null) =>
 
 const formatStatValue = (value?: number | null) => formatUsdCompact(value, { maximumFractionDigits: 1 });
 
-export function EventCardMultiOutcome({ event }: Props) {
+export function EventCardMultiOutcome({ event, priority = false }: Props) {
   const markets = event.markets ?? [];
   const coverImage = event.imageUrl ?? markets[0]?.imageUrl ?? null;
-  const isPriority = event.eventId?.endsWith("-p") === true;
+  const isPriority = priority;
   const href = buildHref(event);
   const preview = markets.slice(0, 3);
 

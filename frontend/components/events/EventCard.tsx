@@ -5,6 +5,7 @@ import { EventCardMultiOutcome } from "./EventCardMultiOutcome";
 
 type Props = {
   event: EventSummary;
+  priority?: boolean;
 };
 
 const isYesNo = (outcomes: string[] = []) =>
@@ -20,7 +21,7 @@ const getPrimaryHeadToHeadMarket = (event: EventSummary) => {
   });
 };
 
-export function EventCard({ event }: Props) {
+export function EventCard({ event, priority = false }: Props) {
   const markets = event.markets ?? [];
   const market = markets[0];
   const outcomes = market?.outcomes ?? [];
@@ -29,7 +30,7 @@ export function EventCard({ event }: Props) {
   if (isBinary && isYesNo(outcomes)) {
     return (
       <div data-testid="event-card">
-        <EventCardBinaryGauge event={event} market={market} />
+        <EventCardBinaryGauge event={event} market={market} priority={priority} />
       </div>
     );
   }
@@ -37,7 +38,7 @@ export function EventCard({ event }: Props) {
   if (isBinary) {
     return (
       <div data-testid="event-card">
-        <EventCardHeadToHead event={event} market={market} />
+        <EventCardHeadToHead event={event} market={market} priority={priority} />
       </div>
     );
   }
@@ -46,14 +47,14 @@ export function EventCard({ event }: Props) {
   if (primaryHeadToHead) {
     return (
       <div data-testid="event-card" className="h-full">
-        <EventCardHeadToHead event={event} market={primaryHeadToHead} />
+        <EventCardHeadToHead event={event} market={primaryHeadToHead} priority={priority} />
       </div>
     );
   }
 
   return (
     <div data-testid="event-card" className="h-full">
-      <EventCardMultiOutcome event={event} />
+      <EventCardMultiOutcome event={event} priority={priority} />
     </div>
   );
 }

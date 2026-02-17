@@ -8,6 +8,7 @@ import { formatUsdCompact } from "@/lib/formatters";
 type Props = {
   event: EventSummary;
   market?: MarketSummary;
+  priority?: boolean;
 };
 
 const buildHref = (event: EventSummary) => {
@@ -20,7 +21,7 @@ const formatProbability = (value?: number | null) =>
 
 const formatStatValue = (value?: number | null) => formatUsdCompact(value, { maximumFractionDigits: 1 });
 
-export function EventCardBinaryGauge({ event, market }: Props) {
+export function EventCardBinaryGauge({ event, market, priority = false }: Props) {
   const outcomes = (market?.outcomes ?? ["Yes", "No"]).slice(0, 2);
   const odds = market?.outcomePrices ?? [];
   if (outcomes.length < 2) {
@@ -29,7 +30,7 @@ export function EventCardBinaryGauge({ event, market }: Props) {
   const chance = formatProbability(odds[0]);
   const volumeTotal = getMarketVolume(market ?? {}, "total");
   const coverImage = event.imageUrl ?? market?.imageUrl ?? null;
-  const isPriority = event.eventId?.endsWith("-p") === true;
+  const isPriority = priority;
   const href = buildHref(event);
 
   return (
