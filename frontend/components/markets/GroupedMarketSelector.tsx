@@ -133,14 +133,7 @@ export function GroupedMarketSelector({
     };
   }, []);
 
-  const activeEnded = useMemo(
-    () => labeledSiblings.some((sibling) => sibling.eventId === activeEventId && !isSelectable(sibling)),
-    [activeEventId, labeledSiblings, isSelectable],
-  );
   const [showEnded, setShowEnded] = useState(false);
-  useEffect(() => {
-    if (activeEnded) setShowEnded(true);
-  }, [activeEnded]);
 
   const { activeSiblings, endedSiblings } = useMemo(() => {
     const active: (MarketSibling & { _label?: string })[] = [];
