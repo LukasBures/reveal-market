@@ -82,7 +82,7 @@ async def test_execute_hedge_rejects_when_fill_below_threshold():
         slippage_bps=30,
         reason="test",
         target_coverage=0.9,
-        clob_token_id="token-yes",
+        clob_token_id="token-yes",  # noqa: S106 - test fixture, not a secret
     )
 
     result = await service._execute_hedge(instr)
@@ -111,7 +111,7 @@ async def test_ingest_commit_rejects_when_insufficient_usdc():
         market_id="m1",
         stake_zen=Decimal("10"),
         direction=OutcomeSide.YES,
-        clob_token_id="token-yes",
+        clob_token_id="token-yes",  # noqa: S106 - test fixture, not a secret
     )
 
     result = await service.ingest_commit(commit)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager, suppress
+from threading import Event
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        heartbeat_stop: Event | None = None
         try:
             await service.startup()
         except Exception as exc:
@@ -41,7 +43,6 @@ def create_app() -> FastAPI:
                 message="hedger startup failed; continuing in degraded mode",
                 error=str(exc),
             )
-        nonlocal heartbeat_stop
         heartbeat_stop = start_heartbeat_logger(
             logger,
             "hedger",
@@ -98,7 +99,6 @@ def create_app() -> FastAPI:
 
     service = HedgerService(settings)
     app.state.service = service
-    heartbeat_stop = None
 
     @app.get("/healthz")
     async def healthz() -> dict:

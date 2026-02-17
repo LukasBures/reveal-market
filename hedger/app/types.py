@@ -109,7 +109,7 @@ class RiskBreach(BaseModel):
     severity: RiskSeverity
     message: str
     market_id: str | None = None
-    detail: dict[str, Any] | None = Field(default_factory=dict)
+    detail: dict[str, Any] = Field(default_factory=dict)
     triggered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

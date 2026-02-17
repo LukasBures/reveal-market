@@ -116,7 +116,7 @@ class HedgerService:
                 clob_cfg = ClobConfig(
                     host=self.settings.polymarket_clob_base,
                     chain_id=self.settings.polygon_chain_id,
-                    private_key=self.settings.hedger_private_key,
+                    private_key=str(self.settings.hedger_private_key),
                     api_key=self.settings.polymarket_api_key,
                     api_secret=self.settings.polymarket_api_secret,
                     api_passphrase=self.settings.polymarket_api_passphrase,
