@@ -69,7 +69,7 @@ services:
       - "autovacuum_analyze_scale_factor=0.02"
       # ---- Safety / Observability ----
       - "-c"
-      - "log_min_duration_statement=500ms"
+      - "log_min_duration_statement=3s"
       - "-c"
       - "log_checkpoints=on"
       - "-c"
