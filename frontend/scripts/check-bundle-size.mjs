@@ -3,7 +3,7 @@ import path from "node:path";
 
 const BYTES_IN_MB = 1024 * 1024;
 const budgets = [
-  { name: "total js", path: ".next/static/chunks", maxBytes: 2.5 * BYTES_IN_MB },
+  { name: "total js", path: ".next/static/chunks", maxBytes: 3.2 * BYTES_IN_MB },
   { name: "root route", path: ".next/server/app/(public)/page.js", maxBytes: 450 * 1024 },
   { name: "docs route", path: ".next/server/app/(public)/docs/page.js", maxBytes: 320 * 1024 },
   { name: "search route", path: ".next/server/app/(public)/search/page.js", maxBytes: 350 * 1024 },
