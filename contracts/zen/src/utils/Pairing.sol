@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 /// @notice Minimal pairing library for BN254-based Groth16 verification.
 /// @dev Adapted from the contracts produced by circom/snarkjs (MIT licensed). Exposed as a standalone library so both the

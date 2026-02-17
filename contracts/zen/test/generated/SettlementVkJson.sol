@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 /// @notice Auto-generated from test/data/settlement_deploy.json by scripts/generate_settlement_vk_json.py.
 /// @dev Do not edit manually; update the source JSON instead.

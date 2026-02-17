@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 import {Test} from "forge-std/Test.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -145,6 +145,8 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
 
     function _toUint16(uint256 value) private pure returns (uint16) {
         require(value <= type(uint16).max, "uint16 overflow");
+        // casting to uint16 is safe because we guard the upper bound above
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint16(value);
     }
 

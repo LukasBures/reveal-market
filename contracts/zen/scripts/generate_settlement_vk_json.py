@@ -22,7 +22,7 @@ def main() -> None:
 
     content = (
         "// SPDX-License-Identifier: MIT\n"
-        "pragma solidity ^0.8.24;\n"
+        "pragma solidity ^0.8.33;\n"
         "\n"
         "/// @notice Auto-generated from test/data/settlement_deploy.json by scripts/generate_settlement_vk_json.py.\n"
         "/// @dev Do not edit manually; update the source JSON instead.\n"
