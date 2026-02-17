@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logging";
+import crypto from "node:crypto";
 
 type EmailConfig = {
   host: string;
@@ -12,6 +13,32 @@ type EmailConfig = {
 };
 
 const EMAIL_TO = "hi@revealmarket.xyz";
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT = 6;
+const rateBucket = new Map<string, { count: number; resetAt: number }>();
+
+const hashValue = (value: string) =>
+  crypto.createHash("sha256").update(value).digest("hex").slice(0, 12);
+
+const getClientKey = (request: Request) => {
+  const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
+  const candidate = forwardedFor.split(",")[0]?.trim();
+  return candidate || request.headers.get("x-real-ip") || "unknown";
+};
+
+const rateLimit = (key: string) => {
+  const now = Date.now();
+  const existing = rateBucket.get(key);
+  if (!existing || existing.resetAt <= now) {
+    rateBucket.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  if (existing.count >= RATE_LIMIT) {
+    return true;
+  }
+  existing.count += 1;
+  return false;
+};
 
 function resolveEmailConfig(): EmailConfig | null {
   const host = process.env.CONTACT_SMTP_HOST;
@@ -57,6 +84,10 @@ async function sendEmail(config: EmailConfig, body: { name: string; email: strin
 
 export async function POST(request: Request) {
   try {
+    const clientKey = getClientKey(request);
+    if (rateLimit(clientKey)) {
+      return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+    }
     const { name, email, message, turnstileToken } = await request.json();
     const safeName = typeof name === "string" ? name.trim() : "";
     const safeEmail = typeof email === "string" ? email.trim() : "";
@@ -97,9 +128,9 @@ export async function POST(request: Request) {
     }
 
     logger.info("contact_form.submission", {
-      name: safeName,
-      email: safeEmail,
-      message_preview: safeMessage.slice(0, 280),
+      name_length: safeName.length,
+      email_hash: hashValue(safeEmail.toLowerCase()),
+      message_length: safeMessage.length,
     });
 
     const emailConfig = resolveEmailConfig();

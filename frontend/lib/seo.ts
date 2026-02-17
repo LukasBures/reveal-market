@@ -263,40 +263,10 @@ const docsMeta: Record<
       "zk markets",
     ],
   },
-  manifesto: {
-    title: "Reveal Market Manifesto",
-    description:
-      "Principles guiding privacy-first prediction markets, institutional integrity, and zk-powered governance.",
-    keywords: ["manifesto", "principles", "privacy", "institutions"],
-  },
-  "the-story": {
-    title: "Reveal Market Story",
-    description:
-      "Milestones, adoption metrics, and roadmap for scaling Reveal Market across networks and partners.",
-    keywords: ["growth timeline", "adoption milestones", "roadmap progress"],
-  },
   "getting-started": {
     title: "Getting Started",
     description: "Integration checklist for exchanges, LPs, and teams onboarding to Reveal Market.",
     keywords: ["integration checklist", "partner onboarding", "api setup"],
-  },
-  architecture: {
-    title: "Reveal Market Architecture",
-    description:
-      "Deep dive into the FastAPI service, ingestion worker, Redis layer, and Foundry contracts.",
-    keywords: ["architecture", "fastapi", "redis", "worker"],
-  },
-  "core-infrastructure": {
-    title: "Core Infrastructure",
-    description:
-      "Breakdown of backend systems, observability, migrations, and infrastructure dependencies.",
-    keywords: ["infrastructure", "observability", "migrations", "dependencies"],
-  },
-  roadmap: {
-    title: "Execution Roadmap",
-    description:
-      "Sequenced milestones across data assurance, liquidity automation, and compliance-ready launches.",
-    keywords: ["roadmap", "milestones", "execution plan"],
   },
   "privacy-security": {
     title: "Privacy & Security",
@@ -304,47 +274,11 @@ const docsMeta: Record<
       "Security posture, privacy guarantees, and operational controls that harden Reveal Market.",
     keywords: ["privacy controls", "security posture", "compliance"],
   },
-  integrations: {
-    title: "Integration Playbook",
-    description:
-      "API surfaces, webhook concepts, and partner tooling for embedding Reveal Market feeds.",
-    keywords: ["webhooks", "api integrations", "partner tooling"],
-  },
-  marketplace: {
-    title: "Marketplace Overview",
-    description:
-      "Market lifecycle, user experience goals, and custom storefront plans for partners.",
-    keywords: ["market lifecycle", "storefront", "prediction market ux"],
-  },
-  tokenomics: {
-    title: "Tokenomics",
-    description:
-      "Fee capture, treasury flow, and token utility powering Reveal Market incentives.",
-    keywords: ["token utility", "treasury", "fee capture"],
-  },
-  "tiers-fees": {
-    title: "Tiers & Fees",
-    description:
-      "Breakdown of fee schedules, rake overrides, and performance incentives for partners.",
-    keywords: ["fee schedule", "rake", "incentives"],
-  },
-  referrals: {
-    title: "Referral Engine",
-    description:
-      "How referral cohorts, KPI options, and co-marketing programs reward distribution partners.",
-    keywords: ["referral program", "distribution", "co-marketing"],
-  },
   faq: {
     title: "Reveal Market FAQ",
     description:
       "Answers to common diligence questions covering custody, compliance, and product ops.",
     keywords: ["faq", "diligence questions", "reveal market answers"],
-  },
-  api: {
-    title: "API Reference",
-    description:
-      "Details on REST endpoints, caching semantics, and rate-limits for Reveal Market APIs.",
-    keywords: ["api reference", "rest endpoints", "rate limits"],
   },
 };
 

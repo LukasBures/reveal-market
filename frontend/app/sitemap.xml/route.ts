@@ -3,25 +3,29 @@ import { resolveUrlConfig } from "@/lib/env-presets";
 
 export const revalidate = 3600;
 
-const EVENT_PAGE_SIZE = 10000;
+const EVENT_PAGE_SIZE = 1000;
 
 async function countEventPages(apiBase: string): Promise<number> {
   const url = new URL("/events/count", apiBase);
   url.searchParams.set("status", "any");
 
-  const response = await fetch(url.toString(), {
-    cache: "force-cache",
-    next: { revalidate },
-  });
-  if (!response.ok) {
+  try {
+    const response = await fetch(url.toString(), {
+      cache: "force-cache",
+      next: { revalidate },
+    });
+    if (!response.ok) {
+      return 0;
+    }
+    const payload = await response.json();
+    const total = Number(payload?.total ?? 0);
+    if (!Number.isFinite(total) || total <= 0) {
+      return 0;
+    }
+    return Math.max(1, Math.ceil(total / EVENT_PAGE_SIZE));
+  } catch {
     return 0;
   }
-  const payload = await response.json();
-  const total = Number(payload?.total ?? 0);
-  if (!Number.isFinite(total) || total <= 0) {
-    return 0;
-  }
-  return Math.max(1, Math.ceil(total / EVENT_PAGE_SIZE));
 }
 
 export async function GET(): Promise<Response> {

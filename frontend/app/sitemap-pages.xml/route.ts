@@ -5,25 +5,26 @@ export const revalidate = 3600;
 
 const DOC_PATHS = [
   "/docs",
-  "/docs/manifesto",
-  "/docs/the-story",
   "/docs/getting-started",
-  "/docs/architecture",
-  "/docs/core-infrastructure",
-  "/docs/roadmap",
   "/docs/privacy-security",
-  "/docs/integrations",
-  "/docs/marketplace",
-  "/docs/tokenomics",
-  "/docs/tiers-fees",
-  "/docs/referrals",
   "/docs/faq",
-  "/docs/api",
 ];
 
 const STATIC_PATHS = ["/", "/about", "/contact", "/legal", "/terms", "/privacy", "/cookies", "/disclaimer", "/proofs"];
 
-export default function sitemap(): MetadataRoute.Sitemap {
+const renderSitemap = (entries: MetadataRoute.Sitemap): string => {
+  const body = entries
+    .map((entry) => {
+      const lastModified = entry.lastModified ? `<lastmod>${entry.lastModified}</lastmod>` : "";
+      const changeFrequency = entry.changeFrequency ? `<changefreq>${entry.changeFrequency}</changefreq>` : "";
+      const priority = entry.priority !== undefined ? `<priority>${entry.priority}</priority>` : "";
+      return `  <url><loc>${entry.url}</loc>${lastModified}${changeFrequency}${priority}</url>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`;
+};
+
+export async function GET(): Promise<Response> {
   const { siteUrl } = resolveUrlConfig();
   const now = new Date().toISOString();
 
@@ -39,9 +40,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority,
   });
 
-  return [
+  const entries: MetadataRoute.Sitemap = [
     createEntry("/", 1, "daily"),
     ...STATIC_PATHS.filter((path) => path !== "/").map((path) => createEntry(path, 0.8)),
     ...DOC_PATHS.map((path) => createEntry(path, path === "/docs" ? 0.75 : 0.6)),
   ];
+
+  return new Response(renderSitemap(entries), {
+    headers: {
+      "Content-Type": "application/xml",
+    },
+  });
 }

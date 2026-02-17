@@ -4,7 +4,7 @@ import { resolveUrlConfig } from "@/lib/env-presets";
 
 export const revalidate = 3600;
 
-const EVENT_PAGE_SIZE = 10000;
+const EVENT_PAGE_SIZE = 1000;
 const EVENT_ORDER_BY = "volume";
 
 const buildEventPath = (eventId: string): string => `/events/${encodeURIComponent(eventId)}`;
@@ -38,7 +38,19 @@ const extractLastModified = (item: any): string | undefined => {
   return typeof candidate === "string" && candidate.trim() ? candidate : undefined;
 };
 
-export default async function sitemap(request: Request): Promise<MetadataRoute.Sitemap> {
+const renderSitemap = (entries: MetadataRoute.Sitemap): string => {
+  const body = entries
+    .map((entry) => {
+      const lastModified = entry.lastModified ? `<lastmod>${entry.lastModified}</lastmod>` : "";
+      const changeFrequency = entry.changeFrequency ? `<changefreq>${entry.changeFrequency}</changefreq>` : "";
+      const priority = entry.priority !== undefined ? `<priority>${entry.priority}</priority>` : "";
+      return `  <url><loc>${entry.url}</loc>${lastModified}${changeFrequency}${priority}</url>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`;
+};
+
+export async function GET(request: Request): Promise<Response> {
   const { siteUrl, apiBaseInternal } = resolveUrlConfig();
   const apiBase = (apiBaseInternal || DEFAULT_API_BASE).replace(/\/$/, "");
   const now = new Date().toISOString();
@@ -60,19 +72,30 @@ export default async function sitemap(request: Request): Promise<MetadataRoute.S
   const endpoint = new URL("/events", apiBase);
   params.forEach((value, key) => endpoint.searchParams.set(key, value));
 
-  const response = await fetch(endpoint.toString(), {
-    cache: "force-cache",
-    next: { revalidate },
-  });
-
-  if (!response.ok) {
-    return entries;
+  let data: any[] = [];
+  try {
+    const response = await fetch(endpoint.toString(), {
+      cache: "force-cache",
+      next: { revalidate },
+    });
+    if (!response.ok) {
+      throw new Error("events_fetch_failed");
+    }
+    const payload = await response.json();
+    const items = Array.isArray(payload) ? payload : payload?.items ?? [];
+    if (Array.isArray(items)) {
+      data = items;
+    }
+  } catch {
+    data = [];
   }
 
-  const payload = await response.json();
-  const data = Array.isArray(payload) ? payload : payload?.items ?? [];
   if (!Array.isArray(data) || data.length === 0) {
-    return entries;
+    return new Response(renderSitemap(entries), {
+      headers: {
+        "Content-Type": "application/xml",
+      },
+    });
   }
 
   for (const item of data) {
@@ -89,5 +112,9 @@ export default async function sitemap(request: Request): Promise<MetadataRoute.S
     });
   }
 
-  return entries;
+  return new Response(renderSitemap(entries), {
+    headers: {
+      "Content-Type": "application/xml",
+    },
+  });
 }
