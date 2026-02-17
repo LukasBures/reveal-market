@@ -5,7 +5,7 @@ description = "Polymarket market/FX streamer with SSE/WS fanout and FX integrati
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi>=0.111,<0.112",
+    "fastapi>=0.129,<0.130",
     "uvicorn>=0.30,<0.31",
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.2,<3.0",
