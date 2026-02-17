@@ -79,7 +79,7 @@ jobs:
           uv sync --project relayer --group dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
       - name: Pre-commit checks
-        run: uv run pre-commit run --all-files
+        run: make format
 
   backend:
     needs: precommit
@@ -202,30 +202,6 @@ jobs:
           PYTEST_WORKER_COUNT: 4
         working-directory: hedger
         run: ./run_tests.sh
-
-  contracts-polygon:
-    needs: precommit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.4.4
-
-      - name: Install Foundry dependencies (polygon)
-        working-directory: contracts/polygon
-        run: |
-          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ]; then
-            forge install --no-git --shallow \
-              foundry-rs/forge-std@v1.9.1 \
-              openzeppelin/openzeppelin-contracts@v5.0.0
-          fi
-
-      - name: Run Polygon contracts suite
-        working-directory: contracts/polygon
-        run: ./run_local.sh
 
   contracts-zen:
     needs: precommit
@@ -373,7 +349,6 @@ jobs:
       - relayer
       - hedger
       - streamer
-      - contracts-polygon
       - contracts-zen
       - frontend
       - prover

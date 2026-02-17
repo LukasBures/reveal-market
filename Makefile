@@ -74,7 +74,7 @@ test-prover:
 	cd prover && ./run_tests.sh
 
 format:
-	pre-commit run --all-files
+	uv run pre-commit run --all-files
 
 gen-address:
 	python scripts/gen_address.py --mode random --count 1
