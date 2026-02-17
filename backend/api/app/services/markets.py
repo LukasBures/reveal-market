@@ -40,7 +40,7 @@ from app.runtime import (
     logger,
     settings,
 )
-from app.services.cache_client import get_cache_client
+from app.services import cache_client as cache_client_service
 
 MARKETS_STATS_KEY = "v1:markets:stats"
 MARKET_DETAIL_PREFIX = "v1:markets:detail"
@@ -513,7 +513,7 @@ async def load_group_aggregates(session: AsyncSession, slugs: set[str]) -> dict[
     if not slugs:
         return {}
     aggregates: dict[str, dict[str, float | None]] = {}
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     if cache is None:
         group_expr = _group_slug_expression()
         total_volume_expr = _total_volume_expression()
@@ -616,7 +616,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
     normalized = (group_slug or "").strip().lower()
     if not normalized:
         return []
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     cache_key = group_cache_key(normalized)
     cached = await get_json(cache, cache_key)
     if cached is not None:
@@ -657,7 +657,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         ).scalars()
         meta_map = {row.market_id: row for row in meta_rows}
 
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     event_ids = [record.event_id for record in markets if isinstance(record.event_id, str)]
     stats_map = await _fetch_market_stats(cache, event_ids)
 
@@ -902,7 +902,7 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
         return
     market_ids = list(id_map.keys())
     event_ids = [target.event_id for target in id_map.values() if isinstance(getattr(target, "event_id", None), str)]
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     stats_map = await _fetch_market_stats(cache, event_ids)
 
     outcome_rows = (
@@ -1266,7 +1266,7 @@ async def invalidate_market_cache(
 ) -> None:
     """Invalidate all cache tags touching a market/detail/resolution/group."""
 
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     log_event(
         logger,
         logging.DEBUG,
@@ -1301,7 +1301,7 @@ async def hydrate_markets_cache(
 ) -> dict[str, Any]:
     """Populate the hottest markets into Redis directly from Postgres."""
 
-    cache = await get_cache_client()
+    cache = await cache_client_service.get_cache_client()
     target_limit = limit or settings.cache_hydrate_limit or settings.cacheable_market_limit
     target_order_by = order_by or settings.cache_hydrate_order_by
     if target_order_by == "volume_24h_usd":
