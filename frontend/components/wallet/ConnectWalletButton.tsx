@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connector } from "wagmi";
 import { useConnect, useConnectors, useConnection, useDisconnect, useSwitchChain } from "wagmi";
+import { ensureEip6963Discovery, getEip6963Providers, type Eip6963ProviderDetail } from "@/lib/eip6963";
 import { defaultChain } from "@/lib/wagmi";
 
 type ConnectorOption = {
@@ -15,6 +16,7 @@ type ConnectorOption = {
   description: string;
   iconSrc: string;
   iconAlt: string;
+  rdns?: string;
 };
 
 type WagmiError = Error & { shortMessage?: string | undefined };
@@ -50,14 +52,16 @@ const CONNECTOR_UI: ConnectorOption[] = [
     description: "Official extension",
     iconSrc: "/wallet-icons/metamask.svg",
     iconAlt: "MetaMask",
+    rdns: "io.metamask",
   },
   {
     id: "rabby",
     label: "Rabby",
-    connectorId: "injected",
+    connectorId: "rabby",
     description: "Rabby + injected",
     iconSrc: "/wallet-icons/rabby.svg",
     iconAlt: "Rabby",
+    rdns: "io.rabby",
   },
   {
     id: "coinbase",
@@ -66,14 +70,16 @@ const CONNECTOR_UI: ConnectorOption[] = [
     description: "Browser & mobile",
     iconSrc: "/wallet-icons/coinbasewallet.svg",
     iconAlt: "Coinbase Wallet",
+    rdns: "com.coinbase.wallet",
   },
   {
     id: "okx",
     label: "OKX Wallet",
-    connectorId: "injected",
+    connectorId: "okx",
     description: "OKX, Bitget, Brave",
     iconSrc: "/wallet-icons/okx.svg",
     iconAlt: "OKX Wallet",
+    rdns: "com.okx.wallet",
   },
   {
     id: "trust",
@@ -82,6 +88,7 @@ const CONNECTOR_UI: ConnectorOption[] = [
     description: "WalletConnect (mobile)",
     iconSrc: "/wallet-icons/trust.svg",
     iconAlt: "Trust Wallet",
+    rdns: "com.trustwallet",
   },
   {
     id: "walletconnect",
@@ -94,6 +101,13 @@ const CONNECTOR_UI: ConnectorOption[] = [
 ] as const;
 
 type ConnectorMap = Record<string, Connector | undefined>;
+const RDNS_ALIASES: Record<string, string[]> = {
+  okx: ["com.okx.wallet", "com.okex.wallet"],
+  trust: ["com.trustwallet"],
+  coinbase: ["com.coinbase.wallet"],
+  metamask: ["io.metamask"],
+  rabby: ["io.rabby"],
+};
 const walletConnectEnabled =
   Boolean(process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) || process.env.NODE_ENV === "test";
 
@@ -133,6 +147,7 @@ export function ConnectWalletButton() {
   const chainMismatch = isConnected && chain?.id !== defaultChain.id;
   const [lastConnectedAddress, setLastConnectedAddress] = useState<string | null>(null);
   const [lastConnectedChainName, setLastConnectedChainName] = useState<string | null>(null);
+  const [eip6963Providers, setEip6963Providers] = useState<Record<string, Eip6963ProviderDetail>>({});
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -150,6 +165,28 @@ export function ConnectWalletButton() {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!isMounted || typeof window === "undefined") {
+      return;
+    }
+    ensureEip6963Discovery();
+    const syncProviders = () => {
+      setEip6963Providers(getEip6963Providers());
+    };
+    syncProviders();
+    const handleProvider = (event: Event) => {
+      const detail = (event as CustomEvent<Eip6963ProviderDetail>).detail;
+      if (!detail?.info?.rdns) {
+        return;
+      }
+      syncProviders();
+    };
+    window.addEventListener("eip6963:announceProvider", handleProvider as EventListener);
+    return () => {
+      window.removeEventListener("eip6963:announceProvider", handleProvider as EventListener);
+    };
+  }, [isMounted]);
 
   useEffect(() => {
     if (!isConnected || !chain) {
@@ -224,62 +261,144 @@ export function ConnectWalletButton() {
     return { ethereum, providers };
   }, [isMounted]);
 
-  const availableOptions = useMemo(() => {
-    return CONNECTOR_UI.filter((option) => {
-      if (option.id === "walletconnect" && !walletConnectEnabled) {
-        return false;
+  const hasEip6963Providers = Object.keys(eip6963Providers).length > 0;
+
+  const resolveEipProvider = useCallback(
+    (option: ConnectorOption) => {
+      if (!option.rdns) {
+        return null;
       }
+      const direct = eip6963Providers[option.rdns];
+      if (direct) {
+        return direct;
+      }
+      if (option.id === "okx") {
+        return RDNS_ALIASES.okx.map((alias) => eip6963Providers[alias]).find(Boolean) ?? null;
+      }
+      return null;
+    },
+    [eip6963Providers],
+  );
+
+  const connectorOptions = useMemo(() => {
+    return CONNECTOR_UI.map((option) => {
       const connector = connectorsById[option.connectorId];
-      if (!connector) return false;
-      const ready = Boolean((connector as any).ready ?? true);
+      const ready = Boolean((connector as any)?.ready ?? true);
+      const eipProvider = resolveEipProvider(option);
 
       if (!isMounted) {
-        return option.connectorId === "walletConnect" ? walletConnectEnabled : ready;
+        const available =
+          option.connectorId === "walletConnect" ? walletConnectEnabled && Boolean(connector) : ready && Boolean(connector);
+        return { option, connector, available, eipProvider, reason: null as string | null };
       }
 
       const hasProviderMatch = (predicate: (provider: any) => boolean) =>
         providerFlags.providers.some(predicate);
       const hasMetaMask = hasProviderMatch((provider) => Boolean(provider?.isMetaMask));
       const hasCoinbaseWallet = hasProviderMatch((provider) => Boolean(provider?.isCoinbaseWallet));
+      const hasRabbyWallet = hasProviderMatch((provider) => Boolean(provider?.isRabby));
+      const hasOkxWallet = hasProviderMatch((provider) => Boolean(provider?.isOkxWallet || provider?.isOKExWallet));
+      const hasTrustWallet = hasProviderMatch((provider) => Boolean(provider?.isTrust || provider?.isTrustWallet));
       const hasOtherInjected = hasProviderMatch(
         (provider) => Boolean(provider) && !provider?.isMetaMask && !provider?.isCoinbaseWallet,
       );
+      const detectedMetaMask = hasMetaMask || Boolean(eipProvider);
+      const detectedCoinbase = hasCoinbaseWallet || Boolean(eipProvider);
+      const detectedRabby = hasRabbyWallet || Boolean(eipProvider);
+      const detectedOkx = hasOkxWallet || Boolean(eipProvider);
+      const detectedTrust = hasTrustWallet || Boolean(eipProvider);
 
-      // Determine if this connector is actually available in the current environment.
-      let walletAvailable = ready;
-      if (option.connectorId === "walletConnect") {
-        walletAvailable = walletConnectEnabled;
+      let available = false;
+      if (option.rdns && hasEip6963Providers) {
+        available = Boolean(eipProvider) && Boolean(connector);
+      } else if (option.connectorId === "walletConnect") {
+        available = walletConnectEnabled && Boolean(connector);
       } else if (option.connectorId === "metaMask") {
-        walletAvailable ||= hasMetaMask;
+        available = Boolean(connector) && ready && (hasMetaMask || Boolean(eipProvider));
       } else if (option.connectorId === "coinbaseWalletSDK") {
-        walletAvailable ||= hasCoinbaseWallet;
+        available = Boolean(connector) && ready && (hasCoinbaseWallet || Boolean(eipProvider));
+      } else if (option.connectorId === "rabby") {
+        available = Boolean(connector) && ready && (hasRabbyWallet || Boolean(eipProvider));
+      } else if (option.connectorId === "okx") {
+        available = Boolean(connector) && ready && (hasOkxWallet || Boolean(eipProvider));
       } else if (option.connectorId === "injected") {
-        walletAvailable ||= hasOtherInjected;
+        available = Boolean(connector) && ready && hasOtherInjected;
+      } else {
+        available = Boolean(connector) && ready;
       }
 
-      if (!walletAvailable) {
-        return false;
+      if (option.id === "trust") {
+        const trustAnnounced = hasEip6963Providers
+          ? Boolean(eipProvider)
+          : hasTrustWallet;
+        available = walletConnectEnabled && Boolean(connector) && trustAnnounced;
       }
 
-      // On mobile browsers, only surface wallets we detected or WalletConnect.
+      // On mobile browsers, only allow wallets we detected (or WalletConnect).
       if (isMobileBrowser && option.connectorId !== "walletConnect") {
-        if (option.connectorId === "metaMask") return hasMetaMask;
-        if (option.connectorId === "coinbaseWalletSDK") return hasCoinbaseWallet;
-        if (option.connectorId === "injected") return hasOtherInjected;
+        if (option.connectorId === "metaMask") {
+          available = available && detectedMetaMask;
+        }
+        if (option.connectorId === "coinbaseWalletSDK") {
+          available = available && detectedCoinbase;
+        }
+        if (option.connectorId === "rabby") {
+          available = available && detectedRabby;
+        }
+        if (option.connectorId === "okx") {
+          available = available && detectedOkx;
+        }
+        if (option.connectorId === "injected") available = available && hasOtherInjected;
+        if (option.id === "trust") {
+          available = available && detectedTrust;
+        }
       }
 
-      return walletAvailable;
+      let reason: string | null = null;
+      if (!available) {
+        if (option.connectorId === "walletConnect" || option.id === "trust") {
+          if (!walletConnectEnabled) {
+            reason = "Enable WalletConnect";
+          } else if (!connector) {
+            reason = "Not configured";
+          } else if (option.id === "trust" && isMobileBrowser && !detectedTrust) {
+            reason = "Not detected";
+          } else {
+            reason = "Unavailable";
+          }
+        } else if (!connector) {
+          reason = "Not configured";
+        } else if (!ready) {
+          reason = "Unavailable";
+        } else if (isMobileBrowser) {
+          reason = "Not detected";
+        } else {
+          reason = "Install";
+        }
+      }
+
+      return { option, connector, available, eipProvider, reason };
     });
-  }, [connectorsById, isMobileBrowser, isMounted, providerFlags.providers]);
+  }, [
+    connectorsById,
+    eip6963Providers,
+    hasEip6963Providers,
+    isMobileBrowser,
+    isMounted,
+    providerFlags.providers,
+    resolveEipProvider,
+  ]);
+
+  const hasAnyAvailable = connectorOptions.some((entry) => entry.available);
 
   useEffect(() => {
     if (!selectedOption) return;
-    const stillAvailable = availableOptions.some((option) => option.id === selectedOption.id);
+    const stillAvailable = connectorOptions.some((entry) => entry.option.id === selectedOption.id && entry.available);
     if (!stillAvailable) {
       setSelectedOption(null);
       setAcceptedTerms(false);
     }
-  }, [availableOptions, selectedOption]);
+  }, [connectorOptions, selectedOption]);
 
   const isConnecting = connectStatus === "pending";
 
@@ -397,59 +516,64 @@ export function ConnectWalletButton() {
             <div className="mt-5 space-y-4">
               <div className="space-y-3">
                 <p className="text-[11px] uppercase tracking-[0.35em] text-white/50">Wallet providers</p>
-                {availableOptions.length === 0 ? (
+                {!hasAnyAvailable ? (
                   <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-center text-xs text-white/70">
                     No compatible wallets detected on this device. Try WalletConnect or switch devices.
                   </p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {availableOptions.map((option) => {
-                      const connector = connectorsById[option.connectorId];
-                      const disabled = !connector || isConnecting;
-                      const isSelected = selectedOption?.id === option.id;
-                      const isActiveConnector = isConnected && activeConnectorId === connector?.id;
-                      const stateClass = isActiveConnector
-                        ? "border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-300/60"
-                        : isSelected
-                          ? "border-brand-400 bg-brand-500/20"
+                ) : null}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {connectorOptions.map(({ option, connector, available, reason }) => {
+                    const isUnavailable = !available;
+                    const disabled = isConnecting || isUnavailable;
+                    const isSelected = selectedOption?.id === option.id;
+                    const isActiveConnector = isConnected && activeConnectorId === connector?.id;
+                    const stateClass = isActiveConnector
+                      ? "border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-300/60"
+                      : isSelected
+                        ? "border-brand-400 bg-brand-500/20"
+                        : isUnavailable
+                          ? "border-white/10 bg-white/5 opacity-50 grayscale"
                           : "border-white/15 bg-white/5";
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => {
-                            if (disabled) {
-                              return;
-                            }
-                            setSelectedOption(option);
-                            setAcceptedTerms(false);
-                          }}
-                          className={`group flex items-center gap-4 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${stateClass}`}
-                        >
-                          <span className="flex h-16 w-16 flex-none items-center justify-center rounded-3xl bg-white/10 transition-transform duration-200 group-hover:scale-105">
-                            <Image
-                              src={option.iconSrc}
-                              alt={option.iconAlt}
-                              width={64}
-                              height={64}
-                              className="h-12 w-12 object-contain"
-                            />
-                          </span>
-                          <span>
-                            {option.label}
-                            <span className="block text-xs font-normal text-white/60">{option.description}</span>
-                            {isActiveConnector ? (
-                              <span className="mt-1 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
-                                Connected
-                              </span>
-                            ) : null}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) {
+                            return;
+                          }
+                          setSelectedOption(option);
+                          setAcceptedTerms(false);
+                        }}
+                        className={`group flex items-center gap-4 rounded-2xl border px-3 py-3 text-left text-sm font-semibold text-white/90 transition ${isUnavailable ? "text-white/50" : "hover:border-white hover:text-white"} disabled:cursor-not-allowed disabled:opacity-50 ${stateClass}`}
+                      >
+                        <span className="flex h-16 w-16 flex-none items-center justify-center rounded-3xl bg-white/10 transition-transform duration-200 group-hover:scale-105">
+                          <Image
+                            src={option.iconSrc}
+                            alt={option.iconAlt}
+                            width={64}
+                            height={64}
+                            className="h-12 w-12 object-contain"
+                          />
+                        </span>
+                        <span>
+                          {option.label}
+                          <span className="block text-xs font-normal text-white/60">{option.description}</span>
+                          {isActiveConnector ? (
+                            <span className="mt-1 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                              Connected
+                            </span>
+                          ) : isUnavailable ? (
+                            <span className="mt-1 inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">
+                              {reason ?? "Unavailable"}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
                 {connectErrorMessage ? <p className="text-xs text-rose-300">{connectErrorMessage}</p> : null}
               </div>
               {selectedOption ? (

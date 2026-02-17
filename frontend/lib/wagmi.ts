@@ -79,9 +79,40 @@ if (!walletConnectEnabled && !isTestEnv && typeof console !== "undefined") {
   console.warn("WalletConnect disabled: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set.");
 }
 
+const findProvider = (
+  window: any | undefined,
+  predicate: (provider: any) => boolean,
+): any | undefined => {
+  const ethereum = window && (window as any).ethereum;
+  const providers = Array.isArray(ethereum?.providers) ? ethereum.providers.filter(Boolean) : ethereum ? [ethereum] : [];
+  return providers.find((provider: any) => predicate(provider));
+};
+
 const createWalletConnectors = (): CreateConnectorFn[] => {
   const shared: CreateConnectorFn[] = [
     injected({ target: "metaMask", shimDisconnect: true }),
+    injected({
+      target: {
+        id: "rabby",
+        name: "Rabby",
+        provider: () =>
+          findProvider(typeof window !== "undefined" ? (window as any) : undefined, (provider) =>
+            Boolean(provider?.isRabby),
+          ),
+      },
+      shimDisconnect: true,
+    }),
+    injected({
+      target: {
+        id: "okx",
+        name: "OKX Wallet",
+        provider: () =>
+          findProvider(typeof window !== "undefined" ? (window as any) : undefined, (provider) =>
+            Boolean(provider?.isOkxWallet || provider?.isOKExWallet),
+          ),
+      },
+      shimDisconnect: true,
+    }),
     injected({ shimDisconnect: true }),
     coinbaseWallet({ appName: "Reveal Market" }),
   ];

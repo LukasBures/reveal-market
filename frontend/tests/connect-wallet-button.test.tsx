@@ -59,6 +59,11 @@ let currentDisconnectState: WagmiDisconnectState;
 let currentSignMessageState: WagmiSignMessageState;
 let currentSwitchChainState: WagmiSwitchChainState;
 
+vi.mock("@/lib/eip6963", () => ({
+  ensureEip6963Discovery: vi.fn(),
+  getEip6963Providers: vi.fn(() => ({})),
+}));
+
 vi.mock("wagmi", () => ({
   useConnection: () => currentAccountState,
   useConnect: () => currentConnectState,
@@ -74,6 +79,12 @@ vi.mock("@/lib/wagmi", () => ({
 
 describe("ConnectWalletButton", () => {
   beforeEach(() => {
+    (globalThis as any).window = Object.assign(globalThis.window ?? {}, {
+      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
     currentAccountState = {
       address: undefined,
       status: "disconnected",
@@ -197,9 +208,11 @@ describe("ConnectWalletButton", () => {
     expect(screen.getByText(/switch to .* to continue/i)).toBeInTheDocument();
   });
 
-  it("hides injected wallets when the browser has no compatible providers", () => {
+  it("grays out injected wallets when the browser has no compatible providers", () => {
     currentConnectorsState = [
       createConnector("metaMask", "MetaMask", false),
+      createConnector("rabby", "Rabby", false),
+      createConnector("okx", "OKX Wallet", false),
       createConnector("injected", "Injected", false),
       createConnector("coinbaseWalletSDK", "Coinbase Wallet", false),
       walletConnectConnector,
@@ -208,8 +221,10 @@ describe("ConnectWalletButton", () => {
     render(<ConnectWalletButton />);
     fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
 
-    expect(screen.queryByRole("button", { name: /metamask/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /rabby/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /metamask/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /rabby/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /coinbase wallet/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /okx wallet/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^walletconnect/i })).toBeInTheDocument();
   });
 });
