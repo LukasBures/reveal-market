@@ -137,7 +137,7 @@ def create_app() -> FastAPI:
     Build a FastAPI app instance with middleware, routes, and lifecycle hooks.
 
     FastAPI caches the app at module import, so this stays lightweight and
-    side-effect free beyond client initialisation and middleware wiring.
+    side effect free beyond client initialization and middleware wiring.
     """
 
     _log_environment()

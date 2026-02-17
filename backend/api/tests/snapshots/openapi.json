@@ -153,6 +153,19 @@
         "title": "ClaimStatusResponse",
         "type": "object"
       },
+      "EventCountResponse": {
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "EventCountResponse",
+        "type": "object"
+      },
       "EventResponse": {
         "properties": {
           "aggregate_liquidity_usd": {
@@ -3980,6 +3993,132 @@
           }
         },
         "summary": "Get Event By Key",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/events/count": {
+      "get": {
+        "description": "Return distinct event group count for sitemap paging.",
+        "operationId": "count_events_events_count_get",
+        "parameters": [
+          {
+            "description": "Filter markets by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by status",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter markets by category",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by category",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "Filter markets by oracle address",
+            "in": "query",
+            "name": "oracle",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter markets by oracle address",
+              "title": "Oracle"
+            }
+          },
+          {
+            "description": "Case-insensitive search over market titles",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive search over market titles",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "Return only featured markets",
+            "in": "query",
+            "name": "only_featured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only featured markets",
+              "title": "Only Featured"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventCountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count Events",
         "tags": [
           "events"
         ]

@@ -636,7 +636,7 @@ async def _enqueue_hedger_job(kind: str, endpoint: str, payload: dict[str, Any])
     return job_id
 
 
-async def _call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     """POST to the relayer with simple retries and friendlier errors."""
 
     if not settings.relayer_base_url:
@@ -689,7 +689,7 @@ async def _call_relayer(endpoint: str, payload: dict[str, Any]) -> dict[str, Any
     )
 
 
-async def _call_hedger(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def call_hedger(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     """POST to the hedger with simple retries and friendlier errors."""
 
     if not settings.hedger_base_url:
@@ -836,7 +836,7 @@ async def _resolve_job_tx_hash(session: AsyncSession, job_id: str) -> str | None
         return None
     try:
         status_url = _relayer_url("status")
-        result = await _call_relayer(status_url, {"jobId": job_id})
+        result = await call_relayer(status_url, {"jobId": job_id})
     except Exception:
         return None
     resolved_tx = _extract_tx_hash(result)
@@ -1749,7 +1749,7 @@ async def trade_commit(
     relayer_job = None
     commit_url = _relayer_url("commit")
     try:
-        relayer_result = await _call_relayer(commit_url, relayer_payload)
+        relayer_result = await call_relayer(commit_url, relayer_payload)
     except HTTPException as exc:
         if settings.relayer_queue_enabled:
             relayer_job = await _enqueue_relayer_job("commit", commit_url, relayer_payload)
@@ -2207,7 +2207,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     relayer_job = None
     try:
         claim_url = _relayer_url("claim")
-        result = await _call_relayer(claim_url, relayer_payload)
+        result = await call_relayer(claim_url, relayer_payload)
     except HTTPException as exc:
         if settings.relayer_queue_enabled:
             relayer_job = await _enqueue_relayer_job("claim", claim_url, relayer_payload)
@@ -2315,7 +2315,7 @@ async def sync_commitments(
             }
             try:
                 hedger_endpoint = f"{settings.hedger_base_url}/admin/commits"
-                response = await _call_hedger(hedger_endpoint, commit_payload)
+                response = await call_hedger(hedger_endpoint, commit_payload)
                 hedge_attempts.append({"status": "ok", "response": response})
             except Exception as exc:
                 try:
@@ -2486,7 +2486,7 @@ async def trade_status(
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
         status_url = _relayer_url("status")
         try:
-            result = await _call_relayer(status_url, {"jobId": job_id_value})
+            result = await call_relayer(status_url, {"jobId": job_id_value})
         except HTTPException as exc:
             log_event(
                 logger,

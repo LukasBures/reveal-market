@@ -12,8 +12,9 @@ import logging
 import random
 import time
 from collections.abc import Awaitable
+from collections.abc import Awaitable as AwaitableABC
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, TypeVar
 
 from redis.exceptions import RedisError
 from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -25,7 +26,7 @@ from app import repository_async
 from app.database import run_migrations, session_scope
 from app.metrics_registry import PRICING_COUNTER
 from app.onchain import validate_verifier_circuit_hash
-from app.routes.trade import _call_hedger, _call_relayer
+from app.routes.trade import call_hedger, call_relayer
 from app.runtime import logger, request_metrics
 from app.runtime import settings as runtime_settings
 from app.services.alerting import alert_background_failure
@@ -33,7 +34,14 @@ from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
 
 _RNG = random.SystemRandom()
-settings: Any = cast(Any, runtime_settings)
+settings: Any = runtime_settings
+_T = TypeVar("_T")
+
+
+async def _maybe_await(value: Awaitable[_T] | _T) -> _T:
+    if isinstance(value, AwaitableABC):
+        return await value
+    return value
 
 
 async def record_schema_revision_tag() -> None:
@@ -212,7 +220,7 @@ async def cache_refresh_loop() -> None:
             if not acquired:
                 jitter = min(interval * 0.2, 30)
                 wait_seconds = interval + _RNG.uniform(-jitter, jitter)
-                await asyncio.sleep(max(1, wait_seconds))
+                await asyncio.sleep(max(1.0, wait_seconds))
                 continue
             try:
                 await hydrate_markets_cache(
@@ -246,7 +254,7 @@ async def cache_refresh_loop() -> None:
                 wait_seconds = base_wait + backoff
             else:
                 wait_seconds = base_wait
-            await asyncio.sleep(max(1, wait_seconds))
+            await asyncio.sleep(max(1.0, wait_seconds))
     except asyncio.CancelledError:
         log_event(
             logger,
@@ -289,7 +297,7 @@ async def relayer_queue_loop() -> None:
                 if await circuit.is_open("relayer_queue"):
                     await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
                     continue
-                item = await cast(Awaitable[Any], client.brpop([queue_key], timeout=5))
+                item = await _maybe_await(client.brpop([queue_key], timeout=5))
                 if item is None:
                     continue
                 _, raw = item
@@ -311,7 +319,7 @@ async def relayer_queue_loop() -> None:
                 body = payload.get("payload") or {}
                 attempts = int(payload.get("attempts") or 0)
                 try:
-                    result = await _call_relayer(endpoint, body)
+                    result = await call_relayer(endpoint, body)
                     await client.set(
                         f"{queue_key}:result:{job_id}",
                         json.dumps(result),
@@ -331,7 +339,7 @@ async def relayer_queue_loop() -> None:
                         )
                     else:
                         payload["attempts"] = attempts
-                        await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
+                        await _maybe_await(client.lpush(queue_key, json.dumps(payload)))
                     await alert_background_failure(
                         "relayer_queue_loop",
                         exc,
@@ -400,7 +408,7 @@ async def hedger_queue_loop() -> None:
                 if await circuit.is_open("hedger_queue"):
                     await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
                     continue
-                item = await cast(Awaitable[Any], client.brpop([queue_key], timeout=5))
+                item = await _maybe_await(client.brpop([queue_key], timeout=5))
                 if item is None:
                     continue
                 _, raw = item
@@ -422,7 +430,7 @@ async def hedger_queue_loop() -> None:
                 body = payload.get("payload") or {}
                 attempts = int(payload.get("attempts") or 0)
                 try:
-                    result = await _call_hedger(endpoint, body)
+                    result = await call_hedger(endpoint, body)
                     await client.set(
                         f"{queue_key}:result:{job_id}",
                         json.dumps(result),
@@ -442,7 +450,7 @@ async def hedger_queue_loop() -> None:
                         )
                     else:
                         payload["attempts"] = attempts
-                        await cast(Awaitable[Any], client.lpush(queue_key, json.dumps(payload)))
+                        await _maybe_await(client.lpush(queue_key, json.dumps(payload)))
                     await alert_background_failure(
                         "hedger_queue_loop",
                         exc,
