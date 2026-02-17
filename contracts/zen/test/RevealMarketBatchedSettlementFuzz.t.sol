@@ -100,7 +100,7 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
         uint16[] memory counts = new uint16[](batchCount);
         for (uint256 i = 0; i < batchCount; i++) {
             roots[i] = _buildBatchRoot(batchLeaves[i], batchLeaves[i].length);
-            counts[i] = uint16(batchLeaves[i].length);
+            counts[i] = _toUint16(batchLeaves[i].length);
         }
 
         vm.prank(oracle);
@@ -127,7 +127,7 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
                 uint256(0)
             ];
             proofs[i] = "";
-            batchIndexes[i] = uint16(i);
+            batchIndexes[i] = _toUint16(i);
         }
 
         vm.prank(oracle);
@@ -141,6 +141,11 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
 
     function _netTicket() internal view returns (uint256) {
         return ticketSize - (ticketSize * rakeBps) / 10_000;
+    }
+
+    function _toUint16(uint256 value) private pure returns (uint16) {
+        require(value <= type(uint16).max, "uint16 overflow");
+        return uint16(value);
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {

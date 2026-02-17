@@ -103,7 +103,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         roots[0] = root0;
         roots[1] = root1;
         uint16[] memory counts = new uint16[](2);
-        counts[0] = uint16(BATCH_SIZE);
+        counts[0] = _toUint16(BATCH_SIZE);
         counts[1] = 1;
 
         vm.prank(oracle);
@@ -176,5 +176,10 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         return abi.encodePacked(r, s, v);
+    }
+
+    function _toUint16(uint256 value) private pure returns (uint16) {
+        require(value <= type(uint16).max, "uint16 overflow");
+        return uint16(value);
     }
 }

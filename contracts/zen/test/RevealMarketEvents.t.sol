@@ -62,7 +62,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesEmitsLocked() external {
-        bytes32 leaf = _commitTicket(bytes32("lock"));
+        bytes32 leaf = _commitTicket(_salt("lock"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
@@ -76,7 +76,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testPostResultEmits() external {
-        bytes32 leaf = _commitTicket(bytes32("result"));
+        bytes32 leaf = _commitTicket(_salt("result"));
         _lockSingleBatch(leaf);
 
         vm.expectEmit(true, false, false, true, address(market));
@@ -86,7 +86,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleEmitsSettled() external {
-        bytes32 leaf = _commitTicket(bytes32("settle"));
+        bytes32 leaf = _commitTicket(_salt("settle"));
         bytes32 root = _lockSingleBatch(leaf);
 
         vm.prank(oracle);
@@ -114,7 +114,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testClaimEmitsClaimed() external {
-        bytes32 leaf = _commitTicket(bytes32("claim"));
+        bytes32 leaf = _commitTicket(_salt("claim"));
         bytes32 root = _lockSingleBatch(leaf);
         vm.prank(oracle);
         market.postResult(1);
@@ -142,7 +142,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         vm.expectEmit(true, true, true, true, address(market));
         emit RevealMarket.Claimed(relayerOwner, user, 0, netTicket);
         vm.prank(relayerOwner);
-        market.claim(user, 0, 1, netTicket, netTicket, bytes32("claim"), proof);
+        market.claim(user, 0, 1, netTicket, netTicket, _salt("claim"), proof);
     }
 
     function testExtendClaimDeadlineEmits() external {
@@ -154,7 +154,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testSweepUnclaimedEmits() external {
-        bytes32 leaf = _commitTicket(bytes32("sweep"));
+        bytes32 leaf = _commitTicket(_salt("sweep"));
         bytes32 root = _lockSingleBatch(leaf);
         vm.prank(oracle);
         market.postResult(1);
@@ -196,7 +196,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testRefundEvents() external {
-        _commitTicket(bytes32("refund"));
+        _commitTicket(_salt("refund"));
         vm.warp(commitDeadline + 1);
 
         vm.expectEmit(true, false, false, true, address(market));
@@ -207,7 +207,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         vm.expectEmit(true, true, true, true, address(market));
         emit RevealMarket.Refunded(relayerOwner, user, 0, _netTicket());
         vm.prank(relayerOwner);
-        market.refund(user, 0, 1, _netTicket(), _netTicket(), bytes32("refund"), new bytes32[](0));
+        market.refund(user, 0, 1, _netTicket(), _netTicket(), _salt("refund"), new bytes32[](0));
     }
 
     function _commitTicket(bytes32 salt) internal returns (bytes32 leaf) {

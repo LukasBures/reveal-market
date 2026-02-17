@@ -230,18 +230,20 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (auth.expiry < block.timestamp) revert CommitExpired();
         if (usedCommitNonces[auth.user][auth.nonce]) revert CommitReplay();
 
-        bytes32 commitDigest = keccak256(
-            abi.encodePacked(
-                address(this),
-                marketId,
-                auth.commitment,
-                auth.user,
-                auth.nonce,
-                auth.expiry,
-                auth.ticketValue,
-                block.chainid
-            )
+        bytes memory commitData = abi.encodePacked(
+            address(this),
+            marketId,
+            auth.commitment,
+            auth.user,
+            auth.nonce,
+            auth.expiry,
+            auth.ticketValue,
+            block.chainid
         );
+        bytes32 commitDigest;
+        assembly {
+            commitDigest := keccak256(add(commitData, 32), mload(commitData))
+        }
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(commitDigest);
         if (digest.recover(signature) != authorizationSigner) revert InvalidSignature();
 
@@ -272,7 +274,11 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (commitments.length == 0) revert NothingToLock();
         if (roots.length == 0 || roots.length != counts.length) revert BatchCountMismatch();
         if (relayerSig.length != 0) {
-            bytes32 digest = keccak256(abi.encode(marketId, roots, counts, block.chainid));
+            bytes memory digestData = abi.encode(marketId, roots, counts, block.chainid);
+            bytes32 digest;
+            assembly {
+                digest := keccak256(add(digestData, 32), mload(digestData))
+            }
             bytes32 signed = MessageHashUtils.toEthSignedMessageHash(digest);
             address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
             if (signed.recover(relayerSig) != relayerOwner) revert InvalidRelayerSignature();

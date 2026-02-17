@@ -71,7 +71,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesRejectsBeforeDeadline() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("before-deadline"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("before-deadline"));
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
@@ -90,7 +90,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesRejectsMismatchedCounts() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("mismatch"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("mismatch"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
@@ -104,12 +104,12 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesRejectsBatchSizeExceeded() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("oversize"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("oversize"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
-        counts[0] = uint16(BATCH_SIZE + 1);
+        counts[0] = _toUint16(BATCH_SIZE + 1);
 
         vm.expectRevert(RevealMarket.BatchSizeExceeded.selector);
         vm.prank(oracle);
@@ -117,7 +117,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesRejectsTotalMismatch() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("total-mismatch"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("total-mismatch"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
@@ -130,7 +130,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesRejectsInvalidRelayerSignature() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("bad-sig"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("bad-sig"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
@@ -144,7 +144,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testLockBatchesAcceptsRelayerSignature() external {
-        (bytes32 leaf,,,) = _commitTicket(1, bytes32("good-sig"));
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("good-sig"));
         vm.warp(commitDeadline + 1);
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
@@ -158,7 +158,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsWithoutResult() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("no-result"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("no-result"));
         bytes32 root = _lockSingle(leaf, "");
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
 
@@ -168,7 +168,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsOnTotalsMismatch() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("totals"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("totals"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount + 1, payout);
 
@@ -178,7 +178,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsOnRakeMismatch() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("rake"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("rake"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         signals[5] = signals[5] + 1;
@@ -189,7 +189,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsOnCircuitHashMismatch() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("circuit"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("circuit"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         signals[8] = uint256(keccak256("bad"));
@@ -200,7 +200,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsOnPaddingMismatch() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("padding"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("padding"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         signals[9] = 1;
@@ -211,7 +211,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleRevertsOnInvalidProof() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("proof"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("proof"));
         bytes32 root = _lockAndPost(leaf, 1);
         verifier.setShouldVerify(false);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
@@ -223,7 +223,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
 
     function testClaimRevertsWrongOutcome() external {
         (bytes32 leaf, bytes32[] memory leaves, uint256 netAmount, uint256 payout) =
-            _commitTicket(1, bytes32("claim-outcome"));
+            _commitTicket(1, _salt("claim-outcome"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         vm.prank(oracle);
@@ -231,12 +231,12 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
 
         vm.expectRevert(RevealMarket.WrongOutcome.selector);
         vm.prank(relayerOwner);
-        market.claim(user, 0, 0, netAmount, payout, bytes32("claim-outcome"), _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, 0, netAmount, payout, _salt("claim-outcome"), _buildMerkleProof(leaves, 1, 0));
     }
 
     function testClaimRevertsWhenPaused() external {
         (bytes32 leaf, bytes32[] memory leaves, uint256 netAmount, uint256 payout) =
-            _commitTicket(1, bytes32("claim-pause"));
+            _commitTicket(1, _salt("claim-pause"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         vm.prank(oracle);
@@ -247,11 +247,11 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
 
         vm.expectRevert(RevealMarket.ClaimsPaused.selector);
         vm.prank(relayerOwner);
-        market.claim(user, 0, 1, netAmount, payout, bytes32("claim-pause"), _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, 1, netAmount, payout, _salt("claim-pause"), _buildMerkleProof(leaves, 1, 0));
     }
 
     function testEnableRefundsRejectsAfterSettlement() external {
-        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("refund-after"));
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refund-after"));
         bytes32 root = _lockAndPost(leaf, 1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
         vm.prank(oracle);
@@ -263,14 +263,14 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testRefundRevertsInvalidLeaf() external {
-        (, , uint256 netAmount, uint256 payout) = _commitTicket(1, bytes32("refund-leaf"));
+        (, , uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refund-leaf"));
         vm.warp(commitDeadline + 1);
         vm.prank(relayerOwner);
         market.enableRefunds();
 
         vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
         vm.prank(relayerOwner);
-        market.refund(user, 0, 1, netAmount, payout, bytes32("wrong-salt"), new bytes32[](0));
+        market.refund(user, 0, 1, netAmount, payout, _salt("wrong-salt"), new bytes32[](0));
     }
 
     function _commitTicket(uint256 outcome, bytes32 salt)
@@ -374,5 +374,10 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
     function _wrapLeaf(bytes32 leaf) private pure returns (bytes32[] memory leaves) {
         leaves = new bytes32[](1);
         leaves[0] = leaf;
+    }
+
+    function _toUint16(uint256 value) private pure returns (uint16) {
+        require(value <= type(uint16).max, "uint16 overflow");
+        return uint16(value);
     }
 }

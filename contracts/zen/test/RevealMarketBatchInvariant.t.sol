@@ -91,17 +91,22 @@ contract RevealMarketBatchInvariantTest is Test, PoseidonTestUtils {
         bytes32[] memory roots = new bytes32[](1);
         roots[0] = _buildBatchRoot(leaves, commitCount);
         uint16[] memory counts = new uint16[](1);
-        counts[0] = uint16(commitCount);
+        counts[0] = _toUint16(commitCount);
 
         vm.prank(oracle);
         market.lockBatches(roots, counts, "");
 
-        assertEq(market.batchCounts(0), uint16(commitCount), "batchCount");
+        assertEq(market.batchCounts(0), _toUint16(commitCount), "batchCount");
         assertEq(market.nextTicketId(), commitCount, "commitments length");
     }
 
     function _netTicket() internal view returns (uint256) {
         return ticketSize - (ticketSize * rakeBps) / 10_000;
+    }
+
+    function _toUint16(uint256 value) private pure returns (uint16) {
+        require(value <= type(uint16).max, "uint16 overflow");
+        return uint16(value);
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {

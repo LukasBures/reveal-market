@@ -7,6 +7,10 @@ abstract contract PoseidonTestUtils {
     uint256 internal constant BATCH_SIZE = 256;
     uint256 internal constant MERKLE_DEPTH = 8;
 
+    function _salt(string memory value) internal pure returns (bytes32) {
+        return bytes32(keccak256(abi.encodePacked(value)));
+    }
+
     function _poseidonLeaf(
         uint256 ticketId,
         uint256 outcomeId,

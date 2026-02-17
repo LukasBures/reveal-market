@@ -65,8 +65,8 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](2);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
-        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), bytes32("b"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
+        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), _salt("b"), user)), 1);
         uint16[] memory counts = new uint16[](2);
         counts[0] = 1;
         counts[1] = 1;
@@ -95,8 +95,8 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](2);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
-        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), bytes32("b"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
+        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), _salt("b"), user)), 1);
         uint16[] memory counts = new uint16[](2);
         counts[0] = 1;
         counts[1] = 1;
@@ -122,7 +122,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](1);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
         vm.prank(oracle);
@@ -148,7 +148,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](1);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
         vm.prank(oracle);
@@ -173,7 +173,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](1);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
         vm.prank(oracle);
@@ -199,7 +199,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         bytes32[] memory roots = new bytes32[](1);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32("a"), user)), 1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
         vm.prank(oracle);
