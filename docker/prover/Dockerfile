@@ -2,7 +2,7 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
-ARG GOLANG_IMAGE=golang:1.22-alpine
+ARG GOLANG_IMAGE=golang:1.24-alpine
 ARG NODE_IMAGE=node:20-alpine
 ARG DEBIAN_IMAGE=debian:bookworm-slim
 

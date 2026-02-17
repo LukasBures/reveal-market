@@ -790,6 +790,7 @@ version = "0.4.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "prometheus-client" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -818,6 +819,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.129,<0.130" },
+    { name = "httpx", specifier = "==0.27.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.27.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.11.1" },
     { name = "prometheus-client", specifier = "==0.20.0" },
