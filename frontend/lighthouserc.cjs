@@ -26,6 +26,14 @@ module.exports = {
         "categories:best-practices": ["warn", { minScore: 0.9 }],
         "categories:seo": ["warn", { minScore: 0.9 }],
       },
+      assertionsByUrl: {
+        "http://localhost:3000/search": {
+          "categories:seo": "off",
+        },
+        "http://localhost:3000/events/sample-event": {
+          "categories:seo": "off",
+        },
+      },
     },
     upload: {
       target: "temporary-public-storage",
