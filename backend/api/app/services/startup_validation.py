@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from app.runtime import is_production, logger, settings
 from shared.logging import log_event
+
+from app.runtime import is_production, logger, settings
 
 
 def validate_required_secrets() -> None:

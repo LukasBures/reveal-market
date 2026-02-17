@@ -7,8 +7,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
-from app import models, schemas
 from shared import models as shared_models
+
+from app import models, schemas
 
 
 def _normalize_bigint(value: Any) -> str | None:

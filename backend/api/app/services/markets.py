@@ -16,18 +16,6 @@ from decimal import Decimal
 from typing import Any, cast
 from urllib.parse import unquote_plus
 
-from app import crud, models, schemas
-from app.database import session_scope
-from app.runtime import (
-    TRENDING_MIN_LIQUIDITY,
-    TRENDING_MIN_ORDERBOOK,
-    TRENDING_MIN_SCORE,
-    TRENDING_MIN_TRADES,
-    TRENDING_MIN_VOLUME_24H,
-    logger,
-    settings,
-)
-from app.services.cache_client import get_cache_client
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from shared.cache_async import add_tag, get_json, get_json_many, get_schema_tag, invalidate_tag, set_json
@@ -40,6 +28,19 @@ from shared.categories import canonical_category_from_slug
 from shared.logging import log_event
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import crud, models, schemas
+from app.database import session_scope
+from app.runtime import (
+    TRENDING_MIN_LIQUIDITY,
+    TRENDING_MIN_ORDERBOOK,
+    TRENDING_MIN_SCORE,
+    TRENDING_MIN_TRADES,
+    TRENDING_MIN_VOLUME_24H,
+    logger,
+    settings,
+)
+from app.services.cache_client import get_cache_client
 
 MARKETS_STATS_KEY = "v1:markets:stats"
 MARKET_DETAIL_PREFIX = "v1:markets:detail"

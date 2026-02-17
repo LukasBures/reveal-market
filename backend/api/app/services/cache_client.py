@@ -10,11 +10,12 @@ import asyncio
 import logging
 
 import httpx
-from app import runtime
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from shared.cache_async import get_client
 from shared.logging import log_event
+
+from app import runtime
 
 
 async def _connect_cache_with_retry() -> Redis | None:

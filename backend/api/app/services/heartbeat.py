@@ -11,10 +11,11 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from app import runtime, schemas
-from app.services.cache_client import get_cache_client
 from redis.exceptions import RedisError
 from shared.logging import log_event
+
+from app import runtime, schemas
+from app.services.cache_client import get_cache_client
 
 heartbeat_logger = logging.getLogger("reveal_market.api.heartbeat")
 
