@@ -453,7 +453,7 @@ async def test_polymarket_client_fetches_events_and_flattens_markets():
     assert len(markets) == 3
     multi = [m for m in markets if m.event_id in {"m-1", "m-2"}]
     single = [m for m in markets if m.event_id == "m-3"]
-    assert {m.group_slug for m in multi} == {"multi-event"}
+    assert {m.group_slug for m in multi} == {None}
     assert single[0].group_slug is None
     # Ensure event metadata was attached
 

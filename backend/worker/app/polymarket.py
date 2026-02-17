@@ -678,7 +678,7 @@ class AsyncPolymarketClient:
                 markets = event.get("markets")
                 if not markets:
                     continue
-                event_group_slug = _derive_event_group_slug(event) if len(markets) > 1 else None
+                event_group_slug = _derive_event_group_slug(event, markets) if len(markets) > 1 else None
                 event_tags = event.get("tags")
                 event_category = event.get("category")
                 event_series = event.get("series")
@@ -1030,6 +1030,61 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
     if not base_slug:
         return None
 
+    def _strip_date_range(value: str) -> str:
+        parts = value.split("-")
+        if len(parts) < 4:
+            return value
+        month_tokens = {
+            "january",
+            "jan",
+            "february",
+            "feb",
+            "march",
+            "mar",
+            "april",
+            "apr",
+            "may",
+            "june",
+            "jun",
+            "july",
+            "jul",
+            "august",
+            "aug",
+            "september",
+            "sep",
+            "sept",
+            "october",
+            "oct",
+            "november",
+            "nov",
+            "december",
+            "dec",
+        }
+        # Remove trailing date-range tokens like february-16-february-18-2026-02-16.
+        idx = len(parts) - 1
+        removed_any = False
+        while idx >= 0:
+            token = parts[idx]
+            if token.isdigit():
+                removed_any = True
+                idx -= 1
+                continue
+            if token in month_tokens:
+                removed_any = True
+                idx -= 1
+                continue
+            if token in {"to", "through", "and", "from"}:
+                removed_any = True
+                idx -= 1
+                continue
+            break
+        if not removed_any:
+            return value
+        stripped = "-".join(parts[: idx + 1]).strip("-")
+        if stripped.count("-") < 2:
+            return value
+        return stripped or value
+
     def _extract_date_token(value: str | None) -> str | None:
         if not value:
             return None
@@ -1157,7 +1212,16 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
     if "committed-to-the-" in base_slug:
         _, remainder = base_slug.split("committed-to-the-", 1)
         base_slug = remainder or base_slug
+    base_slug = _strip_date_range(base_slug)
     parts = base_slug.split("-")
+    for idx in range(len(parts) - 2):
+        if (
+            re.fullmatch(r"\d{4}", parts[idx])
+            and re.fullmatch(r"\d{2}", parts[idx + 1])
+            and re.fullmatch(r"\d{2}", parts[idx + 2])
+        ):
+            prefix = "-".join(parts[: idx + 3]).strip("-")
+            return prefix or base_slug
     # Find the rightmost range-like token (numeric or range keywords) and trim everything from that token onward.
     cutoff = None
     for idx in range(len(parts) - 1, -1, -1):
@@ -1175,15 +1239,26 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
     return trimmed or base_slug
 
 
-def _derive_event_group_slug(event: dict[str, Any]) -> str | None:
-    title = _clean_string(event.get("title") or event.get("name"))
-    if title:
-        return _slugify(title)
-    question = _clean_string(event.get("question"))
-    if question:
-        return _slugify(question)
-    fallback = _clean_string(event.get("slug") or event.get("id"))
-    return _slugify(fallback)
+def _derive_event_group_slug(event: dict[str, Any], markets: list[Any] | None = None) -> str | None:
+    if markets:
+        candidates: list[str] = []
+        for raw in markets:
+            if not isinstance(raw, dict):
+                continue
+            group_item_title = _clean_string(raw.get("groupItemTitle") or raw.get("group_item_title"))
+            slug = _clean_string(raw.get("slug"))
+            question = _clean_string(raw.get("question") or raw.get("title") or raw.get("name"))
+            derived = _derive_group_slug(slug, question, group_item_title)
+            if derived:
+                candidates.append(derived)
+        if candidates:
+            from collections import Counter
+
+            counts = Counter(candidates)
+            slug, count = counts.most_common(1)[0]
+            if count >= 2 and count >= (len(candidates) // 2 + 1):
+                return slug
+    return None
 
 
 def _parse_group_threshold(value: Any) -> float | None:
