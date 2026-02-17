@@ -388,6 +388,8 @@ jobs:
 
       - name: Deploy to Reveal Market production server
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_SHA: ${{ github.sha }}
         with:
           host: 159.69.29.255
           username: reveal
@@ -430,10 +432,11 @@ jobs:
             mkdir -p ~/.ssh
             ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
             if [ -n "${MAIN_GIT_SSH_COMMAND:-}" ]; then
-              GIT_SSH_COMMAND="${MAIN_GIT_SSH_COMMAND}" git pull --rebase --recurse-submodules=no
+              GIT_SSH_COMMAND="${MAIN_GIT_SSH_COMMAND}" git fetch origin "${GITHUB_SHA}"
             else
-              git pull --rebase --recurse-submodules=no
+              git fetch origin "${GITHUB_SHA}"
             fi
+            git checkout "${GITHUB_SHA}"
 
             git submodule sync --recursive
             git -c submodule.prover/artifacts.update=none submodule update --init --recursive
