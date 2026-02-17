@@ -42,4 +42,4 @@ async def test_execute_hedge_rejects_when_clob_missing(monkeypatch):
 
     result = await service._execute_hedge(instr)
     assert result["status"] == "rejected"
-    assert result["reason"] == "read_only"
+    assert result["reason"] == "clob_unavailable"

@@ -207,16 +207,26 @@ class HedgerService:
                 idempotency_key=idemp_key,
             )
             return {"status": "duplicate", "idempotency_key": idemp_key}
-        if await self.repository.commit_exists(idemp_key):
+        try:
+            if await self.repository.commit_exists(idemp_key):
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="hedger.commit.duplicate.db",
+                    message="commit dropped (duplicate idempotency key in DB)",
+                    market_id=commit.market_id,
+                    idempotency_key=idemp_key,
+                )
+                return {"status": "duplicate", "idempotency_key": idemp_key}
+        except Exception as exc:
             log_event(
                 logger,
-                logging.INFO,
-                event="hedger.commit.duplicate.db",
-                message="commit dropped (duplicate idempotency key in DB)",
+                logging.WARNING,
+                event="hedger.commit.db_unavailable",
+                message="database unavailable; skipping idempotency check",
                 market_id=commit.market_id,
-                idempotency_key=idemp_key,
+                error=str(exc),
             )
-            return {"status": "duplicate", "idempotency_key": idemp_key}
 
         if self.fx_oracle.stale():
             log_event(

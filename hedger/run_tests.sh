@@ -68,7 +68,12 @@ run_py_tests() {
   # Ensure dev deps (including xdist) are present.
   if ! "${python_bin}" -c "import pytest, pytest_asyncio, importlib.util; importlib.util.find_spec('xdist')" >/dev/null 2>&1; then
     log_step "Installing dev dependencies (including xdist)"
-    "${python_bin}" -m pip install --no-cache-dir -e .[dev]
+    if command -v uv >/dev/null 2>&1; then
+      uv sync --project "${ROOT_DIR}" --extra dev --no-install-project
+    else
+      log_error "uv not found on PATH; install uv or run 'uv sync --project hedger --extra dev --no-install-project'"
+      exit 1
+    fi
   fi
 
   # Lint first if ruff is available.

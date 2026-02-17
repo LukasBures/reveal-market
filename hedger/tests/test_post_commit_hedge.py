@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from app.config import Settings
+from app.fx import FxQuote
 from app.service import HedgerService
 from app.types import CommitEvent, HedgeAction, HedgeInstruction, OutcomeSide
 
@@ -100,6 +102,8 @@ async def test_ingest_commit_rejects_when_insufficient_usdc():
     )
     service = HedgerService(settings)
     service.lock_manager = None
+    service.fx_oracle._quote = FxQuote(zen_usd=Decimal("1.0"), fetched_at=datetime.now(UTC))
+    service.fx_oracle._stale_override = False
 
     class LowBalanceWallet(StubWallet):
         def has_sufficient_balance(self, required_usdc: Decimal):
