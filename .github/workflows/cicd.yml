@@ -370,6 +370,7 @@ jobs:
           username: reveal
           port: 2222
           key: ${{ secrets.PROD_SSH_KEY }}
+          envs: GITHUB_SHA
           script: |
             set -euo pipefail
             echo ">>> Pull latest code"
