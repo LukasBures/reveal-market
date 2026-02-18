@@ -37,9 +37,10 @@ RUN mkdir -p /data /config
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY Caddyfile /etc/caddy/Caddyfile
+COPY maintenance.html /srv/maintenance/maintenance.html
 # Validate config at build time to fail fast.
 RUN caddy validate --config /etc/caddy/Caddyfile && \
     setcap 'cap_net_bind_service=+ep' /usr/bin/caddy && \
-    chown -R caddy:caddy /data /config
+    chown -R caddy:caddy /data /config /srv/maintenance
 
 USER caddy

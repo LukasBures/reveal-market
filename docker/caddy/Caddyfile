@@ -39,6 +39,12 @@
   }
 }
 
+(maintenance_root) {
+  root * /srv/maintenance
+  rewrite * /maintenance.html
+  file_server
+}
+
 (log_common) {
   log {
     level {$CADDY_LOG_LEVEL:INFO}
@@ -73,6 +79,19 @@
       write_timeout 30s
       max_conns_per_host 128
       keepalive_idle_conns 128
+    }
+    @frontend_down status 502 503 504
+    handle_response @frontend_down {
+      root * /srv/maintenance
+      rewrite * /maintenance.html
+      header Cache-Control "no-store"
+      file_server
+    }
+    handle_errors {
+      root * /srv/maintenance
+      rewrite * /maintenance.html
+      header Cache-Control "no-store"
+      file_server
     }
   }
 }
@@ -138,6 +157,9 @@ revealmarket.xyz {
     root * /srv/artifacts
     header Cache-Control "public, max-age=31536000, immutable"
     file_server
+  }
+  handle_path /maintenance {
+    import maintenance_root
   }
   import proxy_frontend
 }
