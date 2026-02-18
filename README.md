@@ -21,6 +21,10 @@ Reveal Market is a multi-service stack for event-based prediction markets with o
 - `./run_local.sh` builds and launches the stack with cached BuildKit.
 - `./run_prod.sh` performs cached builds and runs detached compose for prod-like runs.
 
+**IPv6 (prod Docker)**
+- The prod compose enables IPv6 on the `reveal-market-prod` bridge network.
+- Host requirements: Docker daemon IPv6 enabled (`ipv6`, `fixed-cidr-v6`, `ip6tables`), IPv6 forwarding/proxy NDP sysctls, and `ndppd` proxying the Docker IPv6 subnet to `eth0`.
+
 **Tests**
 - `make format`
 - `make test`
