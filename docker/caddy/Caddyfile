@@ -87,12 +87,6 @@
       header Cache-Control "no-store"
       file_server
     }
-    handle_errors {
-      root * /srv/maintenance
-      rewrite * /maintenance.html
-      header Cache-Control "no-store"
-      file_server
-    }
   }
 }
 
