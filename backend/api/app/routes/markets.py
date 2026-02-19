@@ -437,9 +437,8 @@ async def list_markets_by_category(
     trending_category = category_slug_key == "trending"
     fetch_limit = limit
     fetch_offset = offset
-    if True:
-        multiplier = 1 if total_volume_mode else 3
-        fetch_limit = min(settings.max_page_size, max(limit * multiplier, settings.default_page_size))
+    multiplier = 1 if total_volume_mode else 3
+    fetch_limit = min(settings.max_page_size, max(limit * multiplier, settings.default_page_size))
     log_event(
         logger,
         logging.DEBUG,

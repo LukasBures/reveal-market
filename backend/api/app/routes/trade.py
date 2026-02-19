@@ -1962,9 +1962,9 @@ async def list_claim_bundles(
 
     # Start with winning rows to avoid walking all commitments for large wallets.
     rows = await repository_async.list_commitments_with_settlement(
-        session, wallet, market_filter=market_id, winning_only=False
+        session, wallet, market_filter=market_id, winning_only=True
     )
-    if not rows:
+    if not rows and not market_id:
         response = schemas.ClaimBundlesResponse(bundles=[])
         await shared_cache.set_json(
             cache_client,
@@ -1979,18 +1979,6 @@ async def list_claim_bundles(
         base_rows = await repository_async.list_commitments_with_settlement(
             session, wallet, market_filter=market_id, winning_only=False
         )
-    elif not rows:
-        # No winners and no specific market requested.
-        response = schemas.ClaimBundlesResponse(bundles=[])
-        await shared_cache.set_json(
-            cache_client,
-            cache_key,
-            response.model_dump(by_alias=True),
-            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
-        )
-        return response
-    else:
-        base_rows = rows
 
     pending_markets: set[str] = set()
     for _commitment, market, settlement in base_rows:

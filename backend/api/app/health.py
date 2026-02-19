@@ -294,9 +294,9 @@ async def _check_pricing_signer(settings: Settings) -> tuple[str, schemas.Health
         try:
             acct = await asyncio.to_thread(load_account, settings.pricing_signer_private_key.get_secret_value())
             derived_address = acct.address
-        except (ValueError, RuntimeError) as exc:  # pragma: no cover - defensive
+        except (ValueError, RuntimeError):  # pragma: no cover - defensive
             status = "error"
-            details.append(f"signer load failed: {exc}")
+            details.append("signer load failed")
 
     env_chain = os.getenv("RM_PRICING_CHAIN_ID")
     if env_chain and derived_chain is not None:

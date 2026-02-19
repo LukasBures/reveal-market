@@ -31,6 +31,18 @@ from app.services.cache_client import get_http_client
 router = APIRouter()
 
 _STREAMER_TIMEOUT_SECONDS = 3.0
+_PRESET_CFG: dict[str, object] | None = None
+
+
+def _get_cached_preset() -> dict[str, object]:
+    """Load and cache env preset config to avoid repeated lookups per request."""
+
+    from shared.env_presets import get_preset
+
+    global _PRESET_CFG
+    if _PRESET_CFG is None:
+        _PRESET_CFG = get_preset()
+    return _PRESET_CFG
 
 
 async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decimal | None:
@@ -38,9 +50,7 @@ async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decim
 
     if not stream_market_id:
         return None
-    from shared.env_presets import get_preset
-
-    preset_cfg = get_preset()
+    preset_cfg = _get_cached_preset()
     stream_base = str(preset_cfg.get("streamer_internal") or preset_cfg.get("streamer_public") or "")
     if not stream_base:
         return None

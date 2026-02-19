@@ -8,6 +8,7 @@ outcomes, tags, and Gamma metadata.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from collections.abc import Iterable
@@ -427,12 +428,12 @@ def safe_float(value: Any) -> float | None:
         return None
     if isinstance(value, (int, float)):
         numeric = float(value)
-        return None if numeric != numeric else numeric  # NaN guard
+        return None if math.isnan(numeric) else numeric
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return None
-    return None if numeric != numeric else numeric
+    return None if math.isnan(numeric) else numeric
 
 
 def safe_int(value: Any) -> int | None:
@@ -1107,7 +1108,7 @@ def compute_market_popularity(market: schemas.MarketResponse) -> float:
     orderbook = clamp(getattr(market, "orderbook_volume_usd", None))
     trades = clamp(getattr(market, "trades_quantity", None))
     score = (liquidity**0.5) * 0.4 + (volume**0.5) * 0.35 + (orderbook**0.5) * 0.2 + (trades**0.5) * 0.05
-    return score if score > 0 and score == score else 0.0
+    return score if score > 0 and not math.isnan(score) else 0.0
 
 
 def is_trending_market(market: schemas.MarketResponse, popularity: float | None = None) -> bool:
