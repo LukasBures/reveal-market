@@ -99,6 +99,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
     event.preventDefault();
     setStatus("submitting");
     setError(null);
+    setCaptchaError(null);
 
     const formData = new FormData(event.currentTarget);
     const payload = {
@@ -125,28 +126,38 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       return;
     }
 
+    let response: Response;
     try {
-      const response = await fetch("/api/contact", {
+      response = await fetch("/api/contact", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...payload, turnstileToken }),
       });
-      if (!response.ok) {
-        setError("We couldn't submit that. Please try again in a moment.");
-        setStatus("error");
-        return;
-      }
-      setStatus("success");
-      event.currentTarget.reset();
-      setTurnstileToken(null);
-      const turnstile = (window as unknown as { turnstile?: Turnstile }).turnstile;
-      if (turnstile && widgetRef.current) {
-        turnstile.reset(widgetRef.current);
-      }
     } catch (err) {
       setError("We couldn't submit that. Please try again in a moment.");
       setStatus("error");
+      return;
     }
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const errorCode = data?.error;
+      if (errorCode === "missing_verification") {
+        setError("Please complete the verification step.");
+      } else if (errorCode === "verification_failed") {
+        setError("Verification failed. Please retry.");
+      } else if (errorCode === "rate_limited") {
+        setError("Too many requests. Please try again in a few minutes.");
+      } else if (errorCode === "missing_fields") {
+        setError("Please include a short note and a valid email address if provided.");
+      } else {
+        setError("We couldn't submit that. Please try again in a moment.");
+      }
+      setStatus("error");
+      return;
+    }
+
+    setStatus("success");
   }
 
   return (
@@ -160,6 +171,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           <span className="text-white">Name</span>
           <input
             name="name"
+            disabled={status === "submitting" || status === "success"}
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
             placeholder="Your name (optional)"
           />
@@ -169,6 +181,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           <input
             type="email"
             name="email"
+            disabled={status === "submitting" || status === "success"}
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring"
             placeholder="you@example.com (optional)"
           />
@@ -180,6 +193,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           name="message"
           required
           rows={7}
+          disabled={status === "submitting" || status === "success"}
           className="w-full min-h-[160px] flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring sm:min-h-[200px]"
           placeholder="Share context about your use case, diligence, or integration needs."
         />
@@ -198,10 +212,10 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       ) : null}
       <button
         type="submit"
-        disabled={status === "submitting"}
+        disabled={status === "submitting" || status === "success"}
         className="w-full rounded-full bg-brand-500 px-5 py-4 text-center text-sm font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
       >
-        {status === "submitting" ? "Sending..." : "Send message"}
+        {status === "submitting" ? "Sending..." : status === "success" ? "Sent" : "Send message"}
       </button>
     </form>
   );

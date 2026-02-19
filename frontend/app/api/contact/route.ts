@@ -80,7 +80,10 @@ export async function POST(request: Request) {
     }
 
     const turnstileSecret = process.env.CONTACT_TURNSTILE_SECRET;
-    if (turnstileSecret) {
+    const envLabel = (process.env.RM_ENVIRONMENT ?? process.env.NODE_ENV ?? "").toLowerCase();
+    const allowTurnstileBypass =
+      envLabel === "local" || envLabel === "development" || envLabel === "dev" || envLabel === "test";
+    if (turnstileSecret && !allowTurnstileBypass) {
       if (!safeTurnstileToken) {
         return NextResponse.json({ ok: false, error: "missing_verification" }, { status: 400 });
       }
@@ -99,6 +102,8 @@ export async function POST(request: Request) {
         logger.warn("contact_form.verification_failed", { error_codes: result["error-codes"] });
         return NextResponse.json({ ok: false, error: "verification_failed" }, { status: 400 });
       }
+    } else if (turnstileSecret) {
+      logger.warn("contact_form.turnstile_bypass", { environment: envLabel || "unknown" });
     } else {
       logger.warn("contact_form.email_disabled", { reason: "missing_turnstile_secret" });
     }
