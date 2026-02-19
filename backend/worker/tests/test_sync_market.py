@@ -292,7 +292,6 @@ async def test_sync_market_upserts_when_hash_changes_with_same_timestamp(monkeyp
             outcomes=["Yes", "No"],
             outcome_prices=[0.45, 0.55],
             source_updated_at=updated_at,
-            content_hash="hash-1",
         )
 
         call_count = 0
@@ -311,7 +310,7 @@ async def test_sync_market_upserts_when_hash_changes_with_same_timestamp(monkeyp
             assert outcome.resolution_changed is False
             await session.commit()
 
-        modified = payload.model_copy(update={"content_hash": "hash-2"})
+        modified = payload.model_copy(update={"outcome_prices": [0.4, 0.6]})
 
         async with session_factory() as session:
             _, outcome = await market_sync.sync_market(session, modified)

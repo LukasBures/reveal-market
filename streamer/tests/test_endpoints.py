@@ -9,7 +9,8 @@ from app.config import Settings
 from app.main import create_app
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
-from tests.utils import DummyStreamer, noop
+
+from tests.test_utils import DummyStreamer, noop
 
 
 class DummyRedis:

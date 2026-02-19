@@ -3,7 +3,8 @@ from __future__ import annotations
 from app.config import Settings
 from app.main import create_app
 from app.state import StreamState
-from tests.utils import DummyStreamer, noop
+
+from tests.test_utils import DummyStreamer, noop
 
 
 def test_logs_warning_when_rtds_disabled(monkeypatch, capsys):

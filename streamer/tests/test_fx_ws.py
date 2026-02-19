@@ -9,7 +9,8 @@ from app.main import create_app
 from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
-from tests.utils import DummyStreamer, noop
+
+from tests.test_utils import DummyStreamer, noop
 
 
 def test_fx_websocket_stream(monkeypatch):
