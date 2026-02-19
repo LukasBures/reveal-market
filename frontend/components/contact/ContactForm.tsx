@@ -9,6 +9,10 @@ type ContactFormProps = {
   siteKey?: string;
 };
 
+const MAX_MESSAGE_LENGTH = 1800;
+const MAX_NAME_LENGTH = 100;
+const MAX_EMAIL_LENGTH = 100;
+
 type Turnstile = {
   render: (element: HTMLElement, options: Record<string, unknown>) => string;
   reset: (widgetId?: string) => void;
@@ -19,6 +23,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [captchaError, setCaptchaError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [messageLength, setMessageLength] = useState(0);
   const widgetRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -117,6 +122,24 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       return;
     }
 
+    if (payload.name.length > MAX_NAME_LENGTH) {
+      setError(`Please keep your name under ${MAX_NAME_LENGTH} characters.`);
+      setStatus("idle");
+      return;
+    }
+
+    if (payload.email.length > MAX_EMAIL_LENGTH) {
+      setError(`Please keep your email under ${MAX_EMAIL_LENGTH} characters.`);
+      setStatus("idle");
+      return;
+    }
+
+    if (payload.message.length > MAX_MESSAGE_LENGTH) {
+      setError(`Please keep your message under ${MAX_MESSAGE_LENGTH} characters.`);
+      setStatus("idle");
+      return;
+    }
+
     if (payload.email && !isValidEmail(payload.email)) {
       setError("Please enter a valid email address or leave it blank.");
       setStatus("idle");
@@ -153,6 +176,12 @@ export function ContactForm({ siteKey }: ContactFormProps) {
         setError("Too many requests. Please try again in a few minutes.");
       } else if (errorCode === "missing_fields") {
         setError("Please include a short note and a valid email address if provided.");
+      } else if (errorCode === "name_too_long") {
+        setError(`Please keep your name under ${MAX_NAME_LENGTH} characters.`);
+      } else if (errorCode === "email_too_long") {
+        setError(`Please keep your email under ${MAX_EMAIL_LENGTH} characters.`);
+      } else if (errorCode === "message_too_long") {
+        setError(`Please keep your message under ${MAX_MESSAGE_LENGTH} characters.`);
       } else {
         setError("We couldn't submit that. Please try again in a moment.");
       }
@@ -174,6 +203,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           <span className="text-white">Name</span>
           <input
             name="name"
+            maxLength={MAX_NAME_LENGTH}
             disabled={status === "submitting" || status === "success"}
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
             placeholder="Your name (optional)"
@@ -184,6 +214,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           <input
             type="email"
             name="email"
+            maxLength={MAX_EMAIL_LENGTH}
             disabled={status === "submitting" || status === "success"}
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
             placeholder="you@example.com (optional)"
@@ -196,10 +227,17 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           name="message"
           required
           rows={7}
+          maxLength={MAX_MESSAGE_LENGTH}
           disabled={status === "submitting" || status === "success"}
           className="w-full min-h-[160px] flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring sm:min-h-[200px]"
           placeholder="Share context about your use case, diligence, or integration needs."
+          onChange={(event) => setMessageLength(event.currentTarget.value.length)}
         />
+        {messageLength >= 1500 ? (
+          <p className="text-xs text-slate-400">
+            {MAX_MESSAGE_LENGTH - messageLength} characters remaining
+          </p>
+        ) : null}
       </label>
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
       {captchaError ? <p className="text-sm text-red-400">{captchaError}</p> : null}

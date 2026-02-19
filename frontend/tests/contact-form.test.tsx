@@ -35,6 +35,35 @@ describe("ContactForm", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("enforces length limits on name, email, and message", async () => {
+    render(<ContactForm />);
+
+    fireEvent.change(screen.getByLabelText(/Name/i), {
+      target: { value: "a".repeat(101) },
+    });
+    fireEvent.change(screen.getByLabelText(/How can we help\?/i), {
+      target: { value: "Hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+    expect(await screen.findByText(/name under 100 characters/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: "Alice" } });
+    fireEvent.change(screen.getByLabelText(/Email/i), {
+      target: { value: `${"a".repeat(90)}@example.com` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+    expect(await screen.findByText(/email under 100 characters/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: "a@example.com" } });
+    fireEvent.change(screen.getByLabelText(/How can we help\?/i), {
+      target: { value: "x".repeat(1801) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+    expect(await screen.findByText(/message under 1800 characters/i)).toBeInTheDocument();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("submits with a turnstile token when provided", async () => {
     const renderMock = vi.fn((_, options: any) => {
       options.callback?.("turnstile-token");

@@ -30,7 +30,10 @@ const rateLimit = (key: string) => {
   return false;
 };
 
-const MAX_MESSAGE_LENGTH = 2000;
+const MAX_DISCORD_CONTENT_LENGTH = 2000;
+const MAX_MESSAGE_LENGTH = 1800;
+const MAX_NAME_LENGTH = 100;
+const MAX_EMAIL_LENGTH = 100;
 
 const normalizeInput = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
@@ -40,17 +43,21 @@ const truncate = (value: string, max: number) =>
 async function sendDiscord(webhookUrl: string, body: { name: string; email?: string; message: string }) {
   const name = body.name ? body.name : "Anonymous";
   const contact = body.email ? body.email : "Not provided";
-  const content = [
+  const rawContent = [
     "**New contact submission**",
     `Name: ${name}`,
     `Contact: ${contact}`,
     "",
     truncate(body.message, MAX_MESSAGE_LENGTH),
   ].join("\n");
+  const content = truncate(rawContent, MAX_DISCORD_CONTENT_LENGTH);
 
   const response = await fetch(webhookUrl, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "user-agent": "RevealMarket Contact/1.0",
+    },
     body: JSON.stringify({
       content,
       username: "RevealMarket Contact",
@@ -59,7 +66,10 @@ async function sendDiscord(webhookUrl: string, body: { name: string; email?: str
   });
 
   if (!response.ok) {
-    throw new Error(`Discord webhook failed with status ${response.status}`);
+    const bodyText = await response.text().catch(() => "");
+    throw new Error(
+      `Discord webhook failed with status ${response.status}${bodyText ? `: ${bodyText}` : ""}`,
+    );
   }
 }
 
@@ -75,7 +85,19 @@ export async function POST(request: Request) {
     const safeMessage = normalizeInput(message);
     const safeTurnstileToken = normalizeInput(turnstileToken);
 
-    if (!safeMessage || (safeEmail && !isValidEmail(safeEmail))) {
+    if (!safeMessage) {
+      return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
+    }
+    if (safeName.length > MAX_NAME_LENGTH) {
+      return NextResponse.json({ ok: false, error: "name_too_long" }, { status: 400 });
+    }
+    if (safeEmail.length > MAX_EMAIL_LENGTH) {
+      return NextResponse.json({ ok: false, error: "email_too_long" }, { status: 400 });
+    }
+    if (safeMessage.length > MAX_MESSAGE_LENGTH) {
+      return NextResponse.json({ ok: false, error: "message_too_long" }, { status: 400 });
+    }
+    if (safeEmail && !isValidEmail(safeEmail)) {
       return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
     }
 
