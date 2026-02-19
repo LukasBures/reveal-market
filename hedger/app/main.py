@@ -21,7 +21,7 @@ from .service import HedgerService
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    setup_logging("reveal_market.hedger", settings.log_level)
+    setup_logging("reveal_market.hedger")
     logger = logging.getLogger("reveal_market.hedger")
     sanitized_config = {
         k: v

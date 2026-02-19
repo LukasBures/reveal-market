@@ -26,7 +26,7 @@ def test_resolve_log_level_invalid_falls_back(monkeypatch) -> None:
 
 def test_setup_logging_emits_init(monkeypatch, caplog) -> None:
     monkeypatch.setenv("HEDGER_LOG_LEVEL", "warning")
-    logger = logging_config.setup_logging("reveal_market.hedger", "INFO")
+    logger = logging_config.setup_logging("reveal_market.hedger")
     assert logger.level == logging.WARNING
     records: list[logging.LogRecord] = []
 
