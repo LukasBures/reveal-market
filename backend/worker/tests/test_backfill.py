@@ -45,7 +45,7 @@ class DummyMarketFunctions:
         self._market_id = market_id
         self._exc = exc
 
-    def marketId(self) -> DummyCall:
+    def marketId(self) -> DummyCall:  # noqa: N802
         return DummyCall(result=self._market_id, exc=self._exc)
 
 
@@ -54,7 +54,7 @@ class DummyFactoryFunctions:
         self._params = params
         self._exc = exc
 
-    def getMarketParams(self, _market_id: int) -> DummyCall:
+    def getMarketParams(self, _market_id: int) -> DummyCall:  # noqa: N802
         return DummyCall(result=self._params, exc=self._exc)
 
 
