@@ -14,7 +14,7 @@ export const EventGrid = memo(function EventGrid({ events }: Props) {
     return null;
   }
   return (
-    <div className="grid grid-cols-1 auto-rows-fr gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid w-full grid-cols-1 auto-rows-fr gap-4 md:grid-cols-2 lg:grid-cols-3">
       {events.map((event, index) => {
         const isPriority = index < PRIORITY_COUNT;
         return <MemoizedEventCard key={event.eventId} event={event} priority={isPriority} />;
