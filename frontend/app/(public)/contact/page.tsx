@@ -26,7 +26,7 @@ export default function ContactPage() {
   const contactSchema = buildContactPageJsonLd("/contact");
   return (
     <>
-      <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col gap-8 px-4 py-12 text-white box-border pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
+      <div className="mx-auto flex min-h-full w-full max-w-7xl flex-1 flex-col gap-8 px-4 py-12 text-white box-border pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Contact</p>
           <h1 className="text-3xl font-semibold text-white sm:text-4xl">Contact</h1>

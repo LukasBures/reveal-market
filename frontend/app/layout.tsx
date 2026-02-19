@@ -166,7 +166,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <HeartbeatClient />
           <div className="flex min-h-screen flex-col">
             <MainNav />
-            <main className="flex-1">{children}</main>
+            <main className="flex-1 flex flex-col">{children}</main>
             <Footer />
           </div>
         </AppProviders>

@@ -153,7 +153,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="flex flex-col space-y-5 rounded-2xl border border-white/10 bg-white/5 p-7 text-base sm:p-8 flex-1"
+      className="flex flex-1 min-h-0 flex-col space-y-5 rounded-2xl border border-white/10 bg-white/5 p-7 text-base sm:p-8"
     >
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm text-slate-200">
@@ -174,13 +174,13 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           />
         </label>
       </div>
-      <label className="space-y-2 text-sm text-slate-200">
+      <label className="flex flex-1 flex-col gap-2 text-sm text-slate-200">
         <span className="text-white">How can we help?</span>
         <textarea
           name="message"
           required
-          rows={5}
-          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring"
+          rows={7}
+          className="w-full min-h-[160px] flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring sm:min-h-[200px]"
           placeholder="Share context about your use case, diligence, or integration needs."
         />
       </label>
