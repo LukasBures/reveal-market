@@ -12,7 +12,7 @@ describe("ContactForm", () => {
         ({
           ok: true,
           json: vi.fn().mockResolvedValue({}),
-        }) as Response,
+        }) as unknown as Response,
     );
     vi.stubGlobal("fetch", fetchMock);
   });

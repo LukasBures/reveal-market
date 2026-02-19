@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { isValidEmail } from "@/lib/validation";
 
 type SubmissionState = "idle" | "submitting" | "success" | "error";
 
@@ -21,8 +22,6 @@ export function ContactForm({ siteKey }: ContactFormProps) {
   const widgetRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const isValidEmail = (value: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
-
   useEffect(() => {
     if (!siteKey || !containerRef.current) {
       return;
@@ -42,8 +41,10 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       return;
     }
 
+    const getTurnstile = (): Turnstile | undefined =>
+      (window as unknown as { turnstile?: Turnstile }).turnstile;
     const renderTurnstile = () => {
-      const turnstile = (window as unknown as { turnstile?: Turnstile }).turnstile;
+      const turnstile = getTurnstile();
       if (!turnstile || !containerRef.current) return;
       containerRef.current.innerHTML = "";
       widgetRef.current = turnstile.render(containerRef.current, {
@@ -65,33 +66,35 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       });
     };
 
-    const turnstileGlobal = (window as unknown as { turnstile?: Turnstile }).turnstile;
+    let cleanup: (() => void) | undefined;
+    const turnstileGlobal = getTurnstile();
     if (turnstileGlobal) {
       renderTurnstile();
-      return;
-    }
-
-    const existingScript = document.getElementById("cf-turnstile");
-    if (existingScript) {
-      if ((window as unknown as { turnstile?: Turnstile }).turnstile) {
-        renderTurnstile();
+    } else {
+      const existingScript = document.getElementById("cf-turnstile");
+      if (existingScript) {
+        if (getTurnstile()) {
+          renderTurnstile();
+        } else {
+          existingScript.addEventListener("load", renderTurnstile);
+          cleanup = () => existingScript.removeEventListener("load", renderTurnstile);
+        }
       } else {
-        existingScript.addEventListener("load", renderTurnstile);
-        return () => existingScript.removeEventListener("load", renderTurnstile);
+        const script = document.createElement("script");
+        script.id = "cf-turnstile";
+        script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        script.onload = renderTurnstile;
+        document.head.appendChild(script);
+        cleanup = () => {
+          script.onload = null;
+        };
       }
-      return;
     }
-
-    const script = document.createElement("script");
-    script.id = "cf-turnstile";
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.onload = renderTurnstile;
-    document.head.appendChild(script);
 
     return () => {
-      script.onload = null;
+      cleanup?.();
     };
   }, [siteKey]);
 
@@ -182,7 +185,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
             type="email"
             name="email"
             disabled={status === "submitting" || status === "success"}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring"
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
             placeholder="you@example.com (optional)"
           />
         </label>

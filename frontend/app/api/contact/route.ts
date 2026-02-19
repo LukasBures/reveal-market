@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logging";
+import { isValidEmail } from "@/lib/validation";
 import crypto from "node:crypto";
 
 const RATE_WINDOW_MS = 10 * 60 * 1000;
@@ -74,8 +75,7 @@ export async function POST(request: Request) {
     const safeMessage = normalizeInput(message);
     const safeTurnstileToken = normalizeInput(turnstileToken);
 
-    const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-    if (!safeMessage || (safeEmail && !emailRegex.test(safeEmail))) {
+    if (!safeMessage || (safeEmail && !isValidEmail(safeEmail))) {
       return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
     }
 
