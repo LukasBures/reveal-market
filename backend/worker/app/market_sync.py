@@ -795,10 +795,11 @@ def _markets_match(
     existing_source_ts = _as_utc(getattr(existing, "source_updated_at", None))
     incoming_source_ts = _as_utc(source_updated_at)
     existing_hash = getattr(existing, "content_hash", None)
-    if content_hash is not None and existing_hash != content_hash:
-        return False, "content_hash_changed"
-    if content_hash and existing_hash and existing_hash == content_hash:
-        return True, "content_hash"
+    if content_hash is not None:
+        if existing_hash != content_hash:
+            return False, "content_hash_changed"
+        if content_hash:
+            return True, "content_hash"
     if incoming_source_ts and existing_source_ts and existing_source_ts == incoming_source_ts:
         return True, "source_timestamp"
     return False, "diff_detected"

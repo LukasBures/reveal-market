@@ -213,6 +213,14 @@ class DummyGauge:
         return self.records[-1]["value"] if self.records else None
 
 
+async def _cancel_task(task: asyncio.Task) -> None:
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 @pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_builds_expected_filters(monkeypatch):
     captured: dict[str, Any] = {}
@@ -1378,12 +1386,8 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
     manual_summary.proof_jobs.append((snapshot, sample_markets[0], None))
     await proofs.enqueue_proof_jobs(redis_client, manual_summary)
     await asyncio.sleep(0.1)
-    proof_worker_task.cancel()
-    settlement_worker_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await proof_worker_task
-    with contextlib.suppress(asyncio.CancelledError):
-        await settlement_worker_task
+    await _cancel_task(proof_worker_task)
+    await _cancel_task(settlement_worker_task)
 
     assert stats["markets_processed"] == 1
     assert await redis_client.llen(runtime_module.settings.proof_queue_key) == 0
@@ -1573,9 +1577,7 @@ async def test_proof_queue_worker_processes_jobs(monkeypatch):
     worker_task = asyncio.create_task(proofs.run_proof_queue_worker(redis_client))
     # Give the worker a moment to process
     await asyncio.sleep(0.1)
-    worker_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await worker_task
+    await _cancel_task(worker_task)
 
     assert called["count"] == 1
     assert await redis_client.llen(queue_key) == 0
@@ -1595,9 +1597,7 @@ async def test_proof_queue_worker_drops_invalid_payload(monkeypatch):
     await redis_client.rpush(queue_key, json.dumps(job))
     worker_task = asyncio.create_task(proofs.run_proof_queue_worker(redis_client))
     await asyncio.sleep(0.05)
-    worker_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await worker_task
+    await _cancel_task(worker_task)
 
     assert await redis_client.llen(queue_key) == 0
     assert gauge.last_value() == 0

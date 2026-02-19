@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import gc
 import json
 import logging
@@ -150,6 +149,16 @@ def _calculate_sleep(start_time: float) -> float:
     if jitter > 0:
         sleep_for += random.uniform(0, jitter)  # noqa: S311 - non-crypto jitter
     return sleep_for
+
+
+async def _cancel_task(task: asyncio.Task | None) -> None:
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
@@ -2066,19 +2075,7 @@ async def run_worker() -> None:
             await asyncio.sleep(sleep_for)
     finally:
         heartbeat_stop.set()
-        if maintenance_task is not None:
-            maintenance_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await maintenance_task
-        if lock_batches_task is not None:
-            lock_batches_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await lock_batches_task
-        if proof_worker_task is not None:
-            proof_worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await proof_worker_task
-        if settlement_worker_task is not None:
-            settlement_worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await settlement_worker_task
+        await _cancel_task(maintenance_task)
+        await _cancel_task(lock_batches_task)
+        await _cancel_task(proof_worker_task)
+        await _cancel_task(settlement_worker_task)

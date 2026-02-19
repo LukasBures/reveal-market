@@ -195,8 +195,6 @@ def settlement_needs_refresh(settlement: shared_models.Settlement | None) -> boo
         return True
     if _is_empty_hex(settlement.circuit_hash):
         return True
-    if settlement.commitments_count and not has_batch_roots and not has_merkle_root:
-        return True
     if batch_roots and (not batch_counts or len(batch_counts) != len(batch_roots)):
         return True
     if settlement.commitments_count is None:
@@ -1278,6 +1276,8 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                 # hydrate from chain if possible
                 settlement = await _upsert_settlement_from_chain(session, market) or settlement
                 batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+            if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
+                batch_roots = [settlement.merkle_root]
             if web3 is None or account is None:
                 settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
                 settlement.submission_error = "settlement_tx_unavailable"
@@ -1288,9 +1288,6 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             settlement.submission_error = None
             _mark_dirty()
             session.add(settlement)
-            batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
-                batch_roots = [settlement.merkle_root]
             if not batch_roots:
                 log_event(
                     logger,
