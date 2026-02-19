@@ -249,7 +249,6 @@ jobs:
       - name: Lighthouse CI
         working-directory: frontend
         run: |
-          npm run build
           npm run lighthouse:ci
 
 

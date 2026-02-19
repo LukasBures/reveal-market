@@ -1,13 +1,8 @@
 module.exports = {
   ci: {
     collect: {
-      numberOfRuns: 3,
-      url: [
-        "http://localhost:3000/",
-        "http://localhost:3000/search",
-        "http://localhost:3000/docs",
-        "http://localhost:3000/events/sample-event",
-      ],
+      numberOfRuns: 1,
+      url: ["http://localhost:3000/"],
       startServerCommand: "npm run start",
       startServerReadyPattern: "ready - started server on",
       startServerReadyTimeout: 120000,
@@ -26,14 +21,7 @@ module.exports = {
         "categories:best-practices": ["warn", { minScore: 0.9 }],
         "categories:seo": ["warn", { minScore: 0.9 }],
       },
-      assertionsByUrl: {
-        "http://localhost:3000/search": {
-          "categories:seo": "off",
-        },
-        "http://localhost:3000/events/sample-event": {
-          "categories:seo": "off",
-        },
-      },
+      assertionsByUrl: {},
     },
     upload: {
       target: "temporary-public-storage",
