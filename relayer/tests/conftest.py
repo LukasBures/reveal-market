@@ -43,4 +43,4 @@ def _close_event_loop():
         try:
             policy.set_event_loop(None)
         except RuntimeError:
-            pass
+            return

@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 import relayer.service as service_module
 from relayer.poseidon import build_batch_root, compute_leaf, int_to_hex32
-from relayer.service import RelayerService, TxSendError
 from web3 import Web3
 
 
@@ -48,7 +47,7 @@ class DummyEscrow:
         raise AttributeError(name)
 
 
-class LockingService(RelayerService):
+class LockingService(service_module.RelayerService):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.active = 0
@@ -97,7 +96,7 @@ def _valid_claim_payload():
 
 @pytest.mark.asyncio
 async def test_poll_receipt_revert_marks_permanent():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(receipt_status=0),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -106,7 +105,7 @@ async def test_poll_receipt_revert_marks_permanent():
         api_internal_secret=None,
     )
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         await service._poll_receipt(b"\x01", "commit", 1, time.perf_counter(), attempt=1)
 
     assert exc.value.permanent is True
@@ -140,7 +139,7 @@ async def test_commit_serializes_nonce_lock():
 
 
 def test_validate_commit_rejects_expired():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -151,7 +150,7 @@ def test_validate_commit_rejects_expired():
     payload = _valid_commit_payload()
     payload["expiry"] = int(time.time()) - 1
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         service.validate_commit_payload(payload)
 
     assert exc.value.kind == "invalid"
@@ -159,7 +158,7 @@ def test_validate_commit_rejects_expired():
 
 
 def test_validate_commit_rejects_bad_commitment():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -170,14 +169,14 @@ def test_validate_commit_rejects_bad_commitment():
     payload = _valid_commit_payload()
     payload["commitment"] = "0x" + "0" * 62
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         service.validate_commit_payload(payload)
 
     assert exc.value.kind == "invalid"
 
 
 def test_validate_claim_rejects_bad_salt():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -188,14 +187,14 @@ def test_validate_claim_rejects_bad_salt():
     payload = _valid_claim_payload()
     payload["salt"] = "0x" + "4" * 62
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         service.validate_claim_payload(payload)
 
     assert exc.value.kind == "invalid"
 
 
 def test_validate_lock_requires_market_id():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -216,7 +215,7 @@ def test_validate_lock_requires_market_id():
         ],
     }
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         service.validate_lock_payload(payload)
 
     assert exc.value.kind == "invalid"
@@ -224,7 +223,7 @@ def test_validate_lock_requires_market_id():
 
 
 def test_build_batch_roots_matches_poseidon():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -277,7 +276,7 @@ def test_build_batch_roots_matches_poseidon():
 
 
 def test_build_batch_roots_rejects_leaf_mismatch():
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -297,7 +296,7 @@ def test_build_batch_roots_rejects_leaf_mismatch():
         }
     ]
 
-    with pytest.raises(TxSendError) as exc:
+    with pytest.raises(service_module.TxSendError) as exc:
         service._build_batch_roots(tickets)
 
     assert exc.value.kind == "invalid"
@@ -327,7 +326,7 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
 
     monkeypatch.setattr(service_module.httpx, "AsyncClient", DummyAsyncClient)
 
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -390,7 +389,7 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
 
     monkeypatch.setattr(service_module.httpx, "AsyncClient", DummyAsyncClient)
 
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -440,7 +439,7 @@ async def test_push_commit_ingest_skips_missing_event_id(monkeypatch):
 
     monkeypatch.setattr(service_module.httpx, "AsyncClient", fail_async_client)
 
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
@@ -468,7 +467,7 @@ async def test_push_settlement_ingest_skips_missing_market_id(monkeypatch):
 
     monkeypatch.setattr(service_module.httpx, "AsyncClient", fail_async_client)
 
-    service = RelayerService(
+    service = service_module.RelayerService(
         web3=DummyWeb3(),
         escrow=SimpleNamespace(address="0xescrow"),
         account=SimpleNamespace(address="0xrelayer"),
