@@ -9,6 +9,7 @@ from app.main import create_app
 from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
+from tests.utils import DummyStreamer, noop
 
 
 def test_fx_websocket_stream(monkeypatch):
@@ -19,20 +20,10 @@ def test_fx_websocket_stream(monkeypatch):
     state.fx_last_update = now
 
     # Keep startup/shutdown from doing network work
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())

@@ -4,6 +4,7 @@ import pytest
 from app.main import create_app
 from app.state import StreamState
 from fastapi.testclient import TestClient
+from tests.utils import DummyStreamer, noop
 
 
 class StubCacheState(StreamState):
@@ -19,18 +20,8 @@ class StubCacheState(StreamState):
 def clob_client(monkeypatch):
     state = StubCacheState()
 
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: state.settings)

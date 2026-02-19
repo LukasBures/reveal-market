@@ -5,6 +5,7 @@ from app.config import Settings
 from app.main import create_app
 from app.state import StreamState
 from fastapi.testclient import TestClient
+from tests.utils import DummyStreamer, noop
 
 
 class DummySubgraph:
@@ -35,21 +36,12 @@ class DummySubgraph:
 
 @pytest.fixture()
 def subgraph_app(monkeypatch):
+    """Create a TestClient with mocked streamer/subgraph dependencies for subgraph tests."""
+
     settings = Settings(subgraph_default_url="https://example.com/subgraph")
     state = StreamState(settings)
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
@@ -165,18 +157,8 @@ def test_subgraph_not_configured_returns_503(monkeypatch):
     )
     state = StreamState(settings)
 
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
@@ -186,24 +168,18 @@ def test_subgraph_not_configured_returns_503(monkeypatch):
     with TestClient(app) as client:
         resp = client.get("/subgraph/markets")
         assert resp.status_code == 503
+        body = resp.json()
+        assert isinstance(body, dict)
+        assert "detail" in body
+        assert isinstance(body["detail"], str) and body["detail"]
 
 
 def test_subgraph_http_error_surfaces_details(monkeypatch):
     settings = Settings(subgraph_default_url="https://example.com/subgraph")
     state = StreamState(settings)
 
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     class DummySubgraph:
         async def fetch_markets(self, **_kwargs):

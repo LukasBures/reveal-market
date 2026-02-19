@@ -4,6 +4,7 @@ import pytest
 from app.main import create_app
 from app.state import StreamState
 from fastapi.testclient import TestClient
+from tests.utils import DummyStreamer, noop
 
 
 class StubState(StreamState):
@@ -24,16 +25,6 @@ def history_client(monkeypatch):
     monkeypatch.setattr("app.main.get_settings", lambda: state.settings)
 
     # Avoid spinning up real network streamer in tests.
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
 

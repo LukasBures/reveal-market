@@ -9,6 +9,7 @@ from app.config import Settings
 from app.main import create_app
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
+from tests.utils import DummyStreamer, noop
 
 
 class DummyRedis:
@@ -39,19 +40,6 @@ def test_app(monkeypatch):
     state.fx_last_update = now
 
     # Avoid starting real streamer/network loops in tests.
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
@@ -98,19 +86,6 @@ def test_health_endpoint_reports_upstream_status(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
@@ -141,19 +116,6 @@ def test_health_status_stale(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
@@ -173,19 +135,6 @@ def test_health_status_degraded(monkeypatch):
     state.last_seen["m1"] = datetime.now(UTC) - timedelta(seconds=120)
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -207,19 +156,6 @@ def test_fx_endpoint(monkeypatch):
     state.fx_last_update = now
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -251,19 +187,6 @@ def test_fx_endpoint_reports_stale_and_age(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
@@ -282,19 +205,6 @@ def test_subscriptions_endpoint(monkeypatch):
     state.rtds_symbols.add("zenusdt")
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -451,19 +361,9 @@ def test_dashboard_endpoint(monkeypatch):
     state.last_seen["dash-m1"] = now
     state.last_published["dash-m1"] = now
 
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
 
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     app = create_app()
@@ -481,16 +381,6 @@ def test_control_subscription_endpoints(monkeypatch):
     state = StreamState(settings)
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -542,16 +432,6 @@ def test_control_symbols_respect_cap_and_bump_version(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
 
@@ -584,16 +464,6 @@ def test_access_token_and_connection_cap(monkeypatch):
     state = StreamState(settings)
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -630,13 +500,6 @@ def test_per_client_connection_cap(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
             return None
@@ -650,9 +513,6 @@ def test_per_client_connection_cap(monkeypatch):
     state.subscribe = fake_subscribe  # type: ignore[assignment]
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -671,13 +531,6 @@ def test_ws_requires_access_token(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
     class DummyPubSub:
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
             # Mimic redis pubsub timeout so the websocket loop sends a heartbeat and yields.
@@ -695,9 +548,6 @@ def test_ws_requires_access_token(monkeypatch):
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
 
-    async def noop():
-        return None
-
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
     app = create_app()
@@ -713,16 +563,6 @@ def test_stream_releases_assets_on_subscribe_error(monkeypatch):
     state = StreamState(settings)
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
-
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
@@ -748,13 +588,6 @@ def test_rate_limit_overflow(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    class DummyStreamer:
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
     async def fake_subscribe(market_id: str):
         class DummyPubSub:
             async def get_message(self, ignore_subscribe_messages=True, timeout=None):
@@ -769,9 +602,6 @@ def test_rate_limit_overflow(monkeypatch):
     state.subscribe = fake_subscribe  # type: ignore[assignment]
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]

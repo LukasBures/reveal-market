@@ -3,24 +3,12 @@ from __future__ import annotations
 from app.config import Settings
 from app.main import create_app
 from app.state import StreamState
+from tests.utils import DummyStreamer, noop
 
 
 def test_logs_warning_when_rtds_disabled(monkeypatch, capsys):
     settings = Settings(rtds_enabled=False)
     state = StreamState(settings)
-
-    class DummyStreamer:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-    async def noop():
-        return None
 
     state.startup = noop  # type: ignore[assignment]
     state.shutdown = noop  # type: ignore[assignment]
