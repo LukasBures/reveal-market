@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import Request
+
+
+class ResponseLike(Protocol):
+    headers: Any
+    body: Any | None
 
 
 def extract_cache_hit(request: Request | None) -> bool | None:
@@ -25,7 +30,7 @@ def extract_cache_metadata(request: Request | None) -> dict[str, Any]:
     return {"cache_key": None, "cache_source": None, "cache_hit": None}
 
 
-def estimate_response_bytes(response) -> int:
+def estimate_response_bytes(response: ResponseLike) -> int:
     """
     Estimate the size of an HTTP response body in bytes.
 

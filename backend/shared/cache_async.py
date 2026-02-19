@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util as importlib_util
 import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
-from threading import Lock
 from typing import Any, Protocol, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from .logging import log_event
+import shared.logging as shared_logging
+
+from .cache_stats import CacheStats
 
 logger = logging.getLogger("reveal_market.cache_async")
 
@@ -27,37 +29,9 @@ class _JsonLib(Protocol):
         raise NotImplementedError
 
 
-_orjson_spec = importlib.util.find_spec("orjson")
+_orjson_spec = importlib_util.find_spec("orjson")
 _orjson_module = importlib.import_module("orjson") if _orjson_spec else None
 orjson = cast(_JsonLib | None, _orjson_module)
-
-
-class CacheStats:
-    def __init__(self):
-        self._lock = Lock()
-        self.hits = 0
-        self.misses = 0
-        self.errors = 0
-
-    def record_hit(self) -> None:
-        with self._lock:
-            self.hits += 1
-
-    def record_miss(self) -> None:
-        with self._lock:
-            self.misses += 1
-
-    def record_error(self) -> None:
-        with self._lock:
-            self.errors += 1
-
-    def snapshot(self) -> dict[str, float]:
-        with self._lock:
-            return {
-                "hits": float(self.hits),
-                "misses": float(self.misses),
-                "errors": float(self.errors),
-            }
 
 
 _stats = CacheStats()
@@ -87,7 +61,7 @@ def get_client(url: str) -> Redis | None:
     try:
         return Redis.from_url(url, decode_responses=True)
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.connection_failed",
@@ -105,7 +79,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
     if client is None:
         stats.record_miss()
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.get.disabled",
@@ -116,7 +90,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
     try:
         payload_raw = await client.get(key)
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.get.error",
@@ -129,7 +103,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
     if payload_raw is None:
         stats.record_miss()
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.get.miss",
@@ -142,7 +116,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
     elif isinstance(payload_raw, str):
         payload = payload_raw.encode()
     else:
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.get.invalid_type",
@@ -155,7 +129,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
     try:
         data = _json_loads(payload)
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.get.hit",
@@ -166,7 +140,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
         stats.record_hit()
         return data
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.decode.error",
@@ -198,7 +172,7 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
     try:
         payloads = await client.mget(list(keys))
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.mget.error",
@@ -218,7 +192,7 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
         elif isinstance(payload_raw, str):
             payload = payload_raw.encode()
         else:
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.WARNING,
                 event="cache.mget.invalid_type",
@@ -233,7 +207,7 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
             results[key] = data
             stats.record_hit()
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.WARNING,
                 event="cache.mget.decode_error",
@@ -250,7 +224,7 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
 
     if client is None:
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.set.disabled",
@@ -262,7 +236,7 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
         payload = _json_dumps(value)
         if ttl_seconds is not None and ttl_seconds <= 0:
             if logger.isEnabledFor(logging.DEBUG):
-                log_event(
+                shared_logging.log_event(
                     logger,
                     logging.DEBUG,
                     event="cache.set.skip",
@@ -276,7 +250,7 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
         else:
             await client.set(key, payload)
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.set",
@@ -287,7 +261,7 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
             )
     except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
         get_stats_client().record_error()
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.set.error",
@@ -302,7 +276,7 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
 
     if client is None:
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.set_many.disabled",
@@ -314,7 +288,7 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
         return 0
     if ttl_seconds is not None and ttl_seconds <= 0:
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.set_many.skip",
@@ -339,7 +313,7 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
         return len(items)
     except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
         get_stats_client().record_error()
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.set_many.error",
@@ -355,7 +329,7 @@ async def delete(client: Redis | None, key: str) -> None:
 
     if client is None:
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.delete.disabled",
@@ -366,7 +340,7 @@ async def delete(client: Redis | None, key: str) -> None:
     try:
         await client.delete(key)
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.delete.error",
@@ -387,7 +361,7 @@ async def delete_prefix(client: Redis | None, prefix: str) -> None:
         async for key in iter_scan(client, pattern):
             await _maybe_await(client.delete(key))
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.delete_prefix.error",
@@ -418,7 +392,7 @@ async def add_tag(client: Redis | None, tag: str, key: str) -> None:
     try:
         await _maybe_await(client.sadd(_tag_storage_key(tag), key))
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.tag.added",
@@ -427,7 +401,7 @@ async def add_tag(client: Redis | None, tag: str, key: str) -> None:
                 key=key,
             )
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.tag.attach_failed",
@@ -468,7 +442,7 @@ async def invalidate_tag(client: Redis | None, tag: str) -> int:
             removed += len(batch)
         await _maybe_await(client.delete(storage_key))
         if logger.isEnabledFor(logging.DEBUG):
-            log_event(
+            shared_logging.log_event(
                 logger,
                 logging.DEBUG,
                 event="cache.tag.invalidated",
@@ -478,7 +452,7 @@ async def invalidate_tag(client: Redis | None, tag: str) -> int:
             )
         return removed
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.tag.invalidate_failed",
@@ -506,7 +480,7 @@ async def get_schema_tag(client: Redis | None, schema_version_key: str) -> str:
     try:
         revision = await client.get(schema_version_key)
     except RedisError as exc:  # pragma: no cover - defensive
-        log_event(
+        shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.schema_tag.error",

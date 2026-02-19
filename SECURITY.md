@@ -2,20 +2,23 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+RevealMarket is deployed as a service. Security fixes are applied to the
+`main` branch and the latest tagged release used for production deployments.
+Older releases are not supported.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| `main` (rolling) | :white_check_mark: |
+| latest release tag | :white_check_mark: |
+| older releases | :x:                |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report security issues privately via GitHub Security Advisories:
+https://github.com/RevealMarket/reveal-market/security/advisories/new
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+We aim to acknowledge all vulnerability reports within **3 business days** and
+provide status updates at least every **7 business days** while we investigate
+and prepare a fix. Once a fix is ready, we will coordinate a disclosure date
+with the reporter. Please **do not** disclose vulnerabilities publicly until a
+fix has been released.

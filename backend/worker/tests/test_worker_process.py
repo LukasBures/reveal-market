@@ -419,8 +419,6 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
     assert stats["markets_processed"] == 0
     assert stats["markets_changed"] == 0
     assert stats["resolutions_changed"] == 0
-    assert stats["markets_changed"] == 0
-    assert stats["resolutions_changed"] == 0
     assert dummy.store.get(runtime_module.settings.schema_version_key) == schema_state.current_revision
     assert "schema:unknown" in invalidated
     assert f"schema:{schema_state.previous_revision}" in invalidated
@@ -679,9 +677,6 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     monkeypatch.setattr(worker_service, "log_resolution_gaps_async", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_addresses", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "backfill_market_params", async_zero, raising=False)
-    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
-    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
-    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
     monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", async_zero, raising=False)
     monkeypatch.setattr(
         runtime_module,

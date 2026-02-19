@@ -77,7 +77,7 @@ describe("Trade status polling", () => {
     hooks.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
   });
 
-  it("polls trade status when tx hash is present", async () => {
+  it("calls fetchTradeStatus when tx hash is present", async () => {
     hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
     hooks.useReadContract.mockReturnValue({ data: 0n });
