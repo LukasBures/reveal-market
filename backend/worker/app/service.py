@@ -68,7 +68,17 @@ class _WorkerTimestamps:
 
 _WORKER_TIMESTAMPS = _WorkerTimestamps()
 _WORKER_TIMESTAMPS_LOCK = asyncio.Lock()
-_background_proofs_task: asyncio.Task | None = None
+
+
+@dataclass
+class WorkerContext:
+    """Holds per-worker mutable state such as background tasks."""
+
+    background_proofs_task: asyncio.Task | None = None
+    background_proofs_skipped_count: int = 0
+
+
+_DEFAULT_CONTEXT = WorkerContext()
 
 
 class MemoryStats(TypedDict, total=False):
@@ -1411,11 +1421,15 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         await _release_sync_lease(redis_client)
 
 
-async def process_once(redis_client: Redis | None = None) -> dict[str, float | int | str | bool]:
+async def process_once(
+    redis_client: Redis | None = None, context: WorkerContext | None = None
+) -> dict[str, float | int | str | bool]:
     """Fetch markets, persist them, and emit a heartbeat once."""
 
     from shared.db_metrics import reset_metrics as reset_db_metrics
 
+    if context is None:
+        context = _DEFAULT_CONTEXT
     reset_db_metrics()
     log_event(
         logger,
@@ -1507,16 +1521,26 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
                 error=str(exc),
             )
     else:
-        global _background_proofs_task
-        if _background_proofs_task is None or _background_proofs_task.done():
-            _background_proofs_task = asyncio.create_task(_run_proofs_and_settlements(summary))
+        if context.background_proofs_task is None or context.background_proofs_task.done():
+            context.background_proofs_task = asyncio.create_task(_run_proofs_and_settlements(summary))
+            context.background_proofs_skipped_count = 0
         else:
+            context.background_proofs_skipped_count += 1
             log_event(
                 logger,
                 logging.DEBUG,
                 event="worker.proof.jobs_skipped",
                 message="previous proof/settlement task still running",
+                skip_count=context.background_proofs_skipped_count,
             )
+            if context.background_proofs_skipped_count >= 3:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="worker.proof.jobs_skipped_repeatedly",
+                    message="proof/settlement processing repeatedly skipped because previous task is still running",
+                    skip_count=context.background_proofs_skipped_count,
+                )
     summary.proofs_generated = 0
     summary.settlement_txs = 0
     cache_report = await invalidate_cache_tags(redis_client, summary)
@@ -2015,11 +2039,11 @@ async def record_batch_stats(
         )
 
 
-async def _run_worker_tick(redis_client: Redis | None) -> None:
+async def _run_worker_tick(redis_client: Redis | None, context: WorkerContext) -> None:
     """Execute a single worker tick with cache priming in parallel."""
 
     async with asyncio.TaskGroup() as tg:
-        process_task = tg.create_task(process_once(redis_client))
+        process_task = tg.create_task(process_once(redis_client, context=context))
         prime_markets_task = tg.create_task(prime_markets_cache(redis_client))
         prime_featured_task = tg.create_task(prime_featured_views(redis_client))
 
@@ -2057,6 +2081,7 @@ async def run_worker() -> None:
         interval_seconds=runtime.settings.container_heartbeat_seconds,
         message="Worker container heartbeat",
     )
+    worker_context = WorkerContext()
     proof_worker_task: asyncio.Task | None = None
     settlement_worker_task: asyncio.Task | None = None
     lock_batches_task: asyncio.Task | None = None
@@ -2070,7 +2095,7 @@ async def run_worker() -> None:
         while True:
             loop_start = time.monotonic()
             try:
-                await _run_worker_tick(redis_client)
+                await _run_worker_tick(redis_client, worker_context)
                 sleep_for = _calculate_sleep(loop_start)
             except Exception as exc:  # pragma: no cover - defensive
                 log_event(
@@ -2100,4 +2125,4 @@ async def run_worker() -> None:
         await _cancel_task(lock_batches_task)
         await _cancel_task(proof_worker_task)
         await _cancel_task(settlement_worker_task)
-        await _cancel_task(_background_proofs_task)
+        await _cancel_task(worker_context.background_proofs_task)

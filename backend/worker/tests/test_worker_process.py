@@ -425,6 +425,48 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_once_enqueues_backfill_proof_jobs(monkeypatch):
+    dummy = DummyRedis()
+    summary = market_sync.SyncSummary()
+    schema_state = SchemaSyncResult(
+        changed=False,
+        previous_revision=None,
+        current_revision="0001_revision",
+    )
+
+    async def fake_schema():
+        return schema_state
+
+    async def fake_sync(_redis_client=None):
+        return summary, 0, 0, 0.0
+
+    async def fake_enqueue(*_args, **_kwargs):
+        return 0
+
+    class DummyReport:
+        total = 0
+
+    async def fake_invalidate(*_args, **_kwargs):
+        return DummyReport()
+
+    called = {"value": False}
+
+    async def fake_backfill(_redis_client=None):
+        called["value"] = True
+        return 0
+
+    monkeypatch.setattr(worker_service, "ensure_schema", fake_schema, raising=False)
+    monkeypatch.setattr(worker_service, "_sync_polymarket_feed", fake_sync, raising=False)
+    monkeypatch.setattr(worker_service, "enqueue_proof_jobs", fake_enqueue, raising=False)
+    monkeypatch.setattr(worker_service, "_enqueue_backfill_proof_jobs", fake_backfill, raising=False)
+    monkeypatch.setattr(worker_service, "invalidate_cache_tags", fake_invalidate, raising=False)
+
+    await worker_service.process_once(dummy)
+
+    assert called["value"] is True
+
+
+@pytest.mark.asyncio
 async def test_process_once_handles_polymarket_failures(monkeypatch, caplog):
     dummy = DummyRedis()
     schema_state = SchemaSyncResult(

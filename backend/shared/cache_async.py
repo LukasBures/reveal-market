@@ -476,7 +476,14 @@ async def invalidate_tag(client: Redis | None, tag: str) -> int:
 
 
 async def _maybe_await(result: Awaitable[Any] | Any) -> Any:
-    """Await a result when possible; passthrough otherwise."""
+    """Compatibility helper for Redis calls that may be sync or async.
+
+    Some Redis client methods are synchronous in certain configurations or
+    library versions and asynchronous in others. This helper normalizes those
+    differences by awaiting the result when it is awaitable and otherwise
+    returning it directly. Use this only for known Redis operations that can be
+    either sync or async, not as a general pattern for arbitrary code.
+    """
 
     if inspect.isawaitable(result):
         return await cast(Awaitable[Any], result)
