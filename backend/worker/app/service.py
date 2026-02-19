@@ -158,7 +158,8 @@ async def _cancel_task(task: asyncio.Task | None) -> None:
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        # Expected during shutdown/cancellation.
+        return
 
 
 async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:

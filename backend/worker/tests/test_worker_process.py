@@ -218,7 +218,8 @@ async def _cancel_task(task: asyncio.Task) -> None:
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        # Expected when stopping background tasks in tests.
+        return
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
-from importlib import import_module, util
 from threading import Lock
 from typing import Any, Protocol, cast
 
@@ -27,8 +27,8 @@ class _JsonLib(Protocol):
         raise NotImplementedError
 
 
-_orjson_spec = util.find_spec("orjson")
-_orjson_module = import_module("orjson") if _orjson_spec else None
+_orjson_spec = importlib.util.find_spec("orjson")
+_orjson_module = importlib.import_module("orjson") if _orjson_spec else None
 orjson = cast(_JsonLib | None, _orjson_module)
 
 
