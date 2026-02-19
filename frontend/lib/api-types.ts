@@ -192,25 +192,6 @@ export type MarketStatusStat = {
   count: number;
 };
 
-export type HealthSnapshot = {
-  status: string;
-  timestamp?: string;
-  databaseLatencyMs?: number | null;
-  redisLatencyMs?: number | null;
-  workerHeartbeat?: {
-    marketsProcessed?: number;
-    latencyMs?: number;
-    timestamp?: string;
-  } | null;
-};
-
-export type InvestorKpis = {
-  openMarkets: number;
-  settledMarkets: number;
-  databaseLatencyMs: number | null;
-  lastUpdatedIso: string | null;
-};
-
 export type FetchFeaturedMarketsOptions = {
   searchQuery?: string;
   category?: string;

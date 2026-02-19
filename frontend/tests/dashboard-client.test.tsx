@@ -23,7 +23,6 @@ const hoisted = vi.hoisted(() => ({
   useChainId: vi.fn(),
   fetchPositions: vi.fn(),
   fetchClaimBundles: vi.fn(),
-  fetchClaimStatus: vi.fn(),
   useWriteContract: vi.fn(),
   useReadContract: vi.fn(),
   usePublicClient: vi.fn(),
@@ -47,7 +46,6 @@ vi.mock("@/lib/wagmi", () => ({
 vi.mock("@/lib/api", () => ({
   fetchPositions: hoisted.fetchPositions,
   fetchClaimBundles: hoisted.fetchClaimBundles,
-  fetchClaimStatus: hoisted.fetchClaimStatus,
 }));
 
 describe("DashboardClient", () => {
@@ -56,7 +54,6 @@ describe("DashboardClient", () => {
     hoisted.useChainId.mockReset();
     hoisted.fetchPositions.mockReset();
     hoisted.fetchClaimBundles.mockReset();
-    hoisted.fetchClaimStatus.mockReset();
     hoisted.useWriteContract.mockReset();
     hoisted.useReadContract.mockReset();
     hoisted.usePublicClient.mockReset();
@@ -68,7 +65,6 @@ describe("DashboardClient", () => {
       isPending: false,
       error: undefined,
     });
-    hoisted.fetchClaimStatus.mockResolvedValue({ status: "ready", pendingMarkets: [] });
   });
 
   it("prompts to connect when wallet is disconnected", () => {

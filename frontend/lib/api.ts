@@ -1,8 +1,6 @@
 import type {
   EventSummary,
   FetchFeaturedMarketsOptions,
-  HealthSnapshot,
-  InvestorKpis,
   MarketDetail,
   MarketSibling,
   MarketStatusStat,
@@ -631,52 +629,6 @@ export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
   return primaryStats ?? [];
 }
 
-export async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
-  if (maybeShortCircuitOffline("fetchHealthSnapshot")) {
-    return null;
-  }
-  const endpoint = `${DEFAULT_API_BASE}/healthz`;
-  try {
-    logger.debug("fetchHealthSnapshot:request", { endpoint, baseUrl: DEFAULT_API_BASE });
-    const response = await fetch(endpoint, {
-      next: { revalidate: 45 },
-    });
-    if (!response.ok) {
-      // Advisory only; skip logging for 404/503 to avoid noise.
-      if (response.status === 404 || response.status === 503) {
-        return null;
-      }
-      logger.error("fetchHealthSnapshot:failed", { status: response.status, endpoint, baseUrl: DEFAULT_API_BASE });
-      return null;
-    }
-    const payload = await response.json();
-    const components = payload?.components ?? {};
-    const snapshot: HealthSnapshot = {
-      status: String(payload?.status ?? "unknown"),
-      timestamp: payload?.timestamp,
-      databaseLatencyMs: components?.database?.latency_ms ?? components?.database?.latencyMs ?? null,
-      redisLatencyMs: components?.redis?.latency_ms ?? components?.redis?.latencyMs ?? null,
-      workerHeartbeat: components?.worker
-        ? {
-            marketsProcessed: components.worker.detail
-              ? parseInt(components.worker.detail.replace(/\D/g, ""), 10) || undefined
-              : undefined,
-            latencyMs: components.worker.latency_ms ?? null,
-            timestamp: payload?.timestamp,
-          }
-        : null,
-    };
-    logger.debug("fetchHealthSnapshot:success", {
-      status: snapshot.status,
-      endpoint,
-    });
-    return snapshot;
-  } catch (error) {
-    logOfflineAwareError("fetchHealthSnapshot", error);
-    return null;
-  }
-}
-
 type ProofReceiptFilters = {
   offset?: number;
   marketId?: number;
@@ -783,39 +735,6 @@ export async function fetchClaimBundles(
   }
 }
 
-export async function fetchClaimStatus(
-  wallet: string,
-  signature: string,
-): Promise<{ status: string; pendingMarkets?: string[]; error?: string }> {
-  if (maybeShortCircuitOffline("fetchClaimStatus")) {
-    return { status: "pending", error: "offline" };
-  }
-  const url = new URL(`${DEFAULT_API_BASE}/claim/status`);
-  url.searchParams.set("wallet", wallet);
-  try {
-    const response = await fetch(url.toString(), {
-      cache: "no-store",
-      headers: { "X-Wallet-Signature": signature },
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      const errorMessage = `Failed to fetch claim status (${response.status}): ${detail}`;
-      logger.error("fetchClaimStatus:failed", { status: response.status, endpoint: url.toString() });
-      return { status: "pending", error: errorMessage };
-    }
-    const payload = await response.json();
-    return {
-      status: payload?.status ?? "pending",
-      pendingMarkets: Array.isArray(payload?.pendingMarkets)
-        ? (payload.pendingMarkets as string[])
-        : undefined,
-    };
-  } catch (error) {
-    logOfflineAwareError("fetchClaimStatus", error);
-    return { status: "pending", error: (error as Error).message };
-  }
-}
-
 export async function fetchProofReceipts(
   limit = 20,
   options?: ProofReceiptFilters,
@@ -879,25 +798,6 @@ export async function fetchProofReceipts(
     logOfflineAwareError("fetchProofReceipts", error, { offset });
     return { receipts: [], error: (error as Error).message };
   }
-}
-
-export async function fetchInvestorKpis(
-  preloadedStats?: MarketStatusStat[],
-  preloadedHealth?: HealthSnapshot | null,
-): Promise<InvestorKpis> {
-  const stats = Array.isArray(preloadedStats) ? preloadedStats : await fetchMarketStatsBreakdown();
-  const health = typeof preloadedHealth !== "undefined" ? preloadedHealth : await fetchHealthSnapshot();
-
-  const liveStat = stats.find((item) => item.status === "live")?.count ?? 0;
-  const finalizedStat = stats.find((item) => item.status === "finalized")?.count ?? 0;
-  const snapshot = {
-    openMarkets: liveStat,
-    settledMarkets: finalizedStat,
-    databaseLatencyMs: health?.databaseLatencyMs ?? null,
-    lastUpdatedIso: health?.timestamp ?? null,
-  };
-  logger.debug("fetchInvestorKpis:computed", snapshot);
-  return snapshot;
 }
 
 export async function fetchMarketByEventId(eventId: string, eventKey?: string | null): Promise<MarketDetail | null> {
