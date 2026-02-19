@@ -22,7 +22,6 @@
     X-Frame-Options "DENY"
     Referrer-Policy "strict-origin-when-cross-origin"
     Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
-    Expect-CT "max-age=86400, enforce"
     -Server
   }
 }
@@ -94,7 +93,7 @@
   reverse_proxy api:8000 {
     health_uri /live
     health_headers {
-      Host api.revealmarket.xyz
+      Host {$API_DOMAIN:api.revealmarket.xyz}
     }
     health_interval 10s
     health_timeout 3s
@@ -105,7 +104,7 @@
       keepalive_idle_conns 64
       read_timeout 60s
     }
-    header_up Host api.revealmarket.xyz
+    header_up Host {$API_DOMAIN:api.revealmarket.xyz}
   }
 }
 
@@ -113,7 +112,7 @@
   reverse_proxy streamer:8100 {
     health_uri /healthz
     health_headers {
-      Host stream.revealmarket.xyz
+      Host {$STREAM_DOMAIN:stream.revealmarket.xyz}
     }
     health_interval 10s
     health_timeout 3s
@@ -124,14 +123,14 @@
       keepalive_idle_conns 64
       read_timeout 60s
     }
-    header_up Host stream.revealmarket.xyz
+    header_up Host {$STREAM_DOMAIN:stream.revealmarket.xyz}
   }
 }
 
 (tls_prod) {
   tls {
     dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-    resolvers 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112
+    resolvers {$CADDY_DNS_RESOLVERS:1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112}
   }
 }
 
