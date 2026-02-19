@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import importlib
-import importlib.util
 import json
 import logging
 import math
@@ -15,6 +13,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from functools import partial
+from importlib import import_module, util
 from types import ModuleType
 from typing import Any, Protocol, cast
 
@@ -32,15 +31,17 @@ regex_number = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 class _JsonLib(Protocol):
-    def loads(self, payload: str | bytes) -> Any: ...
+    def loads(self, payload: str | bytes) -> Any:
+        raise NotImplementedError
 
-    def dumps(self, payload: Any) -> bytes: ...
+    def dumps(self, payload: Any) -> bytes:
+        raise NotImplementedError
 
 
 _orjson_module: ModuleType | None = None
-_orjson_spec = importlib.util.find_spec("orjson")
+_orjson_spec = util.find_spec("orjson")
 if _orjson_spec is not None:
-    _orjson_module = importlib.import_module("orjson")
+    _orjson_module = import_module("orjson")
 orjson = cast(_JsonLib | None, _orjson_module)
 
 logger = logging.getLogger("reveal_market.worker.polymarket")
@@ -61,44 +62,6 @@ def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
     if archived is not None:
         params["archived"] = str(archived).lower()
     return params
-
-
-_GAMMA_EVENT_ALLOWED_FIELDS = {
-    "event_id",
-    "ticker",
-    "slug",
-    "title",
-    "description",
-    "resolution_source",
-    "start_date",
-    "end_date",
-    "image",
-    "icon",
-    "active",
-    "closed",
-    "archived",
-    "new",
-    "featured",
-    "restricted",
-    "liquidity",
-    "volume",
-    "open_interest",
-    "sort_by",
-    "created_at_raw",
-    "updated_at_raw",
-    "competitive",
-    "volume_1wk",
-    "volume_1mo",
-    "volume_1yr",
-    "enable_order_book",
-}
-_GAMMA_EVENT_KEY_MAP = {
-    "startDate": "start_date",
-    "endDate": "end_date",
-    "resolutionSource": "resolution_source",
-    "createdAt": "created_at_raw",
-    "updatedAt": "updated_at_raw",
-}
 
 
 class MarketPayload(BaseModel):
@@ -818,6 +781,7 @@ class AsyncPolymarketClient:
             ):
                 with attempt:
                     return await action_callable()
+            raise RuntimeError("retry loop exited without executing action")
 
         self._retryer = _retry_wrapper
         return self._retryer

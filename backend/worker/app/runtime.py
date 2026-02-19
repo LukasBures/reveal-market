@@ -229,8 +229,14 @@ circuit_breaker = CircuitBreaker(
 
 try:  # pragma: no cover - signal availability depends on platform
     signal.signal(signal.SIGHUP, reload_worker_settings)
-except (AttributeError, ValueError):
-    pass
+except (AttributeError, ValueError) as exc:
+    log_event(
+        logger,
+        logging.DEBUG,
+        event="worker.signal.sighup_unavailable",
+        message="SIGHUP handler unavailable on this platform",
+        error=str(exc),
+    )
 
 
 async def get_http_client(timeout: float) -> httpx.AsyncClient:

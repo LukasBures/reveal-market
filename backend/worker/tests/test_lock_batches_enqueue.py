@@ -4,11 +4,10 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
-import shared.models as shared_models
 from app import runtime
 from app.settlement import run_lock_batches_jobs
 from eth_account import Account
-from shared.models import Base, Commitment, Market
+from shared.models import Base, Commitment, Market, MarketStatusEnum
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -43,7 +42,7 @@ async def test_lock_batches_enqueues_successful_submission(monkeypatch):
         title="Test Market",
         oracle="0x" + "1" * 40,
         market_address="0x" + "2" * 40,
-        status=shared_models.MarketStatusEnum.COMMIT.value,
+        status=MarketStatusEnum.COMMIT.value,
         closes_at=now - timedelta(seconds=5),
     )
     commitment = Commitment(

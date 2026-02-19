@@ -195,7 +195,7 @@ def test_cache_refresh_worker_triggers_hydration(monkeypatch):
         try:
             await task
         except asyncio.CancelledError:
-            pass
+            return
 
     asyncio.run(_run_once())
 

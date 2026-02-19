@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 import app.market_sync as market_sync
 import app.resolution as resolution_module
 import pytest
-from app.market_sync import sync_market
 from app.polymarket import MarketPayload
 from shared.models import Base, Market, Resolution
 from sqlalchemy import select
@@ -50,7 +49,7 @@ async def test_sync_market_inserts_and_updates():
         )
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, initial)
+            _, outcome = await market_sync.sync_market(session, initial)
             assert outcome.market_changed is True
             await session.commit()
 
@@ -65,7 +64,7 @@ async def test_sync_market_inserts_and_updates():
         updated = initial.model_copy(update={"title": "Updated Market", "status": "settled"})
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, updated)
+            _, outcome = await market_sync.sync_market(session, updated)
             assert outcome.market_changed is True
             await session.commit()
 
@@ -94,7 +93,7 @@ async def test_sync_market_reuses_prefetched_instance(monkeypatch):
         )
 
         async with session_factory() as session:
-            await sync_market(session, base_payload)
+            await market_sync.sync_market(session, base_payload)
             await session.commit()
 
         async with session_factory() as session:
@@ -106,7 +105,7 @@ async def test_sync_market_reuses_prefetched_instance(monkeypatch):
 
             monkeypatch.setattr("app.market_sync.shared_repository.get_market_by_event_id", _unexpected, raising=False)
 
-            await sync_market(session, updated, existing_market=existing)
+            await market_sync.sync_market(session, updated, existing_market=existing)
             await session.commit()
 
         async with session_factory() as session:
@@ -137,7 +136,7 @@ async def test_sync_market_preserves_onchain_fields():
         )
 
         async with session_factory() as session:
-            await sync_market(session, initial)
+            await market_sync.sync_market(session, initial)
             await session.commit()
 
         updated = MarketPayload(
@@ -154,7 +153,7 @@ async def test_sync_market_preserves_onchain_fields():
         )
 
         async with session_factory() as session:
-            await sync_market(session, updated)
+            await market_sync.sync_market(session, updated)
             await session.commit()
 
         conflicting = updated.model_copy(
@@ -166,7 +165,7 @@ async def test_sync_market_preserves_onchain_fields():
         )
 
         async with session_factory() as session:
-            await sync_market(session, conflicting)
+            await market_sync.sync_market(session, conflicting)
             await session.commit()
 
         async with session_factory() as session:
@@ -216,7 +215,7 @@ async def test_sync_market_persists_resolution(monkeypatch):
         )
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, payload)
+            _, outcome = await market_sync.sync_market(session, payload)
             assert outcome.resolution_changed is True
             await session.commit()
 
@@ -260,7 +259,7 @@ async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, payload)
+            _, outcome = await market_sync.sync_market(session, payload)
             assert outcome.market_changed is True
             assert outcome.resolution_changed is False
             await session.commit()
@@ -268,7 +267,7 @@ async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         identical = MarketPayload(**payload.model_dump())
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, identical)
+            _, outcome = await market_sync.sync_market(session, identical)
             assert outcome.market_changed is False
             assert outcome.resolution_changed is False
             await session.commit()
@@ -306,7 +305,7 @@ async def test_sync_market_skips_when_source_timestamp_matches_without_hash(monk
         monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, payload)
+            _, outcome = await market_sync.sync_market(session, payload)
             assert outcome.market_changed is True
             assert outcome.resolution_changed is False
             await session.commit()
@@ -314,7 +313,7 @@ async def test_sync_market_skips_when_source_timestamp_matches_without_hash(monk
         identical = MarketPayload(**payload.model_dump())
 
         async with session_factory() as session:
-            _, outcome = await sync_market(session, identical)
+            _, outcome = await market_sync.sync_market(session, identical)
             assert outcome.market_changed is False
             assert outcome.resolution_changed is False
             await session.commit()

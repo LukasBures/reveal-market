@@ -14,7 +14,14 @@ from . import runtime
 from .database import session_scope
 
 logger = runtime.logger
-_schema_checked = False
+
+
+@dataclass
+class _SchemaState:
+    checked: bool = False
+
+
+_schema_state = _SchemaState()
 
 
 @dataclass
@@ -27,9 +34,8 @@ class SchemaSyncResult:
 async def ensure_schema() -> SchemaSyncResult:
     """Apply database migrations once per worker lifecycle if configured."""
 
-    global _schema_checked
     result = SchemaSyncResult()
-    if _schema_checked:
+    if _schema_state.checked:
         log_event(
             logger,
             logging.DEBUG,
@@ -79,7 +85,7 @@ async def ensure_schema() -> SchemaSyncResult:
             revision=revision,
             previous_revision=previous_revision,
         )
-    _schema_checked = True
+    _schema_state.checked = True
     return result
 
 

@@ -29,7 +29,7 @@ def estimate_response_bytes(response) -> int:
         try:
             return int(header_len)
         except ValueError:
-            pass
+            header_len = None
     body = getattr(response, "body", None)
     if isinstance(body, (bytes, bytearray)):
         return len(body)

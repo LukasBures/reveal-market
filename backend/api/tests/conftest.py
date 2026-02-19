@@ -144,8 +144,8 @@ def client(test_database, monkeypatch):
     import app.runtime as runtime
     import app.server as api_main
     from app.database import get_session
-    from app.server import app
 
+    app = api_main.app
     app.dependency_overrides[get_session] = override_get_session
     original_cache = getattr(app, "cache_client", None)
 

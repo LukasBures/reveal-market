@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from time import monotonic
@@ -13,9 +14,16 @@ from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
 _FX_CACHE: dict[str, Decimal | bool | float | str | None] = {}
-_FX_HTTP_CLIENT: httpx.AsyncClient | None = None
-_FX_CLIENT_TIMEOUT: float | None = None
-_FX_CLIENT_CLASS: type[httpx.AsyncClient] = httpx.AsyncClient
+
+
+@dataclass
+class _FxClientState:
+    client: httpx.AsyncClient | None = None
+    timeout: float | None = None
+    client_cls: type[httpx.AsyncClient] = httpx.AsyncClient
+
+
+_FX_CLIENT_STATE = _FxClientState()
 _FX_CLIENT_LOCK = asyncio.Lock()
 
 # FX source is pinned to the streamer; override in code if the streamer host changes.
@@ -48,27 +56,27 @@ def _build_fx_limits(settings: Settings) -> httpx.Limits:
 async def _get_fx_client(timeout_seconds: float, settings: Settings) -> httpx.AsyncClient:
     """Reuse a single AsyncClient so TLS handshakes are not repeated per request."""
 
-    global _FX_HTTP_CLIENT, _FX_CLIENT_TIMEOUT, _FX_CLIENT_CLASS
     async with _FX_CLIENT_LOCK:
         async_client_cls: type[httpx.AsyncClient] = httpx.AsyncClient
+        state = _FX_CLIENT_STATE
         needs_new = (
-            _FX_HTTP_CLIENT is None
-            or _FX_CLIENT_TIMEOUT != timeout_seconds
-            or _FX_CLIENT_CLASS is not async_client_cls
-            or getattr(_FX_HTTP_CLIENT, "is_closed", False)
+            state.client is None
+            or state.timeout != timeout_seconds
+            or state.client_cls is not async_client_cls
+            or getattr(state.client, "is_closed", False)
         )
-        if _FX_HTTP_CLIENT is not None and getattr(_FX_HTTP_CLIENT, "is_closed", False):
+        if state.client is not None and getattr(state.client, "is_closed", False):
             # Close leftover transports from tests/reloads.
-            await _FX_HTTP_CLIENT.aclose()
-            _FX_HTTP_CLIENT = None
+            await state.client.aclose()
+            state.client = None
         if needs_new:
-            _FX_HTTP_CLIENT = async_client_cls(
+            state.client = async_client_cls(
                 timeout=_build_fx_timeout(settings, timeout_seconds),
                 limits=_build_fx_limits(settings),
             )
-            _FX_CLIENT_TIMEOUT = timeout_seconds
-            _FX_CLIENT_CLASS = async_client_cls
-        return _FX_HTTP_CLIENT or async_client_cls(timeout=timeout_seconds)
+            state.timeout = timeout_seconds
+            state.client_cls = async_client_cls
+        return state.client or async_client_cls(timeout=timeout_seconds)
 
 
 class PricingEngine:

@@ -6,7 +6,6 @@ import logging
 import os
 import time
 from datetime import UTC, datetime
-from json import JSONDecodeError
 from urllib.parse import urlparse
 
 import httpx
@@ -239,7 +238,7 @@ async def _check_worker_heartbeat(settings: Settings) -> tuple[str, schemas.Heal
             )
         else:
             component = schemas.HealthComponent(status="degraded", detail="heartbeat missing")
-    except (RedisError, TypeError, JSONDecodeError, UnicodeDecodeError) as exc:
+    except (RedisError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         component = schemas.HealthComponent(status="error", detail=str(exc))
     return "worker", component
 

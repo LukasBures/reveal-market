@@ -50,7 +50,7 @@ def _close_pytest_asyncio_loop():
         try:
             policy.set_event_loop(None)
         except RuntimeError:
-            pass
+            return
 
 
 @pytest.fixture(autouse=True)
@@ -73,4 +73,4 @@ def _close_loop_after_test():
         try:
             policy.set_event_loop(None)
         except RuntimeError:
-            pass
+            return

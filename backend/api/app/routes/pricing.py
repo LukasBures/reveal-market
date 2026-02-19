@@ -155,7 +155,6 @@ def _assert_commits_allowed(
             blocked_at_ts = _normalize_ts(blocked_at)
             if blocked_at_ts is None or blocked_at_ts > block_time:
                 market.commits_blocked_at = block_time
-                blocked_at = market.commits_blocked_at
                 blocked_at_ts = block_time
             if session is not None:
                 session.add(market)

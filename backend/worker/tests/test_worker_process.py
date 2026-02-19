@@ -16,7 +16,6 @@ import app.runtime as runtime_module
 import app.service as worker_service
 import httpx
 import pytest
-from app.market_sync import SyncSummary
 from app.polymarket import MarketPayload, build_filters_from_settings
 from app.prover_client import SettlementProofResponse
 from app.schema import SchemaSyncResult
@@ -389,7 +388,7 @@ async def test_process_once_publishes_schema_revision(monkeypatch):
         return schema_state
 
     async def fake_sync(_redis_client=None):
-        return SyncSummary(), 0, 0, 0.0
+        return market_sync.SyncSummary(), 0, 0, 0.0
 
     monkeypatch.setattr(worker_service, "ensure_schema", fake_schema, raising=False)
     monkeypatch.setattr(worker_service, "_sync_polymarket_feed", fake_sync, raising=False)
@@ -1240,7 +1239,7 @@ async def test_maybe_generate_settlement_proof_rejects_circuit_hash_mismatch(mon
 async def test_enqueue_proof_jobs_dedupes(monkeypatch):
     redis_client = DummyRedis()
     monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", DummyGauge())
-    summary = SyncSummary()
+    summary = market_sync.SyncSummary()
     market_payload = MarketPayload(
         event_id="evt-proof",
         title="Proofable",
@@ -1375,7 +1374,7 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
             "market_address": market_row.market_address,
             "condition_id": market_row.condition_id,
         }
-    manual_summary = SyncSummary()
+    manual_summary = market_sync.SyncSummary()
     manual_summary.proof_jobs.append((snapshot, sample_markets[0], None))
     await proofs.enqueue_proof_jobs(redis_client, manual_summary)
     await asyncio.sleep(0.1)
@@ -1449,7 +1448,7 @@ async def test_settlement_queue_skips_without_signer(monkeypatch):
         )
         await session.commit()
 
-    temp_summary = SyncSummary()
+    temp_summary = market_sync.SyncSummary()
     submitted = await worker_service.run_settlement_jobs(temp_summary, redis_client)
 
     queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)
@@ -1521,7 +1520,7 @@ async def test_settlement_queue_skips_without_rpc(monkeypatch):
         session.add(commit_row)
         await session.commit()
 
-    temp_summary = SyncSummary()
+    temp_summary = market_sync.SyncSummary()
     submitted = await worker_service.run_settlement_jobs(temp_summary, redis_client)
 
     queue_items = redis_client.store.get(runtime_module.settings.relayer_queue_key)

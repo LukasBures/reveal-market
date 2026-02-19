@@ -9,6 +9,7 @@ import json
 import logging
 import random
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
@@ -57,10 +58,16 @@ from .settlement import (
 
 logger = runtime.logger
 
-_LAST_CLOSED_RECONCILE_TS: float | None = None
-_LAST_POLYMARKET_UPDATED_AT_TS: float | None = None
-_LAST_MEMORY_PRESSURE_SCAN_TS: float | None = None
-_LAST_SYNC_LEASE_FAILURE_TS: float | None = None
+
+@dataclass
+class _WorkerTimestamps:
+    last_closed_reconcile_ts: float | None = None
+    last_polymarket_updated_at_ts: float | None = None
+    last_memory_pressure_scan_ts: float | None = None
+    last_sync_lease_failure_ts: float | None = None
+
+
+_WORKER_TIMESTAMPS = _WorkerTimestamps()
 
 
 class MemoryStats(TypedDict, total=False):
@@ -426,8 +433,14 @@ def _memory_snapshot() -> MemoryStats:
                     vms_kb = _parse_kb_value(line)
                 elif line.startswith("VmData:"):
                     data_kb = _parse_kb_value(line)
-    except OSError:
-        pass
+    except OSError as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.memory.status_unavailable",
+            message="failed to read /proc/self/status",
+            error=str(exc),
+        )
 
     if rss_kb is not None:
         stats["mem_rss_mb"] = round(rss_kb / 1024, 2)
@@ -473,7 +486,6 @@ def _trim_worker_memory() -> bool:
 
 
 def _count_memory_pressure_objects() -> MemoryPressureStats:
-    global _LAST_MEMORY_PRESSURE_SCAN_TS
     interval = max(runtime.settings.worker_memory_pressure_scan_interval_seconds, 0)
     if interval <= 0:
         return {
@@ -481,12 +493,15 @@ def _count_memory_pressure_objects() -> MemoryPressureStats:
             "market_orm_objects": 0,
         }
     now = time.monotonic()
-    if _LAST_MEMORY_PRESSURE_SCAN_TS is not None and (now - _LAST_MEMORY_PRESSURE_SCAN_TS) < interval:
+    if (
+        _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts is not None
+        and (now - _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts) < interval
+    ):
         return {
             "market_payload_objects": 0,
             "market_orm_objects": 0,
         }
-    _LAST_MEMORY_PRESSURE_SCAN_TS = now
+    _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts = now
     counts: MemoryPressureStats = {
         "market_payload_objects": 0,
         "market_orm_objects": 0,
@@ -533,16 +548,15 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | 
 async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
     """Best-effort lease so only one worker paginates Gamma at a time."""
 
-    global _LAST_SYNC_LEASE_FAILURE_TS
     cooldown = max(runtime.settings.polymarket_sync_lease_failure_cooldown_seconds, 0)
     cooldown_jitter = max(runtime.settings.polymarket_sync_lease_failure_jitter_seconds, 0)
     now = time.monotonic()
-    if cooldown > 0 and _LAST_SYNC_LEASE_FAILURE_TS is not None:
-        if (now - _LAST_SYNC_LEASE_FAILURE_TS) < cooldown:
+    if cooldown > 0 and _WORKER_TIMESTAMPS.last_sync_lease_failure_ts is not None:
+        if (now - _WORKER_TIMESTAMPS.last_sync_lease_failure_ts) < cooldown:
             return False
     if redis_client is None:
         if cooldown > 0:
-            _LAST_SYNC_LEASE_FAILURE_TS = now
+            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         wait_for = cooldown + (random.uniform(0, cooldown_jitter) if cooldown_jitter else 0)  # noqa: S311
         if wait_for > 0:
             await asyncio.sleep(wait_for)
@@ -558,12 +572,12 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
             ex=int(ttl_with_jitter),
         )
         if acquired:
-            _LAST_SYNC_LEASE_FAILURE_TS = None
+            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = None
         else:
-            _LAST_SYNC_LEASE_FAILURE_TS = now
+            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         return bool(acquired)
     except Exception as exc:  # pragma: no cover - defensive
-        _LAST_SYNC_LEASE_FAILURE_TS = now
+        _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         log_event(
             logger,
             logging.WARNING,
@@ -773,8 +787,7 @@ async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float
             )
             last_ts = None
     else:
-        global _LAST_POLYMARKET_UPDATED_AT_TS
-        last_ts = _LAST_POLYMARKET_UPDATED_AT_TS
+        last_ts = _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts
     if last_ts is None:
         return None
     grace = max(runtime.settings.polymarket_updated_at_cutoff_grace_seconds, 0)
@@ -797,8 +810,7 @@ async def _record_polymarket_updated_at(redis_client: Redis | None, last_seen_ts
             )
             return
     else:
-        global _LAST_POLYMARKET_UPDATED_AT_TS
-        _LAST_POLYMARKET_UPDATED_AT_TS = last_seen_ts
+        _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts = last_seen_ts
 
 
 def _page_updated_at_bounds(markets: list[MarketPayload]) -> tuple[float | None, float | None]:
@@ -833,8 +845,7 @@ async def _should_run_closed_reconcile(redis_client: Redis | None) -> bool:
                 error=str(exc),
             )
     else:
-        global _LAST_CLOSED_RECONCILE_TS
-        last_ts = _LAST_CLOSED_RECONCILE_TS
+        last_ts = _WORKER_TIMESTAMPS.last_closed_reconcile_ts
     if last_ts is not None and now - last_ts < interval:
         return False
     return True
@@ -854,8 +865,7 @@ async def _mark_closed_reconcile_run(redis_client: Redis | None) -> None:
                 error=str(exc),
             )
     else:
-        global _LAST_CLOSED_RECONCILE_TS
-        _LAST_CLOSED_RECONCILE_TS = float(now)
+        _WORKER_TIMESTAMPS.last_closed_reconcile_ts = float(now)
 
 
 async def _list_closed_reconcile_event_ids(

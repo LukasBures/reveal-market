@@ -647,14 +647,14 @@ async def stop_background_tasks() -> None:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                continue
     for task in (runtime.relayer_queue_task, runtime.hedger_queue_task):
         if task:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                continue
     runtime.metrics_task = None
     runtime.cache_refresh_task = None
     runtime.quote_sweeper_task = None

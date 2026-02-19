@@ -1436,5 +1436,12 @@ async def hydrate_markets_cache(
         if cache is not None and lock_acquired:
             try:
                 await cache.delete(lock_key)
-            except RedisError:
-                pass
+            except RedisError as exc:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="markets.cache.lock_release_failed",
+                    message="failed to release cache lock",
+                    cache_key=cache_key,
+                    error=str(exc),
+                )

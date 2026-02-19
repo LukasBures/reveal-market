@@ -73,12 +73,12 @@ def get_async_web3(rpc_url: str | None):
             web3.middleware_onion.inject(async_geth_poa_middleware, layer=0)
         except ValueError:
             # Middleware already installed; ignore.
-            pass
+            logger.debug("POA middleware already installed; skipping injection")
     elif extra_data_to_poa_middleware:
         try:
             web3.middleware_onion.inject(extra_data_to_poa_middleware, layer=0)
         except ValueError:
-            pass
+            logger.debug("POA middleware already installed; skipping injection")
 
     return web3
 
