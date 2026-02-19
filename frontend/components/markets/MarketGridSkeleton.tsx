@@ -1,10 +1,10 @@
 export function MarketGridSkeleton({ cards = 6 }: { cards?: number }) {
   return (
-    <div className="grid auto-rows-fr gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 auto-rows-fr gap-4 md:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: cards }).map((_, index) => (
         <div
           key={`skeleton-${index}`}
-          className="relative flex h-full min-h-[170px] animate-pulse flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-[0_25px_60px_rgba(1,3,20,0.65)]"
+          className="group relative flex h-full min-h-[170px] w-full animate-pulse flex-col gap-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-3 shadow-[0_25px_60px_rgba(1,3,20,0.65)]"
         />
       ))}
     </div>
