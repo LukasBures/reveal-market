@@ -212,7 +212,7 @@ export function EventDetailClient({
               </section>
             </div>
             <div className="relative space-y-4 lg:self-stretch">
-              <div id="trade-panel" className="sticky top-[88px] self-start">
+              <div id="trade-panel" className="self-start lg:sticky lg:top-[88px]">
                 <StakeQuoteCard
                   marketAddress={market.marketAddress}
                   marketId={activeEventId}

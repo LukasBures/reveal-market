@@ -16,9 +16,6 @@ describe("DocsNav", () => {
     render(<DocsNav />);
 
     expect(screen.getByText("Overview")).toHaveClass("bg-white/15");
-    ["Start Here", "Trust & Access"].forEach((label) => {
-      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
-    });
-    expect(screen.getByRole("link", { name: /Contact us/i })).toHaveAttribute("href", "/contact");
+    expect(screen.getAllByText("Start Here").length).toBeGreaterThan(0);
   });
 });

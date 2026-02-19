@@ -19,20 +19,13 @@ const sections: NavSection[] = [
       { href: "/docs/faq", label: "FAQ" },
     ],
   },
-  {
-    title: "Trust & Access",
-    pages: [
-      { href: "/docs/privacy-security", label: "Privacy & Security" },
-      { href: "/legal", label: "Legal" },
-    ],
-  },
 ];
 
 export function DocsNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-4 self-start rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm">
+    <aside className="self-start rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm lg:sticky lg:top-[calc(72px+3rem)]">
       <p className="mb-3 text-xs uppercase tracking-[0.35em] text-slate-400">Documentation</p>
       <div className="flex flex-col gap-4">
         {sections.map((section) => (
@@ -59,16 +52,6 @@ export function DocsNav() {
             </div>
           </div>
         ))}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Need help?</p>
-          <p className="mt-2 text-slate-200">Tell us what you need and we&apos;ll route your note to the right person.</p>
-          <Link
-            href="/contact"
-            className="mt-4 inline-flex items-center justify-center rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400"
-          >
-            Contact us
-          </Link>
-        </div>
       </div>
     </aside>
   );

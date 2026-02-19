@@ -347,7 +347,7 @@ export function SearchEventsClient({
           <button
             type="submit"
             disabled={isPending}
-            className="rounded-2xl bg-brand-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-2xl bg-brand-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:tracking-[0.35em]"
           >
             {isPending ? "Searching..." : "Search"}
           </button>

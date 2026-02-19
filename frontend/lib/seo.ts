@@ -151,14 +151,18 @@ export function buildArticleJsonLd({
   path,
   image = DEFAULT_IMAGE,
   type = "Article",
+  datePublished,
+  dateModified,
 }: {
   title: string;
   description: string;
   path: string;
   image?: string;
   type?: "Article" | "TechArticle";
+  datePublished?: string;
+  dateModified?: string;
 }): Record<string, any> {
-  return {
+  const payload: Record<string, any> = {
     "@context": "https://schema.org",
     "@type": type,
     headline: cleanTitle(title),
@@ -181,6 +185,13 @@ export function buildArticleJsonLd({
       },
     },
   };
+  if (datePublished) {
+    payload.datePublished = datePublished;
+  }
+  if (dateModified) {
+    payload.dateModified = dateModified;
+  }
+  return payload;
 }
 
 export function buildContactPageJsonLd(path: string): Record<string, any> {
@@ -253,32 +264,30 @@ const docsMeta: Record<
   { title: string; description: string; keywords?: string[] }
 > = {
   overview: {
-    title: "Reveal Market Docs Overview",
+    title: "How Reveal Market Works",
     description:
-      "Investor briefing on the Reveal Market architecture, roadmap, and partner opportunities.",
+      "How Reveal Market works: stage-by-stage flow, what we share with users, and how to participate.",
     keywords: [
       "reveal market overview",
       "prediction market docs",
-      "investor brief",
-      "zk markets",
+      "how it works",
+      "commit reveal",
     ],
   },
   "getting-started": {
     title: "Getting Started",
-    description: "Integration checklist for exchanges, LPs, and teams onboarding to Reveal Market.",
-    keywords: ["integration checklist", "partner onboarding", "api setup"],
+    description: "Step-by-step guide for getting access, committing, and claiming after settlement.",
+    keywords: ["getting started", "commit", "claim", "settlement"],
   },
   "privacy-security": {
     title: "Privacy & Security",
-    description:
-      "Security posture, privacy guarantees, and operational controls that harden Reveal Market.",
-    keywords: ["privacy controls", "security posture", "compliance"],
+    description: "How private commits work and how settlement receipts keep outcomes verifiable.",
+    keywords: ["private commits", "settlement receipts", "privacy", "security"],
   },
   faq: {
     title: "Reveal Market FAQ",
-    description:
-      "Answers to common diligence questions covering custody, compliance, and product ops.",
-    keywords: ["faq", "diligence questions", "reveal market answers"],
+    description: "Quick answers about participation, settlement, and claims.",
+    keywords: ["faq", "settlement", "claims", "how it works"],
   },
 };
 

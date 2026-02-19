@@ -1,19 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { JsonLd } from "@/components/seo/JsonLd";
 import { DocsStructuredData } from "@/components/docs/DocsStructuredData";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { buildFaqJsonLd, docsMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
   ...docsMetadata("faq"),
   description:
-    "FAQ for Reveal Market: private prediction markets, fixed ticket size, signed quotes, and published settlement receipts.",
+    "FAQ for Reveal Market: participation, settlement, and claims.",
   keywords: [
-    "private prediction markets FAQ",
-    "fixed ticket size",
-    "signed quotes",
-    "settlement receipts",
+    "faq",
+    "settlement",
     "claims",
+    "how it works",
   ],
 };
 
@@ -26,12 +25,12 @@ const faqs = [
   {
     question: "How do markets settle?",
     answer:
-      "Tickets are locked, the winning outcome is posted, and a verifiable receipt is published. Claims are paid out to the committing wallet after settlement.",
+      "Tickets are locked, the winning outcome is posted, and a receipt is published. Claims are paid out to the committing wallet after settlement.",
   },
   {
     question: "How do I start trading?",
     answer:
-      "Unlock access with your code, fund escrow once, request a signed quote, and submit it to commit privately.",
+      "Connect your wallet, request a signed quote, and submit it to commit privately.",
     extra: (
       <>
         {" "}
@@ -53,11 +52,7 @@ const faqs = [
         <Link href="/proofs" className="text-brand-300 underline">
           Proofs
         </Link>{" "}
-        page for recent receipts and statuses. Follow{" "}
-        <a href="https://x.com/RevealMarket" target="_blank" rel="noreferrer" className="text-brand-300 underline">
-          @RevealMarket
-        </a>{" "}
-        for updates.
+        page for recent receipts and statuses.
       </>
     ),
   },
@@ -65,10 +60,6 @@ const faqs = [
 
 export default function FAQPage() {
   const faqSchema = buildFaqJsonLd(
-    faqs.map(({ question, answer }) => ({ question, answer })),
-    "/docs/faq",
-  );
-  const breadcrumbJsonLd = buildFaqJsonLd(
     faqs.map(({ question, answer }) => ({ question, answer })),
     "/docs/faq",
   );
@@ -88,14 +79,9 @@ export default function FAQPage() {
         ))}
       </dl>
       <p className="mt-6 text-sm text-slate-300">
-        Still have questions about private prediction markets, fixed ticket size, or settlement receipts?{" "}
-        <Link href="/contact" className="text-brand-300 underline">
-          Contact us
-        </Link>
-        .
+        Still have questions? Review the docs sections on the left for more detail.
       </p>
       <JsonLd data={faqSchema} id="faq-schema" />
-      <JsonLd data={breadcrumbJsonLd} id="faq-schema-breadcrumb" />
       <DocsStructuredData slug="faq" />
     </>
   );

@@ -21,9 +21,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
   const widgetRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const isValidEmail = (value: string) => {
-    return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
-  };
+  const isValidEmail = (value: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
 
   useEffect(() => {
     if (!siteKey || !containerRef.current) {
@@ -109,14 +107,14 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       message: String(formData.get("message") ?? "").trim(),
     };
 
-    if (!payload.name || !payload.email || !payload.message) {
-      setError("Please share your name, email, and a short note so we can follow up.");
+    if (!payload.message) {
+      setError("Please include a short note so we can understand your request.");
       setStatus("idle");
       return;
     }
 
-    if (!isValidEmail(payload.email)) {
-      setError("Please enter a valid email address.");
+    if (payload.email && !isValidEmail(payload.email)) {
+      setError("Please enter a valid email address or leave it blank.");
       setStatus("idle");
       return;
     }
@@ -155,16 +153,15 @@ export function ContactForm({ siteKey }: ContactFormProps) {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6"
+      className="flex flex-col space-y-5 rounded-2xl border border-white/10 bg-white/5 p-7 text-base sm:p-8 flex-1"
     >
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm text-slate-200">
           <span className="text-white">Name</span>
           <input
             name="name"
-            required
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
-            placeholder="Your name"
+            placeholder="Your name (optional)"
           />
         </label>
         <label className="space-y-2 text-sm text-slate-200">
@@ -172,9 +169,8 @@ export function ContactForm({ siteKey }: ContactFormProps) {
           <input
             type="email"
             name="email"
-            required
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
-            placeholder="you@example.com"
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring"
+            placeholder="you@example.com (optional)"
           />
         </label>
       </div>
@@ -183,8 +179,8 @@ export function ContactForm({ siteKey }: ContactFormProps) {
         <textarea
           name="message"
           required
-          rows={4}
-          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none ring-brand-400/60 focus:ring"
+          rows={5}
+          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-white outline-none ring-brand-400/60 focus:ring"
           placeholder="Share context about your use case, diligence, or integration needs."
         />
       </label>
@@ -203,7 +199,7 @@ export function ContactForm({ siteKey }: ContactFormProps) {
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="w-full rounded-full bg-brand-500 px-5 py-3 text-center text-sm font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
+        className="w-full rounded-full bg-brand-500 px-5 py-4 text-center text-sm font-semibold uppercase tracking-[0.25em] text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {status === "submitting" ? "Sending..." : "Send message"}
       </button>

@@ -2,17 +2,6 @@ import { NextResponse } from "next/server";
 import { logger } from "@/lib/logging";
 import crypto from "node:crypto";
 
-type EmailConfig = {
-  host: string;
-  port: number;
-  user?: string;
-  pass?: string;
-  secure: boolean;
-  from: string;
-  to: string;
-};
-
-const EMAIL_TO = "hi@revealmarket.xyz";
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT = 6;
 const rateBucket = new Map<string, { count: number; resetAt: number }>();
@@ -40,46 +29,37 @@ const rateLimit = (key: string) => {
   return false;
 };
 
-function resolveEmailConfig(): EmailConfig | null {
-  const host = process.env.CONTACT_SMTP_HOST;
-  const port = Number(process.env.CONTACT_SMTP_PORT ?? 0);
-  const user = process.env.CONTACT_SMTP_USER;
-  const pass = process.env.CONTACT_SMTP_PASS;
-  const from = process.env.CONTACT_FROM ?? "no-reply@revealmarket.xyz";
-  const secure = process.env.CONTACT_SMTP_SECURE === "true";
+const MAX_MESSAGE_LENGTH = 2000;
 
-  if (!host || !port) {
-    return null;
-  }
+const normalizeInput = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-  return { host, port, user, pass, secure, from, to: EMAIL_TO };
-}
+const truncate = (value: string, max: number) =>
+  value.length > max ? `${value.slice(0, max - 1)}…` : value;
 
-async function sendEmail(config: EmailConfig, body: { name: string; email: string; message: string }) {
-  const nodemailer = await import("nodemailer");
-  const transport = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: config.user && config.pass ? { user: config.user, pass: config.pass } : undefined,
-  });
-
-  const subject = `[Contact] ${body.name} via revealmarket.xyz`;
-  const text = [
-    `Name: ${body.name}`,
-    `Email: ${body.email}`,
+async function sendDiscord(webhookUrl: string, body: { name: string; email?: string; message: string }) {
+  const name = body.name ? body.name : "Anonymous";
+  const contact = body.email ? body.email : "Not provided";
+  const content = [
+    "**New contact submission**",
+    `Name: ${name}`,
+    `Contact: ${contact}`,
     "",
-    "Message:",
-    body.message,
+    truncate(body.message, MAX_MESSAGE_LENGTH),
   ].join("\n");
 
-  await transport.sendMail({
-    from: config.from,
-    to: config.to,
-    replyTo: body.email,
-    subject,
-    text,
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      content,
+      username: "RevealMarket Contact",
+      allowed_mentions: { parse: [] },
+    }),
   });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed with status ${response.status}`);
+  }
 }
 
 export async function POST(request: Request) {
@@ -89,18 +69,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     const { name, email, message, turnstileToken } = await request.json();
-    const safeName = typeof name === "string" ? name.trim() : "";
-    const safeEmail = typeof email === "string" ? email.trim() : "";
-    const safeMessage = typeof message === "string" ? message.trim() : "";
-    const safeTurnstileToken = typeof turnstileToken === "string" ? turnstileToken.trim() : "";
+    const safeName = normalizeInput(name);
+    const safeEmail = normalizeInput(email);
+    const safeMessage = normalizeInput(message);
+    const safeTurnstileToken = normalizeInput(turnstileToken);
 
     const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-    if (!safeName || !safeEmail || !safeMessage || !emailRegex.test(safeEmail)) {
-      return NextResponse.json(
-        { ok: false, error: "missing_fields" },
-        { status: 400 }
-      );
+    if (!safeMessage || (safeEmail && !emailRegex.test(safeEmail))) {
+      return NextResponse.json({ ok: false, error: "missing_fields" }, { status: 400 });
     }
 
     const turnstileSecret = process.env.CONTACT_TURNSTILE_SECRET;
@@ -127,20 +103,19 @@ export async function POST(request: Request) {
       logger.warn("contact_form.email_disabled", { reason: "missing_turnstile_secret" });
     }
 
-    logger.info("contact_form.submission", {
-      name_length: safeName.length,
-      email_hash: hashValue(safeEmail.toLowerCase()),
-      message_length: safeMessage.length,
-    });
+  logger.info("contact_form.submission", {
+    name_length: safeName.length,
+    email_hash: safeEmail ? hashValue(safeEmail.toLowerCase()) : undefined,
+    message_length: safeMessage.length,
+  });
 
-    const emailConfig = resolveEmailConfig();
-    if (!emailConfig) {
-      logger.warn("contact_form.email_disabled", { reason: "missing_smtp_config" });
-      return NextResponse.json({ ok: true, forwarded: false }, { status: 202 });
+    const discordWebhook = process.env.CONTACT_DISCORD_WEBHOOK_URL;
+    if (discordWebhook) {
+      await sendDiscord(discordWebhook, { name: safeName, email: safeEmail, message: safeMessage });
+      return NextResponse.json({ ok: true, forwarded: true, channel: "discord" }, { status: 202 });
     }
-
-    await sendEmail(emailConfig, { name: safeName, email: safeEmail, message: safeMessage });
-    return NextResponse.json({ ok: true, forwarded: true }, { status: 202 });
+    logger.warn("contact_form.discord_disabled", { reason: "missing_discord_webhook" });
+    return NextResponse.json({ ok: true, forwarded: false }, { status: 202 });
   } catch (error) {
     logger.error("contact_form.error", { error: (error as Error).message });
     return NextResponse.json({ ok: false }, { status: 500 });

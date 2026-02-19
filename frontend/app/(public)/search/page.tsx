@@ -62,11 +62,11 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
     : [];
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+    <div className="mx-auto max-w-7xl px-4 py-12 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
       <div className="space-y-3">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Events</p>
-        <h1 className="text-4xl font-semibold text-white">Search private prediction events</h1>
-        <p className="text-lg text-slate-300">
+        <h1 className="text-3xl font-semibold text-white sm:text-4xl">Search private prediction events</h1>
+        <p className="text-base text-slate-300 sm:text-lg">
           Browse live and settled events. Fixed tickets; entries stay private until settlement and receipts publish when
           outcomes post.
         </p>

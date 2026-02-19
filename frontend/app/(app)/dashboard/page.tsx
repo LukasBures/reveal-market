@@ -29,11 +29,11 @@ export default function DashboardPage() {
   ]);
   return (
     <>
-      <div className="mx-auto max-w-7xl px-4 py-16 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Portfolio</p>
-          <h1 className="text-4xl font-semibold text-white">Your positions & claims</h1>
-          <p className="text-lg text-slate-300">
+          <h1 className="text-3xl font-semibold text-white sm:text-4xl">Your positions & claims</h1>
+          <p className="text-base text-slate-300 sm:text-lg">
             Review your escrow balance, open tickets, potential payouts, and claim winnings once markets settle.
           </p>
         </div>

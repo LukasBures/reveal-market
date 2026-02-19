@@ -1040,7 +1040,7 @@ export function DashboardClient() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search markets"
-              className="min-w-[200px] flex-1 rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-sm text-white shadow-inner shadow-black/40 focus:border-white/60 focus:outline-none"
+              className="w-full min-w-0 flex-1 rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-sm text-white shadow-inner shadow-black/40 focus:border-white/60 focus:outline-none sm:min-w-[200px] sm:w-auto"
             />
             <div className="flex flex-wrap items-center gap-2">
               {(["all", "open", "settled", "claimable"] as const).map(

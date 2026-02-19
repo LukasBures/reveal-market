@@ -61,11 +61,11 @@ export default async function ProofsPage({
   ]);
   return (
     <>
-      <div className="mx-auto max-w-7xl px-4 py-16 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Proof ledger</p>
-          <h1 className="text-4xl font-semibold text-white">Settlement proofs & receipt ledger</h1>
-          <p className="text-lg text-slate-300">
+          <h1 className="text-3xl font-semibold text-white sm:text-4xl">Settlement proofs & receipt ledger</h1>
+          <p className="text-base text-slate-300 sm:text-lg">
             Every resolved market publishes a receipt that shows the outcome and payout summary. Filter by market or
             request id to verify what was paid. Amounts are displayed in ZEN (18 decimals).
           </p>
@@ -81,7 +81,7 @@ export default async function ProofsPage({
           </div>
         )}
       </div>
-      <div className="mx-auto max-w-7xl px-4 pb-16 text-sm text-slate-300 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="mx-auto max-w-7xl px-4 pb-12 text-sm text-slate-300 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:pb-16">
         Need help verifying an outcome?{" "}
         <Link href="/contact" className="text-brand-300 underline">
           Contact the team

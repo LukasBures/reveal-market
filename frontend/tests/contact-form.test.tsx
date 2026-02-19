@@ -15,18 +15,17 @@ describe("ContactForm", () => {
     vi.unstubAllGlobals();
   });
 
-  it("requires all fields and a valid email", async () => {
+  it("requires a message and validates email when provided", async () => {
     render(<ContactForm />);
 
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
-    expect(await screen.findByText(/Please share your name/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Please include a short note/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: "Alice" } });
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: "not-an-email" } });
     fireEvent.change(screen.getByLabelText(/How can we help?/i), { target: { value: "Hi" } });
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: "not-an-email" } });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(await screen.findByText(/valid email address/i)).toBeInTheDocument();
+    expect(await screen.findByText(/valid email address or leave it blank/i)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -45,7 +44,6 @@ describe("ContactForm", () => {
     await waitFor(() => expect(renderMock).toHaveBeenCalled());
 
     fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: "Alice" } });
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: "alice@example.com" } });
     fireEvent.change(screen.getByLabelText(/How can we help?/i), { target: { value: "Hello" } });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
 

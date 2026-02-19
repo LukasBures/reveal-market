@@ -13,6 +13,7 @@ export const metadata: Metadata = buildMetadata({
     "prediction market team",
     "institutional infrastructure",
   ],
+  type: "article",
 });
 
 export default function AboutPage() {
@@ -28,10 +29,10 @@ export default function AboutPage() {
   });
   return (
     <>
-      <div className="mx-auto max-w-7xl px-4 py-16 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-400">About</p>
-        <h1 className="mt-2 text-4xl font-semibold text-white">Built for high-signal traders & builders.</h1>
-        <p className="mt-4 text-lg text-slate-300">
+        <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Built for high-signal traders & builders.</h1>
+        <p className="mt-4 text-base text-slate-300 sm:text-lg">
           Reveal Market couples a hardened FastAPI backend, async ingestion worker, Redis edge caching, and Foundry-based
           smart contracts. Our commit-and-reveal design keeps alpha private until settlement, while zk-proof verification
           ensures payouts remain trustless.
