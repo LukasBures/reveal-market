@@ -31,7 +31,6 @@ export function MarketDetailHeader({ market, coverImage }: Props) {
   };
   const liquidity =
     toNumber(market.liquidityUsd) ??
-    toNumber(market.liquidityUsd) ??
     toNumber(extraData?.liquidity_usd) ??
     toNumber(extraData?.liquidityUsd) ??
     toNumber(gamma?.liquidity) ??

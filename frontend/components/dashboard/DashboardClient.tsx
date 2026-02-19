@@ -601,10 +601,10 @@ export function DashboardClient() {
       setClaimMessage("Claim data missing salt.");
       return;
     }
-    let ticketIdValue = 0n;
-    let outcomeIdValue = 0n;
-    let amountValue = 0n;
-    let payoutValue = 0n;
+    let ticketIdValue: bigint;
+    let outcomeIdValue: bigint;
+    let amountValue: bigint;
+    let payoutValue: bigint;
     try {
       ticketIdValue = parseBigInt(bundle.ticketId);
       outcomeIdValue = parseBigInt(bundle.outcomeId);

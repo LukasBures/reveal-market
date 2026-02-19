@@ -1,3 +1,5 @@
+const SERVER_READY_TIMEOUT_MS = 2 * 60 * 1000;
+
 module.exports = {
   ci: {
     collect: {
@@ -5,7 +7,7 @@ module.exports = {
       url: ["http://localhost:3000/"],
       startServerCommand: "npm run start",
       startServerReadyPattern: "ready - started server on",
-      startServerReadyTimeout: 120000,
+      startServerReadyTimeout: SERVER_READY_TIMEOUT_MS,
       settings: {
         preset: "desktop",
         onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
