@@ -2,6 +2,19 @@ import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import HomePage from "@/app/(public)/page";
 
+const featuredEventsSpy = vi.hoisted(() => vi.fn());
+const mockedFeaturedMarketsModule = vi.hoisted(() => {
+  const MockFeaturedEventsSection = (props: { categoryFilter?: string }) => {
+    featuredEventsSpy(props);
+    return <div data-testid="featured">Featured Events</div>;
+  };
+  const MockFeaturedEventsSkeleton = () => <div data-testid="featured-skeleton">Loading...</div>;
+  return {
+    FeaturedEventsSection: MockFeaturedEventsSection,
+    FeaturedEventsSkeleton: MockFeaturedEventsSkeleton,
+  };
+});
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -33,16 +46,6 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const featuredEventsSpy = vi.fn();
-const MockFeaturedEventsSection = (props: { categoryFilter?: string }) => {
-  featuredEventsSpy(props);
-  return <div data-testid="featured">Featured Events</div>;
-};
-const MockFeaturedEventsSkeleton = () => <div data-testid="featured-skeleton">Loading...</div>;
-const mockedFeaturedMarketsModule = {
-  FeaturedEventsSection: MockFeaturedEventsSection,
-  FeaturedEventsSkeleton: MockFeaturedEventsSkeleton,
-};
 vi.mock("@/components/markets/FeaturedMarketsSection", () => mockedFeaturedMarketsModule);
 
 describe("HomePage", () => {

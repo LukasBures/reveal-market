@@ -7,7 +7,13 @@ describe("ContactForm", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchMock = vi.fn().mockImplementation(async () => ({ ok: true } as Response));
+    fetchMock = vi.fn().mockImplementation(
+      async () =>
+        ({
+          ok: true,
+          json: vi.fn().mockResolvedValue({}),
+        }) as Response,
+    );
     vi.stubGlobal("fetch", fetchMock);
   });
 
