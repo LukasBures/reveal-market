@@ -571,8 +571,8 @@ class DataStreamer:
             try:
                 token_price = Decimal(str(price_raw))
                 token_prices.append(token_price)
-            except (ArithmeticError, ValueError, TypeError):
-                pass
+            except (ArithmeticError, ValueError, TypeError) as exc:
+                logger.debug("Invalid token price in payload: %s (%s)", price_raw, exc)
             token_id_raw = entry.get("token_id") or entry.get("tokenId") or entry.get("id")
             if token_id_raw is not None:
                 token_ids_from_tokens.append(str(token_id_raw))

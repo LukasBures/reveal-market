@@ -28,9 +28,11 @@ def test_fx_websocket_stream(monkeypatch):
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
 
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
     monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())

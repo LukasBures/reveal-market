@@ -25,9 +25,11 @@ def history_client(monkeypatch):
 
     # Avoid spinning up real network streamer in tests.
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     async def noop():
         return None

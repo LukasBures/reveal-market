@@ -10,11 +10,14 @@ def test_logs_warning_when_rtds_disabled(monkeypatch, capsys):
     state = StreamState(settings)
 
     class DummyStreamer:
-        def __init__(self, *_args, **_kwargs): ...
+        def __init__(self, *_args, **_kwargs):
+            pass
 
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     async def noop():
         return None

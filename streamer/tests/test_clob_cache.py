@@ -26,9 +26,11 @@ def clob_client(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
 
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: state.settings)

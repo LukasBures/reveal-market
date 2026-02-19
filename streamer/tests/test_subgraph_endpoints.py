@@ -45,9 +45,11 @@ def subgraph_app(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
 
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
@@ -170,9 +172,11 @@ def test_subgraph_not_configured_returns_503(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
 
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
@@ -195,9 +199,11 @@ def test_subgraph_http_error_surfaces_details(monkeypatch):
     state.shutdown = noop  # type: ignore[assignment]
 
     class DummyStreamer:
-        async def start(self): ...
+        async def start(self):
+            return None
 
-        async def stop(self): ...
+        async def stop(self):
+            return None
 
     class DummySubgraph:
         async def fetch_markets(self, **_kwargs):
