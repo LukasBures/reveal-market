@@ -62,7 +62,6 @@ export function EventCardHeadToHead({ event, market, priority = false }: Props) 
           const isThreeWay = buttonOutcomes.length === 3;
           const isLeft = idx === 0;
           const isMiddle = isThreeWay && idx === 1;
-          const isRight = isThreeWay ? idx === 2 : idx === 1;
           const toneClass = isMiddle
             ? "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
             : isLeft

@@ -5,8 +5,6 @@ export const size = {
   height: 630,
 };
 
-export const contentType = "image/png";
-
 export default function OgImage() {
   return new ImageResponse(
     (

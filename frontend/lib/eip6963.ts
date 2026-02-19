@@ -27,10 +27,6 @@ export const getEip6963Providers = (): ProviderMap => {
   return { ...getProviderMap() };
 };
 
-export const getEip6963ProviderByRdns = (rdns: string): Eip6963ProviderDetail | undefined => {
-  return getProviderMap()[rdns];
-};
-
 export const registerEip6963Provider = (detail: Eip6963ProviderDetail) => {
   if (!detail?.info?.rdns) {
     return;

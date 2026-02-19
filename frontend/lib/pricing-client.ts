@@ -367,22 +367,6 @@ const postTradeCommit = async (
   return (await res.json()) as TradeCommitResponse;
 };
 
-export async function commitTrade(
-  quoteId: string,
-  walletAddress: string,
-  walletSignature: string,
-  maxFxDiffPercent?: number,
-): Promise<TradeCommitResponse> {
-  return postTradeCommit(
-    quoteId,
-    maxFxDiffPercent,
-    false,
-    "Trade commit failed",
-    walletAddress,
-    walletSignature,
-  );
-}
-
 export function createMarketStream(marketId: string, tokenIds?: string[]): EventSource {
   const params = new URLSearchParams();
   params.set("market_id", marketId);

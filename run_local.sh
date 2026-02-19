@@ -39,14 +39,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 FALLBACK_ENV_FILE="${ROOT_DIR}/.env"
 # Resolve env file to seed (ENV_FILE override > .env.local > .env)
-if [[ -n "${ENV_FILE:-}" ]]; then
-  ENV_FILE="${ENV_FILE}"
-elif [[ -f "${DEFAULT_ENV_FILE}" ]]; then
-  ENV_FILE="${DEFAULT_ENV_FILE}"
-elif [[ -f "${FALLBACK_ENV_FILE}" ]]; then
-  ENV_FILE="${FALLBACK_ENV_FILE}"
-else
-  ENV_FILE="${DEFAULT_ENV_FILE}"
+if [[ -z "${ENV_FILE:-}" ]]; then
+  if [[ -f "${DEFAULT_ENV_FILE}" ]]; then
+    ENV_FILE="${DEFAULT_ENV_FILE}"
+  elif [[ -f "${FALLBACK_ENV_FILE}" ]]; then
+    ENV_FILE="${FALLBACK_ENV_FILE}"
+  else
+    ENV_FILE="${DEFAULT_ENV_FILE}"
+  fi
 fi
 FRONTEND_ENV_FILE="${ROOT_DIR}/frontend/.env.local"
 if [[ -f "${ENV_FILE}" ]]; then

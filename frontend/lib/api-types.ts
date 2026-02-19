@@ -99,14 +99,6 @@ export type MarketDetail = MarketSummary & {
   groupMarkets?: MarketDetail[];
 };
 
-export type GroupedMarkets = {
-  groupSlug: string;
-  markets: MarketDetail[];
-  aggregateVolume24hUsd?: number | null;
-  aggregateVolumeTotalUsd?: number | null;
-  aggregateLiquidityUsd?: number | null;
-};
-
 export type EventSummary = {
   eventId: string;
   title: string;

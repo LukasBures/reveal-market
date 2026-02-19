@@ -20,8 +20,6 @@ export const MARKET_CATEGORY_FILTERS = [
   "Science",
 ] as const;
 
-export type MarketCategoryFilter = (typeof MARKET_CATEGORY_FILTERS)[number];
-
 /**
  * Returns a non-negative volume metric. Defaults to 24h volume; `total` uses lifetime volume first.
  */

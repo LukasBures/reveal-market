@@ -7,7 +7,6 @@ export function usePriceStream(
   marketId: string,
   outcome = 0,
   tokenIds: string[] = [],
-  range: PriceHistoryRange = "24H",
 ) {
   const streamState = usePriceStreamStore(marketId, tokenIds);
 

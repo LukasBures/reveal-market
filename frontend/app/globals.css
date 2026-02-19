@@ -1,8 +1,8 @@
+@import "uplot/dist/uPlot.min.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import "uplot/dist/uPlot.min.css";
 
 :root {
   color-scheme: dark;
@@ -17,6 +17,8 @@
   --wolf-ember: #f8e7d3;
   --wolf-violet: #7c84ff;
   --wolf-midnight: #04081f;
+  --font-display: var(--font-sans, "Manrope"), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --viewport-height: 100vh;
 }
 
 html {
@@ -27,18 +29,28 @@ html {
 }
 
 body {
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
+  min-height: var(--viewport-height);
   width: 100%;
-  background-color: var(--background);
+  background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans, "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: var(--font-sans, "Manrope"), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-feature-settings: "cv11", "ss01", "ss02";
   letter-spacing: 0.01em;
   position: relative;
   overflow-x: clip;
   overflow-y: visible;
+}
+
+@supports (height: 100svh) {
+  :root {
+    --viewport-height: 100svh;
+  }
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --viewport-height: 100dvh;
+  }
 }
 
 #__next {
@@ -61,12 +73,11 @@ body::before {
   inset: 0;
   z-index: -2;
   background:
-    radial-gradient(circle at 18% 15%, rgba(12, 39, 177, 0.55), transparent 48%),
-    radial-gradient(circle at 80% 12%, rgba(123, 240, 94, 0.25), transparent 42%),
-    radial-gradient(circle at 55% 78%, rgba(2, 12, 76, 0.55), transparent 55%),
-    linear-gradient(150deg, #010314 10%, #040c2c 40%, #020c4c 75%, #050e26 100%);
+    radial-gradient(circle at 18% 15%, rgba(12, 39, 177, 0.55), transparent 48%) fixed,
+    radial-gradient(circle at 80% 12%, rgba(123, 240, 94, 0.25), transparent 42%) fixed,
+    radial-gradient(circle at 55% 78%, rgba(2, 12, 76, 0.55), transparent 55%) fixed,
+    linear-gradient(150deg, #010314 10%, #040c2c 40%, #020c4c 75%, #050e26 100%) fixed;
   opacity: 0.95;
-  background-attachment: fixed;
   backface-visibility: hidden;
   transform: translateZ(0);
 }
@@ -77,24 +88,30 @@ body::after {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(circle at 80% 10%, rgba(124, 132, 255, 0.28), transparent 45%),
-    radial-gradient(circle at 20% 85%, rgba(123, 240, 94, 0.2), transparent 50%),
+    radial-gradient(circle at 80% 10%, rgba(124, 132, 255, 0.28), transparent 45%) fixed,
+    radial-gradient(circle at 20% 85%, rgba(123, 240, 94, 0.2), transparent 50%) fixed,
+    /*noinspection CssUnknownTarget*/
     image-set(
       url("/brand/reveal-wolf-03.webp") type("image/webp"),
       url("/brand/reveal-wolf-03.png") type("image/png")
-    ) no-repeat right -140px top -80px;
-  background-size: auto, auto, 820px;
+    ) right -140px top -80px / 820px no-repeat fixed;
   opacity: 0.25;
   mix-blend-mode: screen;
   pointer-events: none;
-  background-attachment: fixed;
   backface-visibility: hidden;
   transform: translateZ(0);
 }
 
 @media (max-width: 640px) {
   body::after {
-    background-size: auto, auto, 0;
+    background:
+      radial-gradient(circle at 80% 10%, rgba(124, 132, 255, 0.28), transparent 45%) fixed,
+      radial-gradient(circle at 20% 85%, rgba(123, 240, 94, 0.2), transparent 50%) fixed,
+      /*noinspection CssUnknownTarget*/
+      image-set(
+        url("/brand/reveal-wolf-03.webp") type("image/webp"),
+        url("/brand/reveal-wolf-03.png") type("image/png")
+      ) right -140px top -80px / 0 no-repeat fixed;
     opacity: 0.12;
   }
   body::before {
@@ -125,7 +142,7 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.35);
   border-radius: 9999px;
   border: 2px solid transparent;
 }
@@ -139,7 +156,7 @@ a {
 }
 
 .font-display {
-  font-family: var(--font-display), var(--font-sans, "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: var(--font-display, "Manrope"), var(--font-sans, "Manrope"), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0.05em;
 }
 
@@ -289,7 +306,7 @@ a {
 .halo-card::before {
   content: "";
   position: absolute;
-  inset: 1.5px;
+  inset: 2px;
   border-radius: 1.4rem;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(124, 132, 255, 0.08));
   pointer-events: none;

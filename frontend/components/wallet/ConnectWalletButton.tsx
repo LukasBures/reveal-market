@@ -308,7 +308,7 @@ export function ConnectWalletButton() {
       const detectedOkx = hasOkxWallet || Boolean(eipProvider);
       const detectedTrust = hasTrustWallet || Boolean(eipProvider);
 
-      let available = false;
+      let available: boolean;
       if (option.rdns && hasEip6963Providers) {
         available = Boolean(eipProvider) && Boolean(connector);
       } else if (option.connectorId === "walletConnect") {
@@ -379,15 +379,7 @@ export function ConnectWalletButton() {
 
       return { option, connector, available, eipProvider, reason };
     });
-  }, [
-    connectorsById,
-    eip6963Providers,
-    hasEip6963Providers,
-    isMobileBrowser,
-    isMounted,
-    providerFlags.providers,
-    resolveEipProvider,
-  ]);
+  }, [connectorsById, hasEip6963Providers, isMobileBrowser, isMounted, providerFlags.providers, resolveEipProvider]);
 
   const hasAnyAvailable = connectorOptions.some((entry) => entry.available);
 

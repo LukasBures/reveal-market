@@ -51,7 +51,7 @@ describe("GroupedMarketSelector", () => {
         groupSlug="bitcoin-dips"
         siblings={siblings}
         activeEventId="evt-60000-a"
-        onSelect={onSelect}
+        onSelectAction={onSelect}
       />,
     );
 
@@ -70,7 +70,7 @@ describe("GroupedMarketSelector", () => {
         groupSlug="bitcoin-dips"
         siblings={siblings}
         activeEventId="evt-60000-b"
-        onSelect={onSelect}
+        onSelectAction={onSelect}
       />,
     );
 
@@ -86,7 +86,7 @@ describe("GroupedMarketSelector", () => {
         groupSlug="bitcoin-dips"
         siblings={siblings}
         activeEventId="evt-65000"
-        onSelect={vi.fn()}
+        onSelectAction={vi.fn()}
       />,
     );
 

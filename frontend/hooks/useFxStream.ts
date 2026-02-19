@@ -1,11 +1,11 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import {useEffect, useRef, useSyncExternalStore} from "react";
 import {
-  FX_DEFAULT_PATH,
   createFxWebSocket,
   fetchStreamerFxQuote,
+  FX_DEFAULT_PATH,
+  type FxQuote,
   normalizeFxPath,
   shouldUseStreamerWs,
-  type FxQuote,
 } from "@/lib/pricing-client";
 
 type FxStatus = "connecting" | "live" | "stale" | "error";
@@ -139,7 +139,7 @@ function startConnection(path: string) {
     reconnectTimer: null,
   };
 
-  const cleanup = () => {
+  conn.cleanup = () => {
     conn.cancelled = true;
     if (conn.idleCloseTimer) {
       clearTimeout(conn.idleCloseTimer);
@@ -163,7 +163,6 @@ function startConnection(path: string) {
     }
     connections.delete(normalizedPath);
   };
-  conn.cleanup = cleanup;
 
   const scheduleReconnect = (delay: number) => {
     if (conn.reconnectTimer) {

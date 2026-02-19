@@ -39,7 +39,7 @@ export function MarketDetailChart({
       setSelectedOutcome(Math.max(0, Math.min(selectedOutcomeOverride, Math.max(outcomes.length - 1, 0))));
     }
   }, [selectedOutcomeOverride, outcomes.length]);
-  const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds, range);
+  const { history, error } = usePriceStream(marketId, selectedOutcome, tokenIds);
   const streamState = usePriceStreamStore(marketId, tokenIds);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [fallbackHistory, setFallbackHistory] = useState<
@@ -93,8 +93,6 @@ export function MarketDetailChart({
   }, [history.length, fallbackSeed, streamState.fxStale, streamState.lastUpdated]);
 
   const displayHistory = history.length >= 2 ? history : fallbackHistory;
-  const hasStaleFx = displayHistory.some((p) => p.fx_stale);
-  const latestTs = displayHistory.length ? displayHistory[displayHistory.length - 1].timestamp : null;
 
   const filteredHistory = useMemo(() => {
     if (displayHistory.length === 0) return displayHistory;
@@ -162,7 +160,7 @@ export function MarketDetailChart({
         }),
       );
     };
-    loadHistories();
+    void loadHistories();
     return () => {
       cancelled = true;
     };
@@ -260,20 +258,10 @@ export function MarketDetailChart({
     });
   }, [activeIndex, activeX, alignedXs, dataSeries, outcomeOptions]);
 
-  const parseNum = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
-  const bestBid = parseNum(outcomeState.bestBid);
-  const bestAsk = parseNum(outcomeState.bestAsk);
-  const spread =
-    bestBid !== undefined && bestAsk !== undefined && Number.isFinite(bestAsk - bestBid)
-      ? bestAsk - bestBid
-      : undefined;
   const tickSize =
     typeof streamState.tickSize === "number"
       ? streamState.tickSize
       : undefined;
-
-  const coverageMs =
-    selectedHistory.length > 1 ? selectedHistory[selectedHistory.length - 1].x - selectedHistory[0].x : 0;
 
   const chartRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);

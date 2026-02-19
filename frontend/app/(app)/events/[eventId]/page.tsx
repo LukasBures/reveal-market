@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { cache } from "react";
 import { EventDetailClient } from "@/components/events/EventDetailClient";
 import { fetchFeaturedEvents, fetchMarketByEventId } from "@/lib/api";

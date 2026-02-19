@@ -36,10 +36,6 @@ describe("ProofsClient", () => {
       constructor() {}
       observe() {}
       disconnect() {}
-      unobserve() {}
-      takeRecords() {
-        return [];
-      }
     }
     (globalThis as any).IntersectionObserver = NoopIntersectionObserver;
   });

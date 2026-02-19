@@ -11,23 +11,9 @@ class FakeWebSocket {
   readyState = 0;
   closeCalled = false;
 
-  triggerOpen() {
-    this.readyState = 1;
-    this.onopen?.();
-  }
-
-  triggerMessage(data: string) {
-    this.onmessage?.({ data });
-  }
-
   triggerError() {
     this.onerror?.(new Event("error"));
     this.close();
-  }
-
-  triggerClose() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.(new Event("close"));
   }
 
   close() {

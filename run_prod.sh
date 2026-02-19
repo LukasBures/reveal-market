@@ -174,7 +174,7 @@ read_env_file_value() {
   fi
   local line
   line="$(grep -E "^${key}=" "${file}" | tail -n 1)" || return 0
-  local value="${line#${key}=}"
+  local value="${line#"$key"=}"
   value="${value%\"}"
   value="${value#\"}"
   value="${value%\'}"

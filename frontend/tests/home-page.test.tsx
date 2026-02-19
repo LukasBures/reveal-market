@@ -34,13 +34,16 @@ vi.mock("next/navigation", () => ({
 }));
 
 const featuredEventsSpy = vi.fn();
-vi.mock("@/components/markets/FeaturedMarketsSection", () => ({
-  FeaturedEventsSection: (props: { categoryFilter?: string }) => {
-    featuredEventsSpy(props);
-    return <div data-testid="featured">Featured Events</div>;
-  },
-  FeaturedEventsSkeleton: () => <div data-testid="featured-skeleton">Loading...</div>,
-}));
+const MockFeaturedEventsSection = (props: { categoryFilter?: string }) => {
+  featuredEventsSpy(props);
+  return <div data-testid="featured">Featured Events</div>;
+};
+const MockFeaturedEventsSkeleton = () => <div data-testid="featured-skeleton">Loading...</div>;
+const mockedFeaturedMarketsModule = {
+  FeaturedEventsSection: MockFeaturedEventsSection,
+  FeaturedEventsSkeleton: MockFeaturedEventsSkeleton,
+};
+vi.mock("@/components/markets/FeaturedMarketsSection", () => mockedFeaturedMarketsModule);
 
 describe("HomePage", () => {
   it("renders filters and market cards", async () => {

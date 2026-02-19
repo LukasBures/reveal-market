@@ -197,7 +197,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
               value={draftFilters.marketId}
               placeholder="123"
               inputMode="numeric"
-              onChange={(value) => setDraftFilters((prev) => ({ ...prev, marketId: value.replace(/[^\d]/g, "") }))}
+              onChange={(value) => setDraftFilters((prev) => ({ ...prev, marketId: value.replace(/\D/g, "") }))}
             />
             <FilterField
               label="Event id"

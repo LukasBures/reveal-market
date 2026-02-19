@@ -18,7 +18,7 @@ import {
 } from "wagmi";
 import type { Address, Hex } from "viem";
 import { erc20Abi, maxUint256 } from "viem";
-import { fetchPositions, fetchClaimBundles, fetchClaimStatus } from "@/lib/api";
+import { fetchPositions, fetchClaimBundles } from "@/lib/api";
 import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
@@ -630,7 +630,7 @@ export function DashboardClient() {
       for (const sibling of bundle.merkleProof || []) {
         const siblingValue = parseBigInt(sibling);
         computed =
-          idx & 1n
+          (idx & 1n) === 1n
             ? poseidonHashPair(siblingValue, computed)
             : poseidonHashPair(computed, siblingValue);
         idx >>= 1n;

@@ -4,35 +4,37 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FeaturedEventsClient, AUTO_LOAD_BATCHES } from "@/components/markets/FeaturedMarketsClient";
 import { fetchFeaturedEvents } from "@/lib/api";
+import type { EventSummary, MarketSummary } from "@/lib/api-types";
 
 vi.mock("@/lib/api", () => ({
   fetchFeaturedEvents: vi.fn(),
 }));
 
-const sampleEvent = {
-  eventId: "evt-1",
-  title: "Sample Event",
-  category: "Politics",
-  markets: [
-    {
-      eventId: "evt-1",
-      title: "Sample Market",
-      category: "Politics",
-      tags: ["gov"],
-      outcomes: ["Yes", "No"],
-      outcomePrices: [0.5, 0.5],
-    },
-  ],
+const buildMarket = (overrides: Partial<MarketSummary> = {}): MarketSummary => ({
+  eventId: overrides.eventId ?? "evt-1",
+  title: overrides.title ?? "Sample Market",
+  category: overrides.category ?? "Politics",
+  tags: overrides.tags ?? ["gov"],
+  outcomes: overrides.outcomes ?? ["Yes", "No"],
+  outcomePrices: overrides.outcomePrices ?? [0.5, 0.5],
+  ...overrides,
+});
+
+const buildEvent = (overrides: Partial<EventSummary> = {}): EventSummary => {
+  const eventId = overrides.eventId ?? "evt-1";
+  const title = overrides.title ?? "Sample Event";
+  const category = overrides.category ?? "Politics";
+  const markets = overrides.markets ?? [buildMarket({ eventId, title, category })];
+  return {
+    eventId,
+    title,
+    category,
+    ...overrides,
+    markets,
+  };
 };
 
-const sampleMarket = {
-  eventId: "evt-1",
-  title: "Sample Market",
-  category: "Politics",
-  tags: ["gov"],
-  outcomes: ["Yes", "No"],
-  outcomePrices: [0.5, 0.5],
-};
+const sampleEvent = buildEvent();
 
 
 describe("FeaturedEventsClient", () => {
@@ -123,29 +125,31 @@ describe("FeaturedEventsClient", () => {
     const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock
       .mockResolvedValueOnce(
-        Array.from({ length: 10 }, (_, idx) => ({
-          eventId: `evt-gap-${idx}`,
-          title: `Gap Market ${idx}`,
-          category: "Sports",
-          outcomes: [],
-          outcomePrices: [],
-        })),
+        Array.from({ length: 10 }, (_, idx) =>
+          buildEvent({
+            eventId: `evt-gap-${idx}`,
+            title: `Gap Market ${idx}`,
+            category: "Sports",
+          }),
+        ),
       )
       .mockResolvedValueOnce(
-        Array.from({ length: 5 }, (_, idx) => ({
-          eventId: `evt-gap-next-${idx}`,
-          title: `Gap Market Next ${idx}`,
-          category: "Politics",
-          outcomes: [],
-          outcomePrices: [],
-        })),
+        Array.from({ length: 5 }, (_, idx) =>
+          buildEvent({
+            eventId: `evt-gap-next-${idx}`,
+            title: `Gap Market Next ${idx}`,
+            category: "Politics",
+          }),
+        ),
       );
 
-    const initialBatch = Array.from({ length: 10 }, (_, idx) => ({
-      ...sampleMarket,
-      eventId: `evt-init-gap-${idx}`,
-      title: `Initial Gap ${idx}`,
-    }));
+    const initialBatch = Array.from({ length: 10 }, (_, idx) =>
+      buildEvent({
+        eventId: `evt-init-gap-${idx}`,
+        title: `Initial Gap ${idx}`,
+        category: "Politics",
+      }),
+    );
 
     renderWithClient(
       <FeaturedEventsClient
@@ -176,16 +180,16 @@ describe("FeaturedEventsClient", () => {
   it("auto-loads batches then surfaces the manual button after the cap", async () => {
     let callCount = 0;
     const fetchMock = vi.mocked(fetchFeaturedEvents);
-    fetchMock.mockImplementation((limit = 0) => {
+    fetchMock.mockImplementation((limit = 0, _options) => {
       callCount += 1;
       return Promise.resolve(
-        Array.from({ length: limit }, (_, idx) => ({
-          eventId: `evt-auto-${callCount}-${idx}`,
-          title: `Auto Market ${callCount}-${idx}`,
-          category: "Auto",
-          outcomes: [],
-          outcomePrices: [],
-        })),
+        Array.from({ length: limit }, (_, idx) =>
+          buildEvent({
+            eventId: `evt-auto-${callCount}-${idx}`,
+            title: `Auto Market ${callCount}-${idx}`,
+            category: "Auto",
+          }),
+        ),
       );
     });
 
@@ -202,11 +206,13 @@ describe("FeaturedEventsClient", () => {
     }
     (globalThis as any).IntersectionObserver = InstantIntersectionObserver;
 
-    const initialBatch = Array.from({ length: 10 }, (_, idx) => ({
-      ...sampleMarket,
-      eventId: `evt-init-${idx}`,
-      title: `Initial Market ${idx}`,
-    }));
+    const initialBatch = Array.from({ length: 10 }, (_, idx) =>
+      buildEvent({
+        eventId: `evt-init-${idx}`,
+        title: `Initial Market ${idx}`,
+        category: "Politics",
+      }),
+    );
 
     renderWithClient(
       <FeaturedEventsClient
@@ -233,15 +239,17 @@ describe("FeaturedEventsClient", () => {
   it("shows a loading indicator during automatic pagination", async () => {
     let resolveFetch: (() => void) | undefined;
     const fetchMock = vi.mocked(fetchFeaturedEvents);
-    fetchMock.mockImplementation((limit = 0) => {
+    fetchMock.mockImplementation((limit = 0, _options) => {
       return new Promise((resolve) => {
         resolveFetch = () =>
           resolve(
-            Array.from({ length: limit }, (_, idx) => ({
-              ...sampleMarket,
-              eventId: `evt-lazy-${idx}`,
-              title: `Lazy Market ${idx}`,
-            })),
+            Array.from({ length: limit }, (_, idx) =>
+              buildEvent({
+                eventId: `evt-lazy-${idx}`,
+                title: `Lazy Market ${idx}`,
+                category: "Politics",
+              }),
+            ),
           );
       });
     });
@@ -257,11 +265,13 @@ describe("FeaturedEventsClient", () => {
     }
     (globalThis as any).IntersectionObserver = ManualIntersectionObserver;
 
-    const initialBatch = Array.from({ length: 10 }, (_, idx) => ({
-      ...sampleEvent,
-      eventId: `evt-lazy-init-${idx}`,
-      title: `Lazy Initial ${idx}`,
-    }));
+    const initialBatch = Array.from({ length: 10 }, (_, idx) =>
+      buildEvent({
+        eventId: `evt-lazy-init-${idx}`,
+        title: `Lazy Initial ${idx}`,
+        category: "Politics",
+      }),
+    );
 
     renderWithClient(
       <FeaturedEventsClient

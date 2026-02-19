@@ -28,7 +28,7 @@ type Props = {
   isResolved?: boolean | null;
   tradingHalted?: boolean | null;
   initialTxHash?: string | null;
-  onOutcomeChange?: (outcomeId: number) => void;
+  onOutcomeChangeAction?: (outcomeId: number) => void;
 };
 
 const TICKET_SIZE_ZEN = 0.1;
@@ -104,11 +104,11 @@ export function StakeQuoteCard({
   isResolved,
   tradingHalted = null,
   initialTxHash = null,
-  onOutcomeChange,
+  onOutcomeChangeAction,
 }: Props) {
   const [stakeZen, setStakeZen] = useState<number>(defaultStakeZen);
-  const [stakeInput, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
-  const [stakeError, setStakeError] = useState<string | null>(null);
+  const [, setStakeInput] = useState<string>(defaultStakeZen.toFixed(2));
+  const [stakeError] = useState<string | null>(null);
   const [selectedOutcome, setSelectedOutcome] = useState<number>(initialOutcomeId);
   const [quote, setQuote] = useState<PricingQuote | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -182,10 +182,10 @@ export function StakeQuoteCard({
   }, [outcomeOptions, selectedOutcome]);
 
   useEffect(() => {
-    if (typeof onOutcomeChange === "function") {
-      onOutcomeChange(selectedOutcome);
+    if (typeof onOutcomeChangeAction === "function") {
+      onOutcomeChangeAction(selectedOutcome);
     }
-  }, [selectedOutcome, onOutcomeChange]);
+  }, [selectedOutcome, onOutcomeChangeAction]);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,7 +209,7 @@ export function StakeQuoteCard({
         }
       }
     };
-    loadEscrow();
+    void loadEscrow();
     return () => {
       cancelled = true;
     };
@@ -396,7 +396,7 @@ export function StakeQuoteCard({
         // no-op: CTA stays active while preview refreshes
       }
     };
-    requestPreview();
+    void requestPreview();
     return () => {
       cancelled = true;
     };
@@ -677,7 +677,7 @@ export function StakeQuoteCard({
         setTimeout(poll, 5000);
       }
     };
-    poll();
+    void poll();
     return () => {
       cancelled = true;
     };

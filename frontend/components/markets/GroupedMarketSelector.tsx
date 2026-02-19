@@ -16,20 +16,9 @@ type Props = {
   marketDetails?: MarketDetail[];
   selectedOutcome?: number;
   linkToGroupPage?: boolean;
-  labelOverride?: string;
-  titleOverride?: string;
   subtitleOverride?: string;
   forceShow?: boolean;
-  onSelect?: (eventId: string) => void;
-};
-
-const formatGroupTitle = (slug?: string | null): string => {
-  if (!slug) return "Market";
-  return slug
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  onSelectAction?: (eventId: string) => void;
 };
 
 const formatPrice = (value: number | null | undefined): string => {
@@ -47,11 +36,9 @@ export function GroupedMarketSelector({
   marketDetails = [],
   selectedOutcome,
   linkToGroupPage = false,
-  labelOverride,
-  titleOverride,
   subtitleOverride,
   forceShow = false,
-  onSelect,
+  onSelectAction,
 }: Props) {
   const labeledSiblings = useMemo(() => {
     const formatDay = (value?: string | null) => {
@@ -150,20 +137,19 @@ export function GroupedMarketSelector({
 
   const didAutoSelectRef = useRef(false);
   useEffect(() => {
-    if (!onSelect || didAutoSelectRef.current) return;
+    if (!onSelectAction || didAutoSelectRef.current) return;
     if (activeSiblings.some((sibling) => sibling.eventId === activeEventId)) return;
     const firstActive = activeSiblings[0];
     if (!firstActive) return;
     if (firstActive.eventId !== activeEventId) {
       didAutoSelectRef.current = true;
-      onSelect(firstActive.eventId);
+      onSelectAction(firstActive.eventId);
     }
-  }, [activeEventId, activeSiblings, onSelect]);
+  }, [activeEventId, activeSiblings, onSelectAction]);
 
   const shouldShow = forceShow || (!!groupSlug && siblings.length > 1);
   if (!shouldShow) return null;
 
-  const title = titleOverride ?? formatGroupTitle(groupSlug);
   const subtitle = subtitleOverride ?? "Select a threshold to jump between sub-markets.";
   const countLabel = endedSiblings.length
     ? `${activeSiblings.length} active · ${endedSiblings.length} ended`
@@ -219,12 +205,12 @@ export function GroupedMarketSelector({
                 />
                 </div>
               ) : null;
-              if (onSelect) {
+              if (onSelectAction) {
                 return (
                   <div key={`summary-${sibling.eventId}`} className={cardClassName}>
                     <button
                       type="button"
-                      onClick={() => onSelect(sibling.eventId)}
+                      onClick={() => onSelectAction(sibling.eventId)}
                       className={rowClassName}
                     >
                       <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
@@ -270,10 +256,6 @@ export function GroupedMarketSelector({
                   const volume = sibling.volume ?? 0;
                   const active = sibling.eventId === activeEventId;
                   const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
-                  const href: UrlObject | Route =
-                    linkToGroupPage && groupSlug
-                      ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
-                      : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
                   const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                     active
                       ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"
@@ -325,12 +307,12 @@ export function GroupedMarketSelector({
                 />
             </div>
           ) : null;
-          if (onSelect) {
+          if (onSelectAction) {
             return (
               <div key={`summary-${sibling.eventId}`} className={cardClassName}>
                 <button
                   type="button"
-                  onClick={() => onSelect(sibling.eventId)}
+                  onClick={() => onSelectAction(sibling.eventId)}
                   className={rowClassName}
                 >
                   <span className="text-[11px] uppercase tracking-[0.25em] text-white/80">{label}</span>
@@ -376,10 +358,6 @@ export function GroupedMarketSelector({
               const volume = sibling.volume ?? 0;
               const active = sibling.eventId === activeEventId;
               const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
-              const href: UrlObject | Route =
-                linkToGroupPage && groupSlug
-                  ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
-                  : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
               const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                 active
                   ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"
@@ -421,10 +399,6 @@ export function GroupedMarketSelector({
                 const volume = sibling.volume ?? 0;
                 const active = sibling.eventId === activeEventId;
                 const label = (sibling as MarketSibling & { _label?: string })._label ?? "Sub-market";
-                const href: UrlObject | Route =
-                  linkToGroupPage && groupSlug
-                    ? { pathname: `/events/${encodeURIComponent(groupSlug)}`, query: { eventId: sibling.eventId } }
-                    : (`/events/${encodeURIComponent(sibling.eventId)}` as Route);
                 const className = `flex w-full min-h-[112px] flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition sm:grid sm:grid-cols-[1.2fr,0.9fr,0.9fr,1fr] sm:items-center ${
                   active
                     ? "border-amber-400 bg-amber-500/10 shadow-md shadow-amber-500/20"

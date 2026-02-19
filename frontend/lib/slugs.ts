@@ -22,8 +22,6 @@ const CATEGORY_ALIASES: Record<string, string> = {
   tech: "ai-tech",
 };
 
-export const categorySlugs = Object.keys(CATEGORY_MAP);
-
 export function slugify(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "-");
 }
@@ -43,8 +41,4 @@ export function categorySlugFromLabel(label: string): string | null {
     return slug;
   }
   return CATEGORY_ALIASES[slug] ?? null;
-}
-
-export function categoryLabelFromSlug(slug: string): string | null {
-  return CATEGORY_MAP[slug] ?? null;
 }

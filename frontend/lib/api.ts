@@ -3,7 +3,6 @@ import type {
   FetchFeaturedMarketsOptions,
   HealthSnapshot,
   InvestorKpis,
-  GroupedMarkets,
   MarketDetail,
   MarketSibling,
   MarketStatusStat,

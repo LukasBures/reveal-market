@@ -4,9 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
-import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
 import { GroupedMarketSelector } from "@/components/markets/GroupedMarketSelector";
-import { getCommitDeadline, resolvePriceStreamMarketId } from "@/lib/markets";
+import { getCommitDeadline } from "@/lib/markets";
 import { formatDateTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
 import { buildBreadcrumbJsonLd } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -90,14 +89,6 @@ export function EventDetailClient({
     setSelectedOutcome(0);
   }, [activeEventId, groupMarkets, isSelectableMarket]);
 
-  const tokenIds = Array.isArray(market.clobTokenIds) ? market.clobTokenIds.map((t) => String(t)) : [];
-  const priceStreamEventId = resolvePriceStreamMarketId(market, activeEventId);
-  const resolverSource =
-    market.resolutionSource ??
-    (market.extraData as any)?.resolution_source ??
-    (market.extraData as any)?.gamma?.resolution_source ??
-    null;
-  const resolverLabel = typeof resolverSource === "string" && resolverSource.trim() ? resolverSource.trim() : "Not provided";
   const commitDeadline = getCommitDeadline(market);
   const initialOutcomeId =
     typeof requestedOutcome === "number" && Number.isFinite(requestedOutcome) && requestedOutcome >= 0
@@ -180,11 +171,9 @@ export function EventDetailClient({
                 groupSlug={market.groupSlug ?? canonicalEventId}
                 siblings={selectorSiblings}
                 activeEventId={activeEventId}
-                onSelect={handleSelect}
+                onSelectAction={handleSelect}
                 marketDetails={groupMarkets}
                 selectedOutcome={selectedOutcome}
-                labelOverride="Grouped market"
-                titleOverride={market.groupSlug ? undefined : market.title}
                 subtitleOverride="Choose a sub-market within this event."
                 forceShow
               />
@@ -222,7 +211,7 @@ export function EventDetailClient({
                   marketTitle={market.title}
                   marketStatus={market.status}
                   isResolved={market.resolution?.resolved ?? null}
-                  onOutcomeChange={setSelectedOutcome}
+                  onOutcomeChangeAction={setSelectedOutcome}
                 />
               </div>
             </div>
