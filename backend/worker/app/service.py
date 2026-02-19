@@ -67,6 +67,8 @@ class _WorkerTimestamps:
 
 
 _WORKER_TIMESTAMPS = _WorkerTimestamps()
+_WORKER_TIMESTAMPS_LOCK = asyncio.Lock()
+_background_proofs_task: asyncio.Task | None = None
 
 
 class MemoryStats(TypedDict, total=False):
@@ -495,7 +497,7 @@ def _trim_worker_memory() -> bool:
     return False
 
 
-def _count_memory_pressure_objects() -> MemoryPressureStats:
+async def _count_memory_pressure_objects() -> MemoryPressureStats:
     interval = max(runtime.settings.worker_memory_pressure_scan_interval_seconds, 0)
     if interval <= 0:
         return {
@@ -503,15 +505,14 @@ def _count_memory_pressure_objects() -> MemoryPressureStats:
             "market_orm_objects": 0,
         }
     now = time.monotonic()
-    if (
-        _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts is not None
-        and (now - _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts) < interval
-    ):
-        return {
-            "market_payload_objects": 0,
-            "market_orm_objects": 0,
-        }
-    _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts = now
+    async with _WORKER_TIMESTAMPS_LOCK:
+        last_ts = _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts
+        if last_ts is not None and (now - last_ts) < interval:
+            return {
+                "market_payload_objects": 0,
+                "market_orm_objects": 0,
+            }
+        _WORKER_TIMESTAMPS.last_memory_pressure_scan_ts = now
     counts: MemoryPressureStats = {
         "market_payload_objects": 0,
         "market_orm_objects": 0,
@@ -561,12 +562,15 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
     cooldown = max(runtime.settings.polymarket_sync_lease_failure_cooldown_seconds, 0)
     cooldown_jitter = max(runtime.settings.polymarket_sync_lease_failure_jitter_seconds, 0)
     now = time.monotonic()
-    if cooldown > 0 and _WORKER_TIMESTAMPS.last_sync_lease_failure_ts is not None:
-        if (now - _WORKER_TIMESTAMPS.last_sync_lease_failure_ts) < cooldown:
+    if cooldown > 0:
+        async with _WORKER_TIMESTAMPS_LOCK:
+            last_failure_ts = _WORKER_TIMESTAMPS.last_sync_lease_failure_ts
+        if last_failure_ts is not None and (now - last_failure_ts) < cooldown:
             return False
     if redis_client is None:
         if cooldown > 0:
-            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
+            async with _WORKER_TIMESTAMPS_LOCK:
+                _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         wait_for = cooldown + (random.uniform(0, cooldown_jitter) if cooldown_jitter else 0)  # noqa: S311
         if wait_for > 0:
             await asyncio.sleep(wait_for)
@@ -582,12 +586,15 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
             ex=int(ttl_with_jitter),
         )
         if acquired:
-            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = None
+            async with _WORKER_TIMESTAMPS_LOCK:
+                _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = None
         else:
-            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
+            async with _WORKER_TIMESTAMPS_LOCK:
+                _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         return bool(acquired)
     except Exception as exc:  # pragma: no cover - defensive
-        _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
+        async with _WORKER_TIMESTAMPS_LOCK:
+            _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
         log_event(
             logger,
             logging.WARNING,
@@ -797,7 +804,8 @@ async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float
             )
             last_ts = None
     else:
-        last_ts = _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts
+        async with _WORKER_TIMESTAMPS_LOCK:
+            last_ts = _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts
     if last_ts is None:
         return None
     grace = max(runtime.settings.polymarket_updated_at_cutoff_grace_seconds, 0)
@@ -820,7 +828,8 @@ async def _record_polymarket_updated_at(redis_client: Redis | None, last_seen_ts
             )
             return
     else:
-        _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts = last_seen_ts
+        async with _WORKER_TIMESTAMPS_LOCK:
+            _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts = last_seen_ts
 
 
 def _page_updated_at_bounds(markets: list[MarketPayload]) -> tuple[float | None, float | None]:
@@ -855,7 +864,8 @@ async def _should_run_closed_reconcile(redis_client: Redis | None) -> bool:
                 error=str(exc),
             )
     else:
-        last_ts = _WORKER_TIMESTAMPS.last_closed_reconcile_ts
+        async with _WORKER_TIMESTAMPS_LOCK:
+            last_ts = _WORKER_TIMESTAMPS.last_closed_reconcile_ts
     if last_ts is not None and now - last_ts < interval:
         return False
     return True
@@ -875,7 +885,8 @@ async def _mark_closed_reconcile_run(redis_client: Redis | None) -> None:
                 error=str(exc),
             )
     else:
-        _WORKER_TIMESTAMPS.last_closed_reconcile_ts = float(now)
+        async with _WORKER_TIMESTAMPS_LOCK:
+            _WORKER_TIMESTAMPS.last_closed_reconcile_ts = float(now)
 
 
 async def _list_closed_reconcile_event_ids(
@@ -1251,7 +1262,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                                             changed_events=len(summary.changed_events),
                                             changed_conditions=len(summary.changed_conditions),
                                             proof_jobs=len(summary.proof_jobs),
-                                            **_count_memory_pressure_objects(),
+                                            **(await _count_memory_pressure_objects()),
                                         )
                                         stop_due_to_memory = True
                                         stop_reason = "memory"
@@ -1496,7 +1507,16 @@ async def process_once(redis_client: Redis | None = None) -> dict[str, float | i
                 error=str(exc),
             )
     else:
-        asyncio.create_task(_run_proofs_and_settlements(summary))
+        global _background_proofs_task
+        if _background_proofs_task is None or _background_proofs_task.done():
+            _background_proofs_task = asyncio.create_task(_run_proofs_and_settlements(summary))
+        else:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.jobs_skipped",
+                message="previous proof/settlement task still running",
+            )
     summary.proofs_generated = 0
     summary.settlement_txs = 0
     cache_report = await invalidate_cache_tags(redis_client, summary)
@@ -2080,3 +2100,4 @@ async def run_worker() -> None:
         await _cancel_task(lock_batches_task)
         await _cancel_task(proof_worker_task)
         await _cancel_task(settlement_worker_task)
+        await _cancel_task(_background_proofs_task)

@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 
@@ -78,16 +78,17 @@ describe("Trade status polling", () => {
   });
 
   it("calls fetchTradeStatus when tx hash is present", async () => {
+    const txHash = `0x${"1".repeat(64)}`;
     hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
     hooks.useReadContract.mockReturnValue({ data: 0n });
     hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
     hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
-    apiMocks.statusMock.mockResolvedValue({ status: "confirmed", txHash: "0xtx" });
+    apiMocks.statusMock.mockResolvedValue({ status: "confirmed", txHash });
 
     render(
       <StakeQuoteCard
-        initialTxHash="0xtx"
+        initialTxHash={txHash}
         marketAddress="0x1111111111111111111111111111111111111111"
         marketId="m1"
         outcomes={["Yes", "No"]}
@@ -95,7 +96,10 @@ describe("Trade status polling", () => {
       />,
     );
 
-    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(undefined, "0xtx"));
+    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(txHash, undefined));
+    await waitFor(() => {
+      expect(screen.getByText(/commit confirmed on-chain/i)).toBeInTheDocument();
+    });
   });
 
   it("omits market address when requesting preview without a market address", async () => {

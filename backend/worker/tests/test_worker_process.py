@@ -771,7 +771,8 @@ async def test_fetch_markets_stops_on_updated_at_cutoff(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     async def always_fail(self, **_kwargs):
-        if False:  # pragma: no cover - ensure this is an async generator
+        # Keep this an async generator while never yielding pages.
+        for _ in ():  # pragma: no cover - empty by design
             yield []
         raise RuntimeError("fatal failure")
 
@@ -927,7 +928,7 @@ async def test_publish_heartbeat_logs_after_exhausting_retries(monkeypatch, capl
         def __init__(self):
             self.calls = 0
 
-        def set(self, *args, **kwargs):
+        async def set(self, *args, **kwargs):
             self.calls += 1
             raise RuntimeError("still down")
 

@@ -182,8 +182,19 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
         )
         get_stats_client().record_error()
         return results
+    if payloads is None or len(payloads) != len(keys):
+        shared_logging.log_event(
+            logger,
+            logging.WARNING,
+            event="cache.mget.length_mismatch",
+            message="redis MGET returned unexpected number of payloads",
+            expected=len(keys),
+            actual=0 if payloads is None else len(payloads),
+        )
+        get_stats_client().record_error()
+        return results
     stats = get_stats_client()
-    for key, payload_raw in zip(keys, payloads, strict=False):
+    for key, payload_raw in zip(keys, payloads, strict=True):
         if payload_raw is None:
             stats.record_miss()
             continue
