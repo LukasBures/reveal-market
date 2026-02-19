@@ -19,15 +19,30 @@ timestamp() {
 }
 
 log_info() {
-  printf '[%s] %s\n' "$(timestamp)" "$*"
+  local message=""
+  if (( $# )); then
+    printf -v message '%s ' "$@"
+    message="${message% }"
+  fi
+  printf '[%s] %s\n' "$(timestamp)" "$message"
 }
 
 log_warn() {
-  printf '[%s] WARN: %s\n' "$(timestamp)" "$*" >&2
+  local message=""
+  if (( $# )); then
+    printf -v message '%s ' "$@"
+    message="${message% }"
+  fi
+  printf '[%s] WARN: %s\n' "$(timestamp)" "$message" >&2
 }
 
 log_step() {
-  printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
+  local message=""
+  if (( $# )); then
+    printf -v message '%s ' "$@"
+    message="${message% }"
+  fi
+  printf '\n[%s] >>> %s\n' "$(timestamp)" "$message"
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -115,6 +130,18 @@ check_apk_mirror() {
       log_info "Fallback mirror configured: ${APK_FALLBACK_URL}"
     fi
   fi
+}
+
+run_compose_build() {
+  local parallel_flag="${1:-true}"
+  local parallel_limit="${2:-${COMPOSE_PARALLEL_LIMIT}}"
+  local opts=(--pull --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
+  if [[ "${parallel_flag}" == "true" && "${parallel_limit}" -gt 1 ]]; then
+    opts+=(--parallel)
+  fi
+  local cmd=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${opts[@]}")
+  log_info "Running: COMPOSE_PARALLEL_LIMIT=${parallel_limit} ${cmd[*]}"
+  COMPOSE_PARALLEL_LIMIT="${parallel_limit}" "${cmd[@]}"
 }
 
 if docker compose version >/dev/null 2>&1; then
@@ -493,17 +520,6 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
   log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  run_compose_build() {
-    local parallel_flag="${1:-true}"
-    local parallel_limit="${2:-${COMPOSE_PARALLEL_LIMIT}}"
-    local opts=(--pull --build-arg "APK_REPO_URL=${APK_REPO_URL}" --build-arg "APK_FALLBACK_URL=${APK_FALLBACK_URL}")
-    if [[ "${parallel_flag}" == "true" && "${parallel_limit}" -gt 1 ]]; then
-      opts+=(--parallel)
-    fi
-    local cmd=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" build "${opts[@]}")
-    log_info "Running: COMPOSE_PARALLEL_LIMIT=${parallel_limit} ${cmd[*]}"
-    COMPOSE_PARALLEL_LIMIT="${parallel_limit}" "${cmd[@]}"
-  }
   if ! run_compose_build true "${COMPOSE_PARALLEL_LIMIT}"; then
     if [[ "${COMPOSE_PARALLEL_LIMIT}" -gt 1 ]]; then
       log_warn "Parallel compose build failed (BuildKit flake). Retrying sequentially."

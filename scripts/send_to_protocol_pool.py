@@ -294,10 +294,6 @@ def main() -> int:
             log.error("Approve failed: %s", exc)
             return 1
         nonce += 1
-        try:
-            allowance = token.functions.allowance(sender_address, pool_address).call()
-        except Web3Exception:
-            pass
 
     try:
         est = pool.functions.deposit(amount_int).estimate_gas({"from": sender_address})
