@@ -5,7 +5,6 @@ import type { MarketSortOption } from "@/lib/markets";
 import { FeaturedEventsClient } from "./FeaturedMarketsClient";
 import { DEFAULT_MAX_ITEMS, DEFAULT_PAGE_SIZE } from "./constants";
 import { MarketGridSkeleton } from "./MarketGridSkeleton";
-import { Skeleton } from "../ui/Skeleton";
 
 type Props = {
   pageSize?: number;
@@ -73,9 +72,6 @@ export function FeaturedEventsSkeleton() {
   return (
     <section className="space-y-4">
       <MarketGridSkeleton />
-      <div className="flex items-center justify-center">
-        <Skeleton className="h-10 w-48 rounded-full border border-white/10 bg-white/10" />
-      </div>
     </section>
   );
 }
