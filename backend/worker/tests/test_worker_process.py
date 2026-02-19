@@ -47,6 +47,30 @@ async def create_async_in_memory_db():
     return engine, session_factory
 
 
+class DummySession:
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        return None
+
+    def expunge_all(self) -> None:
+        return None
+
+
+@contextlib.asynccontextmanager
+async def dummy_session_scope():
+    yield DummySession()
+
+
+async def async_none(*_args: Any, **_kwargs: Any) -> None:
+    return None
+
+
+async def async_zero(*_args: Any, **_kwargs: Any) -> int:
+    return 0
+
+
 class DummyRedis:
     def __init__(self):
         self.store: dict[str, Any] = {}
@@ -174,6 +198,14 @@ class DummyRedis:
         self._ttls.clear()
 
 
+class _CounterRecorder:
+    def __init__(self, target: dict[str, Any]):
+        self.target = target
+
+    def inc(self, amount: float = 1.0):
+        self.target["amount"] += amount
+
+
 class DummyCounter:
     def __init__(self):
         self.records: list[dict[str, Any]] = []
@@ -181,15 +213,15 @@ class DummyCounter:
     def labels(self, **labels):
         record = {"labels": labels, "amount": 0}
         self.records.append(record)
+        return _CounterRecorder(record)
 
-        class _Recorder:
-            def __init__(self, target):
-                self.target = target
 
-            def inc(self, amount: float = 1.0):
-                self.target["amount"] += amount
+class _GaugeSetter:
+    def __init__(self, target: dict[str, Any]):
+        self.target = target
 
-        return _Recorder(record)
+    def set(self, value: float):
+        self.target["value"] = value
 
 
 class DummyGauge:
@@ -199,15 +231,7 @@ class DummyGauge:
     def labels(self, **labels):
         record = {"labels": labels, "value": None}
         self.records.append(record)
-
-        class _Setter:
-            def __init__(self, target):
-                self.target = target
-
-            def set(self, value: float):
-                self.target["value"] = value
-
-        return _Setter(record)
+        return _GaugeSetter(record)
 
     def last_value(self) -> float | None:
         return self.records[-1]["value"] if self.records else None
@@ -685,32 +709,12 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     async def _fake_events_paginated(self, **_kwargs):
         yield [payload]
 
-    @contextlib.asynccontextmanager
-    async def dummy_session_scope():
-        class DummySession:
-            async def flush(self):
-                return None
-
-            async def commit(self):
-                return None
-
-            def expunge_all(self):
-                return None
-
-        yield DummySession()
-
     async def fake_collect(session, page, redis_client, summary):
         for item in page:
             summary.changed_events.add(item.event_id)
         summary.markets_created += len(page)
         summary.proof_jobs = []
         return summary
-
-    async def async_none(*_args, **_kwargs):
-        return None
-
-    async def async_zero(*_args, **_kwargs):
-        return 0
 
     monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
     monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
@@ -754,29 +758,9 @@ async def test_fetch_markets_stops_on_updated_at_cutoff(monkeypatch):
         yield [payload_old]
         yield [MarketPayload(event_id="evt-too-old", title="Too old", source_updated_at=ts_old)]
 
-    @contextlib.asynccontextmanager
-    async def dummy_session_scope():
-        class DummySession:
-            async def flush(self):
-                return None
-
-            async def commit(self):
-                return None
-
-            def expunge_all(self):
-                return None
-
-        yield DummySession()
-
     async def fake_collect(session, page, redis_client, summary):
         summary.markets_created += len(page)
         return summary
-
-    async def async_none(*_args, **_kwargs):
-        return None
-
-    async def async_zero(*_args, **_kwargs):
-        return 0
 
     monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
     monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
@@ -814,32 +798,12 @@ async def test_fetch_markets_stops_on_updated_at_cutoff(monkeypatch):
 async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     async def always_fail(self, **_kwargs):
         # Keep this an async generator while never yielding pages.
-        for _ in ():  # pragma: no cover - empty by design
+        if False:  # pragma: no cover - empty by design
             yield []
         raise RuntimeError("fatal failure")
 
-    @contextlib.asynccontextmanager
-    async def dummy_session_scope():
-        class DummySession:
-            async def flush(self):
-                return None
-
-            async def commit(self):
-                return None
-
-            def expunge_all(self):
-                return None
-
-        yield DummySession()
-
     async def fake_collect(session, page, redis_client, summary):
         return summary
-
-    async def async_none(*_args, **_kwargs):
-        return None
-
-    async def async_zero(*_args, **_kwargs):
-        return 0
 
     monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
     monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)
@@ -883,32 +847,12 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
             raise RuntimeError("temporary failure")
         yield [payload]
 
-    @contextlib.asynccontextmanager
-    async def dummy_session_scope():
-        class DummySession:
-            async def flush(self):
-                return None
-
-            async def commit(self):
-                return None
-
-            def expunge_all(self):
-                return None
-
-        yield DummySession()
-
     async def fake_collect(session, page, redis_client, summary):
         for item in page:
             summary.changed_events.add(item.event_id)
         summary.markets_created += len(page)
         summary.proof_jobs = []
         return summary
-
-    async def async_none(*_args, **_kwargs):
-        return None
-
-    async def async_zero(*_args, **_kwargs):
-        return 0
 
     monkeypatch.setattr(worker_service, "session_scope", dummy_session_scope, raising=False)
     monkeypatch.setattr(worker_service, "collect_market_changes_with_summary", fake_collect, raising=False)

@@ -41,6 +41,8 @@ class DummyCall:
 
 
 class DummyMarketFunctions:
+    """Test double that mirrors the Web3 ABI method names."""
+
     def __init__(self, market_id: int | None = None, exc: Exception | None = None) -> None:
         self._market_id = market_id
         self._exc = exc
@@ -50,6 +52,8 @@ class DummyMarketFunctions:
 
 
 class DummyFactoryFunctions:
+    """Test double that mirrors the Web3 ABI method names."""
+
     def __init__(self, params: tuple[Any, ...] | None = None, exc: Exception | None = None) -> None:
         self._params = params
         self._exc = exc
@@ -82,7 +86,7 @@ class DummyWeb3:
 
 
 @pytest.mark.asyncio
-async def test_backfill_market_params_updates_missing_fields(monkeypatch):
+async def test_backfill_market_params_updates_missing_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     session = DummySession()
     market = DummyMarket(event_id="evt-1", market_address="0xabc", onchain_market_id=None)
 
@@ -116,7 +120,7 @@ async def test_backfill_market_params_updates_missing_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backfill_market_params_handles_factory_failure(monkeypatch):
+async def test_backfill_market_params_handles_factory_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     session = DummySession()
     market = DummyMarket(event_id="evt-2", market_address="0xdef", onchain_market_id=5)
 
