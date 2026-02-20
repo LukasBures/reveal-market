@@ -25,6 +25,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     uint256 public constant BATCH_SIZE = 256;
     uint8 public constant MERKLE_DEPTH = 8;
     uint256 public constant CLAIM_WINDOW_SECONDS = 180 days;
+    uint256 public constant MAX_CLAIM_DEADLINE_EXTENSION = 365 days;
 
     struct InitParams {
         address factory;
@@ -129,6 +130,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error CommitsPaused();
     error ClaimsPaused();
     error DeadlineExtendOnly();
+    error DeadlineTooFar();
     error ClaimWindowClosed();
     error ClaimWindowOpen();
     error ClaimsAlreadySwept();
@@ -512,7 +514,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     /// @notice Rotate oracle; allowed until settlement to handle provider changes.
     function setOracle(address newOracle) external onlyFactory {
         if (newOracle == address(0)) revert InvalidAddress();
-        if (phase == Phase.Settled) revert InvalidPhase();
+        if (phase == Phase.Locked || phase == Phase.Settled) revert InvalidPhase();
         oracle = newOracle;
         emit OracleUpdated(newOracle);
     }
@@ -590,6 +592,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     /// @notice Extend-only claim deadline updates. Cannot shorten.
     function extendClaimDeadline(uint256 newDeadline) external onlyFactory {
         if (newDeadline <= claimDeadline) revert DeadlineExtendOnly();
+        if (newDeadline > block.timestamp + MAX_CLAIM_DEADLINE_EXTENSION) revert DeadlineTooFar();
         claimDeadline = newDeadline;
         emit ClaimDeadlineExtended(newDeadline);
     }

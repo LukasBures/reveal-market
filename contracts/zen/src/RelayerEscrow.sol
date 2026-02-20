@@ -36,6 +36,7 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     error UnknownMarket();
     error InvalidFactory();
     error InsufficientBalance();
+    error FeeOnTransferNotSupported();
     error CommitFailed();
     error InvalidRelayerOwner();
     error UserMismatch();
@@ -95,8 +96,11 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         uint256 ticket = IRevealMarket(market).ticketSize();
         if (balances[user] < ticket) revert InsufficientBalance();
 
+        uint256 balanceBefore = COLLATERAL_TOKEN.balanceOf(market);
         balances[user] -= ticket;
         COLLATERAL_TOKEN.safeTransfer(market, ticket);
+        uint256 received = COLLATERAL_TOKEN.balanceOf(market) - balanceBefore;
+        if (received != ticket) revert FeeOnTransferNotSupported();
         IRevealMarket(market).commitWithAuthorization(auth, signature);
 
         emit CommitForwarded(market, auth.commitment, ticket);
