@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { EventDetailClient } from "@/components/events/EventDetailClient";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { fetchFeaturedEvents, fetchMarketByEventId } from "@/lib/api";
 import type { MarketDetail } from "@/lib/api-types";
 import { absoluteUrl, buildMetadata } from "@/lib/seo";
@@ -226,25 +227,18 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
         coverImage={coverImage}
         contextCopy={contextCopy}
       />
-      <script
-        type="application/ld+json"
-        suppressHydrationWarning
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
-      />
-      <script
-        type="application/ld+json"
-        suppressHydrationWarning
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "BreadcrumbList",
-            itemListElement: [
-              { "@type": "ListItem", position: 1, name: "Home", item: absoluteUrl("/") },
-              { "@type": "ListItem", position: 2, name: "Events", item: absoluteUrl("/search") },
-              { "@type": "ListItem", position: 3, name: market.title, item: absoluteUrl(canonicalPath) },
-            ],
-          }),
+      <JsonLd data={structuredData} id="event-structured-data" />
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Home", item: absoluteUrl("/") },
+            { "@type": "ListItem", position: 2, name: "Events", item: absoluteUrl("/search") },
+            { "@type": "ListItem", position: 3, name: market.title, item: absoluteUrl(canonicalPath) },
+          ],
         }}
+        id="event-breadcrumbs"
       />
     </>
   );
