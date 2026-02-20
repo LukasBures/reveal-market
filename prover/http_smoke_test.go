@@ -41,7 +41,13 @@ func TestHTTPHandlersHealthAndProof(t *testing.T) {
 	body := buildTestRequest()
 	body.MarketID = "0x2"
 	payload, _ := json.Marshal(body)
-	proofResp, err := http.Post(srv.URL+"/api/v1/proofs/settlement", "application/json", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/proofs/settlement", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("proof request failed: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
+	proofResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("proof request failed: %v", err)
 	}
