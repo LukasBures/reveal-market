@@ -518,7 +518,7 @@ def test_sync_commitments_endpoint(client, db_session, monkeypatch):
             {
                 "ticketHash": "0x" + "22" * 32,
                 "leaf": "0x" + "22" * 32,
-                "user_address": "0xabc",
+                "user_address": "0x" + "ab" * 20,
                 "outcomeId": 1,
                 "amount": 100,
                 "payout": 110,

@@ -4,9 +4,24 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from web3 import Web3
 
 HealthState = Literal["ok", "degraded", "error"]
+
+
+def _normalize_eth_address(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+    else:
+        cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError("invalid_ethereum_address")
+    if not Web3.is_address(cleaned):
+        raise ValueError(f"invalid_ethereum_address:{cleaned}")
+    return Web3.to_checksum_address(cleaned)
 
 
 class HealthComponent(BaseModel):
@@ -87,6 +102,11 @@ class MarketBase(BaseModel):
     spread: float | None = None
     volume: float | None = None
     open_interest: float | None = None
+
+    @field_validator("market_address", mode="before")
+    @classmethod
+    def _validate_market_addresses(cls, value):
+        return _normalize_eth_address(value)
 
 
 class MarketCreate(MarketBase):
@@ -298,6 +318,11 @@ class PricingQuoteRequest(BaseModel):
         description="(Deprecated) User identifier; defaults to wallet_address for cap tracking",
     )
 
+    @field_validator("wallet_address", "market_address", mode="before")
+    @classmethod
+    def _validate_quote_addresses(cls, value):
+        return _normalize_eth_address(value)
+
 
 class PricingQuoteResponse(BaseModel):
     stake_zen: Decimal
@@ -454,6 +479,11 @@ class CommitmentTicket(BaseModel):
     merkle_path: list[str] | None = Field(default=None, alias="merklePath")
     tx_hash: str | None = Field(default=None, alias="txHash")
 
+    @field_validator("user", mode="before")
+    @classmethod
+    def _validate_commit_user(cls, value):
+        return _normalize_eth_address(value)
+
 
 class CommitmentsSyncRequest(BaseModel):
     market_id: str | None = None
@@ -502,6 +532,11 @@ class TradeClaimRequest(BaseModel):
     market_id: str | None = None
     event_id: str | None = None
     ticket_id: int | None = None
+
+    @field_validator("wallet_address", mode="before")
+    @classmethod
+    def _validate_claim_wallet(cls, value):
+        return _normalize_eth_address(value)
 
 
 class TradeClaimResponse(BaseModel):
