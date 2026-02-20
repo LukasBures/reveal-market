@@ -23,6 +23,9 @@ const IS_BROWSER = typeof window !== "undefined";
 const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
 const DEFAULT_CLOSES_WITHIN_HOURS = 24;
+const DEFAULT_FETCH_TIMEOUT_MS = 8000;
+const SUGGEST_FETCH_TIMEOUT_MS = 5000;
+const PROOF_FETCH_TIMEOUT_MS = 12000;
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
   const message = error instanceof Error ? error.message : String(error ?? "unknown");
   const payload = meta ? { ...meta, error: message } : { error: message };
@@ -42,6 +45,18 @@ const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<strin
 };
 
 const maybeShortCircuitOffline = (_scope: string) => false;
+
+type NextFetchOptions = RequestInit & { next?: { revalidate?: number; tags?: string[] } };
+
+const fetchWithTimeout = async (url: string, options: NextFetchOptions, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 const coerceNumber = (value: any): number | undefined => {
   const parsed = Number(value);
@@ -460,10 +475,14 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       orderBy,
       revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS,
     });
-    const response = await fetch(url.toString(), {
-      cache: "force-cache",
-      next: { revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS, tags: fetchTags },
-    });
+    const response = await fetchWithTimeout(
+      url.toString(),
+      {
+        cache: "force-cache",
+        next: { revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS, tags: fetchTags },
+      },
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       logger.warn("fetchFeaturedEvents:failed", {
@@ -545,13 +564,17 @@ export async function fetchMarketSuggestions(
       limit,
       query: trimmed,
     });
-    const response = await fetch(url.toString(), {
-      cache: "force-cache",
-      next: {
-        revalidate: options?.revalidate ?? DEFAULT_SUGGEST_REVALIDATE_SECONDS,
-        tags: [`suggest:${normalized}`],
+    const response = await fetchWithTimeout(
+      url.toString(),
+      {
+        cache: "force-cache",
+        next: {
+          revalidate: options?.revalidate ?? DEFAULT_SUGGEST_REVALIDATE_SECONDS,
+          tags: [`suggest:${normalized}`],
+        },
       },
-    });
+      SUGGEST_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) {
       logger.error("fetchMarketSuggestions:failed", { status: response.status, endpoint: url.toString() });
       return [];
@@ -598,9 +621,13 @@ async function fetchMarketStatsFrom(
 ): Promise<MarketStatusStat[] | null> {
   try {
     const endpoint = `${baseUrl}/events/stats`;
-    const response = await fetch(endpoint, {
-      next: { revalidate: revalidateSeconds },
-    });
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        next: { revalidate: revalidateSeconds },
+      },
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       logger.warn(`${scope}:failed`, { status: response.status, endpoint, baseUrl });
@@ -648,7 +675,11 @@ export async function fetchTradeStatus(
   if (txHash) url.searchParams.set("tx_hash", txHash);
   if (jobId) url.searchParams.set("job_id", jobId);
   try {
-    const response = await fetch(url.toString(), { cache: "no-store" });
+    const response = await fetchWithTimeout(
+      url.toString(),
+      { cache: "no-store" },
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) {
       return { status: "unknown" };
     }
@@ -672,7 +703,11 @@ export async function fetchPositions(
   const url = new URL(`${DEFAULT_API_BASE}/positions`);
   url.searchParams.set("wallet", wallet);
   try {
-    const response = await fetch(url.toString(), { cache: "no-store" });
+    const response = await fetchWithTimeout(
+      url.toString(),
+      { cache: "no-store" },
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) {
       const detail = await response.text();
       const errorMessage = `Failed to fetch positions (${response.status}): ${detail}`;
@@ -709,10 +744,14 @@ export async function fetchClaimBundles(
   const url = new URL(`${DEFAULT_API_BASE}/claim/bundles`);
   url.searchParams.set("wallet", wallet);
   try {
-    const response = await fetch(url.toString(), {
-      cache: "no-store",
-      headers: { "X-Wallet-Signature": signature },
-    });
+    const response = await fetchWithTimeout(
+      url.toString(),
+      {
+        cache: "no-store",
+        headers: { "X-Wallet-Signature": signature },
+      },
+      PROOF_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) {
       const detail = await response.text();
       const errorMessage = `Failed to fetch claim bundles (${response.status}): ${detail}`;
@@ -776,9 +815,13 @@ export async function fetchProofReceipts(
         requestId: options?.requestId,
       },
     });
-    const response = await fetch(endpoint, {
-      next: { revalidate: DEFAULT_REVALIDATE_SECONDS },
-    });
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        next: { revalidate: DEFAULT_REVALIDATE_SECONDS },
+      },
+      PROOF_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) {
       const errorMessage = `Failed to fetch proof receipts (${response.status})`;
       logger.error("fetchProofReceipts:failed", { status: response.status, endpoint, offset });
@@ -808,13 +851,13 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
     const lookupKey = (eventKey ?? eventId).trim();
     const detailUrl = `${DEFAULT_API_BASE}/events/by-key/${lookupKey}`;
     logger.info("fetchMarketByEventId:request", { eventId, eventKey: lookupKey, endpoint: detailUrl });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(detailUrl, {
-      signal: controller.signal,
-      next: { revalidate: 30 },
-    });
-    clearTimeout(timeout);
+    const response = await fetchWithTimeout(
+      detailUrl,
+      {
+        next: { revalidate: 30 },
+      },
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
     if (response.status === 404) {
       logger.warn("fetchMarketByEventId:not_found", { eventId });
       return null;
