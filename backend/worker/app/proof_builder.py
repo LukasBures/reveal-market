@@ -61,24 +61,33 @@ def _build_batch_payloads(
     if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
         raise SettlementDataMissingError("batch roots/counts missing")
 
+    normalized_counts: list[int] = []
+    for count_raw in batch_counts:
+        try:
+            count_val = int(count_raw or 0)
+        except Exception:
+            raise SettlementDataMissingError("invalid batch count") from None
+        if count_val <= 0:
+            raise SettlementDataMissingError("invalid batch count")
+        normalized_counts.append(count_val)
+    batch_counts = normalized_counts
+    total_count = sum(batch_counts)
+
     # Build batch commitment lookup, preserving explicit leaf indexes.
     by_batch: dict[int, dict[int, Commitment]] = {}
     for commitment in commitments:
         if commitment.leaf_index is None:
             raise SettlementDataMissingError("missing leaf_index")
-        batch_index = int(commitment.leaf_index) // BATCH_SIZE
-        rel_index = int(commitment.leaf_index) % BATCH_SIZE
+        leaf_index = int(commitment.leaf_index)
+        if leaf_index < 0 or (total_count and leaf_index >= total_count):
+            raise SettlementDataMissingError(f"invalid leaf_index {leaf_index}")
+        batch_index = leaf_index // BATCH_SIZE
+        rel_index = leaf_index % BATCH_SIZE
         by_batch.setdefault(batch_index, {})[rel_index] = commitment
 
     payloads: list[dict[str, Any]] = []
     for batch_index, root_value in enumerate(batch_roots):
-        count_raw = batch_counts[batch_index] if batch_index < len(batch_counts) else None
-        try:
-            count = int(count_raw or 0)
-        except Exception:
-            raise SettlementDataMissingError("invalid batch count") from None
-        if count <= 0:
-            raise SettlementDataMissingError("invalid batch count")
+        count = batch_counts[batch_index] if batch_index < len(batch_counts) else 0
         batch_commitments = by_batch.get(batch_index, {})
         leaves: list[bytes | None] = [None] * count
         pool_yes = 0
