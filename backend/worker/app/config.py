@@ -15,6 +15,7 @@ from shared.logging import log_event
 from sqlalchemy.engine.url import make_url
 
 PRESET = get_preset()
+MAX_GAS_PRICE_GWEI = 500.0
 
 
 def _split_csv(value: str) -> list[str]:
@@ -317,6 +318,11 @@ class Settings(BaseSettings):
     relayer_queue_key: str = Field(default="reveal_market:relayer_queue", description="Redis key for relayer jobs")
     proof_queue_key: str = Field(default="reveal_market_worker:proof_queue")
     proof_queue_dedupe_key: str = Field(default="reveal_market_worker:proof_queue_dedupe")
+    proof_queue_dedupe_ttl_seconds: int = Field(
+        default=86400,
+        ge=60,
+        description="TTL (seconds) for proof queue dedupe entries",
+    )
     proof_queue_dead_letter_key: str = Field(default="reveal_market_worker:proof_queue_dead_letter")
     proof_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     proof_queue_max_concurrency: int = Field(default=2, ge=1)
@@ -340,6 +346,11 @@ class Settings(BaseSettings):
         default=6,
         ge=1,
         description="Max consecutive proof failures before extended cooldown",
+    )
+    proof_failure_max_age_seconds: int = Field(
+        default=86400,
+        ge=3600,
+        description="Max wall-clock seconds to keep retrying a proof before giving up",
     )
     settlement_queue_key: str = Field(default="reveal_market_worker:settlement_queue")
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
@@ -479,6 +490,21 @@ class Settings(BaseSettings):
     def _none_on_empty(cls, value):
         return _empty_to_none(value)
 
+    @field_validator(
+        "gas_price_gwei",
+        "settlement_gas_price_gwei",
+        "settlement_max_priority_fee_gwei",
+        "lock_batches_gas_price_gwei",
+        "lock_batches_max_priority_fee_gwei",
+    )
+    @classmethod
+    def _validate_gas_price_bounds(cls, value):
+        if value is None:
+            return value
+        if value > MAX_GAS_PRICE_GWEI:
+            raise ValueError(f"gas_price_exceeds_safety_limit:{value}")
+        return value
+
     @property
     def total_monetisation_percent(self) -> float:
         return float(self.rake_percent + self.haircut_percent + self.worsen_percent)
@@ -560,6 +586,9 @@ def validate_required_settings(settings: Settings) -> None:
     require("RM_RPC_URL", when=prod_like)
     if settings.lock_batches_use_relayer:
         require("RM_RELAYER_BASE_URL")
+    if prod_like and settings.relayer_base_url:
+        if not settings.relayer_bearer_token and not settings.relayer_internal_secret:
+            missing.append("RM_RELAYER_BEARER_TOKEN or RM_RELAYER_API_INTERNAL_SECRET")
     require("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", when=prod_like)
     require("RM_SETTLEMENT_RPC_URL", when=prod_like and not _env_present("RM_RPC_URL"))
     if missing:
