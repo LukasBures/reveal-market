@@ -380,6 +380,44 @@ async def apply_resolution(
             block_number=record_payload.get("block_number"),
         )
 
+    existing_block = getattr(existing, "block_number", None) if existing is not None else None
+    incoming_block = record_payload.get("block_number")
+    if existing_block is not None:
+        if incoming_block is None:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.stale_snapshot_skipped",
+                message="skipping resolution update without block number",
+                condition_id=normalized_condition_id,
+                existing_block=existing_block,
+            )
+            return ResolutionOutcome()
+        try:
+            incoming_block_int = int(incoming_block)
+        except (TypeError, ValueError):
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.stale_snapshot_skipped",
+                message="skipping resolution update with invalid block number",
+                condition_id=normalized_condition_id,
+                existing_block=existing_block,
+                incoming_block=incoming_block,
+            )
+            return ResolutionOutcome()
+        if incoming_block_int <= int(existing_block):
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.resolution.stale_snapshot_skipped",
+                message="skipping resolution update with non-increasing block number",
+                condition_id=normalized_condition_id,
+                existing_block=existing_block,
+                incoming_block=incoming_block_int,
+            )
+            return ResolutionOutcome()
+
     await shared_repository.upsert_resolution(session, record_payload)
     cache_payload = dict(record_payload)
     checked_at_iso = checked_at_dt.isoformat()
