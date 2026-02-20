@@ -400,6 +400,26 @@ async def _poll_relayer_job(
     return None
 
 
+def _format_tx_hash(tx_hash: Any) -> str:
+    if hasattr(tx_hash, "hex"):
+        return tx_hash.hex()
+    return str(tx_hash)
+
+
+def _receipt_status(receipt: Any) -> int | None:
+    if receipt is None:
+        return None
+    if isinstance(receipt, dict):
+        return receipt.get("status")
+    return getattr(receipt, "status", None)
+
+
+def _ensure_tx_success(receipt: Any, tx_hash: Any, *, action: str) -> None:
+    status_value = _receipt_status(receipt)
+    if status_value != 1:
+        raise RuntimeError(f"{action}_failed status={status_value} tx_hash={_format_tx_hash(tx_hash)}")
+
+
 async def _submit_lock_batches(
     web3: AsyncWeb3,
     account,
@@ -423,6 +443,7 @@ async def _submit_lock_batches(
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    _ensure_tx_success(receipt, tx_hash, action="lock_batches")
     return tx_hash.hex(), getattr(receipt, "blockNumber", None)
 
 
@@ -504,6 +525,7 @@ async def _maybe_post_result(web3: AsyncWeb3, account, contract, winning_outcome
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    _ensure_tx_success(receipt, tx_hash, action="post_result")
     log_event(
         logger,
         logging.INFO,
@@ -540,6 +562,7 @@ async def _submit_verify_and_settle(
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    _ensure_tx_success(receipt, tx_hash, action="verify_and_settle")
     return tx_hash.hex(), getattr(receipt, "blockNumber", None)
 
 
@@ -572,6 +595,7 @@ async def _submit_verify_and_settle_batched(
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
+    _ensure_tx_success(receipt, tx_hash, action="verify_and_settle_batched")
     return tx_hash.hex(), getattr(receipt, "blockNumber", None)
 
 
@@ -1288,6 +1312,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
             settlement.submission_error = None
             _mark_dirty()
             session.add(settlement)
+            await session.commit()
             if not batch_roots:
                 log_event(
                     logger,
