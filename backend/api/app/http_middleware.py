@@ -370,7 +370,7 @@ def attach_request_context(app: FastAPI) -> None:
                 path=request.url.path,
                 method=request.method,
             )
-        if not is_production:
+        if settings.environment.lower() in {"dev", "development", "local", "test", "testing"}:
             response.headers["x-db-queries"] = str(db_metrics.query_count)
             response.headers["x-db-time-ms"] = f"{db_metrics.total_time_ms:.2f}"
             response.headers["x-db-slowest-ms"] = f"{db_metrics.max_time_ms:.2f}"
