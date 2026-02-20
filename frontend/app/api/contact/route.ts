@@ -1,22 +1,28 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logging";
 import { isValidEmail } from "@/lib/validation";
+import { getRedisClient } from "@/lib/redis";
 import crypto from "node:crypto";
 
 const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_WINDOW_SECONDS = Math.ceil(RATE_WINDOW_MS / 1000);
 const RATE_LIMIT = 6;
 const rateBucket = new Map<string, { count: number; resetAt: number }>();
 
 const hashValue = (value: string) =>
-  crypto.createHash("sha256").update(value).digest("hex").slice(0, 12);
+  crypto.createHash("sha256").update(value).digest("hex").slice(0, 16);
 
 const getClientKey = (request: Request) => {
   const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
-  const candidate = forwardedFor.split(",")[0]?.trim();
+  const forwardedIps = forwardedFor
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const candidate = forwardedIps.length ? forwardedIps[forwardedIps.length - 1] : "";
   return candidate || request.headers.get("x-real-ip") || "unknown";
 };
 
-const rateLimit = (key: string) => {
+const rateLimitInMemory = (key: string) => {
   const now = Date.now();
   const existing = rateBucket.get(key);
   if (!existing || existing.resetAt <= now) {
@@ -30,6 +36,24 @@ const rateLimit = (key: string) => {
   return false;
 };
 
+const rateLimitRedis = async (key: string) => {
+  const redis = getRedisClient();
+  if (!redis) {
+    return null;
+  }
+  const count = await redis.incr(key);
+  if (count === 1) {
+    await redis.expire(key, RATE_WINDOW_SECONDS);
+  }
+  return count > RATE_LIMIT;
+};
+
+const isAllowedDiscordHost = (hostname: string) =>
+  hostname === "discord.com" ||
+  hostname.endsWith(".discord.com") ||
+  hostname === "discordapp.com" ||
+  hostname.endsWith(".discordapp.com");
+
 const MAX_DISCORD_CONTENT_LENGTH = 2000;
 const MAX_MESSAGE_LENGTH = 1800;
 const MAX_NAME_LENGTH = 100;
@@ -41,6 +65,10 @@ const truncate = (value: string, max: number) =>
   value.length > max ? `${value.slice(0, max - 1)}…` : value;
 
 async function sendDiscord(webhookUrl: string, body: { name: string; email?: string; message: string }) {
+  const parsed = new URL(webhookUrl);
+  if (parsed.protocol !== "https:" || !isAllowedDiscordHost(parsed.hostname)) {
+    throw new Error("webhook_host_not_allowed");
+  }
   const name = body.name ? body.name : "Anonymous";
   const contact = body.email ? body.email : "Not provided";
   const rawContent = [
@@ -76,9 +104,6 @@ async function sendDiscord(webhookUrl: string, body: { name: string; email?: str
 export async function POST(request: Request) {
   try {
     const clientKey = getClientKey(request);
-    if (rateLimit(clientKey)) {
-      return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
-    }
     const { name, email, message, turnstileToken } = await request.json();
     const safeName = normalizeInput(name);
     const safeEmail = normalizeInput(email);
@@ -103,6 +128,26 @@ export async function POST(request: Request) {
 
     const turnstileSecret = process.env.CONTACT_TURNSTILE_SECRET;
     const envLabel = (process.env.RM_ENVIRONMENT ?? process.env.NODE_ENV ?? "").toLowerCase();
+    const isProdEnv = envLabel === "prod" || envLabel === "production";
+    try {
+      const redisLimited = await rateLimitRedis(`contact_rate:${clientKey}`);
+      if (redisLimited === null) {
+        if (isProdEnv) {
+          logger.error("contact_form.rate_limit_unavailable", { reason: "missing_redis" });
+          return NextResponse.json({ ok: false, error: "rate_limit_unavailable" }, { status: 503 });
+        }
+        if (rateLimitInMemory(clientKey)) {
+          return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+        }
+      } else if (redisLimited) {
+        return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      }
+    } catch (error) {
+      logger.warn("contact_form.rate_limit_failed", { error: (error as Error).message });
+      if (rateLimitInMemory(clientKey)) {
+        return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      }
+    }
     const allowTurnstileBypass =
       envLabel === "local" || envLabel === "development" || envLabel === "dev" || envLabel === "test";
     if (turnstileSecret && !allowTurnstileBypass) {
@@ -130,11 +175,11 @@ export async function POST(request: Request) {
       logger.warn("contact_form.email_disabled", { reason: "missing_turnstile_secret" });
     }
 
-  logger.info("contact_form.submission", {
-    name_length: safeName.length,
-    email_hash: safeEmail ? hashValue(safeEmail.toLowerCase()) : undefined,
-    message_length: safeMessage.length,
-  });
+    logger.info("contact_form.submission", {
+      name_length: safeName.length,
+      email_hash: safeEmail ? hashValue(safeEmail.toLowerCase()) : undefined,
+      message_length: safeMessage.length,
+    });
 
     const discordWebhook = process.env.CONTACT_DISCORD_WEBHOOK_URL;
     if (discordWebhook) {
