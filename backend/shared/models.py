@@ -21,7 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql import func
 
 
@@ -106,6 +106,12 @@ class Market(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    @validates("condition_id", "event_id")
+    def _normalize_ids(self, _key: str, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.lower()
 
     outcomes_rel: Mapped[list[MarketOutcome]] = relationship(
         "MarketOutcome",
