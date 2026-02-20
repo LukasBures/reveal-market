@@ -975,6 +975,27 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
         return tentative_next
 
 
+async def _record_commit_nonce(nonce: int) -> None:
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    key = f"commit_nonce:{nonce}"
+    try:
+        added = await _resolve_awaitable(cache.set(key, "1", ex=int(settings.commit_nonce_ttl_seconds), nx=True))
+    except Exception as exc:  # pragma: no cover - best-effort guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.commit.nonce_cache_failed",
+            message="failed to record commit nonce",
+            nonce=nonce,
+            error=str(exc),
+        )
+        return
+    if not added:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="nonce_already_used")
+
+
 async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tuple[str, int]:
     """Create a market via the factory when no address is stored."""
 
@@ -1712,6 +1733,7 @@ async def trade_commit(
 
     nonce = secrets.randbelow(2**256 - 1)
     expiry = int(time.time()) + int(settings.commit_nonce_ttl_seconds)
+    await _record_commit_nonce(nonce)
     auth_digest = Web3.solidity_keccak(
         ["address", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
         [
@@ -2384,8 +2406,10 @@ async def ingest_settlement(
 
 
 def _verify_internal_secret(secret_header: str | None) -> None:
-    secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else None
-    if secret and secret_header != secret:
+    if not settings.internal_api_secret:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_secret_not_configured")
+    secret = settings.internal_api_secret.get_secret_value()
+    if secret_header != secret:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
