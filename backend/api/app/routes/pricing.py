@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from secrets import token_hex
-from typing import cast
+from typing import TypedDict, Unpack, cast
 
 import httpx
 from eth_account import Account
@@ -15,7 +15,7 @@ from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import SecretStr
 from shared import models as shared_models
-from shared.logging import log_event
+from shared.logging import get_request_id, log_event
 from shared.onchain.client import load_account
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,28 @@ router = APIRouter()
 
 _STREAMER_TIMEOUT_SECONDS = 3.0
 _PRESET_CFG: dict[str, object] | None = None
+
+
+class _PricingUnavailableFields(TypedDict, total=False):
+    error: str
+    fx_received_at: str | None
+
+
+def _pricing_unavailable(
+    reason: str, *, request_id: str | None, **fields: Unpack[_PricingUnavailableFields]
+) -> HTTPException:
+    log_event(
+        logger,
+        logging.WARNING,
+        event="pricing.unavailable",
+        message=reason,
+        request_id=request_id,
+        **fields,
+    )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"error": "pricing_unavailable", "request_id": request_id},
+    )
 
 
 def _get_cached_preset() -> dict[str, object]:
@@ -309,6 +331,7 @@ async def pricing_quote(
 ) -> schemas.PricingQuoteResponse:
     """Generate a signed quote bound to stake, FX, outcome, and expiry."""
 
+    request_id = get_request_id()
     now = datetime.now(tz=UTC)
     user_id = payload.user_id or payload.wallet_address
     quote_id_for_audit: str | None = None
@@ -356,23 +379,17 @@ async def pricing_quote(
         try:
             fx_quote = await fetch_fx_quote(settings)
             if fx_quote.stale:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error": "fx_stale",
-                        "message": "FX price stale",
-                        "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
-                    },
+                raise _pricing_unavailable(
+                    "fx_stale",
+                    request_id=request_id,
+                    fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
                 )
             zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
             fx_received_at = fx_quote.received_at
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-            ) from exc
+            raise _pricing_unavailable("fx_unavailable", request_id=request_id, error=str(exc)) from exc
 
         market_total = None
         user_total = None
@@ -391,21 +408,12 @@ async def pricing_quote(
         if payload.market_id is not None:
             outcome_price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
         if outcome_price is None or outcome_price <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
-            )
+            raise _pricing_unavailable("price_unavailable", request_id=request_id)
 
         if zen_usd is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-            )
+            raise _pricing_unavailable("fx_unavailable", request_id=request_id)
         if settings.pricing_chain_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
-            )
+            raise _pricing_unavailable("pricing_chain_missing", request_id=request_id)
 
         zen_usd_scaled = _scale_fx_value(zen_usd)
         engine = PricingEngine(settings)
@@ -424,11 +432,7 @@ async def pricing_quote(
         quote_id = token_hex(32)
         quote_id_for_audit = quote_id
         if settings.pricing_signer_private_key is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "pricing_signer_unavailable", "message": "Pricing signer unavailable"},
-                headers=None,
-            )
+            raise _pricing_unavailable("pricing_signer_unavailable", request_id=request_id)
         raw_signer_key = settings.pricing_signer_private_key
         signer_key: str | None
         if isinstance(raw_signer_key, SecretStr):
@@ -535,9 +539,7 @@ async def pricing_quote(
                 quote_id=quote_id,
                 error=str(exc),
             )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Quote persistence failed"
-            ) from exc
+            raise _pricing_unavailable("quote_persist_failed", request_id=request_id, error=str(exc)) from exc
 
         log_event(
             logger,
@@ -589,6 +591,7 @@ async def pricing_quote_preview(
     """Return an unsigned, non-persistent preview quote (no market creation, no signature)."""
 
     # No creation here; best-effort fetch of existing market address.
+    request_id = get_request_id()
     now = datetime.now(tz=UTC)
     user_id = payload.user_id or payload.wallet_address
     ticket_size_wei = int(settings.ticket_size_wei)
@@ -609,23 +612,17 @@ async def pricing_quote_preview(
     try:
         fx_quote = await fetch_fx_quote(settings)
         if fx_quote.stale:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "fx_stale",
-                    "message": "FX price stale",
-                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
-                },
+            raise _pricing_unavailable(
+                "fx_stale",
+                request_id=request_id,
+                fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
             )
         zen_usd = float(fx_quote.zen_usd) if fx_quote.zen_usd is not None else None
         fx_received_at = fx_quote.received_at
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        ) from exc
+        raise _pricing_unavailable("fx_unavailable", request_id=request_id, error=str(exc)) from exc
 
     market_total = None
     user_total = None
@@ -644,21 +641,12 @@ async def pricing_quote_preview(
     if payload.market_id is not None:
         outcome_price = await _resolve_outcome_price(session, payload.market_id, payload.outcome_id)
     if outcome_price is None or outcome_price <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "price_unavailable", "message": "Outcome price unavailable"},
-        )
+        raise _pricing_unavailable("price_unavailable", request_id=request_id)
 
     if zen_usd is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        )
+        raise _pricing_unavailable("fx_unavailable", request_id=request_id)
     if settings.pricing_chain_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "pricing_chain_missing", "message": "Pricing chain id not configured"},
-        )
+        raise _pricing_unavailable("pricing_chain_missing", request_id=request_id)
 
     stake_wei = _to_wei_amount(payload.stake_zen)
     zen_usd_scaled = _scale_fx_value(zen_usd)
@@ -710,6 +698,7 @@ async def pricing_submit(
 ) -> schemas.PricingSubmitResponse:
     """Validate and mark a quote as consumed, re-checking FX drift if requested."""
 
+    request_id = get_request_id()
     quote = payload.quote
     now = datetime.now(tz=UTC)
     quote_payload_for_audit = quote.model_dump(mode="json")
@@ -723,9 +712,7 @@ async def pricing_submit(
             return dt
 
         if settings.pricing_chain_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing chain id not configured"
-            )
+            raise _pricing_unavailable("pricing_chain_missing", request_id=request_id)
         if quote.wallet_address is None or quote.market_address is None or quote.outcome_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -740,7 +727,7 @@ async def pricing_submit(
             signer_key = cast(str | None, raw_signer_key)
         signer_account = await asyncio.to_thread(load_account, signer_key) if signer_key else None
         if signer_account is None:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pricing signer unavailable")
+            raise _pricing_unavailable("pricing_signer_unavailable", request_id=request_id)
 
         if not quote.quote_id:
             PRICING_COUNTER.labels(event="submit", result="missing").inc()
@@ -843,13 +830,10 @@ async def pricing_submit(
                     current_fx = fx_quote.zen_usd
                 if fx_quote.stale:
                     PRICING_COUNTER.labels(event="submit", result="fx_stale").inc()
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={
-                            "error": "fx_stale",
-                            "message": "FX price stale during submit",
-                            "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
-                        },
+                    raise _pricing_unavailable(
+                        "fx_stale",
+                        request_id=request_id,
+                        fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
                     )
                 fx_diff_percent = (
                     (abs(current_fx - quote.zen_usd) / quote.zen_usd * Decimal("100"))
@@ -858,10 +842,7 @@ async def pricing_submit(
                 )
                 if current_fx is None:
                     PRICING_COUNTER.labels(event="submit", result="fx_missing").inc()
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={"error": "fx_missing", "message": "FX check failed: missing price"},
-                    )
+                    raise _pricing_unavailable("fx_missing", request_id=request_id)
                 if fx_diff_percent > payload.max_fx_diff_percent:
                     PRICING_COUNTER.labels(event="submit", result="fx_drift").inc()
                     raise HTTPException(
@@ -872,10 +853,7 @@ async def pricing_submit(
                 raise
             except Exception as exc:
                 PRICING_COUNTER.labels(event="submit", result="fx_error").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={"error": "fx_check_failed", "message": f"FX check failed: {exc}"},
-                ) from exc
+                raise _pricing_unavailable("fx_check_failed", request_id=request_id, error=str(exc)) from exc
         else:
             current_fx = quote.zen_usd
         market_id_for_caps = db_quote.market_id
@@ -966,6 +944,7 @@ async def pricing_quote_state(quote_id: str, session: AsyncSession = Depends(get
 
 @router.get("/pricing/fx", response_model=schemas.FxQuoteResponse, tags=["pricing"])
 async def pricing_fx() -> schemas.FxQuoteResponse:
+    request_id = get_request_id()
     try:
         fx_quote = await fetch_fx_quote(settings, use_cache_on_error=False)
         if fx_quote.stale:
@@ -976,13 +955,10 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
                 message="FX feed stale",
                 fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
             )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "fx_stale",
-                    "message": "FX price stale",
-                    "fx_received_at": fx_quote.received_at.isoformat() if fx_quote.received_at else None,
-                },
+            raise _pricing_unavailable(
+                "fx_stale",
+                request_id=request_id,
+                fx_received_at=fx_quote.received_at.isoformat() if fx_quote.received_at else None,
             )
         return fx_quote
     except httpx.HTTPError as exc:
@@ -993,10 +969,7 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="failed to fetch FX feed",
             error=str(exc),
         )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        ) from exc
+        raise _pricing_unavailable("fx_unavailable", request_id=request_id, error=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive catch for malformed payloads
@@ -1007,7 +980,4 @@ async def pricing_fx() -> schemas.FxQuoteResponse:
             message="unexpected FX parsing error",
             error=str(exc),
         )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "fx_unavailable", "message": "FX price unavailable"},
-        ) from exc
+        raise _pricing_unavailable("fx_unavailable", request_id=request_id, error=str(exc)) from exc

@@ -72,7 +72,7 @@ def test_pricing_fx_falls_back_on_http_error(client, monkeypatch):
     resp = client.get("/pricing/fx")
     assert resp.status_code == 503
     data = resp.json()
-    assert data["detail"]["error"] == "fx_unavailable"
+    assert data["detail"]["error"] == "pricing_unavailable"
 
 
 def test_pricing_fx_rejects_stale_payload(client, monkeypatch):
@@ -81,7 +81,7 @@ def test_pricing_fx_rejects_stale_payload(client, monkeypatch):
 
     resp = client.get("/pricing/fx")
     assert resp.status_code == 503
-    assert resp.json()["detail"]["error"] == "fx_stale"
+    assert resp.json()["detail"]["error"] == "pricing_unavailable"
 
 
 def test_pricing_fx_cors_origin_smoke(client, monkeypatch):
@@ -230,7 +230,7 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     }
     resp = client.post("/pricing/quote", json=payload)
     assert resp.status_code == 503
-    assert resp.json()["detail"]["error"] == "fx_stale"
+    assert resp.json()["detail"]["error"] == "pricing_unavailable"
 
 
 def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch):
@@ -353,4 +353,4 @@ def test_pricing_quote_rejects_missing_price(client, monkeypatch):
     }
     resp = client.post("/pricing/quote", json=quote_payload)
     assert resp.status_code == 503
-    assert resp.json()["detail"]["error"] == "price_unavailable"
+    assert resp.json()["detail"]["error"] == "pricing_unavailable"

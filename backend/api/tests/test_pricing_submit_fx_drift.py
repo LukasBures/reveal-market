@@ -99,4 +99,4 @@ async def test_pricing_submit_rejects_stale_fx(client, monkeypatch):
         json={"quote": quote, "max_fx_diff_percent": 1},
     )
     assert submit_resp.status_code == 503
-    assert submit_resp.json()["detail"]["error"] == "fx_stale"
+    assert submit_resp.json()["detail"]["error"] == "pricing_unavailable"
