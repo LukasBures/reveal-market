@@ -9,7 +9,7 @@ const PUBLIC_PATHS = [
   "/apple-touch-icon.png",
   "/safari-pinned-tab.svg",
 ];
-const APP_PATHS = ["/dashboard", "/proofs", "/events"];
+const APP_PATHS = ["/dashboard", "/proofs"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
