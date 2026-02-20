@@ -48,11 +48,19 @@ export default async function ProofsPage({
   const normalizedEventId = resolvedSearchParams?.eventId ?? resolvedSearchParams?.event_id;
   const normalizedConditionId = resolvedSearchParams?.conditionId ?? resolvedSearchParams?.condition_id;
   const normalizedRequestId = resolvedSearchParams?.requestId ?? resolvedSearchParams?.request_id;
+  const parsedMarketId = normalizedMarketId ? Number.parseInt(normalizedMarketId, 10) : undefined;
+  const safeMarketId =
+    parsedMarketId !== undefined &&
+    Number.isFinite(parsedMarketId) &&
+    Number.isSafeInteger(parsedMarketId) &&
+    parsedMarketId > 0
+      ? parsedMarketId
+      : undefined;
   const filters = {
     eventId: normalizedEventId,
     conditionId: normalizedConditionId,
     requestId: normalizedRequestId,
-    marketId: normalizedMarketId ? Number(normalizedMarketId) : undefined,
+    marketId: safeMarketId,
   };
   const { receipts, error } = await fetchProofReceipts(PAGE_SIZE, filters);
   const breadcrumbs = buildBreadcrumbJsonLd([
