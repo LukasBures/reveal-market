@@ -46,13 +46,35 @@ async def _resolve_awaitable(value: Awaitable[Any] | Any) -> Any:
     return value
 
 
-async def should_attempt(redis_client: Redis | None, key: str) -> bool:
+async def should_attempt(
+    redis_client: Redis | None,
+    key: str,
+    *,
+    max_age_seconds: int | None = None,
+    logger=None,
+    event: str | None = None,
+    message: str | None = None,
+) -> bool:
     if redis_client is None:
         return True
     try:
         state = await _resolve_awaitable(redis_client.hgetall(key))
     except Exception:
         return True
+    if max_age_seconds:
+        first_ts = _to_float(state.get("first_ts"), 0.0)
+        if first_ts and (_now() - first_ts) > max_age_seconds:
+            if logger:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event=event or "worker.retry.expired",
+                    message=message or "retry window exceeded; skipping",
+                    retry_key=key,
+                    age_seconds=int(_now() - first_ts),
+                    max_age_seconds=max_age_seconds,
+                )
+            return False
     next_ts = _to_float(state.get("next_ts"), 0.0)
     return _now() >= next_ts
 
@@ -78,6 +100,7 @@ async def record_failure(
         if attempts >= max_attempts:
             backoff = max_seconds
         next_ts = _now() + backoff
+        first_ts = _to_float(state.get("first_ts"), 0.0) or _now()
         await _resolve_awaitable(
             redis_client.hset(
                 key,
@@ -86,6 +109,7 @@ async def record_failure(
                     "next_ts": str(next_ts),
                     "last_error": reason or "",
                     "updated_at": str(_now()),
+                    "first_ts": str(first_ts),
                 },
             )
         )

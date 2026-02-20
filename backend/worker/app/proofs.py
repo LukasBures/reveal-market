@@ -261,6 +261,19 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
             )
             if int(result or 0) == 1:
                 enqueued += 1
+                try:
+                    await _resolve_awaitable(
+                        redis_client.expire(dedupe_key, int(runtime.settings.proof_queue_dedupe_ttl_seconds))
+                    )
+                except Exception as exc:
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.proof.queue_dedupe_ttl_failed",
+                        message="failed to set proof queue dedupe TTL",
+                        dedupe_key=dedupe_key,
+                        error=str(exc),
+                    )
             elif int(result or 0) == 0:
                 PROOF_QUEUE_OVERFLOW_COUNTER.labels(outcome="skipped").inc()
             else:
@@ -398,22 +411,6 @@ async def maybe_generate_settlement_proof(
             message="prover circuit open; skipping proof generation",
         )
         return False
-    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("prover"):
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.prover.circuit_open",
-            message="prover circuit open; skipping proof generation",
-        )
-        return False
-    if runtime.circuit_breaker and await runtime.circuit_breaker.is_open("prover"):
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.prover.circuit_open",
-            message="prover circuit open; skipping proof generation",
-        )
-        return False
 
     def _as_int(value: Any) -> int | None:
         try:
@@ -436,7 +433,14 @@ async def maybe_generate_settlement_proof(
     numeric_market_id = _as_int(market_identifier)
     retry_key = failure_key("reveal_market_worker:proof:fail", str(market_identifier))
 
-    if not await should_attempt(redis_client, retry_key):
+    if not await should_attempt(
+        redis_client,
+        retry_key,
+        max_age_seconds=runtime.settings.proof_failure_max_age_seconds,
+        logger=logger,
+        event="worker.proof.retry_expired",
+        message="proof retry window exceeded; skipping",
+    ):
         return False
 
     async def _notify_status_change() -> None:
