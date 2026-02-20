@@ -230,6 +230,18 @@ export function ConnectWalletButton() {
     }
   }, [accountStatus, address, chain?.name, isConnected]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const maxAge = isConnected ? 60 * 60 * 24 * 7 : 0;
+    const parts = [`wallet_session=${isConnected ? "1" : ""}`, "Path=/", `Max-Age=${maxAge}`, "SameSite=Lax"];
+    if (window.location.protocol === "https:") {
+      parts.push("Secure");
+    }
+    document.cookie = parts.join("; ");
+  }, [isConnected]);
+
   const connectorsById = useMemo<ConnectorMap>(() => {
     return connectors.reduce<ConnectorMap>((acc, connector) => {
       acc[connector.id] = connector;
