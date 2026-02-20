@@ -131,9 +131,10 @@ def test_health_endpoint_handles_polymarket_timeout(client, monkeypatch):
     assert "timeout" in components["polymarket_api"]["detail"].lower()
 
 
-def test_heartbeat_dashboard_reports_components(client):
+def test_heartbeat_dashboard_reports_components(client, monkeypatch):
     cache = client.app.cache_client
     now_iso = datetime.now(tz=UTC).isoformat()
+    monkeypatch.setattr("app.routes.meta.settings.internal_api_secret", SecretStr("secret"), raising=False)
     asyncio.run(
         cache.set(
             "reveal_market_worker:heartbeat",
@@ -164,7 +165,7 @@ def test_heartbeat_dashboard_reports_components(client):
         )
     )
 
-    response = client.get("/healthz/heartbeats")
+    response = client.get("/healthz/heartbeats", headers={"X-Internal-Secret": "secret"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"]["service"] == "Reveal Market Worker"
@@ -172,12 +173,13 @@ def test_heartbeat_dashboard_reports_components(client):
     assert payload["api"]["metrics"]["total_requests"] == 15
 
 
-def test_heartbeat_dashboard_handles_missing_payload(client):
+def test_heartbeat_dashboard_handles_missing_payload(client, monkeypatch):
     cache = client.app.cache_client
     asyncio.run(cache.delete("reveal_market_worker:heartbeat"))
     asyncio.run(cache.delete("reveal_market_api:heartbeat"))
 
-    response = client.get("/healthz/heartbeats")
+    monkeypatch.setattr("app.routes.meta.settings.internal_api_secret", SecretStr("secret"), raising=False)
+    response = client.get("/healthz/heartbeats", headers={"X-Internal-Secret": "secret"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"] is None
@@ -188,6 +190,7 @@ def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
     monkeypatch.setattr("app.server.settings.worker_heartbeat_stale_seconds", 1, raising=False)
     cache = client.app.cache_client
     old = datetime.now(tz=UTC) - timedelta(minutes=5)
+    monkeypatch.setattr("app.routes.meta.settings.internal_api_secret", SecretStr("secret"), raising=False)
     asyncio.run(
         cache.set(
             "reveal_market_worker:heartbeat",
@@ -202,7 +205,7 @@ def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
         )
     )
 
-    response = client.get("/healthz/heartbeats")
+    response = client.get("/healthz/heartbeats", headers={"X-Internal-Secret": "secret"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["worker"]["status"] == "degraded"
@@ -212,6 +215,7 @@ def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
     monkeypatch.setattr("app.server.settings.api_heartbeat_ttl_seconds", 5, raising=False)
     cache = client.app.cache_client
     old = datetime.now(tz=UTC) - timedelta(minutes=10)
+    monkeypatch.setattr("app.routes.meta.settings.internal_api_secret", SecretStr("secret"), raising=False)
     asyncio.run(
         cache.set(
             "reveal_market_api:heartbeat",
@@ -226,7 +230,7 @@ def test_heartbeat_dashboard_marks_api_stale(client, monkeypatch):
         )
     )
 
-    response = client.get("/healthz/heartbeats")
+    response = client.get("/healthz/heartbeats", headers={"X-Internal-Secret": "secret"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["api"]["status"] == "degraded"

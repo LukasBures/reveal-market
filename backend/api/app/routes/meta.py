@@ -4,16 +4,28 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.config import get_settings
 from app.database import get_session
 from app.health import build_deep_health_response, build_health_response
+from app.runtime import settings as runtime_settings
 from app.services.heartbeat import build_api_dashboard, build_worker_dashboard
 
 router = APIRouter()
+settings = runtime_settings
+
+
+def _verify_internal_secret(secret_header: str | None) -> None:
+    if not settings.internal_api_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="internal_secret_not_configured",
+        )
+    if secret_header != settings.internal_api_secret.get_secret_value():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
 @router.get("/", tags=["meta"])
@@ -60,9 +72,12 @@ async def liveness_check() -> dict[str, str]:
 
 
 @router.get("/healthz/heartbeats", response_model=schemas.HeartbeatDashboard, tags=["health"])
-async def heartbeat_dashboard() -> schemas.HeartbeatDashboard:
+async def heartbeat_dashboard(
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+) -> schemas.HeartbeatDashboard:
     """Return worker/API heartbeat snapshots stored in Redis."""
 
+    _verify_internal_secret(internal_secret)
     now = datetime.now(tz=UTC)
     worker_status = await build_worker_dashboard(now)
     api_status = await build_api_dashboard(now)

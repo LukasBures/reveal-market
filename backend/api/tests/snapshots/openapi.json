@@ -4335,6 +4335,24 @@
       "get": {
         "description": "Return worker/API heartbeat snapshots stored in Redis.",
         "operationId": "heartbeat_dashboard_healthz_heartbeats_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Internal-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Secret"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
