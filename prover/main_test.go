@@ -178,6 +178,7 @@ func TestProofHandlerSuccess(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -263,6 +264,7 @@ func TestProofHandlerStream(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement?stream=1", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 
 	app.proofHandler(rec, req)
 
@@ -289,6 +291,7 @@ func TestProofHandlerInvalidJSON(t *testing.T) {
 	app := newApp(cfg, &stubProver{ready: true})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewBufferString("{"))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
@@ -303,6 +306,7 @@ func TestProofHandlerProverError(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected validation error, got %d", rec.Code)
@@ -317,6 +321,7 @@ func TestProofHandlerCircuitHashMismatch(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
@@ -334,6 +339,7 @@ func TestProofHandlerUnready(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
@@ -351,6 +357,7 @@ func TestProofHandlerBusy(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", rec.Code)
@@ -378,6 +385,7 @@ func TestProofHandlerStrictValidation(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
 	app.proofHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)

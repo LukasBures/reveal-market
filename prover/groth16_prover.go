@@ -157,6 +157,9 @@ func (p *groth16Prover) Generate(ctx context.Context, req settlementProofRequest
 	if err != nil {
 		return nil, newInternalError(fmt.Errorf("failed to create temp dir: %w", err))
 	}
+	if err := os.Chmod(workdir, 0o700); err != nil {
+		return nil, newInternalError(fmt.Errorf("failed to secure temp dir: %w", err))
+	}
 	defer os.RemoveAll(workdir)
 
 	inputFile := filepath.Join(workdir, "input.json")

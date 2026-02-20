@@ -26,7 +26,7 @@ import (
 
 const (
 	defaultLogLevel       = "INFO"
-	artifactCheckInterval = 10 * time.Minute
+	artifactCheckInterval = time.Minute
 	settlementBatchSize   = 256
 )
 
@@ -187,6 +187,12 @@ func main() {
 		"listen_addr":    cfg.ListenAddr,
 		"heartbeat_secs": cfg.HeartbeatSeconds,
 	})
+	if strings.TrimSpace(cfg.SharedSecret) == "" {
+		logLine("error", "prover.config.missing_secret", map[string]any{
+			"env": "RM_PROVER_SHARED_SECRET",
+		})
+		os.Exit(1)
+	}
 	if cfg.WorkerMode == "worker" {
 		logLine("info", "prover.worker.mode", map[string]any{
 			"mode": cfg.WorkerMode,
@@ -459,16 +465,22 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret := strings.TrimSpace(a.cfg.SharedSecret)
-	if secret != "" {
-		provided := strings.TrimSpace(r.Header.Get("X-Prover-Secret"))
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
-			logLine("warn", "prover.request.unauthorized", map[string]any{
-				"path":   r.URL.Path,
-				"method": r.Method,
-			})
-			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid prover secret", nil)
-			return
-		}
+	if secret == "" {
+		logLine("error", "prover.request.secret_missing", map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
+		writeError(w, http.StatusInternalServerError, "prover_secret_not_configured", "prover secret not configured", nil)
+		return
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Prover-Secret"))
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+		logLine("warn", "prover.request.unauthorized", map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid prover secret", nil)
+		return
 	}
 	ready, missing, mismatches, artifactErr := a.readyForProof()
 	if !ready {

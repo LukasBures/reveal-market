@@ -43,6 +43,7 @@ func newTestConfig(t *testing.T) shared.Config {
 	return shared.Config{
 		ListenAddr:          "127.0.0.1:0",
 		Version:             "test",
+		SharedSecret:        "secret",
 		WitnessScriptPath:   witness,
 		WasmPath:            wasm,
 		ZKeyPath:            zkey,
