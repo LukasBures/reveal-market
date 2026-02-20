@@ -85,7 +85,14 @@ def testregister_fx_rejects_non_positive():
 
 
 def testregister_fx_bounds_and_circuit_breaker():
-    state = StreamState(Settings(fx_min_price=0.5, fx_max_price=2.0, fx_max_consecutive_rejections=2))
+    state = StreamState(
+        Settings(
+            fx_min_price=0.5,
+            fx_max_price=2.0,
+            fx_max_consecutive_rejections=2,
+            fx_fallback_price=1.0,
+        )
+    )
     # First out-of-bounds should increment rejection count.
     assert state.register_fx(Decimal("10"), source="binance_ws") is None
     # Second rejection trips circuit breaker.
