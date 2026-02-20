@@ -68,6 +68,54 @@ class DataStreamer:
                 return parsed
         return None
 
+    def _extract_prices_for_validation(self, raw: dict) -> list[Decimal]:
+        raw_prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
+        prices = self._coerce_array(raw_prices)
+        parsed: list[Decimal] = []
+        if prices:
+            for value in prices:
+                try:
+                    parsed.append(Decimal(str(value)))
+                except (ArithmeticError, ValueError, TypeError):
+                    continue
+            return parsed
+        tokens = raw.get("tokens") if isinstance(raw.get("tokens"), list) else []
+        for entry in tokens:
+            if not isinstance(entry, dict):
+                continue
+            price_raw = entry.get("price")
+            try:
+                parsed.append(Decimal(str(price_raw)))
+            except (ArithmeticError, ValueError, TypeError):
+                continue
+        return parsed
+
+    def _validate_rest_market(self, raw: dict) -> bool:
+        market_id = (
+            raw.get("id")
+            or raw.get("marketId")
+            or raw.get("market")
+            or raw.get("conditionId")
+            or raw.get("condition_id")
+        )
+        if not market_id:
+            return False
+        prices = self._extract_prices_for_validation(raw)
+        if not prices:
+            return False
+        if len(prices) > 100:
+            return False
+        for price in prices:
+            if price.is_nan() or price.is_infinite():
+                return False
+            if price < 0 or price > 1:
+                return False
+        if len(prices) == 2:
+            total = prices[0] + prices[1]
+            if total < Decimal("0.9") or total > Decimal("1.1"):
+                return False
+        return True
+
     @staticmethod
     def _tune_http_logging() -> None:
         """Silence verbose httpx/httpcore access logs during tight rest-poll loops."""
@@ -376,10 +424,22 @@ class DataStreamer:
                         extra={"event": "clob.rest.empty", "cursor": cursor},
                     )
                 break
+            valid_markets: list[dict[str, Any]] = []
             for market in markets:
+                if not isinstance(market, dict) or not self._validate_rest_market(market):
+                    logger.warning(
+                        "CLOB REST payload failed validation",
+                        extra={"event": "clob.rest.invalid_payload"},
+                    )
+                    if self.stream_metrics:
+                        with suppress(Exception):
+                            self.stream_metrics.record_drop("ingest", "invalid_payload")
+                            self.stream_metrics.record_ingest_drop("rest", "invalid_payload")
+                    continue
+                valid_markets.append(market)
                 await self._normalize_and_publish(market, source="rest")
-            total += len(markets)
-            for market in markets:
+            total += len(valid_markets)
+            for market in valid_markets:
                 market_id = str(market.get("id") or market.get("marketId") or "")
                 tokens = self.state.get_clob_tokens(market_id)
                 if market_id and tokens and market_id in self.state.subscriptions.assets:

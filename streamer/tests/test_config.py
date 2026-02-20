@@ -6,7 +6,7 @@ from app.config import Settings
 def test_settings_defaults():
     cfg = Settings()
     assert cfg.clob_ws_url.startswith("wss://")
-    assert cfg.fx_fallback_price == 0.0
+    assert cfg.fx_fallback_price == 3.0
     assert cfg.total_monetization == cfg.worsen_percent + cfg.haircut_percent + cfg.rake_percent
 
 

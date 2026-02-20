@@ -237,9 +237,19 @@ def create_app() -> FastAPI:
 
         asyncio.create_task(_release_later())
 
+    def _is_valid_access_token(token: str | None) -> bool:
+        return not settings.access_token or token == settings.access_token
+
     def _require_access_token(token: str | None):
-        if settings.access_token and token != settings.access_token:
+        if not _is_valid_access_token(token):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid access token")
+
+    async def _require_ws_access_token(ws: WebSocket) -> bool:
+        token = ws.headers.get("x-access-token")
+        if not _is_valid_access_token(token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return False
+        return True
 
     rl_buckets: dict[str, list[float]] = {}
     rl_last_cleanup = 0.0
@@ -599,6 +609,8 @@ def create_app() -> FastAPI:
         skip: int = 0,
         user: str | None = None,
     ):
+        if not await _require_ws_access_token(websocket):
+            return
         assets = [item.strip() for item in asset_ids.split(",") if item.strip()]
         if not assets:
             await websocket.accept()
@@ -752,6 +764,8 @@ def create_app() -> FastAPI:
             ) from exc
 
     async def _subgraph_ws_send(ws: WebSocket, fn, **kwargs):
+        if not await _require_ws_access_token(ws):
+            return
         await ws.accept()
         try:
             data = await fn(**kwargs)
@@ -880,8 +894,7 @@ def create_app() -> FastAPI:
         symbols: str | None = None,
     ):
         access_token = websocket.headers.get("x-access-token")
-        if settings.access_token and access_token != settings.access_token:
-            await websocket.accept()
+        if not _is_valid_access_token(access_token):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         if not state.redis:

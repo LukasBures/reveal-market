@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     fx_rest_enabled: bool = Field(default=True, description="Enable REST fallback when WS is stale")
     fx_rest_interval_seconds: int = Field(default=10, ge=5, description="Interval between FX REST refresh attempts")
     fx_timeout_seconds: float = Field(default=5.0, gt=0, description="HTTP timeout for FX REST requests")
-    fx_fallback_price: float = Field(default=0.0, ge=0, description="Hard fallback FX price when all sources fail")
+    fx_fallback_price: float = Field(default=3.0, ge=0, description="Hard fallback FX price when all sources fail")
     fx_ws_ping_interval_seconds: int = Field(default=20, ge=5, description="Interval between FX WS ping frames")
     fx_ws_read_timeout_seconds: int = Field(
         default=30, ge=5, description="Max seconds to wait for FX WS data before reconnect"
@@ -191,6 +191,17 @@ class Settings(BaseSettings):
         stale_seconds = info.data.get("market_stale_seconds")
         if stale_seconds and value <= stale_seconds:
             raise ValueError("STREAMER_MARKET_STALE_EVICT_SECONDS must exceed STREAMER_MARKET_STALE_SECONDS")
+        return value
+
+    @field_validator("fx_fallback_price")
+    @classmethod
+    def _validate_fx_fallback(cls, value, info):
+        min_price = info.data.get("fx_min_price")
+        max_price = info.data.get("fx_max_price")
+        if value is None:
+            return value
+        if min_price is not None and max_price is not None and not (min_price <= value <= max_price):
+            raise ValueError(f"STREAMER_FX_FALLBACK_PRICE must be between {min_price} and {max_price}")
         return value
 
     @field_validator(
