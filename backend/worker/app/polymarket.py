@@ -154,6 +154,14 @@ class MarketPayload(BaseModel):
 
         outcomes = _extract_outcomes(raw.get("outcomes"))
         outcome_prices = _extract_prices(raw.get("outcomePrices"))
+        if outcomes and len(outcomes) > 100:
+            raise ValueError(f"too_many_outcomes:{len(outcomes)}")
+        if outcome_prices:
+            for price in outcome_prices:
+                if not math.isfinite(price) or price < 0 or price > 1:
+                    raise ValueError(f"outcome_price_out_of_range:{price}")
+        if condition_id and not re.match(r"^0x[a-fA-F0-9]{64}$", str(condition_id)):
+            raise ValueError(f"invalid_condition_id:{condition_id}")
         category = _derive_category(raw)
         status = _derive_status(closed, uma_status)
         tags = _extract_tags(raw.get("tags"))
