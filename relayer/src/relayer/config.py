@@ -75,6 +75,22 @@ def _ip_allowlist() -> list[IPAllowEntry]:
     return entries
 
 
+def _proxy_allowlist() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    raw = os.getenv("RELAYER_TRUSTED_PROXY_CIDRS")
+    if not raw:
+        return []
+    entries: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            entries.append(ipaddress.ip_network(value, strict=False))
+        except ValueError as err:
+            raise RuntimeError(f"Invalid RELAYER_TRUSTED_PROXY_CIDRS entry: {value}") from err
+    return entries
+
+
 @dataclass
 class RelayerConfig:
     rpc_url: str
@@ -94,6 +110,7 @@ class RelayerConfig:
     queue_dsn: str | None
     queue_poll_seconds: float
     queue_max_attempts: int
+    queue_max_payload_bytes: int
     fee_bump_percent: float
     min_escrow_token_balance_wei: int
     min_relayer_token_allowance_wei: int
@@ -103,6 +120,7 @@ class RelayerConfig:
     rate_limit_window_seconds: int
     ip_allowlist: list[IPAllowEntry]
     trust_x_forwarded_for: bool
+    trusted_proxy_cidrs: list[ipaddress.IPv4Network | ipaddress.IPv6Network]
     api_base_url: str | None
     api_bearer_token: str | None
     api_internal_secret: str | None
@@ -122,10 +140,13 @@ def load_config() -> RelayerConfig:
         raise RuntimeError("RELAYER_BEARER_TOKEN is required unless RELAYER_ALLOW_INSECURE_AUTH=true")
     rate_limit_requests = _int_env("RELAYER_RATE_LIMIT_REQUESTS", 30)
     rate_limit_window_seconds = _int_env("RELAYER_RATE_LIMIT_WINDOW_SECONDS", 60)
+    queue_max_payload_bytes = _int_env("RELAYER_QUEUE_MAX_PAYLOAD_BYTES", 131072)
     if rate_limit_requests < 0:
         raise RuntimeError("RELAYER_RATE_LIMIT_REQUESTS must be >= 0")
     if rate_limit_requests > 0 and rate_limit_window_seconds <= 0:
         raise RuntimeError("RELAYER_RATE_LIMIT_WINDOW_SECONDS must be > 0 when rate limiting is enabled")
+    if queue_max_payload_bytes <= 0:
+        raise RuntimeError("RELAYER_QUEUE_MAX_PAYLOAD_BYTES must be > 0")
 
     return RelayerConfig(
         rpc_url=_require_env("RPC_URL"),
@@ -145,6 +166,7 @@ def load_config() -> RelayerConfig:
         queue_dsn=_queue_dsn(),
         queue_poll_seconds=_float_env("RELAYER_QUEUE_POLL_SECONDS", 1.0),
         queue_max_attempts=_int_env("RELAYER_QUEUE_MAX_ATTEMPTS", 5),
+        queue_max_payload_bytes=queue_max_payload_bytes,
         fee_bump_percent=_float_env("RELAYER_FEE_BUMP_PERCENT", 0.15),
         min_escrow_token_balance_wei=_int_env("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", 0),
         min_relayer_token_allowance_wei=_int_env("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", 0),
@@ -154,6 +176,7 @@ def load_config() -> RelayerConfig:
         rate_limit_window_seconds=rate_limit_window_seconds,
         ip_allowlist=_ip_allowlist(),
         trust_x_forwarded_for=_bool_env("RELAYER_TRUST_X_FORWARDED_FOR", False),
+        trusted_proxy_cidrs=_proxy_allowlist(),
         api_base_url=os.getenv("RELAYER_API_BASE_URL"),
         api_bearer_token=os.getenv("RELAYER_API_BEARER_TOKEN"),
         api_internal_secret=os.getenv("RELAYER_API_INTERNAL_SECRET"),

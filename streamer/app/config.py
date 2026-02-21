@@ -72,6 +72,18 @@ class Settings(BaseSettings):
         description="PnL subgraph endpoint",
     )
     subgraph_timeout_seconds: float = Field(default=6.0, gt=0, description="HTTP timeout for subgraph calls")
+    subgraph_max_concurrent_queries: int = Field(
+        default=25,
+        ge=1,
+        le=1000,
+        description="Maximum concurrent subgraph queries per process",
+    )
+    subgraph_ws_max_skip: int = Field(
+        default=5000,
+        ge=0,
+        le=100000,
+        description="Maximum websocket subgraph skip value after server-side clamping",
+    )
     rtds_ws_url: str = Field(default="wss://ws-live-data.polymarket.com", description="Secondary WS (RTDS market data)")
     rtds_ping_seconds: int = Field(default=10, ge=3, description="RTDS ping interval in seconds")
     rtds_topic_clob: str = Field(default="clob_market", description="RTDS topic for orderbook data")
@@ -119,6 +131,18 @@ class Settings(BaseSettings):
     haircut_percent: float = Field(default=0.12, ge=0, lt=0.25, description="Percent haircut applied to hedging")
     rake_percent: float = Field(default=0.02, ge=0, lt=0.25, description="Protocol rake percent")
     sse_heartbeat_seconds: int = Field(default=15, ge=1, description="SSE heartbeat interval")
+    max_client_heartbeat_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=600,
+        description="Maximum client-requested SSE/WS heartbeat interval",
+    )
+    max_symbols_per_request: int = Field(
+        default=25,
+        ge=1,
+        le=200,
+        description="Maximum RTDS symbols accepted from a single client request",
+    )
     rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
     ws_reconnect_seconds: float = Field(default=5.0, ge=0.01, description="Backoff between WS reconnect attempts")
     rtds_enabled: bool = Field(default=False, description="Enable RTDS websocket ingestion (disabled by default)")

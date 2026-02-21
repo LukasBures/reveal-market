@@ -42,6 +42,7 @@ def test_load_config_uses_defaults(monkeypatch):
     monkeypatch.delenv("RM_DATABASE_URL", raising=False)
     monkeypatch.delenv("RELAYER_QUEUE_POLL_SECONDS", raising=False)
     monkeypatch.delenv("RELAYER_QUEUE_MAX_ATTEMPTS", raising=False)
+    monkeypatch.delenv("RELAYER_QUEUE_MAX_PAYLOAD_BYTES", raising=False)
     monkeypatch.delenv("RELAYER_FEE_BUMP_PERCENT", raising=False)
     monkeypatch.delenv("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", raising=False)
     monkeypatch.delenv("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", raising=False)
@@ -51,6 +52,7 @@ def test_load_config_uses_defaults(monkeypatch):
     monkeypatch.delenv("RELAYER_RATE_LIMIT_WINDOW_SECONDS", raising=False)
     monkeypatch.delenv("RELAYER_IP_ALLOWLIST", raising=False)
     monkeypatch.delenv("RELAYER_TRUST_X_FORWARDED_FOR", raising=False)
+    monkeypatch.delenv("RELAYER_TRUSTED_PROXY_CIDRS", raising=False)
     monkeypatch.setenv("RELAYER_ALLOW_INSECURE_AUTH", "true")
 
     cfg = load_config()
@@ -66,6 +68,7 @@ def test_load_config_uses_defaults(monkeypatch):
     assert cfg.queue_dsn is None
     assert cfg.queue_poll_seconds == 1.0
     assert cfg.queue_max_attempts == 5
+    assert cfg.queue_max_payload_bytes == 131072
     assert cfg.fee_bump_percent == 0.15
     assert cfg.min_escrow_token_balance_wei == 0
     assert cfg.min_relayer_token_allowance_wei == 0
@@ -75,6 +78,7 @@ def test_load_config_uses_defaults(monkeypatch):
     assert cfg.rate_limit_window_seconds == 60
     assert cfg.ip_allowlist == []
     assert cfg.trust_x_forwarded_for is False
+    assert cfg.trusted_proxy_cidrs == []
 
 
 def test_load_config_applies_overrides(monkeypatch):
@@ -91,6 +95,7 @@ def test_load_config_applies_overrides(monkeypatch):
         RM_DATABASE_URL="postgresql+psycopg2://user:<REDACTED>@localhost:5432/relayer",
         RELAYER_QUEUE_POLL_SECONDS="2.5",
         RELAYER_QUEUE_MAX_ATTEMPTS="7",
+        RELAYER_QUEUE_MAX_PAYLOAD_BYTES="2048",
         RELAYER_FEE_BUMP_PERCENT="0.25",
         RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI="10",  # noqa: S106 - test fixture value
         RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI="20",  # noqa: S106 - test fixture value
@@ -100,6 +105,7 @@ def test_load_config_applies_overrides(monkeypatch):
         RELAYER_RATE_LIMIT_WINDOW_SECONDS="12",
         RELAYER_IP_ALLOWLIST="127.0.0.1,10.0.0.0/24",
         RELAYER_TRUST_X_FORWARDED_FOR="true",
+        RELAYER_TRUSTED_PROXY_CIDRS="127.0.0.1/32,10.0.0.0/24",
     )
 
     cfg = load_config()
@@ -113,6 +119,7 @@ def test_load_config_applies_overrides(monkeypatch):
     assert cfg.queue_dsn == "postgresql://user:<REDACTED>@localhost:5432/relayer"
     assert cfg.queue_poll_seconds == 2.5
     assert cfg.queue_max_attempts == 7
+    assert cfg.queue_max_payload_bytes == 2048
     assert cfg.fee_bump_percent == 0.25
     assert cfg.min_escrow_token_balance_wei == 10
     assert cfg.min_relayer_token_allowance_wei == 20
@@ -122,6 +129,7 @@ def test_load_config_applies_overrides(monkeypatch):
     assert cfg.rate_limit_window_seconds == 12
     assert len(cfg.ip_allowlist) == 2
     assert cfg.trust_x_forwarded_for is True
+    assert len(cfg.trusted_proxy_cidrs) == 2
 
 
 def test_load_config_requires_bearer_token_by_default(monkeypatch):

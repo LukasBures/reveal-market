@@ -427,6 +427,25 @@ def test_control_subscription_endpoints(monkeypatch):
         assert data["symbols"] == []
 
 
+def test_control_endpoints_fail_closed_without_configured_token(monkeypatch):
+    settings = Settings(control_token=None)
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/control/subscriptions")
+        assert resp.status_code == 503
+        resp = client.post("/control/subscriptions", params=[("symbols", "sym1")])
+        assert resp.status_code == 503
+
+
 def test_control_symbols_respect_cap_and_bump_version(monkeypatch):
     settings = Settings(control_token="secret", max_subscriptions=1)  # noqa: S106
     state = StreamState(settings)
@@ -495,6 +514,70 @@ def test_access_token_and_connection_cap(monkeypatch):
         assert client.get("/stream", params={"market_id": "m2"}, headers={"x-access-token": "tok"}).status_code == 429
 
 
+def test_stream_rejects_unbounded_heartbeat(monkeypatch):
+    settings = Settings(max_client_heartbeat_seconds=5)
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            return None
+
+        async def close(self):
+            return
+
+    async def fake_subscribe(_market_id: str):
+        return DummyPubSub()
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        state.redis = DummyRedis()
+        resp = client.get("/stream", params={"market_id": "m1", "heartbeat": 999})
+        assert resp.status_code == 422
+
+
+def test_stream_releases_symbols_on_disconnect(monkeypatch):
+    settings = Settings()
+    state = StreamState(settings)
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class DummyPubSub:
+        async def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            await asyncio.sleep(0.01)
+            return None
+
+        async def close(self):
+            return
+
+    async def fake_subscribe(_market_id: str):
+        return DummyPubSub()
+
+    state.subscribe = fake_subscribe  # type: ignore[assignment]
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        state.redis = DummyRedis()
+        with client.stream(
+            "GET",
+            "/stream",
+            params={"market_id": "m1", "symbols": "zenusdt", "max_events": 1, "heartbeat": 1},
+        ) as resp:
+            assert resp.status_code == 200
+            for _ in resp.iter_lines():
+                break
+        assert "zenusdt" not in state.rtds_symbols
+
+
 def test_per_client_connection_cap(monkeypatch):
     settings = Settings(access_token="tok", max_active_connections=5, max_connections_per_client=1)  # noqa: S106
     state = StreamState(settings)
@@ -523,7 +606,8 @@ def test_per_client_connection_cap(monkeypatch):
         resp = client.get("/stream", params={"market_id": "m1", "max_events": 1}, headers={"x-access-token": "tok"})
         assert resp.status_code == 200
         resp2 = client.get("/stream", params={"market_id": "m2", "max_events": 1}, headers={"x-access-token": "tok"})
-        assert resp2.status_code == 429
+        assert resp2.status_code == 200
+        assert state.active_connections == 0
 
 
 def test_ws_requires_access_token(monkeypatch):

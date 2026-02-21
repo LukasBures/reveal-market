@@ -294,9 +294,11 @@ class HedgerService:
                 "pricing": pricing.model_dump(mode="json"),
             }
 
-        lock_ctx = self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else nullcontext()
+        def _commit_lock():
+            return self.lock_manager.lock(f"commit:{commit.market_id}") if self.lock_manager else nullcontext()
+
         try:
-            async with lock_ctx:
+            async with _commit_lock():
                 snapshot, instruction, breaches = await self.exposure_ledger.preview_commit(
                     commit, stake_usd=pricing.hedge_usdc
                 )
@@ -350,7 +352,7 @@ class HedgerService:
                 return response
 
         try:
-            async with lock_ctx:
+            async with _commit_lock():
                 snapshot, _, _ = await self.exposure_ledger.record_commit(
                     commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc, persist=True
                 )
@@ -540,14 +542,6 @@ class HedgerService:
             filled_size = self._extract_filled_size(order_response, instruction.size_usd)
             fill_ratio = float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0
             min_fill_ratio = float(self.settings.min_fill_percent) / 100.0
-            if fill_ratio < min_fill_ratio:
-                return {
-                    "status": "rejected",
-                    "reason": "fill_below_threshold",
-                    "filled_size_usd": str(filled_size),
-                    "required_fill_percent": str(self.settings.min_fill_percent),
-                }
-
             if filled_size <= 0:
                 return {
                     "status": "rejected",
@@ -580,6 +574,26 @@ class HedgerService:
             size_usd=str(filled_size),
             partial_fill=float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0,
         )
+        if fill_ratio < min_fill_ratio:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="hedger.hedge.partial_below_threshold",
+                message="recorded partial fill below threshold",
+                market_id=instruction.market_id,
+                action=instruction.action,
+                size_usd=str(filled_size),
+                required_fill_percent=str(self.settings.min_fill_percent),
+            )
+            return {
+                "status": "rejected",
+                "reason": "fill_below_threshold",
+                "filled_size_usd": str(filled_size),
+                "required_fill_percent": str(self.settings.min_fill_percent),
+                "reconciled_fill": True,
+                "order": order_response,
+                "approval_tx": approval_tx,
+            }
         return {
             "order": order_response,
             "filled_size_usd": str(filled_size),

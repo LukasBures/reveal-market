@@ -21,6 +21,9 @@ from .service import HedgerService
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    env = (settings.environment or "").strip().lower()
+    if env not in {"local", "dev", "development", "test"} and not settings.admin_internal_secret:
+        raise RuntimeError("HEDGER_ADMIN_INTERNAL_SECRET is required when environment is not local/test")
     setup_logging("reveal_market.hedger")
     logger = logging.getLogger("reveal_market.hedger")
     sanitized_config = {

@@ -9,6 +9,7 @@ from app.main import create_app
 from app.price_streamer import PriceStreamer
 from app.state import FxQuote, StreamState
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from tests.test_utils import DummyStreamer, noop
 
@@ -39,6 +40,35 @@ def test_fx_websocket_stream(monkeypatch):
                 assert message["raw_zen_usd"] == 5.5
                 assert message["stale"] is False
                 assert message["pair"] == "ZEN/USDC"
+
+
+def test_fx_websocket_enforces_token_and_connection_cap(monkeypatch):
+    settings = Settings(access_token="tok", max_active_connections=1)  # noqa: S106
+    state = StreamState(settings)
+    now = datetime.now(UTC)
+    state.fx_quote = FxQuote(
+        zen_usd=Decimal("4.2"),
+        raw_zen_usd=Decimal("4.2"),
+        fetched_at=now,
+        stale=False,
+        source="test",
+    )
+    state.fx_last_update = now
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    app = create_app()
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/fx/zen-usd"):
+                pass
+        state.active_connections = settings.max_active_connections
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/fx/zen-usd", headers={"x-access-token": "tok"}):
+                pass
 
 
 @pytest.mark.asyncio

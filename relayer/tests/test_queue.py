@@ -4,7 +4,7 @@ import time
 
 import pytest
 from relayer.queue import TxQueue
-from relayer.service import TxSendError
+from relayer.service import IngestDeliveryError, TxSendError
 
 
 class DummyService:
@@ -55,6 +55,18 @@ class ExplodingService:
     async def commit(self, payload, **kwargs):
         self.called.set()
         raise TypeError("boom")
+
+
+class IngestFailService:
+    def __init__(self):
+        self.commit_calls = 0
+
+    async def commit(self, payload, **kwargs):
+        self.commit_calls += 1
+        return {"txHash": "0xcommit", "status": 1, "nonce": kwargs.get("nonce_override") or 1}
+
+    async def push_commit_ingest(self, payload, *, tx_hash=None):
+        raise IngestDeliveryError("commit_ingest_http_500")
 
 
 @pytest.mark.asyncio
@@ -133,6 +145,23 @@ async def test_queue_deadletters_permanent_error(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_queue_deadletters_when_ingest_fails_after_tx(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = IngestFailService()
+    queue = TxQueue(str(db_path), svc, max_attempts=3, start_worker=False)
+
+    job_id = await queue.enqueue("commit", {"payload": "x"})
+    result = await queue.process_job(job_id)
+    assert result["status"] == "deadletter"
+    assert result["txHash"] == "0xcommit"
+    with queue._connect() as conn:  # noqa: SLF001
+        row = conn.execute("SELECT status, tx_hash FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row is not None
+    assert row["status"] == "deadletter"
+    assert row["tx_hash"] == "0xcommit"
+
+
+@pytest.mark.asyncio
 async def test_queue_commit_expired_deadletters(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()
@@ -159,6 +188,23 @@ def test_queue_skips_running_jobs_in_sqlite(tmp_path):
 
     row = queue._reserve_job_sync()  # noqa: SLF001
     assert row is None
+
+
+def test_queue_init_preserves_running_jobs(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ?",
+            (int(time.time()) - 3600, job_id),
+        )
+    queue_restarted = TxQueue(str(db_path), svc, start_worker=False)
+    with queue_restarted._connect() as conn:  # noqa: SLF001
+        row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row is not None
+    assert row["status"] == "running"
 
 
 @pytest.mark.asyncio

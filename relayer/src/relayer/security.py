@@ -35,17 +35,47 @@ class RateLimiter:
             return True
 
 
-def resolve_client_ip(request: Request, trust_x_forwarded_for: bool) -> str | None:
-    if trust_x_forwarded_for:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            candidate = forwarded.split(",")[0].strip()
-            if candidate:
-                return candidate
+def _ip_in_networks(
+    ip_value: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    networks: Sequence[ipaddress.IPv4Network | ipaddress.IPv6Network],
+) -> bool:
+    return any(ip_value in network for network in networks)
+
+
+def resolve_client_ip(
+    request: Request,
+    trust_x_forwarded_for: bool,
+    trusted_proxy_cidrs: Sequence[ipaddress.IPv4Network | ipaddress.IPv6Network] | None = None,
+) -> str | None:
     client = request.client
-    if client:
-        return client.host
-    return None
+    if client is None:
+        return None
+    direct_ip = client.host
+    if not trust_x_forwarded_for:
+        return direct_ip
+    forwarded = request.headers.get("x-forwarded-for")
+    if not forwarded:
+        return direct_ip
+    trusted_proxies = list(trusted_proxy_cidrs or [])
+    try:
+        direct_ip_obj = ipaddress.ip_address(direct_ip)
+    except ValueError:
+        return direct_ip
+    if not trusted_proxies or not _ip_in_networks(direct_ip_obj, trusted_proxies):
+        # Refuse spoofable forwarded headers from unknown peers.
+        return direct_ip
+    chain = [part.strip() for part in forwarded.split(",") if part.strip()]
+    chain.append(direct_ip)
+    parsed_chain: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for candidate in chain:
+        try:
+            parsed_chain.append(ipaddress.ip_address(candidate))
+        except ValueError:
+            return direct_ip
+    index = len(parsed_chain) - 1
+    while index > 0 and _ip_in_networks(parsed_chain[index], trusted_proxies):
+        index -= 1
+    return str(parsed_chain[index])
 
 
 def ip_allowed(client_ip: str | None, allowlist: Sequence[IPAllowEntry]) -> bool:

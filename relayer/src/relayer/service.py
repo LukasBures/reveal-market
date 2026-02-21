@@ -63,6 +63,10 @@ class TxSendError(RuntimeError):
         self.permanent = permanent
 
 
+class IngestDeliveryError(RuntimeError):
+    """Raised when internal ingest callbacks fail after a transaction succeeds."""
+
+
 @dataclass
 class RelayerService:
     web3: Web3
@@ -800,11 +804,14 @@ class RelayerService:
         return payload
 
     async def push_commit_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
-        """Best-effort push of commitment metadata to the API ingest endpoint."""
+        """Push commitment metadata to the API ingest endpoint."""
 
         if not self.api_base_url:
             return
         event_id = payload.get("event_id") or payload.get("market_id")
+        if payload.get("event_id") and payload.get("market_id") and payload.get("event_id") != payload.get("market_id"):
+            raise IngestDeliveryError("event_market_id_mismatch")
+        market_address = payload.get("market")
         required = {
             "commitment": payload.get("commitment"),
             "user": payload.get("user"),
@@ -821,26 +828,42 @@ class RelayerService:
         ]
         if not event_id:
             missing.append("event_id")
+        if not market_address:
+            missing.append("market")
         if missing:
-            logger.warning(
-                "relayer.ingest.commit_skipped",
-                market=payload.get("market"),
-                missing_fields=missing,
-            )
-            return
+            raise IngestDeliveryError(f"commit_fields_missing:{','.join(sorted(missing))}")
+        try:
+            commitment_bytes = self._require_hex(required["commitment"], "commitment", length_bytes=32)
+            user_addr = self.web3.to_checksum_address(str(required["user"]))
+            outcome_id = self._require_uint(required["outcome_id"], "outcome_id")
+            amount_wei = self._require_uint(required["amount_wei"], "amount_wei")
+            payout_wei = self._require_uint(required["payout_wei"], "payout_wei")
+            ticket_id = self._require_uint(required["ticket_id"], "ticket_id")
+            salt = str(required["salt"])
+            self._require_hex(salt, "salt", length_bytes=32)
+            computed_leaf = compute_leaf(ticket_id, outcome_id, amount_wei, payout_wei, user_addr, salt)
+            if int.from_bytes(commitment_bytes, "big") != computed_leaf:
+                raise IngestDeliveryError("commitment_preimage_mismatch")
+        except (TxSendError, ValueError) as err:
+            raise IngestDeliveryError(f"invalid_commitment_metadata:{err}") from err
         ticket = {
             "ticketHash": required["commitment"],
             "leaf": required["commitment"],
-            "user_address": required["user"],
-            "outcomeId": required["outcome_id"],
-            "amount": required["amount_wei"],
-            "payout": required["payout_wei"],
-            "salt": required["salt"],
-            "merkleIndex": required["ticket_id"],
+            "user_address": user_addr,
+            "outcomeId": outcome_id,
+            "amount": amount_wei,
+            "payout": payout_wei,
+            "salt": salt,
+            "merkleIndex": ticket_id,
             "merklePath": payload.get("merkle_path") or [],
             "txHash": tx_hash,
         }
-        body = {"event_id": event_id, "tickets": [ticket]}
+        body = {
+            "event_id": event_id,
+            "market_id": event_id,
+            "market_address": market_address,
+            "tickets": [ticket],
+        }
         headers = {}
         if self.api_bearer_token:
             headers["Authorization"] = f"Bearer {self.api_bearer_token}"
@@ -849,42 +872,43 @@ class RelayerService:
         try:
             client = await self._get_api_client()
             resp = await client.post(f"{self.api_base_url}/internal/commitments/sync", json=body, headers=headers)
-            logger.info(
-                "relayer.ingest.commit",
-                status=resp.status_code,
-                event_id=event_id,
-                market=payload.get("market"),
-                tx_hash=tx_hash,
-            )
-        except Exception as err:  # pragma: no cover - best-effort ingest
-            logger.warning("relayer.ingest.commit_failed", error=str(err), market=payload.get("market"))
+        except Exception as err:
+            raise IngestDeliveryError(f"commit_ingest_request_failed:{err}") from err
+        if resp.status_code >= 400:
+            raise IngestDeliveryError(f"commit_ingest_http_{resp.status_code}")
+        logger.info(
+            "relayer.ingest.commit",
+            status=resp.status_code,
+            event_id=event_id,
+            market=payload.get("market"),
+            tx_hash=tx_hash,
+        )
 
     async def push_settlement_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
-        """Best-effort push of settlement snapshot to the API ingest endpoint."""
+        """Push settlement snapshot to the API ingest endpoint."""
 
         if not self.api_base_url:
             return
-        market_id = payload.get("market_id") or payload.get("event_id") or payload.get("market")
-        if not market_id:
-            logger.warning(
-                "relayer.ingest.settlement_skipped",
-                market=payload.get("market"),
-                reason="market_id_missing",
-            )
-            return
+        market_id = payload.get("market_id") or payload.get("event_id")
+        if payload.get("market_id") and payload.get("event_id") and payload.get("market_id") != payload.get("event_id"):
+            raise IngestDeliveryError("event_market_id_mismatch")
+        market_address = payload.get("market")
+        if not market_id and not market_address:
+            raise IngestDeliveryError("market_identifier_missing")
+        winning_outcome_id = payload.get("winning_outcome_id")
+        if winning_outcome_id is None:
+            winning_outcome_id = payload.get("outcome_id")
+        if winning_outcome_id is not None:
+            try:
+                winning_outcome_id = int(winning_outcome_id)
+            except (TypeError, ValueError):
+                winning_outcome_id = None
         body = {
             "event_id": market_id,
             "market_id": market_id,
-            "merkleRoot": payload.get("merkle_root"),
-            "commitmentsCount": payload.get("commitments_count"),
-            "batchRoots": payload.get("batch_roots"),
-            "batchCounts": payload.get("batch_counts"),
-            "poolTotalYes": payload.get("pool_total_yes"),
-            "poolTotalNo": payload.get("pool_total_no"),
-            "totalEscrow": payload.get("total_escrow"),
-            "totalLiability": payload.get("total_liability"),
-            "rakeBps": payload.get("rake_bps"),
-            "proofRequestId": payload.get("proof_request_id"),
+            "market_address": market_address,
+            "winningOutcomeId": winning_outcome_id,
+            "txHash": tx_hash,
         }
         headers = {}
         if self.api_bearer_token:
@@ -894,14 +918,16 @@ class RelayerService:
         try:
             client = await self._get_api_client()
             resp = await client.post(f"{self.api_base_url}/internal/settlements/ingest", json=body, headers=headers)
-            logger.info(
-                "relayer.ingest.settlement",
-                status=resp.status_code,
-                market_id=market_id,
-                tx_hash=tx_hash,
-            )
-        except Exception as err:  # pragma: no cover - best-effort ingest
-            logger.warning("relayer.ingest.settlement_failed", error=str(err), market=market_id)
+        except Exception as err:
+            raise IngestDeliveryError(f"settlement_ingest_request_failed:{err}") from err
+        if resp.status_code >= 400:
+            raise IngestDeliveryError(f"settlement_ingest_http_{resp.status_code}")
+        logger.info(
+            "relayer.ingest.settlement",
+            status=resp.status_code,
+            market_id=market_id,
+            tx_hash=tx_hash,
+        )
 
 
 def build_service(

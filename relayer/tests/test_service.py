@@ -336,16 +336,23 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
         api_bearer_token="token",  # noqa: S106 - test-only token
         api_internal_secret="secret",  # noqa: S106 - test-only secret
     )
+    user = "0x0000000000000000000000000000000000000001"
+    outcome_id = 1
+    amount_wei = 99
+    payout_wei = 120
+    ticket_id = 7
+    salt = "0x" + "1" * 64
+    commitment = int_to_hex32(compute_leaf(ticket_id, outcome_id, amount_wei, payout_wei, user, salt))
     payload = {
         "event_id": "evt-1",
         "market": "0x0000000000000000000000000000000000000002",
-        "commitment": "0x" + "0" * 64,
-        "user": "0x0000000000000000000000000000000000000001",
-        "outcome_id": 1,
-        "amount_wei": 99,
-        "payout_wei": 120,
-        "salt": "0x" + "1" * 64,
-        "ticket_id": 7,
+        "commitment": commitment,
+        "user": user,
+        "outcome_id": outcome_id,
+        "amount_wei": amount_wei,
+        "payout_wei": payout_wei,
+        "salt": salt,
+        "ticket_id": ticket_id,
     }
     await service.push_commit_ingest(payload, tx_hash="0xabc")
 
@@ -355,6 +362,7 @@ async def test_push_commit_ingest_uses_api_aliases(monkeypatch):
     request = client.requests[0]
     assert request["url"].endswith("/internal/commitments/sync")
     assert request["headers"]["X-Internal-Secret"] == "secret"
+    assert request["json"]["market_address"] == payload["market"]
     ticket = request["json"]["tickets"][0]
     assert ticket["ticketHash"] == payload["commitment"]
     assert ticket["user_address"] == payload["user"]
@@ -400,16 +408,8 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
     )
     payload = {
         "event_id": "evt-2",
-        "merkle_root": "0x" + "2" * 64,
-        "commitments_count": 3,
-        "batch_roots": ["0x" + "3" * 64],
-        "batch_counts": [3],
-        "pool_total_yes": 10,
-        "pool_total_no": 20,
-        "total_escrow": 30,
-        "total_liability": 10,
-        "rake_bps": 200,
-        "proof_request_id": "req-1",
+        "market": "0x0000000000000000000000000000000000000002",
+        "outcome_id": 1,
     }
     await service.push_settlement_ingest(payload, tx_hash="0xdef")
 
@@ -420,20 +420,14 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
     assert request["url"].endswith("/internal/settlements/ingest")
     assert request["headers"]["X-Internal-Secret"] == "secret"
     body = request["json"]
-    assert body["merkleRoot"] == payload["merkle_root"]
-    assert body["commitmentsCount"] == payload["commitments_count"]
-    assert body["batchRoots"] == payload["batch_roots"]
-    assert body["batchCounts"] == payload["batch_counts"]
-    assert body["poolTotalYes"] == payload["pool_total_yes"]
-    assert body["poolTotalNo"] == payload["pool_total_no"]
-    assert body["totalEscrow"] == payload["total_escrow"]
-    assert body["totalLiability"] == payload["total_liability"]
-    assert body["rakeBps"] == payload["rake_bps"]
-    assert body["proofRequestId"] == payload["proof_request_id"]
+    assert body["event_id"] == payload["event_id"]
+    assert body["market_address"] == payload["market"]
+    assert body["winningOutcomeId"] == payload["outcome_id"]
+    assert body["txHash"] == "0xdef"
 
 
 @pytest.mark.asyncio
-async def test_push_commit_ingest_skips_missing_event_id(monkeypatch):
+async def test_push_commit_ingest_rejects_missing_event_id(monkeypatch):
     def fail_async_client(*_args, **_kwargs):
         raise AssertionError("AsyncClient should not be constructed")
 
@@ -457,11 +451,12 @@ async def test_push_commit_ingest_skips_missing_event_id(monkeypatch):
         "salt": "0x" + "1" * 64,
         "ticket_id": 7,
     }
-    await service.push_commit_ingest(payload, tx_hash="0xabc")
+    with pytest.raises(service_module.IngestDeliveryError, match="commit_fields_missing:event_id"):
+        await service.push_commit_ingest(payload, tx_hash="0xabc")
 
 
 @pytest.mark.asyncio
-async def test_push_settlement_ingest_skips_missing_market_id(monkeypatch):
+async def test_push_settlement_ingest_rejects_missing_market_id(monkeypatch):
     def fail_async_client(*_args, **_kwargs):
         raise AssertionError("AsyncClient should not be constructed")
 
@@ -480,4 +475,5 @@ async def test_push_settlement_ingest_skips_missing_market_id(monkeypatch):
         "merkle_root": "0x" + "2" * 64,
         "commitments_count": 3,
     }
-    await service.push_settlement_ingest(payload, tx_hash="0xdef")
+    with pytest.raises(service_module.IngestDeliveryError, match="market_identifier_missing"):
+        await service.push_settlement_ingest(payload, tx_hash="0xdef")

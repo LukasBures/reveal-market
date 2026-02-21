@@ -28,7 +28,7 @@ class ClaimRequest(BaseModel):
     amount: int
     payout: int
     salt: str
-    merkle_proof: list[str]
+    merkle_proof: list[str] = Field(..., max_length=64, description="Merkle siblings (bounded)")
     merkle_root: str | None = Field(default=None, description="Optional root for ingest")
     batch_roots: list[str] | None = Field(default=None, description="Optional batch roots for ingest")
     batch_counts: list[int] | None = Field(default=None, description="Optional batch counts for ingest")
@@ -54,7 +54,7 @@ class LockTicket(BaseModel):
 
 class LockBatchesRequest(BaseModel):
     market: str
-    tickets: list[LockTicket]
+    tickets: list[LockTicket] = Field(..., max_length=256, description="Bounded ticket list for batch locking")
     relayer_sig: str | None = Field(default=None, description="Optional relayer signature")
     event_id: str | None = Field(default=None, description="Optional event/market id for ingest")
     market_id: str | None = Field(default=None, description="Optional market id for ingest")

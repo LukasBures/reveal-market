@@ -147,6 +147,35 @@ def test_subgraph_ws_endpoints(subgraph_app):
         assert message["data"][0]["id"] == "md1"
 
 
+def test_subgraph_ws_clamps_first_and_skip(monkeypatch):
+    settings = Settings(subgraph_default_url="https://example.com/subgraph")
+    state = StreamState(settings)
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+    seen: list[dict] = []
+
+    class DummySubgraph:
+        async def fetch_markets(self, **kwargs):
+            seen.append(kwargs)
+            return [{"id": "m1"}]
+
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.SubgraphClient", lambda *_args, **_kwargs: DummySubgraph())
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/subgraph/ws/markets?first=999999&skip=999999",
+        ) as ws:
+            message = ws.receive_json()
+            assert message["data"][0]["id"] == "m1"
+    assert seen
+    assert seen[0]["first"] == 200
+    assert seen[0]["skip"] == settings.subgraph_ws_max_skip
+
+
 def test_subgraph_not_configured_returns_503(monkeypatch):
     settings = Settings(
         subgraph_default_url=None,
@@ -202,3 +231,58 @@ def test_subgraph_http_error_surfaces_details(monkeypatch):
         payload = resp.json()
         assert payload["detail"]["error"] == "subgraph_http_error"
         assert payload["detail"]["status_code"] == 502
+        assert "url" not in payload["detail"]
+
+
+def test_subgraph_http_routes_apply_rate_limit(monkeypatch):
+    settings = Settings(
+        subgraph_default_url="https://example.com/subgraph",
+        rate_limit_per_minute=1,
+    )
+    state = StreamState(settings)
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    class DummySubgraph:
+        async def fetch_markets(self, **_kwargs):
+            return [{"id": "m1"}]
+
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.SubgraphClient", lambda *_args, **_kwargs: DummySubgraph())
+    app = create_app()
+    with TestClient(app) as client:
+        first = client.get("/subgraph/markets")
+        second = client.get("/subgraph/markets")
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+
+def test_subgraph_ws_routes_apply_rate_limit(monkeypatch):
+    settings = Settings(
+        subgraph_default_url="https://example.com/subgraph",
+        rate_limit_per_minute=1,
+    )
+    state = StreamState(settings)
+    state.startup = noop  # type: ignore[assignment]
+    state.shutdown = noop  # type: ignore[assignment]
+
+    class DummySubgraph:
+        async def fetch_markets(self, **_kwargs):
+            return [{"id": "m1"}]
+
+    monkeypatch.setattr("app.main.StreamState", lambda settings=None, metrics=None: state)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.DataStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.PriceStreamer", lambda *_args, **_kwargs: DummyStreamer())
+    monkeypatch.setattr("app.main.SubgraphClient", lambda *_args, **_kwargs: DummySubgraph())
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/subgraph/ws/markets") as ws1:
+            message = ws1.receive_json()
+            assert message["data"][0]["id"] == "m1"
+        with client.websocket_connect("/subgraph/ws/markets") as ws2:
+            message = ws2.receive_json()
+            assert message["error"] == "subgraph_rate_limited"

@@ -21,7 +21,7 @@ from .metrics import (
     QUEUE_OLDEST_BACKLOG_AGE_SECONDS,
     QUEUE_OUTCOMES,
 )
-from .service import RelayerService, TxSendError
+from .service import IngestDeliveryError, RelayerService, TxSendError
 
 logger = get_logger()
 
@@ -35,6 +35,7 @@ class TxQueue:
         dsn: str | None = None,
         poll_seconds: float = 1.0,
         max_attempts: int = 5,
+        max_payload_bytes: int = 131072,
         fee_bump_percent: float = 0.15,
         start_worker: bool = True,
     ) -> None:
@@ -44,6 +45,7 @@ class TxQueue:
         self.service = service
         self.poll_seconds = poll_seconds
         self.max_attempts = max_attempts
+        self.max_payload_bytes = max_payload_bytes
         self.fee_bump_percent = fee_bump_percent
         self._lock = threading.Lock()
         self._stop = asyncio.Event()
@@ -98,7 +100,6 @@ class TxQueue:
                     )
                     """
                 )
-                conn.execute("UPDATE jobs SET status = 'pending' WHERE status = 'running'")
             else:
                 conn.execute(
                     """
@@ -116,11 +117,13 @@ class TxQueue:
                     )
                     """
                 )
-                conn.execute("UPDATE jobs SET status = 'pending' WHERE status = 'running'")
         self._update_depth()
 
     def _enqueue_sync(self, action: str, payload: Mapping[str, Any]) -> int:
         now = int(time.time())
+        payload_json = json.dumps(payload)
+        if len(payload_json.encode("utf-8")) > self.max_payload_bytes:
+            raise ValueError("payload_too_large")
         with self._lock, self._connect() as conn:
             if self.use_postgres:
                 cur = conn.execute(
@@ -129,7 +132,7 @@ class TxQueue:
                     VALUES (%s, %s, 'pending', 0, %s, %s)
                     RETURNING id
                     """,
-                    (action, json.dumps(payload), now, now),
+                    (action, payload_json, now, now),
                 )
                 job_id = int(cur.fetchone()["id"])
             else:
@@ -138,7 +141,7 @@ class TxQueue:
                     INSERT INTO jobs (action, payload, status, attempts, created_at, updated_at)
                     VALUES (?, ?, 'pending', 0, ?, ?)
                     """,
-                    (action, json.dumps(payload), now, now),
+                    (action, payload_json, now, now),
                 )
                 job_id = int(cur.lastrowid)
         self._update_depth()
@@ -156,18 +159,8 @@ class TxQueue:
 
     def _reserve_job_sync(self, job_id: int | None = None) -> dict[str, Any] | None:
         now = int(time.time())
-        # Unlock stale running jobs that exceeded the tx timeout window so the queue can't stall forever.
-        stale_cutoff = now - int(getattr(self.service, "tx_timeout_seconds", 120)) - 10
         if self.use_postgres:
             with self._lock, self._connect() as conn:
-                conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status = 'pending'
-                    WHERE status = 'running' AND updated_at < %s
-                    """,
-                    (stale_cutoff,),
-                )
                 if job_id is None:
                     cur = conn.execute(
                         """
@@ -189,7 +182,7 @@ class TxQueue:
                         """
                         UPDATE jobs
                         SET status = 'running', attempts = attempts + 1, updated_at = %s
-                        WHERE id = %s AND status IN ('pending', 'running')
+                        WHERE id = %s AND status = 'pending'
                         RETURNING *
                         """,
                         (now, job_id),
@@ -197,24 +190,29 @@ class TxQueue:
                 row = cur.fetchone()
                 return dict(row) if row else None
         with self._lock, self._connect() as conn:
-            conn.execute(
-                "UPDATE jobs SET status = 'pending' WHERE status = 'running' AND updated_at < ?",
-                (stale_cutoff,),
-            )
+            target_id: int | None = None
             if job_id is None:
-                row = conn.execute("SELECT * FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 1").fetchone()
+                row = conn.execute("SELECT id FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 1").fetchone()
+                if row is None:
+                    return None
+                target_id = int(row["id"])
             else:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ? AND status = 'pending'", (job_id,)).fetchone()
-            if row is None:
-                return None
-            attempts = int(row["attempts"]) + 1
-            conn.execute(
-                "UPDATE jobs SET status = 'running', attempts = ?, updated_at = ? WHERE id = ?",
-                (attempts, now, row["id"]),
+                target_id = int(job_id)
+
+            updated = conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'running', attempts = attempts + 1, updated_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (now, target_id),
             )
-            row_dict = {k: row[k] for k in row.keys()}
-            row_dict["attempts"] = attempts
-            return row_dict
+            if int(updated.rowcount or 0) != 1:
+                return None
+            claimed = conn.execute("SELECT * FROM jobs WHERE id = ?", (target_id,)).fetchone()
+            if claimed is None:
+                return None
+            return {k: claimed[k] for k in claimed.keys()}
 
     async def process_job(self, job_id: int | None = None) -> dict[str, Any]:
         row = await asyncio.to_thread(self._reserve_job_sync, job_id)
@@ -242,6 +240,8 @@ class TxQueue:
             **summary,
         )
 
+        tx_hash: str | None = None
+        nonce_used: int | None = int(nonce) if nonce is not None else None
         try:
             # Drop stale commit authorizations so the queue does not get stuck retrying expired jobs.
             if row["action"] == "commit":
@@ -279,23 +279,14 @@ class TxQueue:
                 tx_hash = f"0x{tx_hash}"
             nonce_used_raw = result.get("nonce", nonce)
             nonce_used = int(nonce_used_raw) if nonce_used_raw is not None else None
+            if row["action"] == "commit" and hasattr(self.service, "push_commit_ingest"):
+                await self.service.push_commit_ingest(payload, tx_hash=tx_hash)
+            if row["action"] == "claim" and hasattr(self.service, "push_settlement_ingest"):
+                await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
+            if row["action"] == "lock_batches" and hasattr(self.service, "push_settlement_ingest"):
+                await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
             await asyncio.to_thread(self._mark_complete, job_id, tx_hash, nonce_used)
             QUEUE_OUTCOMES.labels(action=row["action"], status="succeeded").inc()
-            if row["action"] == "commit":
-                try:
-                    await self.service.push_commit_ingest(payload, tx_hash=tx_hash)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("queue.commit.ingest_failed", job_id=job_id, error=str(err))
-            if row["action"] == "claim":
-                try:
-                    await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("queue.claim.ingest_failed", job_id=job_id, error=str(err))
-            if row["action"] == "lock_batches":
-                try:
-                    await self.service.push_settlement_ingest(payload, tx_hash=tx_hash)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("queue.lock_batches.ingest_failed", job_id=job_id, error=str(err))
             logger.info(
                 "queue.job.succeeded",
                 job_id=job_id,
@@ -306,12 +297,15 @@ class TxQueue:
                 **summary,
             )
             return {"jobId": job_id, "status": "succeeded", "txHash": tx_hash, "nonce": nonce_used}
-        except (TxSendError, Web3Exception, ValueError, RuntimeError) as err:
-            nonce_to_store = nonce
+        except (TxSendError, IngestDeliveryError, Web3Exception, ValueError, RuntimeError) as err:
+            nonce_to_store = nonce_used if nonce_used is not None else nonce
             if isinstance(err, TxSendError) and err.nonce is not None:
                 nonce_to_store = err.nonce
             permanent = isinstance(err, TxSendError) and getattr(err, "permanent", False)
-            next_status = "deadletter" if permanent else "pending" if attempts < self.max_attempts else "deadletter"
+            if isinstance(err, IngestDeliveryError):
+                next_status = "deadletter"
+            else:
+                next_status = "deadletter" if permanent else "pending" if attempts < self.max_attempts else "deadletter"
             logger.warning(
                 "queue.job.error",
                 job_id=row["id"],
@@ -320,9 +314,18 @@ class TxQueue:
                 next_status=next_status,
                 error=str(err),
                 nonce=nonce_to_store,
+                tx_hash=tx_hash,
                 **summary,
             )
-            await asyncio.to_thread(self._mark_failure, row["id"], next_status, attempts, str(err), nonce_to_store)
+            await asyncio.to_thread(
+                self._mark_failure,
+                row["id"],
+                next_status,
+                attempts,
+                str(err),
+                nonce_to_store,
+                tx_hash,
+            )
             QUEUE_OUTCOMES.labels(action=row["action"], status=next_status).inc()
             QUEUE_ERROR_REASONS.labels(action=row["action"], reason=self._error_reason(err)).inc()
             if next_status == "deadletter":
@@ -333,6 +336,7 @@ class TxQueue:
                     attempts=attempts,
                     error=str(err),
                     nonce=nonce_to_store,
+                    tx_hash=tx_hash,
                     **summary,
                 )
                 QUEUE_DEADLETTER_TOTAL.labels(action=row["action"]).inc()
@@ -344,10 +348,17 @@ class TxQueue:
                     attempts=attempts,
                     error=str(err),
                     nonce=nonce_to_store,
+                    tx_hash=tx_hash,
                     next_status=next_status,
                     **summary,
                 )
-            return {"jobId": row["id"], "status": next_status, "nonce": nonce_to_store, "error": str(err)}
+            return {
+                "jobId": row["id"],
+                "status": next_status,
+                "txHash": tx_hash,
+                "nonce": nonce_to_store,
+                "error": str(err),
+            }
 
     def _mark_complete(self, job_id: int, tx_hash: str | None, nonce: int | None) -> None:
         now = int(time.time())
@@ -372,26 +383,36 @@ class TxQueue:
                 )
         self._update_depth()
 
-    def _mark_failure(self, job_id: int, status: str, attempts: int, error: str, nonce: int | None) -> None:
+    def _mark_failure(
+        self,
+        job_id: int,
+        status: str,
+        attempts: int,
+        error: str,
+        nonce: int | None,
+        tx_hash: str | None = None,
+    ) -> None:
         now = int(time.time())
         with self._lock, self._connect() as conn:
             if self.use_postgres:
                 conn.execute(
                     """
                     UPDATE jobs
-                    SET status = %s, attempts = %s, last_error = %s, nonce = %s, updated_at = %s
+                    SET status = %s, attempts = %s, last_error = %s, nonce = %s,
+                        tx_hash = COALESCE(%s, tx_hash), updated_at = %s
                     WHERE id = %s
                     """,
-                    (status, attempts, error, nonce, now, job_id),
+                    (status, attempts, error, nonce, tx_hash, now, job_id),
                 )
             else:
                 conn.execute(
                     """
                     UPDATE jobs
-                    SET status = ?, attempts = ?, last_error = ?, nonce = ?, updated_at = ?
+                    SET status = ?, attempts = ?, last_error = ?, nonce = ?,
+                        tx_hash = COALESCE(?, tx_hash), updated_at = ?
                     WHERE id = ?
                     """,
-                    (status, attempts, error, nonce, now, job_id),
+                    (status, attempts, error, nonce, tx_hash, now, job_id),
                 )
         self._update_depth()
 

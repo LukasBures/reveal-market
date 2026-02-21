@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
@@ -26,8 +27,11 @@ def require_internal_secret(
 ) -> None:
     required = service.settings.admin_internal_secret
     if not required:
-        return
-    if not internal_secret or internal_secret != required:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="internal_secret_not_configured",
+        )
+    if not internal_secret or not secrets.compare_digest(internal_secret, required):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
@@ -76,6 +80,7 @@ async def trigger_settlement(
     market_id: str,
     payload: dict,
     service: HedgerService = Depends(get_service),
+    _secret: None = Depends(require_internal_secret),
     _: None = Depends(require_writable),
 ):
     return await service.trigger_settlement(market_id, payload)
@@ -88,6 +93,7 @@ async def bridge_liquidity(
     destination: str,
     slippage_bps: int | None = None,
     service: HedgerService = Depends(get_service),
+    _secret: None = Depends(require_internal_secret),
     _: None = Depends(require_writable),
 ):
     """

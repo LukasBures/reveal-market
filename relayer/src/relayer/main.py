@@ -63,6 +63,7 @@ queue = TxQueue(
     dsn=cfg.queue_dsn,
     poll_seconds=cfg.queue_poll_seconds,
     max_attempts=cfg.queue_max_attempts,
+    max_payload_bytes=cfg.queue_max_payload_bytes,
     fee_bump_percent=cfg.fee_bump_percent,
 )
 
@@ -92,4 +93,5 @@ app = create_app(
     rate_limiter=rate_limiter,
     ip_allowlist=cfg.ip_allowlist,
     trust_x_forwarded_for=cfg.trust_x_forwarded_for,
+    trusted_proxy_cidrs=cfg.trusted_proxy_cidrs,
 )

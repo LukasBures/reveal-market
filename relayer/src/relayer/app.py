@@ -1,3 +1,5 @@
+import hashlib
+import ipaddress
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,7 +16,7 @@ from .metrics import REQUEST_LATENCY
 from .queue import TxQueue
 from .schemas import ClaimRequest, CommitRequest, LockBatchesRequest
 from .security import RateLimiter, ip_allowed, resolve_client_ip
-from .service import RelayerService, TxSendError
+from .service import IngestDeliveryError, RelayerService, TxSendError
 
 logger = get_logger()
 
@@ -28,6 +30,7 @@ def create_app(
     rate_limiter: RateLimiter | None = None,
     ip_allowlist: list[IPAllowEntry] | None = None,
     trust_x_forwarded_for: bool = False,
+    trusted_proxy_cidrs: list[ipaddress.IPv4Network | ipaddress.IPv6Network] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -49,7 +52,14 @@ def create_app(
             return
         expected = f"Bearer {bearer_token}"
         if authorization != expected:
-            logger.warning("auth_failed", provided=authorization)
+            token_fingerprint = None
+            if authorization:
+                token_fingerprint = hashlib.sha256(authorization.encode()).hexdigest()[:12]
+            logger.warning(
+                "auth_failed",
+                has_authorization=bool(authorization),
+                token_fingerprint=token_fingerprint,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="unauthorized",
@@ -60,7 +70,11 @@ def create_app(
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded and not trust_x_forwarded_for:
             logger.warning("x_forwarded_for_ignored", forwarded_for=forwarded)
-        client_ip = resolve_client_ip(request, trust_x_forwarded_for)
+        client_ip = resolve_client_ip(
+            request,
+            trust_x_forwarded_for,
+            trusted_proxy_cidrs=trusted_proxy_cidrs,
+        )
         if not ip_allowed(client_ip, allowlist):
             logger.warning("ip_not_allowed", client_ip=client_ip, path=request.url.path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ip_not_allowed")
@@ -184,13 +198,13 @@ def create_app(
                 )
             result = await svc.commit(payload)
             if hasattr(svc, "push_commit_ingest"):
-                try:
-                    tx_hash = result.get("txHash")
-                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
-                    await svc.push_commit_ingest(payload, tx_hash=tx_hash_str)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("commit_ingest_failed", error=str(err), market=payload.get("market"))
+                tx_hash = result.get("txHash")
+                tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                await svc.push_commit_ingest(payload, tx_hash=tx_hash_str)
             return result
+        except IngestDeliveryError as err:
+            logger.error("commit_ingest_failed", error=str(err))
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="commit_ingest_failed") from err
         except TxSendError as err:
             if err.kind == "invalid":
                 logger.warning("commit_invalid_payload", error=str(err))
@@ -198,6 +212,11 @@ def create_app(
             logger.error("commit_failed", error=str(err))
             raise HTTPException(status_code=500, detail="commit_failed") from err
         except ValueError as err:
+            if str(err) == "payload_too_large":
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="payload_too_large",
+                ) from err
             logger.warning("commit_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
         except (Web3Exception, RuntimeError, OverflowError) as err:
@@ -224,13 +243,13 @@ def create_app(
                 )
             result = await svc.claim(payload)
             if hasattr(svc, "push_settlement_ingest"):
-                try:
-                    tx_hash = result.get("txHash")
-                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
-                    await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("claim_ingest_failed", error=str(err), market=payload.get("market"))
+                tx_hash = result.get("txHash")
+                tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
             return result
+        except IngestDeliveryError as err:
+            logger.error("claim_ingest_failed", error=str(err))
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="claim_ingest_failed") from err
         except TxSendError as err:
             if err.kind == "invalid":
                 logger.warning("claim_invalid_payload", error=str(err))
@@ -238,6 +257,11 @@ def create_app(
             logger.error("claim_failed", error=str(err))
             raise HTTPException(status_code=500, detail="claim_failed") from err
         except ValueError as err:
+            if str(err) == "payload_too_large":
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="payload_too_large",
+                ) from err
             logger.warning("claim_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
         except (Web3Exception, RuntimeError, OverflowError) as err:
@@ -263,13 +287,13 @@ def create_app(
                 )
             result = await svc.lock_batches(payload)
             if hasattr(svc, "push_settlement_ingest"):
-                try:
-                    tx_hash = result.get("txHash")
-                    tx_hash_str = str(tx_hash) if tx_hash is not None else None
-                    await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
-                except Exception as err:  # pragma: no cover - best-effort ingest
-                    logger.warning("lock_batches_ingest_failed", error=str(err), market=payload.get("market"))
+                tx_hash = result.get("txHash")
+                tx_hash_str = str(tx_hash) if tx_hash is not None else None
+                await svc.push_settlement_ingest(payload, tx_hash=tx_hash_str)
             return result
+        except IngestDeliveryError as err:
+            logger.error("lock_batches_ingest_failed", error=str(err))
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="lock_batches_ingest_failed") from err
         except TxSendError as err:
             if err.kind == "invalid":
                 logger.warning("lock_batches_invalid_payload", error=str(err))
@@ -277,6 +301,11 @@ def create_app(
             logger.error("lock_batches_failed", error=str(err))
             raise HTTPException(status_code=500, detail="lock_batches_failed") from err
         except ValueError as err:
+            if str(err) == "payload_too_large":
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="payload_too_large",
+                ) from err
             logger.warning("lock_batches_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
         except (Web3Exception, RuntimeError, OverflowError) as err:

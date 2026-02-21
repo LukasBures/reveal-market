@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from time import time
 from typing import Any, cast
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -42,6 +43,26 @@ def _compute_cors_host_warnings(
     if env_url and resolved_public and env_url != resolved_public:
         warnings.append({"reason": "env_mismatch", "expected": resolved_public, "env": env_url})
     return warnings
+
+
+def _redact_url_value(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
+    return "<redacted>"
+
+
+def _sanitize_config_value(key: str, value: Any) -> Any:
+    lowered = key.lower()
+    if isinstance(value, str):
+        if "url" in lowered:
+            return _redact_url_value(value)
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.netloc:
+            return _redact_url_value(value)
+    if isinstance(value, list):
+        return [_sanitize_config_value(key, item) for item in value]
+    return value
 
 
 async def _sse_events(
@@ -138,7 +159,7 @@ def create_app() -> FastAPI:
     subgraph_client = SubgraphClient(settings)
     heartbeat_stop = start_heartbeat(logger, "streamer", interval_seconds=60)
     sanitized_config = {
-        k: v
+        k: _sanitize_config_value(k, v)
         for k, v in settings.model_dump(warnings=False).items()
         if not any(secret in k for secret in ["key", "private", "secret", "password", "token"])
     }
@@ -230,13 +251,6 @@ def create_app() -> FastAPI:
             else:
                 client_connections[client_key] = next_val
 
-    def _deferred_release(client_id: str, access_token: str | None, delay_seconds: float) -> None:
-        async def _release_later() -> None:
-            await asyncio.sleep(delay_seconds)
-            _release_connection(client_id, access_token)
-
-        asyncio.create_task(_release_later())
-
     def _is_valid_access_token(token: str | None) -> bool:
         return not settings.access_token or token == settings.access_token
 
@@ -276,6 +290,39 @@ def create_app() -> FastAPI:
                 headers={"Retry-After": "60"},
             )
         bucket.append(now)
+
+    subgraph_query_semaphore = asyncio.Semaphore(max(1, int(settings.subgraph_max_concurrent_queries)))
+
+    def _validate_heartbeat(heartbeat: int) -> int:
+        if heartbeat < 1 or heartbeat > settings.max_client_heartbeat_seconds:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"heartbeat must be between 1 and {settings.max_client_heartbeat_seconds}",
+            )
+        return heartbeat
+
+    def _parse_symbols(symbols: str | None) -> list[str]:
+        if not symbols:
+            return []
+        raw_symbols = [sym.strip() for sym in symbols.split(",") if sym.strip()]
+        if len(raw_symbols) > settings.max_symbols_per_request:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
+            )
+        parsed = state.sanitize_rtds_symbols(raw_symbols, max_items=settings.max_symbols_per_request)
+        invalid = [symbol for symbol in raw_symbols if state._normalize_rtds_symbol(symbol) is None]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"invalid symbols: {', '.join(invalid)}",
+            )
+        return parsed
+
+    def _clamp_subgraph_window(first: int, skip: int, *, max_first: int) -> tuple[int, int]:
+        bounded_first = min(max(int(first), 1), max_first)
+        bounded_skip = min(max(int(skip), 0), settings.subgraph_ws_max_skip)
+        return bounded_first, bounded_skip
 
     app_instance.add_middleware(
         cast(Any, CORSMiddleware),
@@ -416,6 +463,17 @@ def create_app() -> FastAPI:
         return await _fx_payload()
 
     async def _fx_ws_stream(ws: WebSocket):
+        access_token = ws.headers.get("x-access-token")
+        if not _is_valid_access_token(access_token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        client_id = ws.client.host if ws.client else "unknown"
+        try:
+            _rate_limit(client_id)
+            _acquire_connection(client_id, access_token)
+        except HTTPException:
+            await ws.close(code=status.WS_1013_TRY_AGAIN_LATER)
+            return
         await ws.accept()
         last_sent: datetime | None = None
         timeout = max(settings.fx_ws_read_timeout_seconds, 1.0)
@@ -444,6 +502,7 @@ def create_app() -> FastAPI:
         except Exception as exc:  # pragma: no cover - runtime guard
             logger.warning("FX websocket error", extra={"event": "fx.ws.stream.error", "error": str(exc)})
         finally:
+            _release_connection(client_id, access_token)
             with suppress(Exception):
                 await ws.close()
 
@@ -470,6 +529,7 @@ def create_app() -> FastAPI:
     @app_instance.get("/subgraph/markets")
     @app_instance.get("/data/subgraph/markets")
     async def subgraph_markets(
+        request: Request,
         first: int = Query(20, ge=1, le=200),
         skip: int = Query(0, ge=0),
         ids: str | None = Query(default=None, description="Comma-separated market ids to filter"),
@@ -477,6 +537,7 @@ def create_app() -> FastAPI:
         id_list = [item.strip() for item in ids.split(",") if item.strip()] if ids else None
         markets = await _subgraph_query(
             subgraph_client.fetch_markets,
+            request=request,
             first=first,
             skip=skip,
             ids=id_list,
@@ -486,6 +547,7 @@ def create_app() -> FastAPI:
     @app_instance.get("/subgraph/trades")
     @app_instance.get("/data/subgraph/trades")
     async def subgraph_trades(
+        request: Request,
         asset_ids: str = Query(..., description="Comma-separated asset ids to filter (maker/taker asset ids)"),
         first: int = Query(50, ge=1, le=200),
         skip: int = Query(0, ge=0),
@@ -496,6 +558,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_ids required")
         trades = await _subgraph_query(
             subgraph_client.fetch_trades,
+            request=request,
             asset_ids=assets,
             first=first,
             skip=skip,
@@ -506,6 +569,7 @@ def create_app() -> FastAPI:
     @app_instance.get("/subgraph/positions")
     @app_instance.get("/data/subgraph/positions")
     async def subgraph_positions(
+        request: Request,
         user: str = Query(..., description="User address to query positions for"),
         asset_ids: str | None = Query(default=None, description="Optional comma-separated asset id filter"),
         first: int = Query(50, ge=1, le=200),
@@ -514,6 +578,7 @@ def create_app() -> FastAPI:
         assets = [item.strip() for item in asset_ids.split(",") if item.strip()] if asset_ids else None
         positions = await _subgraph_query(
             subgraph_client.fetch_positions,
+            request=request,
             user=user,
             asset_ids=assets,
             first=first,
@@ -524,25 +589,34 @@ def create_app() -> FastAPI:
     @app_instance.get("/subgraph/open-interest")
     @app_instance.get("/data/subgraph/open-interest")
     async def subgraph_open_interest(
+        request: Request,
         market_id: str = Query(..., description="Market id to query open interest for"),
         first: int = Query(100, ge=1, le=300),
         skip: int = Query(0, ge=0),
     ):
-        oi = await _subgraph_query(subgraph_client.fetch_open_interest, market_id=market_id, first=first, skip=skip)
+        oi = await _subgraph_query(
+            subgraph_client.fetch_open_interest,
+            request=request,
+            market_id=market_id,
+            first=first,
+            skip=skip,
+        )
         return {"market_id": market_id, "count": len(oi), "data": oi}
 
     @app_instance.get("/subgraph/open-interest/global")
     @app_instance.get("/data/subgraph/open-interest/global")
     async def subgraph_global_open_interest(
+        request: Request,
         first: int = Query(10, ge=1, le=200),
         skip: int = Query(0, ge=0),
     ):
-        oi = await _subgraph_query(subgraph_client.fetch_global_open_interest, first=first, skip=skip)
+        oi = await _subgraph_query(subgraph_client.fetch_global_open_interest, request=request, first=first, skip=skip)
         return {"count": len(oi), "data": oi}
 
     @app_instance.get("/subgraph/pnl")
     @app_instance.get("/data/subgraph/pnl")
     async def subgraph_pnl(
+        request: Request,
         user: str = Query(..., description="User address to query PnL for"),
         token_ids: str | None = Query(default=None, description="Optional comma-separated token ids"),
         first: int = Query(50, ge=1, le=200),
@@ -551,6 +625,7 @@ def create_app() -> FastAPI:
         tokens = [item.strip() for item in token_ids.split(",") if item.strip()] if token_ids else None
         pnl = await _subgraph_query(
             subgraph_client.fetch_pnl,
+            request=request,
             user=user,
             token_ids=tokens,
             first=first,
@@ -561,19 +636,26 @@ def create_app() -> FastAPI:
     @app_instance.get("/subgraph/activity")
     @app_instance.get("/data/subgraph/activity")
     async def subgraph_activity(
+        request: Request,
         user: str | None = Query(default=None, description="Optional user filter"),
         condition: str | None = Query(default=None, description="Optional condition filter"),
         first: int = Query(50, ge=1, le=200),
         skip: int = Query(0, ge=0),
     ):
         activity = await _subgraph_query(
-            subgraph_client.fetch_activity, user=user, condition=condition, first=first, skip=skip
+            subgraph_client.fetch_activity,
+            request=request,
+            user=user,
+            condition=condition,
+            first=first,
+            skip=skip,
         )
         return {"count": sum(len(v) for v in activity.values()), "data": activity}
 
     @app_instance.get("/subgraph/market-data")
     @app_instance.get("/data/subgraph/market-data")
     async def subgraph_market_data(
+        request: Request,
         condition: str | None = Query(default=None, description="Optional condition filter"),
         outcome_index: int | None = Query(default=None, description="Optional outcome index filter"),
         first: int = Query(50, ge=1, le=200),
@@ -581,6 +663,7 @@ def create_app() -> FastAPI:
     ):
         data = await _subgraph_query(
             subgraph_client.fetch_market_data,
+            request=request,
             condition=condition,
             outcome_index=outcome_index,
             first=first,
@@ -591,6 +674,7 @@ def create_app() -> FastAPI:
     @app_instance.websocket("/subgraph/ws/markets")
     @app_instance.websocket("/data/subgraph/ws/markets")
     async def ws_subgraph_markets(websocket: WebSocket, first: int = 20, skip: int = 0, ids: str | None = None):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         id_list = [item.strip() for item in ids.split(",") if item.strip()] if ids else None
         await _subgraph_ws_send(
             websocket,
@@ -609,8 +693,7 @@ def create_app() -> FastAPI:
         skip: int = 0,
         user: str | None = None,
     ):
-        if not await _require_ws_access_token(websocket):
-            return
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         assets = [item.strip() for item in asset_ids.split(",") if item.strip()]
         if not assets:
             await websocket.accept()
@@ -635,6 +718,7 @@ def create_app() -> FastAPI:
         first: int = 50,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         assets = [item.strip() for item in asset_ids.split(",") if item.strip()] if asset_ids else None
         await _subgraph_ws_send(
             websocket,
@@ -653,6 +737,7 @@ def create_app() -> FastAPI:
         first: int = 100,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=300)
         await _subgraph_ws_send(
             websocket,
             subgraph_client.fetch_open_interest,
@@ -668,6 +753,7 @@ def create_app() -> FastAPI:
         first: int = 10,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         await _subgraph_ws_send(
             websocket,
             subgraph_client.fetch_global_open_interest,
@@ -684,6 +770,7 @@ def create_app() -> FastAPI:
         first: int = 50,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         tokens = [item.strip() for item in token_ids.split(",") if item.strip()] if token_ids else None
         await _subgraph_ws_send(
             websocket,
@@ -703,6 +790,7 @@ def create_app() -> FastAPI:
         first: int = 50,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         await _subgraph_ws_send(
             websocket,
             subgraph_client.fetch_activity,
@@ -721,6 +809,7 @@ def create_app() -> FastAPI:
         first: int = 50,
         skip: int = 0,
     ):
+        first, skip = _clamp_subgraph_window(first, skip, max_first=200)
         await _subgraph_ws_send(
             websocket,
             subgraph_client.fetch_market_data,
@@ -731,16 +820,33 @@ def create_app() -> FastAPI:
         )
 
     def _require_control_token(control_header: str | None) -> None:
-        if settings.control_token and control_header != settings.control_token:
+        if not settings.control_token:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="control token not configured",
+            )
+        if control_header != settings.control_token:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid control token")
 
     def _require_cache() -> None:
         if not state.redis:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="cache unavailable")
 
-    async def _subgraph_query(fn, **kwargs):
+    async def _subgraph_query(
+        fn,
+        *,
+        request: Request | None = None,
+        client_id: str | None = None,
+        **kwargs,
+    ):
+        identifier = client_id
+        if identifier is None and request is not None and request.client:
+            identifier = request.client.host
+        if identifier:
+            _rate_limit(f"subgraph:{identifier}")
         try:
-            return await fn(**kwargs)
+            async with subgraph_query_semaphore:
+                return await fn(**kwargs)
         except SubgraphNotConfiguredError as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         except httpx.HTTPStatusError as exc:
@@ -749,7 +855,6 @@ def create_app() -> FastAPI:
                 detail={
                     "error": "subgraph_http_error",
                     "status_code": exc.response.status_code,
-                    "url": str(exc.request.url) if exc.request else None,
                 },
             ) from exc
         except SubgraphError as exc:
@@ -764,11 +869,21 @@ def create_app() -> FastAPI:
             ) from exc
 
     async def _subgraph_ws_send(ws: WebSocket, fn, **kwargs):
+        client_id = ws.client.host if ws.client else "unknown"
+        access_token = ws.headers.get("x-access-token")
+        connection_acquired = False
         if not await _require_ws_access_token(ws):
             return
+        try:
+            _acquire_connection(client_id, access_token)
+            connection_acquired = True
+        except HTTPException:
+            await ws.close(code=status.WS_1013_TRY_AGAIN_LATER)
+            return
+
         await ws.accept()
         try:
-            data = await fn(**kwargs)
+            data = await _subgraph_query(fn, client_id=client_id, **kwargs)
             await ws.send_json({"data": data})
         except SubgraphNotConfiguredError as exc:
             await ws.send_json({"error": "subgraph_not_configured", "message": str(exc)})
@@ -777,15 +892,18 @@ def create_app() -> FastAPI:
                 {
                     "error": "subgraph_http_error",
                     "status_code": exc.response.status_code,
-                    "url": str(exc.request.url) if exc.request else None,
                 }
             )
         except SubgraphError as exc:
             await ws.send_json({"error": "subgraph_error", "message": str(exc)})
+        except HTTPException as exc:
+            await ws.send_json({"error": "subgraph_rate_limited", "status_code": exc.status_code})
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("subgraph ws failed", extra={"event": "subgraph.ws.error", "error": str(exc)})
             await ws.send_json({"error": "subgraph_query_failed"})
         finally:
+            if connection_acquired:
+                _release_connection(client_id, access_token)
             with suppress(Exception):
                 await ws.close()
 
@@ -802,6 +920,7 @@ def create_app() -> FastAPI:
         symbols: str | None = Query(default=None, description="Comma-separated crypto symbols to subscribe (RTDS)"),
         access_token: str | None = Header(default=None, alias="x-access-token"),
     ):
+        heartbeat = _validate_heartbeat(heartbeat)
         _require_access_token(access_token)
         if not state.redis:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="cache unavailable")
@@ -831,29 +950,41 @@ def create_app() -> FastAPI:
                 )
                 with suppress(Exception):
                     metrics.assets_fallback.labels(transport="sse", target=fallback_target).inc()
-        symbols_list = [sym.strip() for sym in symbols.split(",") if sym.strip()] if symbols else []
+        symbols_list = _parse_symbols(symbols)
         assets_for_release = list(assets)
         connection_acquired = False
         assets_acquired = False
+        symbols_acquired = False
         pubsub = None
+
+        def _cleanup() -> None:
+            nonlocal connection_acquired, assets_acquired, symbols_acquired
+            if symbols_acquired:
+                state.release_rtds_symbols(symbols_list)
+                symbols_acquired = False
+            if assets_acquired:
+                state.release_assets(assets_for_release)
+                assets_acquired = False
+            if connection_acquired:
+                _release_connection(client_id, access_token)
+                connection_acquired = False
+
         try:
             _acquire_connection(client_id, access_token)
             connection_acquired = True
             if assets:
                 state.acquire_assets(assets)
                 assets_acquired = True
+            if symbols_list:
+                state.acquire_rtds_symbols(symbols_list)
+                symbols_acquired = True
             pubsub = await state.subscribe(market_id)
         except Exception:
-            if assets_acquired:
-                state.release_assets(assets_for_release)
             if pubsub:
                 with suppress(Exception):
                     await pubsub.close()
-            if connection_acquired:
-                _release_connection(client_id, access_token)
+            _cleanup()
             raise
-        if symbols_list:
-            state.add_rtds_symbols(symbols_list)
         logger.info(
             "stream connection accepted",
             extra={
@@ -876,10 +1007,7 @@ def create_app() -> FastAPI:
                 heartbeat_seconds=heartbeat,
                 max_events=effective_max_events,
                 metrics=metrics,
-                on_close=lambda: (
-                    state.release_assets(assets_for_release),
-                    _deferred_release(client_id, access_token, heartbeat),
-                ),
+                on_close=_cleanup,
                 bootstrap_payloads=bootstrap_payloads,
             ),
             media_type="text/event-stream",
@@ -893,6 +1021,9 @@ def create_app() -> FastAPI:
         assets_ids: str | None = None,
         symbols: str | None = None,
     ):
+        if heartbeat < 1 or heartbeat > settings.max_client_heartbeat_seconds:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         access_token = websocket.headers.get("x-access-token")
         if not _is_valid_access_token(access_token):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -925,10 +1056,15 @@ def create_app() -> FastAPI:
                 )
                 with suppress(Exception):
                     metrics.assets_fallback.labels(transport="ws", target=fallback_target).inc()
-        symbols_list = [sym.strip() for sym in symbols.split(",") if sym.strip()] if symbols else []
+        try:
+            symbols_list = _parse_symbols(symbols)
+        except HTTPException:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         assets_for_release = list(assets)
         connection_acquired = False
         assets_acquired = False
+        symbols_acquired = False
         pubsub = None
         try:
             _acquire_connection(client_id, access_token)
@@ -936,19 +1072,22 @@ def create_app() -> FastAPI:
             if assets:
                 state.acquire_assets(assets)
                 assets_acquired = True
+            if symbols_list:
+                state.acquire_rtds_symbols(symbols_list)
+                symbols_acquired = True
             pubsub = await state.subscribe(market_id)
             await websocket.accept()
         except Exception:
-            if assets_acquired:
-                state.release_assets(assets_for_release)
             if pubsub:
                 with suppress(Exception):
                     await pubsub.close()
+            if symbols_acquired:
+                state.release_rtds_symbols(symbols_list)
             if connection_acquired:
                 _release_connection(client_id, access_token)
+            if assets_acquired:
+                state.release_assets(assets_for_release)
             raise
-        if symbols_list:
-            state.add_rtds_symbols(symbols_list)
         logger.info(
             "ws stream connection accepted",
             extra={
@@ -992,6 +1131,8 @@ def create_app() -> FastAPI:
                 await pubsub.close()
             with suppress(Exception):
                 await websocket.close()
+            with suppress(Exception):
+                state.release_rtds_symbols(symbols_list)
             with suppress(Exception):
                 state.release_assets(assets_for_release)
             _release_connection(client_id, access_token)
@@ -1093,6 +1234,17 @@ def create_app() -> FastAPI:
         _require_control_token(control_token)
         # rate limit by control caller if available
         _rate_limit("control")
+        if len(symbols) > settings.max_symbols_per_request:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
+            )
+        invalid_symbols = [symbol for symbol in symbols if state._normalize_rtds_symbol(symbol) is None]
+        if invalid_symbols:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"invalid symbols: {', '.join(invalid_symbols)}",
+            )
         added_assets = state.acquire_assets(assets_ids or [])
         added_symbols = state.add_rtds_symbols(symbols or [])
         logger.info(
@@ -1119,6 +1271,17 @@ def create_app() -> FastAPI:
     ):
         _require_control_token(control_token)
         _rate_limit("control")
+        if len(symbols) > settings.max_symbols_per_request:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
+            )
+        invalid_symbols = [symbol for symbol in symbols if state._normalize_rtds_symbol(symbol) is None]
+        if invalid_symbols:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"invalid symbols: {', '.join(invalid_symbols)}",
+            )
         if assets_ids:
             state.force_remove_assets(assets_ids)
         removed_symbols = state.remove_rtds_symbols(symbols or [])

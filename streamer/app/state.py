@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -107,6 +108,8 @@ class StreamState:
         self.market_tokens: dict[str, list[str]] = {}
         self.metrics = metrics
         self._asset_refcounts: dict[str, int] = {}
+        self._symbol_refcounts: dict[str, int] = {}
+        self._pinned_symbols: set[str] = set()
         self._acquired_history: set[str] = set()
         self._history_last_ts: dict[str, datetime] = {}
         self.active_connections: int = 0
@@ -362,36 +365,106 @@ class StreamState:
                 self._asset_refcounts[tok] = self._asset_refcounts.get(tok, 0) + count
                 self.subscriptions.add_assets([tok])
 
+    @staticmethod
+    def _normalize_rtds_symbol(symbol: str) -> str | None:
+        trimmed = str(symbol).strip()
+        if not trimmed:
+            return None
+        if len(trimmed) > 64:
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9:_-]+", trimmed):
+            return None
+        return trimmed
+
+    def sanitize_rtds_symbols(self, symbols: Iterable[str], *, max_items: int) -> list[str]:
+        parsed: list[str] = []
+        seen: set[str] = set()
+        capped = max(int(max_items), 0)
+        for symbol in symbols:
+            normalized = self._normalize_rtds_symbol(str(symbol))
+            if normalized is None or normalized in seen:
+                continue
+            seen.add(normalized)
+            parsed.append(normalized)
+            if capped and len(parsed) >= capped:
+                break
+        return parsed
+
     def add_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
         added: list[str] = []
-        for sym in symbols:
-            trimmed = str(sym).strip()
-            if not trimmed or trimmed in self.rtds_symbols:
+        for sym in self.sanitize_rtds_symbols(symbols, max_items=self.settings.max_subscriptions):
+            if sym in self._pinned_symbols:
                 continue
-            if len(self.rtds_symbols) >= self.settings.max_subscriptions:
+            if sym not in self.rtds_symbols and len(self.rtds_symbols) >= self.settings.max_subscriptions:
                 logger.warning(
                     "RTDS symbol cap reached; ignoring symbol",
                     extra={
                         "event": "stream.symbols.cap",
-                        "symbol": trimmed,
+                        "symbol": sym,
                         "count": len(self.rtds_symbols),
                         "max": self.settings.max_subscriptions,
                     },
                 )
                 continue
-            self.rtds_symbols.add(trimmed)
-            added.append(trimmed)
+            self._pinned_symbols.add(sym)
+            if sym not in self.rtds_symbols:
+                self.rtds_symbols.add(sym)
+                added.append(sym)
         if added:
             self.rtds_symbols_version += 1
         return added
 
     def remove_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
         removed: list[str] = []
-        for sym in symbols:
-            trimmed = str(sym).strip()
-            if trimmed and trimmed in self.rtds_symbols:
-                self.rtds_symbols.remove(trimmed)
-                removed.append(trimmed)
+        for sym in self.sanitize_rtds_symbols(symbols, max_items=self.settings.max_subscriptions):
+            self._pinned_symbols.discard(sym)
+            if self._symbol_refcounts.get(sym, 0) <= 0 and sym in self.rtds_symbols:
+                self.rtds_symbols.remove(sym)
+                removed.append(sym)
+        if removed:
+            self.rtds_symbols_version += 1
+        return removed
+
+    def acquire_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
+        added: list[str] = []
+        for sym in self.sanitize_rtds_symbols(symbols, max_items=self.settings.max_subscriptions):
+            existing_count = self._symbol_refcounts.get(sym, 0)
+            if (
+                existing_count == 0
+                and sym not in self.rtds_symbols
+                and len(self.rtds_symbols) >= self.settings.max_subscriptions
+            ):
+                logger.warning(
+                    "RTDS symbol cap reached; ignoring symbol",
+                    extra={
+                        "event": "stream.symbols.cap",
+                        "symbol": sym,
+                        "count": len(self.rtds_symbols),
+                        "max": self.settings.max_subscriptions,
+                    },
+                )
+                continue
+            self._symbol_refcounts[sym] = existing_count + 1
+            if existing_count == 0 and sym not in self.rtds_symbols:
+                self.rtds_symbols.add(sym)
+                added.append(sym)
+        if added:
+            self.rtds_symbols_version += 1
+        return added
+
+    def release_rtds_symbols(self, symbols: Iterable[str]) -> list[str]:
+        removed: list[str] = []
+        for sym in self.sanitize_rtds_symbols(symbols, max_items=self.settings.max_subscriptions):
+            count = self._symbol_refcounts.get(sym, 0)
+            if count <= 0:
+                continue
+            if count == 1:
+                self._symbol_refcounts.pop(sym, None)
+                if sym not in self._pinned_symbols and sym in self.rtds_symbols:
+                    self.rtds_symbols.remove(sym)
+                    removed.append(sym)
+            else:
+                self._symbol_refcounts[sym] = count - 1
         if removed:
             self.rtds_symbols_version += 1
         return removed

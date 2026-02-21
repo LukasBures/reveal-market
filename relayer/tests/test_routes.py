@@ -7,6 +7,7 @@ from relayer.app import create_app
 from relayer.queue import TxQueue
 from relayer.schemas import ClaimRequest, CommitRequest, LockBatchesRequest
 from relayer.security import RateLimiter
+from relayer.service import IngestDeliveryError
 
 
 class FakeService:
@@ -74,6 +75,14 @@ class IngestService(FakeService):
 
     async def push_settlement_ingest(self, payload, *, tx_hash=None):
         self.settlement_ingests.append({"payload": payload, "tx_hash": tx_hash})
+
+
+class FailingIngestService(IngestService):
+    async def push_commit_ingest(self, payload, *, tx_hash=None):
+        raise IngestDeliveryError("commit_ingest_http_500")
+
+    async def push_settlement_ingest(self, payload, *, tx_hash=None):
+        raise IngestDeliveryError("settlement_ingest_http_500")
 
 
 @pytest.fixture
@@ -342,6 +351,46 @@ def test_lock_batches_route_triggers_ingest():
     assert service.settlement_ingests[0]["tx_hash"] == "0xlock"
 
 
+def test_commit_route_returns_502_when_ingest_fails():
+    service = FailingIngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "commit_ingest_failed"
+
+
+def test_claim_route_returns_502_when_ingest_fails():
+    service = FailingIngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = ClaimRequest(
+        market="0x0000000000000000000000000000000000000002",
+        user="0x0000000000000000000000000000000000000001",
+        ticket_id=0,
+        outcome_id=1,
+        amount=10,
+        payout=15,
+        salt="0x" + "1" * 64,
+        merkle_proof=[],
+    ).model_dump()
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "claim_ingest_failed"
+
+
 def test_lock_batches_requires_market_identifier(client):
     payload = {
         "market": "0x0000000000000000000000000000000000000002",
@@ -468,6 +517,65 @@ def test_claim_invalid_address(client):
     ).model_dump()
     resp = client.post("/claim", json=payload)
     assert resp.status_code == 400
+
+
+def test_claim_rejects_oversized_merkle_proof(client):
+    payload = {
+        "market": "0x0000000000000000000000000000000000000002",
+        "user": "0x0000000000000000000000000000000000000001",
+        "ticket_id": 0,
+        "outcome_id": 1,
+        "amount": 10,
+        "payout": 15,
+        "salt": "0x" + "1" * 64,
+        "merkle_proof": ["0x" + "2" * 64 for _ in range(65)],
+    }
+    resp = client.post("/claim", json=payload)
+    assert resp.status_code == 422
+
+
+def test_lock_batches_rejects_oversized_ticket_array(client):
+    tickets = [
+        {
+            "ticket_id": idx,
+            "outcome_id": 0,
+            "amount": 10,
+            "payout": 15,
+            "user": "0x0000000000000000000000000000000000000001",
+            "salt": "0x" + "1" * 64,
+        }
+        for idx in range(257)
+    ]
+    payload = {
+        "market": "0x0000000000000000000000000000000000000002",
+        "event_id": "evt-lock",
+        "tickets": tickets,
+    }
+    resp = client.post("/lock-batches", json=payload)
+    assert resp.status_code == 422
+
+
+def test_queue_rejects_oversized_payload(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, max_payload_bytes=128, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
+        signature="0x" + "1" * 130,
+        event_id="evt-" + ("x" * 256),
+    ).model_dump()
+
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == "payload_too_large"
 
 
 def test_metrics_use_route_template_for_params(tmp_path):
