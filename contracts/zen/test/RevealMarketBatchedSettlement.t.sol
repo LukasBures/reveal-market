@@ -23,7 +23,8 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayer = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayer = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -46,6 +47,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayer);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
 
@@ -61,6 +63,10 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 2_000 ether);
+        token.approve(address(protocolPool), 2_000 ether);
+        protocolPool.deposit(2_000 ether);
     }
 
     function testVerifyAndSettleBatchedSumsTotals() external {
@@ -86,12 +92,15 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
             }
             IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
                 commitment: leaf,
+                ticketId: i,
                 user: user,
                 nonce: i + 1,
                 expiry: block.timestamp + 12 hours,
                 ticketValue: ticketSize
             });
             bytes memory sig = _signAuth(auth, authKey);
+            vm.prank(user);
+            relayerEscrow.approveCommitAuthorization(address(market), auth);
             vm.prank(relayer);
             relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
         }
@@ -105,16 +114,17 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         uint16[] memory counts = new uint16[](2);
         counts[0] = _toUint16(BATCH_SIZE);
         counts[1] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
 
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
         uint256 poolYes0 = netTicket * BATCH_SIZE;
         uint256 poolNo0 = 0;
         uint256 poolYes1 = 0;
-        uint256 poolNo1 = netTicket;
+        uint256 poolNo1 = 0;
 
         bytes[] memory proofs = new bytes[](2);
         proofs[0] = "";
@@ -125,8 +135,8 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
             uint256(root1),
             market.marketId(),
             uint256(0),
-            poolYes1 + poolNo1,
-            poolYes1,
+            netTicket,
+            uint256(0),
             rakeBps,
             poolYes1,
             poolNo1,
@@ -156,7 +166,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         assertEq(market.totalEscrow(), netTicket * totalTickets, "totalEscrow matches");
         assertEq(market.totalLiability(), poolYes0, "totalLiability matches winning pool");
         assertEq(market.poolTotalYes(), poolYes0, "poolYes matches");
-        assertEq(market.poolTotalNo(), poolNo1, "poolNo matches");
+        assertEq(market.poolTotalNo(), 0, "poolNo matches");
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {
@@ -165,6 +175,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -175,6 +186,14 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
         return abi.encodePacked(r, s, v);
     }
 

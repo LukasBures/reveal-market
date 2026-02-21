@@ -4,26 +4,33 @@ pragma solidity ^0.8.33;
 import {Test} from "forge-std/Test.sol";
 
 import {Verifier} from "../src/Verifier.sol";
+import {Deploy} from "../script/Deploy.s.sol";
+import {SettlementVkJson} from "./generated/SettlementVkJson.sol";
 
 contract OwnershipFlowsVerifierTest is Test {
     address private owner = makeAddr("owner");
     address private newOwner = makeAddr("newOwner");
+    DeployHarnessOwnership private loader;
+
+    function setUp() external {
+        loader = new DeployHarnessOwnership();
+    }
 
     function testVerifierOwnable2Step() external {
-        uint256[2] memory alpha1 = [uint256(1), uint256(2)];
-        uint256[2][2] memory beta2 = [[uint256(1), uint256(2)], [uint256(3), uint256(4)]];
-        uint256[2][2] memory gamma2 = [[uint256(5), uint256(6)], [uint256(7), uint256(8)]];
-        uint256[2][2] memory delta2 = [[uint256(9), uint256(10)], [uint256(11), uint256(12)]];
-        uint256[2][] memory icPoints = new uint256[2][](11);
-        for (uint256 i = 0; i < icPoints.length; ++i) {
-            icPoints[i] = [uint256(100 + i * 2), uint256(101 + i * 2)];
-        }
+        Deploy.VerifyingKeyConfig memory cfg = loader.loadVkJson(string(SettlementVkJson.SETTLEMENT_VK_JSON));
         vm.prank(owner);
-        Verifier verifier = new Verifier(alpha1, beta2, gamma2, delta2, icPoints, keccak256("vk"), 10);
+        Verifier verifier =
+            new Verifier(cfg.alpha1, cfg.beta2, cfg.gamma2, cfg.delta2, cfg.ic, keccak256("vk"), cfg.expectedInputs);
         vm.prank(owner);
         verifier.transferOwnership(newOwner);
         vm.prank(newOwner);
         verifier.acceptOwnership();
         assertEq(verifier.owner(), newOwner);
+    }
+}
+
+contract DeployHarnessOwnership is Deploy {
+    function loadVkJson(string memory json) external pure returns (VerifyingKeyConfig memory) {
+        return _loadVerifyingKeyJson(json);
     }
 }

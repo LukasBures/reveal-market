@@ -37,6 +37,7 @@ contract RelayerEscrowTest is Test {
     function testCommitFailsForUnknownMarket() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: bytes32(uint256(1)),
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 1,
@@ -55,7 +56,7 @@ contract RelayerEscrowTest is Test {
     }
 
     function testCommitUserMismatchReverts() external {
-        DummyMarket market = new DummyMarket();
+        DummyMarket market = new DummyMarket(address(this), address(escrow), address(token));
         vm.prank(owner);
         escrow.setMarketFactory(address(this));
         escrow.registerMarket(address(market));
@@ -69,6 +70,7 @@ contract RelayerEscrowTest is Test {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: bytes32(uint256(1)),
+            ticketId: 0,
             user: other,
             nonce: 1,
             expiry: block.timestamp + 1,
@@ -83,6 +85,15 @@ contract RelayerEscrowTest is Test {
 
 contract DummyMarket is IRevealMarket {
     uint256 public ticket = 1 ether;
+    address public override factory;
+    address public override relayerEscrow;
+    address public override collateralToken;
+
+    constructor(address factory_, address relayerEscrow_, address collateralToken_) {
+        factory = factory_;
+        relayerEscrow = relayerEscrow_;
+        collateralToken = collateralToken_;
+    }
 
     function commitWithAuthorization(CommitAuth calldata, bytes calldata) external payable {}
 
@@ -117,6 +128,8 @@ contract DummyMarket is IRevealMarket {
     function extendClaimDeadline(uint256) external pure {}
 
     function sweepUnclaimed(address) external pure {}
+
+    function refundTicket(uint256) external pure {}
 
     function marketState()
         external

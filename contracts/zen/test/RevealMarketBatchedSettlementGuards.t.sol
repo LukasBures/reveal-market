@@ -23,7 +23,8 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayer = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayer = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -43,6 +44,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayer);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
 
@@ -58,20 +60,26 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 2_000 ether);
+        token.approve(address(protocolPool), 2_000 ether);
+        protocolPool.deposit(2_000 ether);
     }
 
     function testVerifyAndSettleBatchedRejectsDuplicateBatchIndex() external {
         _commitTickets(2);
         vm.warp(commitDeadline + 1);
 
-        bytes32[] memory roots = new bytes32[](2);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
-        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), _salt("b"), user)), 1);
-        uint16[] memory counts = new uint16[](2);
-        counts[0] = 1;
-        counts[1] = 1;
+        bytes32[] memory leaves = new bytes32[](2);
+        leaves[0] = _poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32(uint256(1)), user);
+        leaves[1] = _poseidonLeaf(1, 0, _netTicket(), _netTicket(), bytes32(uint256(2)), user);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(leaves, 2);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 2;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -79,39 +87,35 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         proofs[0] = "";
         proofs[1] = "";
         uint256[10][] memory signals = new uint256[10][](2);
-        signals[0] = _signals(roots[0], 0, _netTicket(), _netTicket());
-        signals[1] = _signals(roots[1], 0, _netTicket(), _netTicket());
+        signals[0] = _signals(roots[0], 0, _netTicket() * 2, _netTicket() * 2);
+        signals[1] = _signals(roots[0], 0, _netTicket() * 2, _netTicket() * 2);
         uint16[] memory batchIndexes = new uint16[](2);
         batchIndexes[0] = 0;
         batchIndexes[1] = 0;
 
-        vm.expectRevert(RevealMarket.InvalidBatchIndex.selector);
+        vm.expectRevert(RevealMarket.BatchAlreadyVerified.selector);
         vm.prank(oracle);
         market.verifyAndSettleBatched(proofs, signals, batchIndexes);
     }
 
     function testVerifyAndSettleBatchedRejectsMissingBatchProof() external {
-        _commitTickets(2);
+        _commitTickets(1);
         vm.warp(commitDeadline + 1);
 
-        bytes32[] memory roots = new bytes32[](2);
-        roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
-        roots[1] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(1, 0, _netTicket(), _netTicket(), _salt("b"), user)), 1);
-        uint16[] memory counts = new uint16[](2);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] =
+            _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), bytes32(uint256(1)), user)), 1);
+        uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
-        counts[1] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
-        bytes[] memory proofs = new bytes[](1);
-        proofs[0] = "";
-        uint256[10][] memory signals = new uint256[10][](1);
-        signals[0] = _signals(roots[0], 0, _netTicket(), _netTicket());
-        uint16[] memory batchIndexes = new uint16[](1);
-        batchIndexes[0] = 0;
-
+        bytes[] memory proofs = new bytes[](0);
+        uint256[10][] memory signals = new uint256[10][](0);
+        uint16[] memory batchIndexes = new uint16[](0);
         vm.expectRevert(RevealMarket.BatchProofLengthMismatch.selector);
         vm.prank(oracle);
         market.verifyAndSettleBatched(proofs, signals, batchIndexes);
@@ -125,8 +129,9 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -151,8 +156,9 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -176,8 +182,9 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -202,8 +209,9 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(_poseidonLeaf(0, 0, _netTicket(), _netTicket(), _salt("a"), user)), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -221,6 +229,125 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         market.verifyAndSettleBatched(proofs, signals, batchIndexes);
     }
 
+    function testRefreshAfterPartialBatchedSettlementCannotResetProgress() external {
+        (bytes32[] memory roots, uint16[] memory counts, uint256 netTicket, uint256 batchSize) =
+            _lockTwoBatchesAndPostResult();
+
+        _verifySingleBatch(roots[0], 0, netTicket * batchSize, netTicket * batchSize);
+        assertEq(market.settledBatchCount(), 1, "first batch accepted");
+
+        verifier.setVerifyingKeyHash(keccak256("rotated-key"));
+        bytes[] memory stalledProofs = new bytes[](1);
+        stalledProofs[0] = "";
+        uint256[10][] memory stalledSignals = new uint256[10][](1);
+        stalledSignals[0] = _signals(roots[1], 0, netTicket, netTicket);
+        uint16[] memory stalledIndexes = new uint16[](1);
+        stalledIndexes[0] = 1;
+        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(stalledProofs, stalledSignals, stalledIndexes);
+
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.setVerifierApproval(address(verifier), true);
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.refreshMarketLockedVerifierKey(address(market));
+
+        assertEq(market.settledBatchCount(), 1, "progress unchanged");
+        assertTrue(market.batchProofVerified(0), "batch 0 remains verified");
+        assertFalse(market.batchProofVerified(1), "batch 1 not verified");
+
+        assertEq(counts[0], uint16(batchSize), "batch size unchanged");
+        assertEq(roots.length, 2, "batch roots unchanged");
+    }
+
+    function testEnableRefundsAfterPartialBatchedSettlementTimeout() external {
+        (bytes32[] memory roots,, uint256 netTicket, uint256 batchSize) = _lockTwoBatchesAndPostResult();
+        _verifySingleBatch(roots[0], 0, netTicket * batchSize, netTicket * batchSize);
+        assertEq(market.settledBatchCount(), 1, "partial progress");
+
+        vm.expectRevert(RevealMarket.RefundsUnavailable.selector);
+        factory.enableMarketRefunds(address(market));
+
+        vm.warp(block.timestamp + market.SETTLEMENT_TIMEOUT_SECONDS());
+        factory.enableMarketRefunds(address(market));
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled), "fallback to cancelled");
+    }
+
+    function _lockTwoBatchesAndPostResult()
+        internal
+        returns (bytes32[] memory roots, uint16[] memory counts, uint256 netTicket, uint256 batchSize)
+    {
+        batchSize = BATCH_SIZE;
+        bytes32[] memory batch0Leaves;
+        bytes32[] memory batch1Leaves;
+        (batch0Leaves, batch1Leaves, netTicket) = _commitTwoBatchTickets();
+        vm.warp(commitDeadline + 1);
+
+        roots = new bytes32[](2);
+        roots[0] = _buildBatchRoot(batch0Leaves, batchSize);
+        roots[1] = _buildBatchRoot(batch1Leaves, 1);
+        counts = new uint16[](2);
+        counts[0] = uint16(batchSize);
+        counts[1] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
+
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, relayerSig);
+        vm.prank(oracle);
+        market.postResult(0);
+    }
+
+    function _commitTwoBatchTickets()
+        internal
+        returns (bytes32[] memory batch0Leaves, bytes32[] memory batch1Leaves, uint256 netTicket)
+    {
+        uint256 totalTickets = BATCH_SIZE + 1;
+        netTicket = _netTicket();
+        token.mint(user, totalTickets * ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), totalTickets * ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(totalTickets * ticketSize);
+
+        batch0Leaves = new bytes32[](BATCH_SIZE);
+        batch1Leaves = new bytes32[](1);
+        for (uint256 i = 0; i < totalTickets; ++i) {
+            bytes32 leaf = _poseidonLeaf(i, 0, netTicket, netTicket, bytes32(i + 1), user);
+            if (i < BATCH_SIZE) {
+                batch0Leaves[i] = leaf;
+            } else {
+                batch1Leaves[0] = leaf;
+            }
+
+            IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+                commitment: leaf,
+                ticketId: i,
+                user: user,
+                nonce: i + 1,
+                expiry: block.timestamp + 12 hours,
+                ticketValue: ticketSize
+            });
+            bytes memory sig = _signAuth(auth, authKey);
+            vm.prank(user);
+            relayerEscrow.approveCommitAuthorization(address(market), auth);
+            vm.prank(relayer);
+            relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        }
+    }
+
+    function _verifySingleBatch(bytes32 root, uint16 batchIndex, uint256 totalEscrow_, uint256 totalLiability_)
+        internal
+    {
+        bytes[] memory proofs = new bytes[](1);
+        proofs[0] = "";
+        uint256[10][] memory signals = new uint256[10][](1);
+        signals[0] = _signals(root, 0, totalEscrow_, totalLiability_);
+        uint16[] memory batchIndexes = new uint16[](1);
+        batchIndexes[0] = batchIndex;
+        vm.prank(oracle);
+        market.verifyAndSettleBatched(proofs, signals, batchIndexes);
+    }
+
     function _commitTickets(uint256 count) internal {
         uint256 netAmount = _netTicket();
         token.mint(user, count * ticketSize);
@@ -233,12 +360,15 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
             bytes32 leaf = _poseidonLeaf(i, 0, netAmount, netAmount, bytes32(i + 1), user);
             IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
                 commitment: leaf,
+                ticketId: i,
                 user: user,
                 nonce: i + 1,
                 expiry: block.timestamp + 12 hours,
                 ticketValue: ticketSize
             });
             bytes memory sig = _signAuth(auth, authKey);
+            vm.prank(user);
+            relayerEscrow.approveCommitAuthorization(address(market), auth);
             vm.prank(relayer);
             relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
         }
@@ -275,6 +405,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -285,6 +416,14 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
         return abi.encodePacked(r, s, v);
     }
 

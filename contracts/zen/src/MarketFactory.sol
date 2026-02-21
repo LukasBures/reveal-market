@@ -4,10 +4,16 @@ pragma solidity ^0.8.33;
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IRevealMarket} from "./interfaces/IRevealMarket.sol";
+import {IVerifier} from "./interfaces/IVerifier.sol";
 
 import {ProtocolPool} from "./ProtocolPool.sol";
 import {RelayerEscrow} from "./RelayerEscrow.sol";
 import {RevealMarket} from "./RevealMarket.sol";
+
+interface IVerifierOwnable {
+    function owner() external view returns (address);
+}
 
 /// @notice Deploys minimal RevealMarket clones with trusted configuration and registers them with the relayer + protocol pool.
 contract MarketFactory is Ownable2Step {
@@ -34,6 +40,18 @@ contract MarketFactory is Ownable2Step {
     bool public factoryPaused;
     mapping(address => bool) public isMarket;
     mapping(uint256 => address) public marketForId;
+    mapping(address => address) public marketRelayer;
+    mapping(address => bool) public knownRelayers;
+    address[] public relayerHistory;
+    mapping(address => uint256) private activeRelayerRefCount;
+    mapping(address => uint256) private activeRelayerIndexPlusOne;
+    address[] public activeRelayers;
+    mapping(address => bool) public approvedVerifier;
+    mapping(address => bytes32) public approvedVerifierCodehash;
+    mapping(address => bytes32) public approvedVerifierKeyHash;
+    mapping(address => bytes32) public pinnedVerifierCodehash;
+    mapping(address => bytes32) public pinnedVerifierKeyHash;
+    uint256 public constant MAX_RELAYER_PAUSE_BATCH = 64;
 
     struct MarketParams {
         address market;
@@ -68,12 +86,25 @@ contract MarketFactory is Ownable2Step {
     event AuthorizationSignerUpdated(address indexed market, address indexed signer);
     event OracleUpdated(address indexed market, address indexed oracle);
     event MarketRelayerUpdated(address indexed market, address indexed relayer);
+    event MarketVerifierUpdated(address indexed market, address indexed verifier, bytes32 indexed circuitHash);
+    event MarketLockedVerifierKeyRefreshed(address indexed market, bytes32 indexed keyHash);
+    event VerifierApprovalUpdated(address indexed verifier, bytes32 codehash, bytes32 keyHash, bool approved);
     event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
+    event MarketProtocolPoolUpdated(address indexed market, address indexed protocolPool);
     event MarketClaimDeadlineExtended(address indexed market, uint256 newDeadline);
+    event MarketRefundDeadlineExtended(address indexed market, uint256 newDeadline);
     event MarketClaimsSwept(address indexed market, address indexed recipient);
     event RelayerCommitsPaused(bool paused);
+    event RelayerCommitsPausedBatch(bool paused, uint256 start, uint256 processed);
+    event RelayerPausePropagationFailed(address indexed relayer);
+    event RelayerUnregisterFailed(address indexed market, address indexed relayer);
+    event EscrowBalanceMigrated(
+        address indexed market, address indexed user, address fromRelayer, address toRelayer, uint256 amount
+    );
     event MarketCommitsPaused(address indexed market, bool paused);
     event MarketClaimsPaused(address indexed market, bool paused);
+    event MarketRefundsEnabled(address indexed market);
+    event MarketRefundsSwept(address indexed market, address indexed recipient);
 
     error InvalidImplementation();
     error InvalidRelayer();
@@ -87,6 +118,17 @@ contract MarketFactory is Ownable2Step {
     error InvalidRakeBps();
     error UnknownMarket();
     error FactoryPausedErr();
+    error DependencyNotHooked();
+    error InvalidVerifierInputs();
+    error InvalidCircuitHash();
+    error VerifierNotApproved();
+    error VerifierDrift();
+    error VerifierOwnerMismatch();
+    error RelayerPauseFailed(address relayer);
+    error InvalidPauseRange();
+    error PauseBatchTooLarge();
+    error RelayerRotationLocked();
+    error ProtocolPoolRotationLocked();
 
     constructor(
         address implementation_,
@@ -103,26 +145,78 @@ contract MarketFactory is Ownable2Step {
         protocolPool = protocolPool_;
         relayerEscrow = relayerEscrow_;
         COLLATERAL_TOKEN = collateralToken_;
+        _trackRelayer(address(relayerEscrow_));
     }
 
     /// @notice Owner can update the relayer escrow address (e.g., when rotating relayers).
     function setRelayerEscrow(RelayerEscrow relayer) external onlyOwner {
         if (address(relayer) == address(0)) revert InvalidRelayer();
+        if (address(relayer.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidRelayer();
+        if (relayer.marketFactory() != address(this)) revert DependencyNotHooked();
         relayerEscrow = relayer;
+        _trackRelayer(address(relayer));
         emit RelayerEscrowUpdated(address(relayer));
     }
 
     /// @notice Owner can update the protocol pool.
     function setProtocolPool(ProtocolPool pool) external onlyOwner {
         if (address(pool) == address(0)) revert InvalidProtocolPool();
+        if (address(pool.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidProtocolPool();
+        if (pool.marketFactory() != address(this)) revert DependencyNotHooked();
         protocolPool = pool;
         emit ProtocolPoolUpdated(address(pool));
     }
 
     /// @notice Syncs this factory into the relayer + protocol pool hooks.
     function syncFactoryHooks() external onlyOwner {
-        protocolPool.setMarketFactory(address(this));
-        relayerEscrow.setMarketFactory(address(this));
+        if (protocolPool.marketFactory() != address(this)) revert DependencyNotHooked();
+        if (relayerEscrow.marketFactory() != address(this)) revert DependencyNotHooked();
+    }
+
+    /// @notice Explicit verifier attestation gate; market creation/rotation is blocked unless approved.
+    function setVerifierApproval(address verifier, bool approved) external onlyOwner {
+        if (verifier == address(0)) revert InvalidVerifier();
+        if (approved) {
+            _requireVerifierOwnership(verifier);
+            if (IVerifier(verifier).expectedInputs() != 10) revert InvalidVerifierInputs();
+            bytes32 codehash = verifier.codehash;
+            bytes32 keyHash = IVerifier(verifier).verifyingKeyHash();
+            bytes32 pinnedCodehash = pinnedVerifierCodehash[verifier];
+            if (pinnedCodehash == bytes32(0)) {
+                pinnedVerifierCodehash[verifier] = codehash;
+                pinnedVerifierKeyHash[verifier] = keyHash;
+            } else if (pinnedCodehash != codehash || pinnedVerifierKeyHash[verifier] != keyHash) {
+                revert VerifierDrift();
+            }
+            approvedVerifier[verifier] = true;
+            approvedVerifierCodehash[verifier] = pinnedVerifierCodehash[verifier];
+            approvedVerifierKeyHash[verifier] = pinnedVerifierKeyHash[verifier];
+            emit VerifierApprovalUpdated(
+                verifier, approvedVerifierCodehash[verifier], approvedVerifierKeyHash[verifier], true
+            );
+            return;
+        }
+
+        approvedVerifier[verifier] = false;
+        emit VerifierApprovalUpdated(
+            verifier, approvedVerifierCodehash[verifier], approvedVerifierKeyHash[verifier], false
+        );
+    }
+
+    /// @notice Runtime verifier policy check used by markets during settlement.
+    function isVerifierCurrentlyApproved(address verifier, bytes32 expectedCircuitHash) external view returns (bool) {
+        if (verifier == address(0)) return false;
+        if (!approvedVerifier[verifier]) return false;
+        try IVerifierOwnable(verifier).owner() returns (address verifierOwner) {
+            if (verifierOwner != owner()) return false;
+        } catch {
+            return false;
+        }
+        if (verifier.codehash != approvedVerifierCodehash[verifier]) return false;
+        if (IVerifier(verifier).expectedInputs() != 10) return false;
+        if (IVerifier(verifier).circuitHash() != expectedCircuitHash) return false;
+        if (IVerifier(verifier).verifyingKeyHash() != approvedVerifierKeyHash[verifier]) return false;
+        return true;
     }
 
     /// @notice Updates the global rake applied to all markets.
@@ -172,17 +266,83 @@ contract MarketFactory is Ownable2Step {
     function updateMarketRelayer(address market, RelayerEscrow newRelayer) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
         if (address(newRelayer) == address(0)) revert InvalidRelayer();
+        if (address(newRelayer.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidRelayer();
         if (newRelayer.marketFactory() != address(this)) revert InvalidRelayer();
+        RevealMarket rm = RevealMarket(payable(market));
+        if (rm.phase() != IRevealMarket.Phase.Commit || rm.nextTicketId() != 0) revert RelayerRotationLocked();
+        address oldRelayer = rm.relayerEscrow();
+        if (oldRelayer == address(newRelayer)) return;
+        try RelayerEscrow(payable(oldRelayer)).unregisterMarket(market) {}
+        catch {
+            emit RelayerUnregisterFailed(market, oldRelayer);
+        }
+        _deactivateRelayer(oldRelayer);
+        rm.setRelayerEscrow(address(newRelayer));
         newRelayer.registerMarket(market);
-        RevealMarket(payable(market)).setRelayerEscrow(address(newRelayer));
+        _trackRelayer(address(newRelayer));
+        _activateRelayer(address(newRelayer));
+        marketRelayer[market] = address(newRelayer);
         emit MarketRelayerUpdated(market, address(newRelayer));
+    }
+
+    /// @notice Moves user balances from an old relayer escrow to the market's active relayer.
+    function migrateMarketRelayerBalances(address market, RelayerEscrow oldRelayer, address[] calldata users)
+        external
+        onlyOwner
+    {
+        if (!isMarket[market]) revert UnknownMarket();
+        address targetRelayerAddress = RevealMarket(payable(market)).relayerEscrow();
+        if (address(oldRelayer) == targetRelayerAddress) revert InvalidRelayer();
+
+        RelayerEscrow targetRelayer = RelayerEscrow(payable(targetRelayerAddress));
+        for (uint256 i = 0; i < users.length; ++i) {
+            address user = users[i];
+            uint256 balance = oldRelayer.balances(user);
+            if (balance == 0) continue;
+            oldRelayer.withdrawTo(user, targetRelayerAddress, balance);
+            targetRelayer.creditMigrated(user, balance);
+            emit EscrowBalanceMigrated(market, user, address(oldRelayer), targetRelayerAddress, balance);
+        }
+    }
+
+    /// @notice Rotate verifier metadata for an existing market.
+    function updateMarketVerifier(address market, address newVerifier, bytes32 newCircuitHash) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        _validateVerifier(newVerifier, newCircuitHash);
+        RevealMarket(payable(market)).setVerifier(newVerifier, newCircuitHash);
+        emit MarketVerifierUpdated(market, newVerifier, newCircuitHash);
+    }
+
+    /// @notice Refreshes a locked market's verifier key anchor before any batch proof is accepted.
+    function refreshMarketLockedVerifierKey(address market) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket rm = RevealMarket(payable(market));
+        _validateVerifier(rm.verifier(), rm.circuitHash());
+        rm.refreshLockedVerifierKeyHash();
+        emit MarketLockedVerifierKeyRefreshed(market, rm.lockedVerifierKeyHash());
+    }
+
+    /// @notice Re-route an existing market to a new protocol pool during commit phase.
+    function updateMarketProtocolPool(address market, ProtocolPool newPool) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        if (address(newPool) == address(0)) revert InvalidProtocolPool();
+        if (address(newPool.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidProtocolPool();
+        if (newPool.marketFactory() != address(this)) revert DependencyNotHooked();
+
+        RevealMarket rm = RevealMarket(payable(market));
+        if (rm.phase() != IRevealMarket.Phase.Commit || rm.nextTicketId() != 0) revert ProtocolPoolRotationLocked();
+        uint256 cap = rm.protocolLiabilityCap();
+        newPool.registerMarket(market, cap);
+        rm.setProtocolPool(address(newPool));
+        emit MarketProtocolPoolUpdated(market, address(newPool));
     }
 
     /// @notice Update the protocol liability cap for a market (before settlement).
     function updateProtocolLiabilityCap(address market, uint256 newCap) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
-        RevealMarket(payable(market)).setProtocolLiabilityCap(newCap);
-        protocolPool.updateLiabilityCap(market, newCap);
+        RevealMarket rm = RevealMarket(payable(market));
+        rm.setProtocolLiabilityCap(newCap);
+        ProtocolPool(rm.protocolPool()).updateLiabilityCap(market, newCap);
         emit MarketLiabilityCapUpdated(market, newCap);
     }
 
@@ -199,11 +359,32 @@ contract MarketFactory is Ownable2Step {
         emit MarketClaimDeadlineExtended(market, newDeadline);
     }
 
+    /// @notice Extend a market's cancelled refund deadline (factory-only guard).
+    function extendMarketRefundDeadline(address market, uint256 newDeadline) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).extendRefundDeadline(newDeadline);
+        emit MarketRefundDeadlineExtended(market, newDeadline);
+    }
+
     /// @notice Sweep unclaimed payouts after the claim deadline (factory-only guard).
     function sweepUnclaimed(address market, address recipient) external onlyOwner {
         if (!isMarket[market]) revert UnknownMarket();
         RevealMarket(payable(market)).sweepUnclaimed(recipient);
         emit MarketClaimsSwept(market, recipient);
+    }
+
+    /// @notice Enables refunds for a market after commit window close or lock timeout.
+    function enableMarketRefunds(address market) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).enableRefunds();
+        emit MarketRefundsEnabled(market);
+    }
+
+    /// @notice Sweep unrefunded collateral for cancelled markets after refund deadline.
+    function sweepCancelledRefunds(address market, address recipient) external onlyOwner {
+        if (!isMarket[market]) revert UnknownMarket();
+        RevealMarket(payable(market)).sweepCancelledRefunds(recipient);
+        emit MarketRefundsSwept(market, recipient);
     }
 
     /// @notice Pause or unpause commits on a market (emergency stop).
@@ -222,8 +403,28 @@ contract MarketFactory is Ownable2Step {
 
     /// @notice Emergency pause for relayer escrow commits (guardian stop).
     function setRelayerCommitsPaused(bool paused) external onlyOwner {
-        relayerEscrow.setCommitsPaused(paused);
+        uint256 len = activeRelayers.length;
+        if (len == 0) {
+            emit RelayerCommitsPaused(paused);
+            return;
+        }
+        uint256 start = 0;
+        while (start < len) {
+            uint256 count = len - start;
+            if (count > MAX_RELAYER_PAUSE_BATCH) {
+                count = MAX_RELAYER_PAUSE_BATCH;
+            }
+            _setRelayerCommitsPausedBatch(paused, start, count);
+            emit RelayerCommitsPausedBatch(paused, start, count);
+            start += count;
+        }
         emit RelayerCommitsPaused(paused);
+    }
+
+    /// @notice Emergency pause fanout in bounded chunks for large active relayer sets.
+    function setRelayerCommitsPausedBatch(bool paused, uint256 start, uint256 count) external onlyOwner {
+        _setRelayerCommitsPausedBatch(paused, start, count);
+        emit RelayerCommitsPausedBatch(paused, start, count);
     }
 
     /// @notice Deploys a new minimal market clone with the given parameters.
@@ -234,6 +435,11 @@ contract MarketFactory is Ownable2Step {
         if (params.authorizationSigner == address(0)) revert InvalidSigner();
         if (params.fixedTicketSize == 0) revert InvalidTicketSize();
         if (params.commitDeadline <= block.timestamp) revert InvalidDeadlines();
+        if (protocolPool.marketFactory() != address(this)) revert DependencyNotHooked();
+        if (relayerEscrow.marketFactory() != address(this)) revert DependencyNotHooked();
+        if (address(protocolPool.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidProtocolPool();
+        if (address(relayerEscrow.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidRelayer();
+        _validateVerifier(params.verifier, params.circuitHash);
         uint256 appliedRakeBps = globalRakeBps;
 
         uint256 marketId = nextMarketId++;
@@ -257,13 +463,16 @@ contract MarketFactory is Ownable2Step {
                     marketId: marketId,
                     rakeBps: appliedRakeBps
                 })
-        );
+            );
 
         isMarket[deployedMarket] = true;
         marketForId[marketId] = deployedMarket;
+        marketRelayer[deployedMarket] = address(relayerEscrow);
 
         protocolPool.registerMarket(deployedMarket, params.protocolLiabilityCap);
         relayerEscrow.registerMarket(deployedMarket);
+        _trackRelayer(address(relayerEscrow));
+        _activateRelayer(address(relayerEscrow));
 
         market = deployedMarket;
 
@@ -306,8 +515,87 @@ contract MarketFactory is Ownable2Step {
             protocolLiabilityCap: rm.protocolLiabilityCap(),
             rakeBps: rm.rakeBps(),
             relayerEscrow: rm.relayerEscrow(),
-            protocolPool: address(protocolPool),
+            protocolPool: rm.protocolPool(),
             marketId: marketId
         });
+    }
+
+    function _validateVerifier(address verifier, bytes32 expectedCircuitHash) internal view {
+        if (verifier == address(0)) revert InvalidVerifier();
+        if (!approvedVerifier[verifier]) revert VerifierNotApproved();
+        _requireVerifierOwnership(verifier);
+        if (IVerifier(verifier).expectedInputs() != 10) revert InvalidVerifierInputs();
+        if (IVerifier(verifier).circuitHash() != expectedCircuitHash) revert InvalidCircuitHash();
+        if (verifier.codehash != approvedVerifierCodehash[verifier]) revert VerifierDrift();
+        if (IVerifier(verifier).verifyingKeyHash() != approvedVerifierKeyHash[verifier]) revert VerifierDrift();
+    }
+
+    function _requireVerifierOwnership(address verifier) internal view {
+        try IVerifierOwnable(verifier).owner() returns (address verifierOwner) {
+            if (verifierOwner != owner()) revert VerifierOwnerMismatch();
+        } catch {
+            revert VerifierOwnerMismatch();
+        }
+    }
+
+    function _setRelayerCommitsPausedBatch(bool paused, uint256 start, uint256 count) internal {
+        uint256 len = activeRelayers.length;
+        if (start > len) revert InvalidPauseRange();
+        if (count == 0) revert InvalidPauseRange();
+        if (count > MAX_RELAYER_PAUSE_BATCH) revert PauseBatchTooLarge();
+        if (start + count > len) revert InvalidPauseRange();
+
+        for (uint256 i = 0; i < count; ++i) {
+            address relayer = activeRelayers[start + i];
+            try RelayerEscrow(payable(relayer)).setCommitsPaused(paused) {
+                try RelayerEscrow(payable(relayer)).commitsPaused() returns (bool relayerPaused) {
+                    if (relayerPaused != paused) {
+                        emit RelayerPausePropagationFailed(relayer);
+                    }
+                } catch {
+                    emit RelayerPausePropagationFailed(relayer);
+                }
+            } catch {
+                emit RelayerPausePropagationFailed(relayer);
+            }
+        }
+    }
+
+    function _activateRelayer(address relayer) internal {
+        uint256 refs = activeRelayerRefCount[relayer];
+        activeRelayerRefCount[relayer] = refs + 1;
+        if (refs != 0) return;
+        activeRelayerIndexPlusOne[relayer] = activeRelayers.length + 1;
+        activeRelayers.push(relayer);
+    }
+
+    function _deactivateRelayer(address relayer) internal {
+        uint256 refs = activeRelayerRefCount[relayer];
+        if (refs == 0) return;
+        if (refs > 1) {
+            activeRelayerRefCount[relayer] = refs - 1;
+            return;
+        }
+
+        activeRelayerRefCount[relayer] = 0;
+        uint256 index = activeRelayerIndexPlusOne[relayer];
+        if (index == 0) return;
+        uint256 idx = index - 1;
+        uint256 lastIdx = activeRelayers.length - 1;
+        if (idx != lastIdx) {
+            address moved = activeRelayers[lastIdx];
+            activeRelayers[idx] = moved;
+            activeRelayerIndexPlusOne[moved] = idx + 1;
+        }
+        activeRelayers.pop();
+        activeRelayerIndexPlusOne[relayer] = 0;
+    }
+
+    function _trackRelayer(address relayer) internal {
+        if (knownRelayers[relayer]) {
+            return;
+        }
+        knownRelayers[relayer] = true;
+        relayerHistory.push(relayer);
     }
 }

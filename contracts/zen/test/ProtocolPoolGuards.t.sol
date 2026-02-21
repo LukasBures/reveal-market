@@ -28,6 +28,25 @@ contract ProtocolPoolGuardsTest is Test {
         pool.registerMarket(market, 1 ether);
     }
 
+    function testSetMarketFactoryOnlyOwner() external {
+        address nextFactory = makeAddr("nextFactory");
+
+        vm.prank(stranger);
+        vm.expectRevert();
+        pool.setMarketFactory(nextFactory);
+
+        vm.prank(owner);
+        pool.setMarketFactory(nextFactory);
+        assertEq(pool.marketFactory(), nextFactory);
+    }
+
+    function testSetMarketFactoryRejectsSpoofedOwnerContract() external {
+        ProtocolPoolFactorySpoof spoof = new ProtocolPoolFactorySpoof(owner);
+        vm.expectRevert();
+        spoof.attack(pool, makeAddr("attackerFactory"));
+        assertEq(pool.marketFactory(), factory, "factory unchanged");
+    }
+
     function testDrawRequiresAllowedMarket() external {
         vm.prank(factory);
         pool.registerMarket(market, 2 ether);
@@ -87,6 +106,23 @@ contract ProtocolPoolGuardsTest is Test {
         pool.draw(market, 1 ether);
     }
 
+    function testReservedDrawBypassesPause() external {
+        _fundPool(5 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 3 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 2 ether);
+
+        vm.prank(owner);
+        pool.setDrawsPaused(true);
+        vm.prank(owner);
+        pool.setMarketDrawPaused(market, true);
+
+        vm.prank(market);
+        pool.draw(market, 1 ether);
+        assertEq(pool.consumedLiability(market), 1 ether);
+    }
+
     function testDrawPausedPerMarket() external {
         _fundPool(5 ether);
         vm.prank(factory);
@@ -110,6 +146,49 @@ contract ProtocolPoolGuardsTest is Test {
         assertEq(token.balanceOf(owner), 1 ether);
     }
 
+    function testWithdrawCannotBreachReservedLiability() external {
+        _fundPool(2 ether);
+        vm.prank(owner);
+        pool.setCapacity(2 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 2 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 1.5 ether);
+
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.withdraw(payable(owner), 1 ether);
+    }
+
+    function testSetCapacityRevertsWhenReservationsExist() external {
+        _fundPool(2 ether);
+        vm.prank(owner);
+        pool.setCapacity(2 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 2 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 1 ether);
+
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.ActiveReservations.selector);
+        pool.setCapacity(5 ether);
+    }
+
+    function testReserveLiabilityUsesLiquidityWhenCapacityDisabled() external {
+        _fundPool(2 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 2 ether);
+
+        vm.prank(market);
+        pool.reserveLiability(market, 2 ether);
+
+        vm.prank(factory);
+        pool.registerMarket(stranger, 2 ether);
+        vm.prank(stranger);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.reserveLiability(stranger, 1 wei);
+    }
+
     function testUpdateLiabilityCapOnlyFactory() external {
         vm.prank(factory);
         pool.registerMarket(market, 1 ether);
@@ -124,5 +203,21 @@ contract ProtocolPoolGuardsTest is Test {
         token.approve(address(pool), amount);
         vm.prank(owner);
         pool.deposit(amount);
+    }
+}
+
+contract ProtocolPoolFactorySpoof {
+    address private immutable spoofedOwner;
+
+    constructor(address owner_) {
+        spoofedOwner = owner_;
+    }
+
+    function owner() external view returns (address) {
+        return spoofedOwner;
+    }
+
+    function attack(ProtocolPool pool, address attackerFactory) external {
+        pool.setMarketFactory(attackerFactory);
     }
 }

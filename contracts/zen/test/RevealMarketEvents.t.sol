@@ -23,7 +23,8 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayerOwner = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayerOwner = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -45,6 +46,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
@@ -59,6 +61,10 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 1_000 ether);
+        token.approve(address(protocolPool), 1_000 ether);
+        protocolPool.deposit(1_000 ether);
     }
 
     function testLockBatchesEmitsLocked() external {
@@ -68,11 +74,12 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
 
         vm.expectEmit(true, false, false, true, address(market));
         emit RevealMarket.Locked(roots[0], 1);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
     }
 
     function testPostResultEmits() external {
@@ -146,7 +153,28 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
     }
 
     function testExtendClaimDeadlineEmits() external {
-        uint256 newDeadline = block.timestamp + 30 days;
+        bytes32 leaf = _commitTicket(_salt("extend-claim"));
+        bytes32 root = _lockSingleBatch(leaf);
+        vm.prank(oracle);
+        market.postResult(1);
+
+        uint256 netTicket = _netTicket();
+        uint256[10] memory signals = [
+            uint256(root),
+            market.marketId(),
+            uint256(1),
+            netTicket,
+            netTicket,
+            rakeBps,
+            uint256(0),
+            netTicket,
+            uint256(circuitHash),
+            uint256(0)
+        ];
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        uint256 newDeadline = market.claimDeadline() + 7 days;
         vm.expectEmit(false, false, false, true, address(market));
         emit RevealMarket.ClaimDeadlineExtended(newDeadline);
         vm.prank(address(factory));
@@ -200,13 +228,12 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         vm.warp(commitDeadline + 1);
 
         vm.expectEmit(true, false, false, true, address(market));
-        emit RevealMarket.RefundsEnabled(relayerOwner);
-        vm.prank(relayerOwner);
+        emit RevealMarket.RefundsEnabled(address(factory));
+        vm.prank(address(factory));
         market.enableRefunds();
 
         vm.expectEmit(true, true, true, true, address(market));
-        emit RevealMarket.Refunded(relayerOwner, user, 0, _netTicket());
-        vm.prank(relayerOwner);
+        emit RevealMarket.Refunded(address(this), user, 0, ticketSize);
         market.refund(user, 0, 1, _netTicket(), _netTicket(), _salt("refund"), new bytes32[](0));
     }
 
@@ -214,6 +241,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         leaf = _poseidonLeaf(0, 1, _netTicket(), _netTicket(), salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 12 hours,
@@ -227,6 +255,8 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
 
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }
@@ -241,8 +271,9 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         return roots[0];
     }
 
@@ -252,6 +283,7 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -262,6 +294,14 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
         return abi.encodePacked(r, s, v);
     }
 

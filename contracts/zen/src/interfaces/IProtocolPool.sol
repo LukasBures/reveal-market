@@ -7,4 +7,12 @@ interface IProtocolPool {
     function updateLiabilityCap(address market, uint256 newCap) external;
 
     function draw(address market, uint256 amount) external;
+
+    function reserveLiability(address market, uint256 amount) external;
+
+    function releaseLiabilityReservation(address market) external;
+
+    function drawsPaused() external view returns (bool);
+
+    function marketDrawPaused(address market) external view returns (bool);
 }

@@ -27,7 +27,9 @@ import {Pairing} from "./utils/Pairing.sol";
 contract Verifier is IVerifier, Ownable2Step {
     using Pairing for Pairing.G1Point;
 
-    uint256 private constant MAX_SUPPORTED_INPUTS = 16;
+    uint256 private constant REQUIRED_PUBLIC_INPUTS = 10;
+    uint256 private constant SNARK_SCALAR_FIELD =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
     struct StoredVerifyingKey {
         Pairing.G1Point alfa1;
@@ -40,6 +42,7 @@ contract Verifier is IVerifier, Ownable2Step {
     Pairing.G1Point[] private _ic;
 
     bytes32 public circuitHash;
+    bytes32 public verifyingKeyHash;
     uint256 public immutable EXPECTED_INPUTS;
 
     event VerifyingKeyUpdated(bytes32 indexed circuitHash, uint256 inputs);
@@ -51,6 +54,8 @@ contract Verifier is IVerifier, Ownable2Step {
     error FieldOverflow(uint256 value);
     error ProofInputLengthMismatch(uint256 expected, uint256 provided);
     error PairingHelperUnauthorized();
+    error InvalidCurvePoint();
+    error RenounceOwnershipDisabled();
 
     constructor(
         uint256[2] memory alpha1,
@@ -61,9 +66,8 @@ contract Verifier is IVerifier, Ownable2Step {
         bytes32 circuitHash_,
         uint256 expectedInputs_
     ) Ownable(msg.sender) {
-        if (expectedInputs_ == 0) revert InvalidVerifyingKeyLength(0, 1);
-        if (expectedInputs_ > MAX_SUPPORTED_INPUTS) {
-            revert UnsupportedInputCardinality(expectedInputs_, MAX_SUPPORTED_INPUTS);
+        if (expectedInputs_ != REQUIRED_PUBLIC_INPUTS) {
+            revert UnsupportedInputCardinality(expectedInputs_, REQUIRED_PUBLIC_INPUTS);
         }
         EXPECTED_INPUTS = expectedInputs_;
         _setVerifyingKey(alpha1, beta2, gamma2, delta2, icPoints, circuitHash_);
@@ -100,7 +104,18 @@ contract Verifier is IVerifier, Ownable2Step {
 
         Pairing.G1Point memory vkx = _ic[0];
         for (uint256 i = 0; i < EXPECTED_INPUTS; ++i) {
-            Pairing.G1Point memory term = Pairing.scalarMul(_ic[i + 1], pubSignals[i]);
+            uint256 signal = pubSignals[i];
+            if (signal >= SNARK_SCALAR_FIELD) {
+                return false;
+            }
+            Pairing.G1Point memory icPoint = _ic[i + 1];
+            if (icPoint.X == 0 && icPoint.Y == 0) {
+                if (signal != 0) {
+                    return false;
+                }
+                continue;
+            }
+            Pairing.G1Point memory term = Pairing.scalarMul(icPoint, signal);
             vkx = Pairing.add(vkx, term);
         }
 
@@ -138,17 +153,34 @@ contract Verifier is IVerifier, Ownable2Step {
         if (icPoints.length != EXPECTED_INPUTS + 1) {
             revert InvalidVerifyingKeyLength(icPoints.length, EXPECTED_INPUTS + 1);
         }
-        _vk.alfa1 = _buildG1(alpha1);
-        _vk.beta2 = _buildG2(beta2);
-        _vk.gamma2 = _buildG2(gamma2);
-        _vk.delta2 = _buildG2(delta2);
+        Pairing.G1Point memory alphaPoint = _buildG1(alpha1);
+        Pairing.G2Point memory betaPoint = _buildG2(beta2);
+        Pairing.G2Point memory gammaPoint = _buildG2(gamma2);
+        Pairing.G2Point memory deltaPoint = _buildG2(delta2);
+        if (_isInfinityG1(alphaPoint)) revert InvalidCurvePoint();
+        if (_isInfinityG2(betaPoint)) revert InvalidCurvePoint();
+        if (_isInfinityG2(gammaPoint)) revert InvalidCurvePoint();
+        if (_isInfinityG2(deltaPoint)) revert InvalidCurvePoint();
+        if (!Pairing.isValidG1Point(alphaPoint)) revert InvalidCurvePoint();
+        if (!Pairing.isValidG2Point(betaPoint)) revert InvalidCurvePoint();
+        if (!Pairing.isValidG2Point(gammaPoint)) revert InvalidCurvePoint();
+        if (!Pairing.isValidG2Point(deltaPoint)) revert InvalidCurvePoint();
+
+        _vk.alfa1 = alphaPoint;
+        _vk.beta2 = betaPoint;
+        _vk.gamma2 = gammaPoint;
+        _vk.delta2 = deltaPoint;
 
         delete _ic;
         _ic = new Pairing.G1Point[](icPoints.length);
         for (uint256 i = 0; i < icPoints.length; ++i) {
-            _ic[i] = _buildG1(icPoints[i]);
+            Pairing.G1Point memory point = _buildG1(icPoints[i]);
+            if (_isInfinityG1(point)) revert InvalidCurvePoint();
+            if (!Pairing.isValidG1Point(point)) revert InvalidCurvePoint();
+            _ic[i] = point;
         }
         circuitHash = circuitHash_;
+        verifyingKeyHash = keccak256(abi.encode(alpha1, beta2, gamma2, delta2, icPoints, circuitHash_, EXPECTED_INPUTS));
         emit VerifyingKeyUpdated(circuitHash_, EXPECTED_INPUTS);
     }
 
@@ -176,15 +208,16 @@ contract Verifier is IVerifier, Ownable2Step {
         return Pairing.G2Point([coords[0][0], coords[0][1]], [coords[1][0], coords[1][1]]);
     }
 
-    function _validateG1Point(Pairing.G1Point memory point) private pure {
+    function _validateG1Point(Pairing.G1Point memory point) private view {
         if (point.X == 0 && point.Y == 0) {
             return;
         }
         _validateFieldElement(point.X);
         _validateFieldElement(point.Y);
+        if (!Pairing.isValidG1Point(point)) revert InvalidCurvePoint();
     }
 
-    function _validateG2Point(Pairing.G2Point memory point) private pure {
+    function _validateG2Point(Pairing.G2Point memory point) private view {
         if (point.X[0] == 0 && point.X[1] == 0 && point.Y[0] == 0 && point.Y[1] == 0) {
             return;
         }
@@ -192,6 +225,7 @@ contract Verifier is IVerifier, Ownable2Step {
         _validateFieldElement(point.X[1]);
         _validateFieldElement(point.Y[0]);
         _validateFieldElement(point.Y[1]);
+        if (!Pairing.isValidG2Point(point)) revert InvalidCurvePoint();
     }
 
     function _pairingCheck(Proof memory proof, Pairing.G1Point memory vkx) external view returns (bool) {
@@ -205,5 +239,17 @@ contract Verifier is IVerifier, Ownable2Step {
         if (value >= Pairing.PRIME_Q) {
             revert FieldOverflow(value);
         }
+    }
+
+    function _isInfinityG1(Pairing.G1Point memory point) private pure returns (bool) {
+        return point.X == 0 && point.Y == 0;
+    }
+
+    function _isInfinityG2(Pairing.G2Point memory point) private pure returns (bool) {
+        return point.X[0] == 0 && point.X[1] == 0 && point.Y[0] == 0 && point.Y[1] == 0;
+    }
+
+    function renounceOwnership() public view override onlyOwner {
+        revert RenounceOwnershipDisabled();
     }
 }

@@ -17,6 +17,10 @@ interface IOwnable {
     function owner() external view returns (address);
 }
 
+interface IFactoryVerifierPolicy {
+    function isVerifierCurrentlyApproved(address verifier, bytes32 expectedCircuitHash) external view returns (bool);
+}
+
 /// @notice Minimal commit/reveal market using fixed-size tickets and ZK-verified settlement.
 contract RevealMarket is IRevealMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -24,8 +28,14 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     uint256 public constant BATCH_SIZE = 256;
     uint8 public constant MERKLE_DEPTH = 8;
+    uint256 public constant MAX_LOCK_BATCH_COUNT = 64;
+    uint256 public constant MAX_COMMITMENTS_LIMIT = MAX_LOCK_BATCH_COUNT * BATCH_SIZE;
+    uint256 private constant SNARK_SCALAR_FIELD =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    uint256 public constant MAX_COMMIT_DEADLINE_EXTENSION = 30 days;
     uint256 public constant CLAIM_WINDOW_SECONDS = 180 days;
     uint256 public constant MAX_CLAIM_DEADLINE_EXTENSION = 365 days;
+    uint256 public constant SETTLEMENT_TIMEOUT_SECONDS = 14 days;
 
     struct InitParams {
         address factory;
@@ -72,16 +82,33 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     uint256 public poolTotalYes;
     uint256 public poolTotalNo;
     uint256 public claimedLiability;
+    bool public commitDeadlineExtended;
     uint256 public claimDeadline;
+    bool public claimDeadlineExtended;
     bool public claimsSwept;
+    uint256 public claimPauseTotalDuration;
+    uint256 public claimPauseStartedAt;
+    uint256 public refundDeadline;
+    bool public refundDeadlineExtended;
+    bool public refundsSwept;
     uint256 public protocolTopUp;
     uint256 public winningOutcomeId;
+    bytes32 public lockedVerifierKeyHash;
+    uint256 public settledBatchCount;
+    uint256 public settledEscrowSum;
+    uint256 public settledLiabilitySum;
+    uint256 public settledPoolYesSum;
+    uint256 public settledPoolNoSum;
+    uint256 public lockedAt;
     bool public resultPosted;
     bool private initialized;
 
     bytes32[] private commitments;
+    address[] private commitmentUsers;
     mapping(address => mapping(uint256 => bool)) public usedCommitNonces;
     mapping(uint256 => bool) public claimedTickets;
+    mapping(uint16 => uint256) private batchProofEpoch;
+    uint256 private currentBatchProofEpoch;
 
     event Committed(uint256 indexed ticketId, bytes32 commitment, uint256 totalEscrow);
     event Locked(bytes32 commitmentsRoot, uint256 ticketCount);
@@ -90,6 +117,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
     event ClaimDeadlineExtended(uint256 newDeadline);
     event ClaimsSwept(address indexed recipient, uint256 amount);
+    event RefundDeadlineExtended(uint256 newDeadline);
     event CommitsPausedSet(bool paused);
     event ClaimsPausedSet(bool paused);
     event RefundsEnabled(address indexed caller);
@@ -97,7 +125,13 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event AuthorizationSignerUpdated(address indexed signer);
     event OracleUpdated(address indexed oracle);
     event RelayerEscrowUpdated(address indexed relayer);
+    event ProtocolPoolUpdated(address indexed protocolPool);
     event ProtocolLiabilityCapUpdated(uint256 newCap);
+    event VerifierUpdated(address indexed verifier, bytes32 indexed circuitHash);
+    event LockedVerifierKeyRefreshed(bytes32 indexed keyHash);
+    event SettlementProgressReset(uint256 previousSettledBatches);
+    event BatchProofAccepted(uint16 indexed batchIndex, uint256 settledBatches);
+    event RefundsSwept(address indexed recipient, uint256 amount);
 
     error AlreadyInitialized();
     error NotRelayer();
@@ -144,6 +178,21 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error InvalidBatchIndex();
     error BatchProofLengthMismatch();
     error InvalidRelayerSignature();
+    error SettlementInvariantMismatch();
+    error VerifierInputCountMismatch();
+    error VerifierKeyMismatch();
+    error BatchAlreadyVerified();
+    error RefundWindowClosed();
+    error FeeOnTransferNotSupported();
+    error MaxCommitmentsUnsupported();
+    error ClaimDeadlineAlreadyExtended();
+    error RefundDeadlineAlreadyExtended();
+    error CommitmentUserMismatch();
+    error TicketIndexMismatch();
+    error CommitDeadlineAlreadyExtended();
+    error VerifierNotApproved();
+    error FieldElementOutOfRange();
+    error OracleAuthorizationExpired();
 
     modifier onlyRelayer() {
         _onlyRelayer();
@@ -166,8 +215,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     function _onlyRelayer() internal view {
-        address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
-        if (msg.sender != relayerEscrow && msg.sender != relayerOwner) revert NotRelayer();
+        if (msg.sender != relayerEscrow) revert NotRelayer();
     }
 
     function _onlyRelayerOrFactoryOwner() internal view {
@@ -195,6 +243,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
                 || params.collateralToken == address(0)
         ) revert InvalidInit();
         if (params.rakeBps > 10_000) revert InvalidInit();
+        if (IVerifier(params.verifier).expectedInputs() != 10) revert VerifierInputCountMismatch();
+        if (IVerifier(params.verifier).circuitHash() != params.circuitHash) revert CircuitHashMismatch();
         initialized = true;
         factory = params.factory;
         protocolPool = params.protocolPool;
@@ -205,7 +255,8 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         collateralToken = params.collateralToken;
         commitDeadline = params.commitDeadline;
         ticketSize = params.ticketSize;
-        maxCommitments = params.maxCommitments;
+        if (params.maxCommitments > MAX_COMMITMENTS_LIMIT) revert MaxCommitmentsUnsupported();
+        maxCommitments = params.maxCommitments == 0 ? MAX_COMMITMENTS_LIMIT : params.maxCommitments;
         authorizationSigner = params.authorizationSigner;
         protocolLiabilityCap = params.protocolLiabilityCap;
         marketId = params.marketId;
@@ -224,17 +275,21 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (phase != Phase.Commit) revert InvalidPhase();
         if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
         if (commitsPaused) revert CommitsPaused();
+        if (RelayerEscrow(payable(relayerEscrow)).commitsPaused()) revert CommitsPaused();
         if (msg.value != 0) revert InvalidPayment();
         if (auth.ticketValue != ticketSize) revert InvalidPayment();
         if (auth.user == address(0)) revert InvalidAddress();
         if (IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize) revert InvalidPayment();
-        if (maxCommitments != 0 && commitments.length >= maxCommitments) revert MaxCommitmentsReached();
+        if (commitments.length >= maxCommitments) revert MaxCommitmentsReached();
+        uint256 expectedTicketId = commitments.length;
+        if (auth.ticketId != expectedTicketId) revert TicketIndexMismatch();
         if (auth.expiry < block.timestamp) revert CommitExpired();
         if (usedCommitNonces[auth.user][auth.nonce]) revert CommitReplay();
 
         bytes memory commitData = abi.encodePacked(
             address(this),
             marketId,
+            auth.ticketId,
             auth.commitment,
             auth.user,
             auth.nonce,
@@ -251,14 +306,12 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
         usedCommitNonces[auth.user][auth.nonce] = true;
         commitments.push(auth.commitment);
+        commitmentUsers.push(auth.user);
         uint256 rake = (ticketSize * rakeBps) / 10_000;
         uint256 net = ticketSize - rake;
         totalEscrow += net;
         rakeCollected += rake;
-        if (rake > 0) {
-            IERC20(collateralToken).safeTransfer(protocolPool, rake);
-        }
-        emit Committed(commitments.length - 1, auth.commitment, totalEscrow);
+        emit Committed(expectedTicketId, auth.commitment, totalEscrow);
     }
 
     /// @notice Locks the market and stores the Merkle root over commitments.
@@ -275,22 +328,27 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (block.timestamp < commitDeadline) revert CommitWindowClosed();
         if (commitments.length == 0) revert NothingToLock();
         if (roots.length == 0 || roots.length != counts.length) revert BatchCountMismatch();
-        if (relayerSig.length != 0) {
-            bytes memory digestData = abi.encode(marketId, roots, counts, block.chainid);
-            bytes32 digest;
-            assembly {
-                digest := keccak256(add(digestData, 32), mload(digestData))
-            }
-            bytes32 signed = MessageHashUtils.toEthSignedMessageHash(digest);
-            address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
-            if (signed.recover(relayerSig) != relayerOwner) revert InvalidRelayerSignature();
+        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
+        if (relayerSig.length == 0) revert InvalidRelayerSignature();
+        bytes memory digestData = abi.encode(address(this), factory, marketId, roots, counts, block.chainid);
+        bytes32 digest;
+        assembly {
+            digest := keccak256(add(digestData, 32), mload(digestData))
         }
+        bytes32 signed = MessageHashUtils.toEthSignedMessageHash(digest);
+        address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
+        if (signed.recover(relayerSig) != relayerOwner) revert InvalidRelayerSignature();
 
+        uint256 expectedBatches = (commitments.length + BATCH_SIZE - 1) / BATCH_SIZE;
+        if (roots.length != expectedBatches) revert BatchCountMismatch();
         uint256 total = 0;
         for (uint256 i = 0; i < counts.length; ++i) {
             uint256 count = counts[i];
-            if (count == 0) revert BatchCountMismatch();
             if (count > BATCH_SIZE) revert BatchSizeExceeded();
+            uint256 remaining = commitments.length - total;
+            uint256 expectedCount = remaining > BATCH_SIZE ? BATCH_SIZE : remaining;
+            if (count != expectedCount) revert BatchCountMismatch();
             total += count;
         }
         if (total != commitments.length) revert BatchCountMismatch();
@@ -301,6 +359,16 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             batchRoots.push(roots[i]);
             batchCounts.push(counts[i]);
         }
+
+        lockedVerifierKeyHash = IVerifier(verifier).verifyingKeyHash();
+        currentBatchProofEpoch += 1;
+        settledBatchCount = 0;
+        settledEscrowSum = 0;
+        settledLiabilitySum = 0;
+        settledPoolYesSum = 0;
+        settledPoolNoSum = 0;
+        lockedAt = block.timestamp;
+        IProtocolPool(protocolPool).reserveLiability(address(this), protocolLiabilityCap);
 
         commitmentsRoot = roots.length == 1 ? roots[0] : bytes32(0);
         phase = Phase.Locked;
@@ -326,6 +394,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (batchRoots.length != 1) revert InvalidBatchIndex();
         if (phase != Phase.Locked) revert InvalidPhase();
         if (!resultPosted) revert ResultMissing();
+        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
+        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
 
         if (
             publicSignals[0] != uint256(batchRoots[0]) || publicSignals[1] != marketId
@@ -349,45 +420,23 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     ) external onlyOracle nonReentrant {
         if (phase != Phase.Locked) revert InvalidPhase();
         if (!resultPosted) revert ResultMissing();
+        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
+        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
         if (proofs.length != publicSignals.length || proofs.length != batchIndexes.length) {
             revert BatchProofLengthMismatch();
         }
         uint256 batchCount = batchRoots.length;
-        if (batchCount == 0 || proofs.length != batchCount) revert BatchProofLengthMismatch();
-
-        bool[] memory seen = new bool[](batchCount);
-        uint256 totalEscrowSum = 0;
-        uint256 totalLiabilitySum = 0;
-        uint256 poolYesSum = 0;
-        uint256 poolNoSum = 0;
+        if (batchCount == 0 || proofs.length == 0) revert BatchProofLengthMismatch();
 
         for (uint256 i = 0; i < proofs.length; ++i) {
-            uint256 batchIndex = batchIndexes[i];
-            if (batchIndex >= batchCount) revert InvalidBatchIndex();
-            if (seen[batchIndex]) revert InvalidBatchIndex();
-            seen[batchIndex] = true;
-
-            uint256[10] calldata signals = publicSignals[i];
-            if (
-                signals[0] != uint256(batchRoots[batchIndex]) || signals[1] != marketId
-                    || signals[2] != winningOutcomeId
-            ) revert TotalsMismatch();
-            if (signals[5] != rakeBps) revert RakeMismatch();
-            if (signals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
-            if (signals[9] != 0) revert PaddingMismatch();
-
-            bool ok = IVerifier(verifier).verifyProof(proofs[i], signals);
-            if (!ok) revert InvalidProof();
-
-            totalEscrowSum += signals[3];
-            totalLiabilitySum += signals[4];
-            poolYesSum += signals[6];
-            poolNoSum += signals[7];
+            _verifyBatchProof(proofs[i], publicSignals[i], batchIndexes[i], batchCount);
         }
 
-        if (totalEscrowSum != totalEscrow) revert TotalsMismatch();
-
-        _finalizeSettlement(totalEscrowSum, totalLiabilitySum, poolYesSum, poolNoSum);
+        if (settledBatchCount == batchCount) {
+            if (settledEscrowSum != totalEscrow) revert TotalsMismatch();
+            _finalizeSettlement(settledEscrowSum, settledLiabilitySum, settledPoolYesSum, settledPoolNoSum);
+        }
     }
 
     /// @notice Winning tickets reveal and pay the user directly.
@@ -402,9 +451,11 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     ) external nonReentrant {
         if (phase != Phase.Settled) revert InvalidPhase();
         if (claimsPaused) revert ClaimsPaused();
-        if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimWindowClosed();
+        if (claimsSwept) revert ClaimsAlreadySwept();
+        if (claimDeadline != 0 && block.timestamp > _effectiveClaimDeadline()) revert ClaimWindowClosed();
         if (outcomeId != winningOutcomeId) revert WrongOutcome();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        if (_ticketOwner(ticketId) != user) revert CommitmentUserMismatch();
         bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, user);
         if (!_verifyLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
@@ -412,18 +463,31 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         claimedLiability += payout;
         if (claimedLiability > totalLiability) revert OverClaimed();
 
-        IERC20(collateralToken).safeTransfer(user, payout);
+        _safeTransferExact(user, payout);
         emit Claimed(msg.sender, user, ticketId, payout);
     }
 
     /// @notice Enables refunds after the commit window closes; cancels further settlement/claims.
-    function enableRefunds() external onlyRelayerOrFactoryOwner {
+    function enableRefunds() external {
+        if (msg.sender != factory) revert NotFactory();
         if (phase == Phase.Settled) revert InvalidPhase();
-        if (block.timestamp < commitDeadline && !commitsPaused) revert RefundsUnavailable();
         if (phase == Phase.Cancelled) return;
+        if (phase == Phase.Commit) {
+            if (block.timestamp < commitDeadline) revert RefundsUnavailable();
+        } else if (phase == Phase.Locked) {
+            if (block.timestamp < lockedAt + SETTLEMENT_TIMEOUT_SECONDS) revert RefundsUnavailable();
+        } else {
+            revert InvalidPhase();
+        }
         commitsPaused = true;
         claimsPaused = true;
         phase = Phase.Cancelled;
+        uint256 minRefundDeadline = block.timestamp + CLAIM_WINDOW_SECONDS;
+        if (refundDeadline < minRefundDeadline) {
+            refundDeadline = minRefundDeadline;
+        }
+        refundDeadlineExtended = false;
+        _releaseLiabilityReservation();
         emit RefundsEnabled(msg.sender);
     }
 
@@ -438,15 +502,17 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bytes32[] calldata merkleProof
     ) external nonReentrant onlyRelayerOrFactoryOwner {
         if (phase != Phase.Cancelled) revert RefundsNotEnabled();
+        if (refundDeadline != 0 && block.timestamp > refundDeadline) revert RefundWindowClosed();
+        if (refundsSwept) revert ClaimsAlreadySwept();
         if (user == address(0)) revert InvalidAddress();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        if (_ticketOwner(ticketId) != user) revert CommitmentUserMismatch();
         bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, user);
         if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
-        uint256 rake = (ticketSize * rakeBps) / 10_000;
-        uint256 refundAmount = ticketSize - rake;
-        IERC20(collateralToken).safeTransfer(user, refundAmount);
+        uint256 refundAmount = ticketSize;
+        _safeTransferExact(user, refundAmount);
         emit Refunded(msg.sender, user, ticketId, refundAmount);
     }
 
@@ -460,15 +526,74 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bytes32[] calldata merkleProof
     ) external nonReentrant {
         if (phase != Phase.Cancelled) revert RefundsNotEnabled();
+        if (refundDeadline != 0 && block.timestamp > refundDeadline) revert RefundWindowClosed();
+        if (refundsSwept) revert ClaimsAlreadySwept();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        if (_ticketOwner(ticketId) != msg.sender) revert CommitmentUserMismatch();
         bytes32 leaf = _computeLeaf(ticketId, outcomeId, amount, payout, salt, msg.sender);
         if (!_verifyRefundLeaf(ticketId, leaf, merkleProof)) revert InvalidMerkleProof();
 
         claimedTickets[ticketId] = true;
-        uint256 rake = (ticketSize * rakeBps) / 10_000;
-        uint256 refundAmount = ticketSize - rake;
-        IERC20(collateralToken).safeTransfer(msg.sender, refundAmount);
+        uint256 refundAmount = ticketSize;
+        _safeTransferExact(msg.sender, refundAmount);
         emit Refunded(msg.sender, msg.sender, ticketId, refundAmount);
+    }
+
+    /// @notice Permissionless refund path that only needs the sealed ticket id in cancelled markets.
+    function refundTicket(uint256 ticketId) external nonReentrant {
+        if (phase != Phase.Cancelled) revert RefundsNotEnabled();
+        if (refundDeadline != 0 && block.timestamp > refundDeadline) revert RefundWindowClosed();
+        if (refundsSwept) revert ClaimsAlreadySwept();
+        if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+        address user = _ticketOwner(ticketId);
+        if (user == address(0)) revert CommitmentUserMismatch();
+
+        claimedTickets[ticketId] = true;
+        uint256 refundAmount = ticketSize;
+        _safeTransferExact(user, refundAmount);
+        emit Refunded(msg.sender, user, ticketId, refundAmount);
+    }
+
+    /// @notice Fallback claim path when users cannot reconstruct commitment preimages.
+    /// Oracle signs ticket-level payouts off-chain and anyone can execute delivery to the recorded ticket owner.
+    function claimWithOracleAuthorization(
+        uint256 ticketId,
+        uint256 payout,
+        uint256 expiry,
+        bytes calldata oracleSignature
+    ) external nonReentrant {
+        if (phase != Phase.Settled) revert InvalidPhase();
+        if (claimsPaused) revert ClaimsPaused();
+        if (claimsSwept) revert ClaimsAlreadySwept();
+        if (claimDeadline != 0 && block.timestamp > _effectiveClaimDeadline()) revert ClaimWindowClosed();
+        if (block.timestamp > expiry) revert OracleAuthorizationExpired();
+        if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
+
+        address user = _ticketOwner(ticketId);
+        if (user == address(0)) revert CommitmentUserMismatch();
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(
+                abi.encode(
+                    address(this),
+                    marketId,
+                    ticketId,
+                    user,
+                    winningOutcomeId,
+                    payout,
+                    expiry,
+                    block.chainid,
+                    "CLAIM_ORACLE_V1"
+                )
+            )
+        );
+        if (digest.recover(oracleSignature) != oracle) revert InvalidSignature();
+
+        claimedTickets[ticketId] = true;
+        claimedLiability += payout;
+        if (claimedLiability > totalLiability) revert OverClaimed();
+
+        _safeTransferExact(user, payout);
+        emit Claimed(msg.sender, user, ticketId, payout);
     }
 
     /// @notice Returns the sealed commitment stored at an index (for off-chain auditing).
@@ -526,9 +651,39 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit RelayerEscrowUpdated(newRelayerEscrow);
     }
 
+    /// @notice Rotate protocol pool routing during commit phase before lock reservations are taken.
+    function setProtocolPool(address newProtocolPool) external onlyFactory {
+        if (newProtocolPool == address(0)) revert InvalidAddress();
+        if (phase != Phase.Commit) revert InvalidPhase();
+        if (commitments.length != 0) revert InvalidPhase();
+        protocolPool = newProtocolPool;
+        emit ProtocolPoolUpdated(newProtocolPool);
+    }
+
+    /// @notice Rotate verifier metadata before terminal phases.
+    function setVerifier(address newVerifier, bytes32 newCircuitHash) external onlyFactory {
+        if (newVerifier == address(0)) revert InvalidAddress();
+        if (phase != Phase.Commit) revert InvalidPhase();
+        if (IVerifier(newVerifier).expectedInputs() != 10) revert VerifierInputCountMismatch();
+        if (IVerifier(newVerifier).circuitHash() != newCircuitHash) revert CircuitHashMismatch();
+        if (commitments.length != 0 && newCircuitHash != circuitHash) revert CircuitHashMismatch();
+        verifier = newVerifier;
+        circuitHash = newCircuitHash;
+        emit VerifierUpdated(newVerifier, newCircuitHash);
+    }
+
+    /// @notice Refreshes the locked verifier key hash before any batch proof is accepted.
+    function refreshLockedVerifierKeyHash() external onlyFactory {
+        if (phase != Phase.Locked) revert InvalidPhase();
+        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
+        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
+        emit LockedVerifierKeyRefreshed(lockedVerifierKeyHash);
+    }
+
     /// @notice Adjust the per-market protocol liability cap before settlement.
     function setProtocolLiabilityCap(uint256 newCap) external onlyFactory {
-        if (phase == Phase.Settled) revert InvalidPhase();
+        if (phase != Phase.Commit) revert InvalidPhase();
         protocolLiabilityCap = newCap;
         emit ProtocolLiabilityCapUpdated(newCap);
     }
@@ -540,16 +695,23 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     function setClaimsPaused(bool paused) external onlyFactory {
+        if (claimsSwept) revert ClaimsAlreadySwept();
+        if (phase == Phase.Settled) {
+            if (paused && !claimsPaused) {
+                claimPauseStartedAt = block.timestamp;
+            } else if (!paused && claimsPaused) {
+                claimPauseTotalDuration += block.timestamp - claimPauseStartedAt;
+                claimPauseStartedAt = 0;
+            }
+        }
         claimsPaused = paused;
         emit ClaimsPausedSet(paused);
     }
 
-    function _finalizeSettlement(
-        uint256 totalEscrow_,
-        uint256 totalLiability_,
-        uint256 poolYes_,
-        uint256 poolNo_
-    ) internal {
+    function _finalizeSettlement(uint256 totalEscrow_, uint256 totalLiability_, uint256 poolYes_, uint256 poolNo_)
+        internal
+    {
+        if (poolYes_ + poolNo_ != totalLiability_) revert SettlementInvariantMismatch();
         totalLiability = totalLiability_;
         poolTotalYes = poolYes_;
         poolTotalNo = poolNo_;
@@ -571,13 +733,18 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 tokenBalance = IERC20(collateralToken).balanceOf(address(this));
         uint256 surplus = tokenBalance > totalLiability_ ? tokenBalance - totalLiability_ : 0;
         if (surplus > 0) {
-            IERC20(collateralToken).safeTransfer(protocolPool, surplus);
+            _safeTransferExact(protocolPool, surplus);
         }
 
-        if (claimDeadline == 0 || claimDeadline < block.timestamp) {
-            claimDeadline = block.timestamp + CLAIM_WINDOW_SECONDS;
+        uint256 minClaimDeadline = block.timestamp + CLAIM_WINDOW_SECONDS;
+        if (claimDeadline < minClaimDeadline) {
+            claimDeadline = minClaimDeadline;
         }
+        claimDeadlineExtended = false;
+        claimPauseTotalDuration = 0;
+        claimPauseStartedAt = claimsPaused ? block.timestamp : 0;
 
+        _releaseLiabilityReservation();
         phase = Phase.Settled;
         emit Settled(totalLiability_, rakeAmount, protocolTopUp, poolTotalYes, poolTotalNo);
     }
@@ -586,31 +753,100 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     function extendCommitDeadline(uint256 newDeadline) external onlyFactory {
         if (newDeadline <= commitDeadline) revert DeadlineExtendOnly();
         if (phase != Phase.Commit) revert InvalidPhase();
+        if (commitDeadlineExtended) revert CommitDeadlineAlreadyExtended();
+        if (newDeadline > commitDeadline + MAX_COMMIT_DEADLINE_EXTENSION) revert DeadlineTooFar();
         commitDeadline = newDeadline;
+        commitDeadlineExtended = true;
     }
 
     /// @notice Extend-only claim deadline updates. Cannot shorten.
     function extendClaimDeadline(uint256 newDeadline) external onlyFactory {
+        if (phase != Phase.Settled) revert InvalidPhase();
+        if (claimsSwept) revert ClaimsAlreadySwept();
+        if (claimDeadlineExtended) revert ClaimDeadlineAlreadyExtended();
+        if (claimDeadline == 0 || block.timestamp > _effectiveClaimDeadline()) revert ClaimWindowClosed();
         if (newDeadline <= claimDeadline) revert DeadlineExtendOnly();
-        if (newDeadline > block.timestamp + MAX_CLAIM_DEADLINE_EXTENSION) revert DeadlineTooFar();
+        if (newDeadline > claimDeadline + MAX_CLAIM_DEADLINE_EXTENSION) revert DeadlineTooFar();
         claimDeadline = newDeadline;
+        claimDeadlineExtended = true;
         emit ClaimDeadlineExtended(newDeadline);
+    }
+
+    /// @notice Extend-only refund deadline updates. Can be used once for cancelled markets.
+    function extendRefundDeadline(uint256 newDeadline) external onlyFactory {
+        if (phase != Phase.Cancelled) revert InvalidPhase();
+        if (refundsSwept) revert ClaimsAlreadySwept();
+        if (refundDeadlineExtended) revert RefundDeadlineAlreadyExtended();
+        if (refundDeadline == 0 || block.timestamp > refundDeadline) revert RefundWindowClosed();
+        if (newDeadline <= refundDeadline) revert DeadlineExtendOnly();
+        if (newDeadline > refundDeadline + MAX_CLAIM_DEADLINE_EXTENSION) revert DeadlineTooFar();
+        refundDeadline = newDeadline;
+        refundDeadlineExtended = true;
+        emit RefundDeadlineExtended(newDeadline);
     }
 
     /// @notice Sweep unclaimed payouts after the claim deadline passes.
     function sweepUnclaimed(address recipient) external onlyFactory {
         if (phase != Phase.Settled) revert InvalidPhase();
-        if (claimDeadline == 0 || block.timestamp <= claimDeadline) revert ClaimWindowOpen();
+        if (claimDeadline == 0 || block.timestamp <= _effectiveClaimDeadline()) revert ClaimWindowOpen();
         if (claimsSwept) revert ClaimsAlreadySwept();
-        if (recipient != protocolPool && recipient != relayerEscrow) revert InvalidAddress();
+        if (recipient != protocolPool) revert InvalidAddress();
 
         claimsPaused = true;
         claimsSwept = true;
         uint256 remaining = IERC20(collateralToken).balanceOf(address(this));
         if (remaining > 0) {
-            IERC20(collateralToken).safeTransfer(recipient, remaining);
+            _safeTransferExact(recipient, remaining);
         }
         emit ClaimsSwept(recipient, remaining);
+    }
+
+    /// @notice Sweep unrefunded collateral after cancellation refund window closes.
+    function sweepCancelledRefunds(address recipient) external onlyFactory {
+        if (phase != Phase.Cancelled) revert InvalidPhase();
+        if (refundDeadline == 0 || block.timestamp <= refundDeadline) revert ClaimWindowOpen();
+        if (refundsSwept) revert ClaimsAlreadySwept();
+        if (recipient != protocolPool) revert InvalidAddress();
+
+        refundsSwept = true;
+        uint256 remaining = IERC20(collateralToken).balanceOf(address(this));
+        if (remaining > 0) {
+            _safeTransferExact(recipient, remaining);
+        }
+        emit RefundsSwept(recipient, remaining);
+    }
+
+    function _verifyBatchProof(
+        bytes calldata proof,
+        uint256[10] calldata signals,
+        uint16 batchIndex,
+        uint256 batchCount
+    ) internal {
+        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
+        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
+        if (batchIndex >= batchCount) revert InvalidBatchIndex();
+        if (batchProofEpoch[batchIndex] == currentBatchProofEpoch) revert BatchAlreadyVerified();
+        if (signals[0] != uint256(batchRoots[batchIndex]) || signals[1] != marketId || signals[2] != winningOutcomeId) {
+            revert TotalsMismatch();
+        }
+        if (signals[5] != rakeBps) revert RakeMismatch();
+        if (signals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
+        if (signals[9] != 0) revert PaddingMismatch();
+
+        bool ok = IVerifier(verifier).verifyProof(proof, signals);
+        if (!ok) revert InvalidProof();
+
+        batchProofEpoch[batchIndex] = currentBatchProofEpoch;
+        settledBatchCount += 1;
+        settledEscrowSum += signals[3];
+        settledLiabilitySum += signals[4];
+        settledPoolYesSum += signals[6];
+        settledPoolNoSum += signals[7];
+        emit BatchProofAccepted(batchIndex, settledBatchCount);
+    }
+
+    function _releaseLiabilityReservation() internal {
+        IProtocolPool(protocolPool).releaseLiabilityReservation(address(this));
     }
 
     function _computeLeaf(
@@ -620,11 +856,13 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 payout,
         bytes32 salt,
         address user
-    )
-        internal
-        pure
-        returns (bytes32 hash)
-    {
+    ) internal pure returns (bytes32 hash) {
+        if (
+            ticketId >= SNARK_SCALAR_FIELD || outcomeId >= SNARK_SCALAR_FIELD || amount >= SNARK_SCALAR_FIELD
+                || payout >= SNARK_SCALAR_FIELD || uint256(salt) >= SNARK_SCALAR_FIELD
+        ) {
+            revert FieldElementOutOfRange();
+        }
         uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
         uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
         uint256 h2 = PoseidonT3.poseidon([amount, payout]);
@@ -658,11 +896,49 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     function _verifyRefundLeaf(uint256 ticketId, bytes32 leaf, bytes32[] calldata proof) internal view returns (bool) {
-        if (batchRoots.length == 0) {
-            if (ticketId >= commitments.length) return false;
-            return commitments[ticketId] == leaf;
+        proof;
+        if (ticketId >= commitments.length) return false;
+        return commitments[ticketId] == leaf;
+    }
+
+    function _effectiveClaimDeadline() internal view returns (uint256) {
+        uint256 effective = claimDeadline + claimPauseTotalDuration;
+        if (claimsPaused && claimPauseStartedAt != 0) {
+            effective += block.timestamp - claimPauseStartedAt;
         }
-        return _verifyLeaf(ticketId, leaf, proof);
+        return effective;
+    }
+
+    function _ticketOwner(uint256 ticketId) internal view returns (address) {
+        if (ticketId >= commitmentUsers.length) return address(0);
+        return commitmentUsers[ticketId];
+    }
+
+    function _isVerifierApprovedForSettlement() internal view returns (bool) {
+        try IFactoryVerifierPolicy(factory).isVerifierCurrentlyApproved(verifier, circuitHash) returns (bool approved) {
+            return approved;
+        } catch {
+            return false;
+        }
+    }
+
+    function _safeTransferExact(address recipient, uint256 amount) internal {
+        uint256 senderBalanceBefore = IERC20(collateralToken).balanceOf(address(this));
+        uint256 recipientBalanceBefore = IERC20(collateralToken).balanceOf(recipient);
+        IERC20(collateralToken).safeTransfer(recipient, amount);
+        uint256 senderBalanceAfter = IERC20(collateralToken).balanceOf(address(this));
+        if (senderBalanceAfter > senderBalanceBefore) revert FeeOnTransferNotSupported();
+        uint256 senderDebited = senderBalanceBefore - senderBalanceAfter;
+        if (senderDebited != amount) revert FeeOnTransferNotSupported();
+        uint256 recipientBalanceAfter = IERC20(collateralToken).balanceOf(recipient);
+        if (recipientBalanceAfter < recipientBalanceBefore) revert FeeOnTransferNotSupported();
+        uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
+        if (recipientReceived < amount) revert FeeOnTransferNotSupported();
+    }
+
+    /// @notice Returns true if a batch proof has been accepted in the current settlement epoch.
+    function batchProofVerified(uint16 batchIndex) external view returns (bool) {
+        return batchProofEpoch[batchIndex] == currentBatchProofEpoch;
     }
 
     /// @notice Returns the next ticket id (commitments length); useful for off-chain pre-checks.

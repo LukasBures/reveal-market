@@ -11,6 +11,7 @@ interface IRevealMarket {
 
     struct CommitAuth {
         bytes32 commitment;
+        uint256 ticketId;
         address user;
         uint256 nonce;
         uint256 expiry;
@@ -20,6 +21,12 @@ interface IRevealMarket {
     function commitWithAuthorization(CommitAuth calldata auth, bytes calldata signature) external payable;
 
     function ticketSize() external view returns (uint256);
+
+    function factory() external view returns (address);
+
+    function relayerEscrow() external view returns (address);
+
+    function collateralToken() external view returns (address);
 
     function commitDeadline() external view returns (uint256);
 
@@ -36,7 +43,13 @@ interface IRevealMarket {
     function marketState()
         external
         view
-        returns (bytes32 commitmentsRoot_, uint256 nextTicketId_, Phase phase_, uint256 commitDeadline_, uint256 winningOutcomeId_);
+        returns (
+            bytes32 commitmentsRoot_,
+            uint256 nextTicketId_,
+            Phase phase_,
+            uint256 commitDeadline_,
+            uint256 winningOutcomeId_
+        );
 
     function batchRoots(uint256 index) external view returns (bytes32);
 
@@ -47,6 +60,8 @@ interface IRevealMarket {
     function extendClaimDeadline(uint256 newDeadline) external;
 
     function sweepUnclaimed(address recipient) external;
+
+    function refundTicket(uint256 ticketId) external;
 
     function verifyAndSettleBatched(
         bytes[] calldata proofs,

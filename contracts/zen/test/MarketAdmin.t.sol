@@ -23,7 +23,8 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayerOwner = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayerOwner = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -45,6 +46,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
 
@@ -60,6 +62,10 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 1_000 ether);
+        token.approve(address(protocolPool), 1_000 ether);
+        protocolPool.deposit(1_000 ether);
     }
 
     function testAuthorizationSignerRotationDuringCommit() external {
@@ -71,6 +77,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("leaf"), user),
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 4 hours,
@@ -84,19 +91,21 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         relayerEscrow.deposit(ticketSize);
 
         bytes memory badSig = _signAuth(auth, authKey);
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, badSig);
 
         bytes memory goodSig = _signAuth(auth, newKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, goodSig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, goodSig);
         assertEq(market.totalEscrow(), ticketSize - (ticketSize * market.rakeBps()) / 10_000, "commit succeeded");
     }
 
     function testOracleRotation() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("leaf2"), user),
+            ticketId: 0,
             user: user,
             nonce: 2,
             expiry: block.timestamp + 4 hours,
@@ -108,8 +117,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         address newOracle = makeAddr("newOracle");
         vm.prank(address(this));
@@ -124,13 +132,14 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         roots[0] = root;
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
 
         vm.prank(oracle);
         vm.expectRevert(RevealMarket.NotOracle.selector);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
 
         vm.prank(newOracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
     }
 
     function testRelayerRotationAllowsNewRelayer() external {
@@ -144,6 +153,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("leaf3"), user),
+            ticketId: 0,
             user: user,
             nonce: 3,
             expiry: block.timestamp + 4 hours,
@@ -156,8 +166,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         newRelayer.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
 
-        vm.prank(newRelayer.owner());
-        newRelayer.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(newRelayer, newRelayer.owner(), user, address(market), auth, sig);
         assertEq(market.totalEscrow(), ticketSize - (ticketSize * market.rakeBps()) / 10_000);
 
         vm.expectRevert(RevealMarket.NotRelayer.selector);
@@ -175,6 +184,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         uint256 netTicket = ticketSize - (ticketSize * market.rakeBps()) / 10_000;
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 1, netTicket, netTicket, _salt("leaf4"), user),
+            ticketId: 0,
             user: user,
             nonce: 4,
             expiry: block.timestamp + 4 hours,
@@ -186,8 +196,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         vm.warp(commitDeadline + 1);
         bytes32 root = _lockSingleBatch(oracle, auth.commitment);
@@ -222,9 +231,24 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         roots[0] = root;
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.prank(caller);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         return root;
+    }
+
+    function _approveAndCommit(
+        RelayerEscrow escrow,
+        address relayerCaller,
+        address commitUser,
+        address marketAddr,
+        IRevealMarket.CommitAuth memory auth,
+        bytes memory sig
+    ) internal {
+        vm.prank(commitUser);
+        escrow.approveCommitAuthorization(marketAddr, auth);
+        vm.prank(relayerCaller);
+        escrow.commitOnBehalf(commitUser, marketAddr, auth, sig);
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {
@@ -233,6 +257,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -243,6 +268,14 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
         return abi.encodePacked(r, s, v);
     }
 
@@ -267,6 +300,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
     function testRakeLockedAfterFirstCommit() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("rake-lock"), user),
+            ticketId: 0,
             user: user,
             nonce: 88,
             expiry: block.timestamp + 4 hours,
@@ -278,8 +312,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         vm.prank(address(this));
         vm.expectRevert(RevealMarket.RakeLocked.selector);
@@ -294,6 +327,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("deadline-leaf"), user),
+            ticketId: 0,
             user: user,
             nonce: 77,
             expiry: block.timestamp + 4 hours,
@@ -305,8 +339,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         vm.warp(commitDeadline + 2 days);
         _lockSingleBatch(oracle, auth.commitment);
@@ -314,6 +347,24 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
         vm.prank(address(this));
         factory.extendMarketCommitDeadline(address(market), newCommit + 1 days);
+    }
+
+    function testCommitDeadlineExtensionIsOneShot() external {
+        uint256 firstExtension = commitDeadline + 2 hours;
+        vm.prank(address(this));
+        factory.extendMarketCommitDeadline(address(market), firstExtension);
+        assertEq(market.commitDeadline(), firstExtension);
+
+        vm.prank(address(this));
+        vm.expectRevert(RevealMarket.CommitDeadlineAlreadyExtended.selector);
+        factory.extendMarketCommitDeadline(address(market), firstExtension + 1 hours);
+    }
+
+    function testCommitDeadlineExtensionRejectsTooFar() external {
+        uint256 tooFar = commitDeadline + market.MAX_COMMIT_DEADLINE_EXTENSION() + 1;
+        vm.prank(address(this));
+        vm.expectRevert(RevealMarket.DeadlineTooFar.selector);
+        factory.extendMarketCommitDeadline(address(market), tooFar);
     }
 
     function testRelayerEscrowRotationGuard() external {
@@ -330,9 +381,96 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         factory.updateMarketRelayer(address(market), RelayerEscrow(address(0)));
     }
 
+    function testRelayerRotationLockedAfterFirstCommit() external {
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("relayer-rotation-lock"), user),
+            ticketId: 0,
+            user: user,
+            nonce: 404,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        bytes memory sig = _signAuth(auth, authKey);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
+
+        RelayerEscrow newEscrow = new RelayerEscrow(makeAddr("rotated-owner"), IERC20(address(token)));
+        vm.prank(newEscrow.owner());
+        newEscrow.setMarketFactory(address(factory));
+
+        vm.prank(address(this));
+        vm.expectRevert(MarketFactory.RelayerRotationLocked.selector);
+        factory.updateMarketRelayer(address(market), newEscrow);
+    }
+
+    function testRelayerBalanceMigration() external {
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        assertEq(relayerEscrow.balances(user), ticketSize);
+
+        RelayerEscrow newEscrow = new RelayerEscrow(makeAddr("migration-relayer-owner"), IERC20(address(token)));
+        vm.prank(newEscrow.owner());
+        newEscrow.setMarketFactory(address(factory));
+
+        vm.prank(address(this));
+        factory.updateMarketRelayer(address(market), newEscrow);
+
+        address[] memory users = new address[](1);
+        users[0] = user;
+        vm.prank(address(this));
+        factory.migrateMarketRelayerBalances(address(market), relayerEscrow, users);
+
+        assertEq(relayerEscrow.balances(user), 0, "old relayer drained");
+        assertEq(newEscrow.balances(user), ticketSize, "new relayer credited");
+    }
+
+    function testProtocolPoolMigrationForMarket() external {
+        ProtocolPool newPool = new ProtocolPool(address(this), IERC20(address(token)));
+        newPool.setMarketFactory(address(factory));
+
+        vm.prank(address(this));
+        factory.updateMarketProtocolPool(address(market), newPool);
+
+        assertEq(market.protocolPool(), address(newPool));
+        assertEq(newPool.liabilityCap(address(market)), market.protocolLiabilityCap());
+    }
+
+    function testProtocolPoolMigrationLockedAfterFirstCommit() external {
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("pool-lock"), user),
+            ticketId: 0,
+            user: user,
+            nonce: 909,
+            expiry: block.timestamp + 4 hours,
+            ticketValue: ticketSize
+        });
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+        bytes memory sig = _signAuth(auth, authKey);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
+
+        ProtocolPool newPool = new ProtocolPool(address(this), IERC20(address(token)));
+        newPool.setMarketFactory(address(factory));
+
+        vm.prank(address(this));
+        vm.expectRevert(MarketFactory.ProtocolPoolRotationLocked.selector);
+        factory.updateMarketProtocolPool(address(market), newPool);
+    }
+
     function testAuthorizationSignerGuard() external {
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: _leaf(0, 0, ticketSize, ticketSize, _salt("guard-leaf"), user),
+            ticketId: 0,
             user: user,
             nonce: 9,
             expiry: block.timestamp + 4 hours,
@@ -344,8 +482,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         vm.prank(address(this));
         factory.updateAuthorizationSigner(address(market), makeAddr("newSigner"));
@@ -360,6 +497,7 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         bytes32 leaf = _leaf(0, 0, ticketSize, ticketSize, _salt("pause-commit"), user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
+            ticketId: 0,
             user: user,
             nonce: 55,
             expiry: block.timestamp + 4 hours,
@@ -376,15 +514,16 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         factory.setMarketCommitsPaused(address(market), true);
 
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(relayerOwner);
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.CommitsPaused.selector);
+        vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
 
         vm.prank(address(this));
         factory.setMarketCommitsPaused(address(market), false);
 
-        vm.prank(relayerOwner);
-        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+        _approveAndCommit(relayerEscrow, relayerOwner, user, address(market), auth, sig);
 
         vm.warp(commitDeadline + 1);
         bytes32 root = _lockSingleBatch(oracle, auth.commitment);

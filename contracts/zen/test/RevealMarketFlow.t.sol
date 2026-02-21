@@ -22,7 +22,8 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
     MockVerifier private verifier;
     MockERC20 private token;
 
-    address private relayer = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayer = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -55,6 +56,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayer);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
 
@@ -83,7 +85,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(depositAmount);
 
-        bytes32 salt = keccak256("salt");
+        bytes32 salt = _salt("salt");
         uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
         uint256 netAmount = ticketSize - rakePerTicket;
         uint256 payoutAmount = netAmount + 0.1 ether;
@@ -91,6 +93,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         bytes32 leaf = _leaf(0, outcome, netAmount, payoutAmount, salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 12 hours,
@@ -102,6 +105,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     uint256(1),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -114,6 +118,8 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
@@ -128,8 +134,9 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         roots[0] = root;
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.startPrank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         market.postResult(outcome);
 
         uint256[10] memory signals = [
@@ -140,7 +147,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
             payoutAmount,
             rakeBps,
             uint256(0),
-            netAmount,
+            payoutAmount,
             uint256(circuitHash),
             uint256(0)
         ];
@@ -149,12 +156,12 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         vm.stopPrank();
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
-        assertEq(protocolPool.consumedLiability(address(market)), payoutAmount - netAmount, "top-up recorded");
+        assertEq(protocolPool.consumedLiability(address(market)), payoutAmount - ticketSize, "top-up recorded");
 
         // Wrong user should fail because user is bound into the commitment leaf
         address impostor = makeAddr("impostor");
         vm.prank(relayer);
-        vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
+        vm.expectRevert(RevealMarket.CommitmentUserMismatch.selector);
         market.claim(impostor, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
 
         vm.prank(relayer);
@@ -167,9 +174,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         // protocol pool retains rake and any unused bankroll
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
         assertApproxEqAbs(
-            token.balanceOf(address(protocolPool)),
-            5 ether + expectedRake - (payoutAmount - netAmount),
-            2
+            token.balanceOf(address(protocolPool)), 5 ether + expectedRake - (payoutAmount - netAmount), 2
         );
     }
 
@@ -181,7 +186,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(depositAmount);
 
-        bytes32 salt = keccak256("sweep-salt");
+        bytes32 salt = _salt("sweep-salt");
         uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
         uint256 netAmount = ticketSize - rakePerTicket;
         uint256 payoutAmount = netAmount + 0.1 ether;
@@ -189,6 +194,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         bytes32 leaf = _leaf(0, outcome, netAmount, payoutAmount, salt, user);
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
+            ticketId: 0,
             user: user,
             nonce: 9,
             expiry: block.timestamp + 12 hours,
@@ -200,6 +206,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     uint256(1),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -212,6 +219,8 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
@@ -223,8 +232,9 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         roots[0] = root;
         uint16[] memory counts = new uint16[](1);
         counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
         vm.startPrank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         market.postResult(outcome);
 
         uint256[10] memory signals = [
@@ -235,7 +245,7 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
             payoutAmount,
             rakeBps,
             uint256(0),
-            netAmount,
+            payoutAmount,
             uint256(circuitHash),
             uint256(0)
         ];
@@ -259,5 +269,106 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         assertTrue(market.claimsPaused(), "claims paused");
         assertEq(token.balanceOf(address(market)), 0, "market drained");
         assertEq(token.balanceOf(address(protocolPool)), poolBefore + marketBalance, "sweep to pool");
+    }
+
+    function testClaimPauseExtendsSweepDeadline() external {
+        uint256 depositAmount = 3 ether;
+        token.mint(user, depositAmount);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), depositAmount);
+        vm.prank(user);
+        relayerEscrow.deposit(depositAmount);
+
+        bytes32 salt = _salt("pause-sweep-salt");
+        uint256 rakePerTicket = (ticketSize * rakeBps) / 10_000;
+        uint256 netAmount = ticketSize - rakePerTicket;
+        uint256 payoutAmount = netAmount + 0.1 ether;
+        uint256 outcome = 1;
+        bytes32 leaf = _leaf(0, outcome, netAmount, payoutAmount, salt, user);
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: leaf,
+            ticketId: 0,
+            user: user,
+            nonce: 19,
+            expiry: block.timestamp + 12 hours,
+            ticketValue: ticketSize
+        });
+
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(
+                abi.encodePacked(
+                    address(market),
+                    uint256(1),
+                    auth.ticketId,
+                    auth.commitment,
+                    auth.user,
+                    auth.nonce,
+                    auth.expiry,
+                    auth.ticketValue,
+                    block.chainid
+                )
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
+        vm.prank(relayer);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
+
+        vm.warp(commitDeadline + 1);
+        bytes32[] memory leaves = new bytes32[](1);
+        leaves[0] = leaf;
+        bytes32 root = _buildBatchRoot(leaves, 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
+        vm.startPrank(oracle);
+        market.lockBatches(roots, counts, relayerSig);
+        market.postResult(outcome);
+
+        uint256[10] memory signals = [
+            uint256(root),
+            uint256(1),
+            outcome,
+            netAmount,
+            payoutAmount,
+            rakeBps,
+            uint256(0),
+            payoutAmount,
+            uint256(circuitHash),
+            uint256(0)
+        ];
+
+        market.verifyAndSettle("", signals);
+        vm.stopPrank();
+
+        uint256 deadline = market.claimDeadline();
+        vm.warp(deadline - 1 days);
+        factory.setMarketClaimsPaused(address(market), true);
+        vm.warp(deadline + 1);
+        vm.expectRevert(RevealMarket.ClaimWindowOpen.selector);
+        factory.sweepUnclaimed(address(market), address(protocolPool));
+
+        vm.warp(block.timestamp + 3 days);
+        vm.expectRevert(RevealMarket.ClaimWindowOpen.selector);
+        factory.sweepUnclaimed(address(market), address(protocolPool));
+
+        factory.setMarketClaimsPaused(address(market), false);
+        uint256 effectiveDeadline = market.claimDeadline() + market.claimPauseTotalDuration();
+        vm.warp(effectiveDeadline + 1);
+        factory.sweepUnclaimed(address(market), address(protocolPool));
+        assertTrue(market.claimsSwept(), "claims eventually swept after unpause");
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
+        return abi.encodePacked(r, s, v);
     }
 }

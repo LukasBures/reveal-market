@@ -31,6 +31,22 @@ contract RelayerEscrowGuardsTest is Test {
         assertEq(escrow.marketFactory(), factory);
     }
 
+    function testSetMarketFactoryCannotRotate() external {
+        vm.prank(owner);
+        escrow.setMarketFactory(factory);
+
+        vm.prank(owner);
+        vm.expectRevert(RelayerEscrow.FactoryLocked.selector);
+        escrow.setMarketFactory(makeAddr("nextFactory"));
+    }
+
+    function testSetMarketFactoryRejectsSpoofedOwnerContract() external {
+        EscrowFactorySpoof spoof = new EscrowFactorySpoof(owner);
+        vm.expectRevert();
+        spoof.attack(escrow, factory);
+        assertEq(escrow.marketFactory(), address(0), "factory unchanged");
+    }
+
     function testRegisterMarketRequiresFactory() external {
         vm.prank(owner);
         escrow.setMarketFactory(factory);
@@ -39,7 +55,12 @@ contract RelayerEscrowGuardsTest is Test {
         escrow.registerMarket(makeAddr("market"));
 
         vm.prank(factory);
-        escrow.registerMarket(makeAddr("market"));
+        vm.expectRevert(RelayerEscrow.InvalidMarket.selector);
+        escrow.registerMarket(makeAddr("invalid"));
+
+        DummyMarketGuard market = new DummyMarketGuard(factory, address(escrow), address(token));
+        vm.prank(factory);
+        escrow.registerMarket(address(market));
     }
 
     function testDepositForOnlyOwner() external {
@@ -57,13 +78,14 @@ contract RelayerEscrowGuardsTest is Test {
     }
 
     function testCommitOnBehalfInsufficientBalance() external {
-        DummyMarketGuard market = new DummyMarketGuard();
+        DummyMarketGuard market = new DummyMarketGuard(address(this), address(escrow), address(token));
         vm.prank(owner);
         escrow.setMarketFactory(address(this));
         escrow.registerMarket(address(market));
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: bytes32(uint256(1)),
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 1,
@@ -76,7 +98,7 @@ contract RelayerEscrowGuardsTest is Test {
     }
 
     function testCommitOnBehalfPaused() external {
-        DummyMarketGuard market = new DummyMarketGuard();
+        DummyMarketGuard market = new DummyMarketGuard(address(this), address(escrow), address(token));
         vm.prank(owner);
         escrow.setMarketFactory(address(this));
         escrow.registerMarket(address(market));
@@ -89,6 +111,7 @@ contract RelayerEscrowGuardsTest is Test {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: bytes32(uint256(1)),
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 1,
@@ -101,6 +124,39 @@ contract RelayerEscrowGuardsTest is Test {
         vm.prank(owner);
         vm.expectRevert(RelayerEscrow.CommitsPaused.selector);
         escrow.commitOnBehalf(user, address(market), auth, hex"");
+    }
+
+    function testCommitOnBehalfRequiresUserAuthorization() external {
+        DummyMarketGuard market = new DummyMarketGuard(address(this), address(escrow), address(token));
+        vm.prank(owner);
+        escrow.setMarketFactory(address(this));
+        escrow.registerMarket(address(market));
+
+        token.mint(user, 1 ether);
+        vm.prank(user);
+        token.approve(address(escrow), 1 ether);
+        vm.prank(user);
+        escrow.deposit(1 ether);
+
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: bytes32(uint256(99)),
+            ticketId: 0,
+            user: user,
+            nonce: 77,
+            expiry: block.timestamp + 1 hours,
+            ticketValue: 1 ether
+        });
+
+        vm.prank(owner);
+        vm.expectRevert(RelayerEscrow.CommitAuthorizationMissing.selector);
+        escrow.commitOnBehalf(user, address(market), auth, hex"");
+
+        vm.prank(user);
+        escrow.approveCommitAuthorization(address(market), auth);
+
+        vm.prank(owner);
+        escrow.commitOnBehalf(user, address(market), auth, hex"");
+        assertEq(escrow.balances(user), 0, "ticket debited after approval");
     }
 
     function testCommitPauseAllowsFactory() external {
@@ -119,13 +175,16 @@ contract RelayerEscrowGuardsTest is Test {
     function testCreditFromMarketRequiresAllowed() external {
         vm.prank(owner);
         escrow.setMarketFactory(address(this));
-        DummyMarketGuard market = new DummyMarketGuard();
+        DummyMarketGuard market = new DummyMarketGuard(address(this), address(escrow), address(token));
         escrow.registerMarket(address(market));
 
         vm.prank(stranger);
         vm.expectRevert(RelayerEscrow.UnknownMarket.selector);
         escrow.creditFromMarket(user, 1 ether);
 
+        token.mint(address(market), 1 ether);
+        vm.prank(address(market));
+        token.approve(address(escrow), 1 ether);
         vm.prank(address(market));
         escrow.creditFromMarket(user, 1 ether);
         assertEq(escrow.balances(user), 1 ether);
@@ -134,6 +193,15 @@ contract RelayerEscrowGuardsTest is Test {
 
 contract DummyMarketGuard is IRevealMarket {
     uint256 public ticket = 1 ether;
+    address public override factory;
+    address public override relayerEscrow;
+    address public override collateralToken;
+
+    constructor(address factory_, address relayerEscrow_, address collateralToken_) {
+        factory = factory_;
+        relayerEscrow = relayerEscrow_;
+        collateralToken = collateralToken_;
+    }
 
     function commitWithAuthorization(CommitAuth calldata, bytes calldata) external payable {}
 
@@ -169,6 +237,8 @@ contract DummyMarketGuard is IRevealMarket {
 
     function sweepUnclaimed(address) external pure {}
 
+    function refundTicket(uint256) external pure {}
+
     function marketState()
         external
         pure
@@ -195,3 +265,19 @@ contract DummyMarketGuard is IRevealMarket {
 
     function verifyAndSettleBatched(bytes[] calldata, uint256[10][] calldata, uint16[] calldata) external {}
 }
+
+    contract EscrowFactorySpoof {
+        address private immutable spoofedOwner;
+
+        constructor(address owner_) {
+            spoofedOwner = owner_;
+        }
+
+        function owner() external view returns (address) {
+            return spoofedOwner;
+        }
+
+        function attack(RelayerEscrow escrow, address attackerFactory) external {
+            escrow.setMarketFactory(attackerFactory);
+        }
+    }

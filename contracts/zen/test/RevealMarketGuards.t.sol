@@ -48,6 +48,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
@@ -62,6 +63,10 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 1_000 ether);
+        token.approve(address(protocolPool), 1_000 ether);
+        protocolPool.deposit(1_000 ether);
     }
 
     function testLockRevertsUseLockBatches() external {
@@ -97,10 +102,11 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         uint16[] memory counts = new uint16[](2);
         counts[0] = 1;
         counts[1] = 0;
+        bytes memory sig = _signRelayer(roots, counts, relayerKey);
 
         vm.expectRevert(RevealMarket.BatchCountMismatch.selector);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, sig);
     }
 
     function testLockBatchesRejectsBatchSizeExceeded() external {
@@ -110,10 +116,11 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = _toUint16(BATCH_SIZE + 1);
+        bytes memory sig = _signRelayer(roots, counts, relayerKey);
 
         vm.expectRevert(RevealMarket.BatchSizeExceeded.selector);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, sig);
     }
 
     function testLockBatchesRejectsTotalMismatch() external {
@@ -123,10 +130,11 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
         uint16[] memory counts = new uint16[](1);
         counts[0] = 2;
+        bytes memory sig = _signRelayer(roots, counts, relayerKey);
 
         vm.expectRevert(RevealMarket.BatchCountMismatch.selector);
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, sig);
     }
 
     function testLockBatchesRejectsInvalidRelayerSignature() external {
@@ -139,6 +147,22 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         bytes memory sig = _signRelayer(roots, counts, 0xBADD);
 
         vm.expectRevert(RevealMarket.InvalidRelayerSignature.selector);
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, sig);
+    }
+
+    function testLockBatchesRejectsVerifierCircuitDrift() external {
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("circuit-drift-before-lock"));
+        vm.warp(commitDeadline + 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        bytes memory sig = _signRelayer(roots, counts, relayerKey);
+
+        verifier.setCircuitHash(keccak256("drifted-circuit"));
+
+        vm.expectRevert(RevealMarket.CircuitHashMismatch.selector);
         vm.prank(oracle);
         market.lockBatches(roots, counts, sig);
     }
@@ -221,6 +245,34 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         market.verifyAndSettle("", signals);
     }
 
+    function testVerifyAndSettleRevertsAfterVerifierRevocation() external {
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("verifier-revoked"));
+        bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, netAmount, payout);
+
+        factory.setVerifierApproval(address(verifier), false);
+
+        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+    }
+
+    function testCommitWithAuthorizationRejectsRelayerOwnerDirectCall() external {
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: bytes32(uint256(1)),
+            ticketId: 0,
+            user: user,
+            nonce: 77,
+            expiry: block.timestamp + 1 hours,
+            ticketValue: ticketSize
+        });
+        bytes memory sig = _signAuth(auth, authKey);
+
+        vm.expectRevert(RevealMarket.NotRelayer.selector);
+        vm.prank(relayerOwner);
+        market.commitWithAuthorization(auth, sig);
+    }
+
     function testClaimRevertsWrongOutcome() external {
         (bytes32 leaf, bytes32[] memory leaves, uint256 netAmount, uint256 payout) =
             _commitTicket(1, _salt("claim-outcome"));
@@ -258,18 +310,94 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         market.verifyAndSettle("", signals);
 
         vm.expectRevert(RevealMarket.InvalidPhase.selector);
-        vm.prank(relayerOwner);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
+    }
+
+    function testEnableRefundsRequiresTimeoutAfterResultPosted() external {
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("refund-after-result"));
+        _lockAndPost(leaf, 1);
+
+        vm.expectRevert(RevealMarket.RefundsUnavailable.selector);
+        factory.enableMarketRefunds(address(market));
+
+        vm.warp(block.timestamp + market.SETTLEMENT_TIMEOUT_SECONDS());
+        factory.enableMarketRefunds(address(market));
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
+    }
+
+    function testSetVerifierRejectsWhenLocked() external {
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("verifier-locked"));
+        _lockSingle(leaf, "");
+
+        vm.expectRevert(RevealMarket.InvalidPhase.selector);
+        factory.updateMarketVerifier(address(market), address(verifier), circuitHash);
+    }
+
+    function testSetProtocolLiabilityCapRejectsWhenLocked() external {
+        (bytes32 leaf,,,) = _commitTicket(1, _salt("cap-locked"));
+        _lockSingle(leaf, "");
+
+        vm.expectRevert(RevealMarket.InvalidPhase.selector);
+        factory.updateProtocolLiabilityCap(address(market), protocolCap + 1);
+    }
+
+    function testRefreshLockedVerifierKeyHashCannotRewriteLockedAnchor() external {
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refresh-key"));
+        bytes32 root = _lockSingle(leaf, "");
+        verifier.setVerifyingKeyHash(keccak256("rotated-key"));
+
+        vm.prank(oracle);
+        market.postResult(1);
+        uint256[10] memory signals = _signals(root, 1, netAmount, payout);
+
+        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.setVerifierApproval(address(verifier), true);
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.refreshMarketLockedVerifierKey(address(market));
+
+        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+    }
+
+    function testExtendClaimDeadlineOnlyOnce() external {
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("claim-extend"));
+        bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, netAmount, payout);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        uint256 firstExtension = market.claimDeadline() + 1 days;
+        factory.extendMarketClaimDeadline(address(market), firstExtension);
+        assertEq(market.claimDeadline(), firstExtension);
+
+        vm.expectRevert(RevealMarket.ClaimDeadlineAlreadyExtended.selector);
+        factory.extendMarketClaimDeadline(address(market), firstExtension + 1 days);
+    }
+
+    function testExtendRefundDeadlineOnlyOnce() external {
+        _commitTicket(1, _salt("refund-extend"));
+        vm.warp(commitDeadline + 1);
+        factory.enableMarketRefunds(address(market));
+
+        uint256 firstExtension = market.refundDeadline() + 1 days;
+        factory.extendMarketRefundDeadline(address(market), firstExtension);
+        assertEq(market.refundDeadline(), firstExtension);
+
+        vm.expectRevert(RevealMarket.RefundDeadlineAlreadyExtended.selector);
+        factory.extendMarketRefundDeadline(address(market), firstExtension + 1 days);
     }
 
     function testRefundRevertsInvalidLeaf() external {
-        (, , uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refund-leaf"));
+        (,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refund-leaf"));
         vm.warp(commitDeadline + 1);
-        vm.prank(relayerOwner);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
 
         vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
-        vm.prank(relayerOwner);
         market.refund(user, 0, 1, netAmount, payout, _salt("wrong-salt"), new bytes32[](0));
     }
 
@@ -291,12 +419,15 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: leaf,
+            ticketId: 0,
             user: user,
             nonce: 1,
             expiry: block.timestamp + 12 hours,
             ticketValue: ticketSize
         });
         bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }
@@ -307,9 +438,10 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         counts[0] = 1;
         vm.warp(commitDeadline + 1);
         roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
+        bytes memory sig = relayerSig.length == 0 ? _signRelayer(roots, counts, relayerKey) : relayerSig;
 
         vm.prank(oracle);
-        market.lockBatches(roots, counts, relayerSig);
+        market.lockBatches(roots, counts, sig);
         return roots[0];
     }
 
@@ -346,6 +478,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -365,7 +498,7 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         returns (bytes memory)
     {
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
-            keccak256(abi.encode(market.marketId(), roots, counts, block.chainid))
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         return abi.encodePacked(r, s, v);

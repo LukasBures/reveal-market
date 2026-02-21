@@ -22,4 +22,35 @@ contract DeployVerifyingKeyLoadTest is Test, Deploy {
         assertEq(config.ic[0][0], 19497960300567760639660261670012584085507675705850371475691093687439179069054);
         assertEq(config.ic[10][1], 8223598890083111104239146542008747113584684453192694534904016914676203259216);
     }
+
+    function testLoadVerifyingKeyRejectsOverlongG1Array() external {
+        vm.expectRevert(bytes("invalid g1 coords"));
+        this.loadVkJson(_minimalVkJson(true, false));
+    }
+
+    function testLoadVerifyingKeyRejectsOverlongIcRow() external {
+        vm.expectRevert(bytes("invalid ic coords"));
+        this.loadVkJson(_minimalVkJson(false, true));
+    }
+
+    function loadVkJson(string memory json) external pure returns (VerifyingKeyConfig memory) {
+        return _loadVerifyingKeyJson(json);
+    }
+
+    function _minimalVkJson(bool overlongG1, bool overlongIcRow) private pure returns (string memory) {
+        string memory alpha = overlongG1 ? "[\"1\",\"2\",\"1\",\"9\"]" : "[\"1\",\"2\",\"1\"]";
+        string memory ic0 = overlongIcRow ? "[\"11\",\"12\",\"1\",\"7\"]" : "[\"11\",\"12\",\"1\"]";
+        return string.concat(
+            "{\"vk_alpha_1\":",
+            alpha,
+            ",\"vk_beta_2\":[[\"1\",\"2\"],[\"3\",\"4\"],[\"1\",\"0\"]]",
+            ",\"vk_gamma_2\":[[\"1\",\"2\"],[\"3\",\"4\"],[\"1\",\"0\"]]",
+            ",\"vk_delta_2\":[[\"1\",\"2\"],[\"3\",\"4\"],[\"1\",\"0\"]]",
+            ",\"expectedInputs\":1",
+            ",\"IC\":[",
+            ic0,
+            ",[\"13\",\"14\",\"1\"]]",
+            ",\"circuitHash\":\"0x00000000000000000000000000000000000000000000000000000000000000aa\"}"
+        );
+    }
 }

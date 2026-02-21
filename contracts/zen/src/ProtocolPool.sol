@@ -17,11 +17,15 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     mapping(address => bool) public allowedMarket;
     mapping(address => uint256) public liabilityCap;
     mapping(address => uint256) public consumedLiability;
+    mapping(address => uint256) public reservedLiability;
     mapping(address => bool) public marketDrawPaused;
+    uint256 public reservedTotal;
 
     event MarketRegistered(address indexed market, uint256 cap);
     event CapUpdated(address indexed market, uint256 oldCap, uint256 newCap);
     event LiabilityDrawn(address indexed market, uint256 amount, uint256 totalDrawn);
+    event LiabilityReserved(address indexed market, uint256 amount);
+    event LiabilityReservationReleased(address indexed market, uint256 amount);
     event FundsReceived(address indexed from, uint256 amount);
     event Withdrawn(address indexed to, uint256 amount);
     event MarketFactoryUpdated(address indexed factory);
@@ -35,8 +39,14 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     error InsufficientPool();
     error CapacityExceeded();
     error DrawsPaused();
+    error ReservationExceeded();
+    error ActiveReservations();
+    error InvalidAddress();
+    error FeeOnTransferNotSupported();
 
     uint256 public capacity; // optional global risk budget across markets
+    uint256 public capacityLimit;
+    bool public capacityEnabled;
     bool public drawsPaused;
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
@@ -64,6 +74,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         allowedMarket[market] = true;
         liabilityCap[market] = cap;
         consumedLiability[market] = 0;
+        reservedLiability[market] = 0;
         marketDrawPaused[market] = false;
         emit MarketRegistered(market, cap);
     }
@@ -75,35 +86,100 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         emit CapUpdated(market, old, newCap);
     }
 
+    /// @notice Called by a market during lock to reserve capacity for a future settlement draw.
+    function reserveLiability(address market, uint256 amount) external {
+        if (!allowedMarket[msg.sender] || msg.sender != market) revert Unauthorized();
+        if (amount == 0) {
+            return;
+        }
+        if (capacityEnabled) {
+            if (amount > capacity) revert CapacityExceeded();
+            capacity -= amount;
+        } else {
+            uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
+            if (balance < reservedTotal || amount > balance - reservedTotal) revert InsufficientPool();
+        }
+        reservedLiability[market] += amount;
+        reservedTotal += amount;
+        emit LiabilityReserved(market, amount);
+    }
+
+    /// @notice Releases remaining reserved capacity once settlement finalizes or refunds are enabled.
+    function releaseLiabilityReservation(address market) external {
+        if (!allowedMarket[msg.sender] || msg.sender != market) revert Unauthorized();
+        uint256 reserved = reservedLiability[market];
+        if (reserved == 0) {
+            return;
+        }
+        reservedLiability[market] = 0;
+        reservedTotal -= reserved;
+        if (capacityEnabled) {
+            capacity += reserved;
+            if (capacity > capacityLimit) {
+                capacity = capacityLimit;
+            }
+        }
+        emit LiabilityReservationReleased(market, reserved);
+    }
+
     /// @notice Called by markets to draw protocol coverage up to their configured cap.
     function draw(address market, uint256 amount) external nonReentrant {
         if (!allowedMarket[msg.sender] || msg.sender != market) revert Unauthorized();
-        if (drawsPaused || marketDrawPaused[market]) revert DrawsPaused();
+        uint256 reserved = reservedLiability[market];
+        if (reserved == 0 && (drawsPaused || marketDrawPaused[market])) revert DrawsPaused();
         uint256 newConsumed = consumedLiability[market] + amount;
         if (newConsumed > liabilityCap[market]) revert CapExceeded();
-        if (capacity != 0 && amount > capacity) revert CapacityExceeded();
+        if (reserved != 0) {
+            if (amount > reserved) revert ReservationExceeded();
+            reservedLiability[market] = reserved - amount;
+            reservedTotal -= amount;
+        } else if (capacityEnabled) {
+            if (amount > capacity) revert CapacityExceeded();
+            capacity -= amount;
+        }
         uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
 
+        uint256 marketBalanceBefore = COLLATERAL_TOKEN.balanceOf(market);
         consumedLiability[market] = newConsumed;
-        if (capacity != 0) {
-            capacity -= amount;
-        }
         COLLATERAL_TOKEN.safeTransfer(market, amount);
+        uint256 balanceAfter = COLLATERAL_TOKEN.balanceOf(address(this));
+        if (balanceAfter > balance) revert InsufficientPool();
+        uint256 debited = balance - balanceAfter;
+        if (debited != amount) revert InsufficientPool();
+        uint256 marketBalanceAfter = COLLATERAL_TOKEN.balanceOf(market);
+        if (marketBalanceAfter < marketBalanceBefore) revert InsufficientPool();
+        uint256 marketReceived = marketBalanceAfter - marketBalanceBefore;
+        if (marketReceived < amount) revert InsufficientPool();
         emit LiabilityDrawn(market, amount, newConsumed);
     }
 
     /// @notice Owner can withdraw idle funds (e.g., to re-seed the pool elsewhere).
     function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
+        if (to == address(0)) revert InvalidAddress();
         uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
+        if (balance - amount < reservedTotal) revert InsufficientPool();
+        uint256 senderBalanceBefore = balance;
+        uint256 recipientBalanceBefore = COLLATERAL_TOKEN.balanceOf(to);
         COLLATERAL_TOKEN.safeTransfer(to, amount);
+        uint256 senderBalanceAfter = COLLATERAL_TOKEN.balanceOf(address(this));
+        if (senderBalanceAfter > senderBalanceBefore) revert FeeOnTransferNotSupported();
+        uint256 senderDebited = senderBalanceBefore - senderBalanceAfter;
+        if (senderDebited != amount) revert FeeOnTransferNotSupported();
+        uint256 recipientBalanceAfter = COLLATERAL_TOKEN.balanceOf(to);
+        if (recipientBalanceAfter < recipientBalanceBefore) revert FeeOnTransferNotSupported();
+        uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
+        if (recipientReceived < amount) revert FeeOnTransferNotSupported();
         emit Withdrawn(to, amount);
     }
 
     /// @notice Sets a global risk budget; zero disables capacity tracking.
     function setCapacity(uint256 newCapacity) external onlyOwner {
+        if (reservedTotal != 0) revert ActiveReservations();
         capacity = newCapacity;
+        capacityLimit = newCapacity;
+        capacityEnabled = newCapacity != 0;
         emit CapacityUpdated(newCapacity);
     }
 

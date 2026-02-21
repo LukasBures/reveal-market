@@ -30,12 +30,15 @@ contract MarketFactoryGuardsTest is Test {
         relayer = new RelayerEscrow(owner, IERC20(address(token)));
         implementation = new RevealMarket();
         verifier = new MockVerifier(circuitHash);
+        verifier.transferOwnership(owner);
         factory = new MarketFactory(address(implementation), pool, relayer, address(token), owner);
 
         vm.prank(owner);
         pool.setMarketFactory(address(factory));
         vm.prank(owner);
         relayer.setMarketFactory(address(factory));
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier), true);
     }
 
     function testCreateMarketRevertsWhenPaused() external {
@@ -84,6 +87,43 @@ contract MarketFactoryGuardsTest is Test {
         factory.createMarket(params);
     }
 
+    function testCreateMarketRevertsOnUnsupportedCommitmentCap() external {
+        MarketFactory.CreateMarketParams memory params = _params(block.timestamp + 1 days);
+        params.maxCommitments = (uint256(type(uint16).max) + 1) * 256 + 1;
+        vm.prank(owner);
+        vm.expectRevert(RevealMarket.MaxCommitmentsUnsupported.selector);
+        factory.createMarket(params);
+    }
+
+    function testCreateMarketRevertsWhenVerifierNotApproved() external {
+        MockVerifier otherVerifier = new MockVerifier(keccak256("other"));
+        MarketFactory.CreateMarketParams memory params = _params(block.timestamp + 1 days);
+        params.verifier = address(otherVerifier);
+        params.circuitHash = otherVerifier.circuitHash();
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.VerifierNotApproved.selector);
+        factory.createMarket(params);
+    }
+
+    function testSetVerifierApprovalRequiresOwnerCoupling() external {
+        MockVerifier foreignVerifier = new MockVerifier(keccak256("foreign"));
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.VerifierOwnerMismatch.selector);
+        factory.setVerifierApproval(address(foreignVerifier), true);
+    }
+
+    function testSetVerifierApprovalPinsKeyHashPerAddress() external {
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier), false);
+
+        verifier.setVerifyingKeyHash(keccak256("rotated-key"));
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.setVerifierApproval(address(verifier), true);
+    }
+
     function testSetGlobalRakeBpsRejectsTooHigh() external {
         vm.prank(owner);
         vm.expectRevert(MarketFactory.InvalidRakeBps.selector);
@@ -111,6 +151,121 @@ contract MarketFactoryGuardsTest is Test {
         factory.setRelayerCommitsPaused(true);
     }
 
+    function testSetRelayerCommitsPausedSkipsFailingHistoricalRelayer() external {
+        vm.prank(owner);
+        factory.createMarket(_params(block.timestamp + 1 days));
+
+        RevertingRelayerStub failing = new RevertingRelayerStub(IERC20(address(token)), address(factory));
+        vm.prank(owner);
+        factory.setRelayerEscrow(RelayerEscrow(payable(address(failing))));
+        vm.prank(owner);
+        factory.setRelayerEscrow(relayer);
+
+        vm.prank(owner);
+        factory.setRelayerCommitsPaused(true);
+        assertTrue(relayer.commitsPaused(), "active relayer paused");
+    }
+
+    function testSetRelayerCommitsPausedContinuesIfActiveRelayerFails() external {
+        vm.prank(owner);
+        address marketAddress = factory.createMarket(_params(block.timestamp + 1 days));
+
+        RevertingRelayerStub failing = new RevertingRelayerStub(IERC20(address(token)), address(factory));
+        vm.prank(owner);
+        factory.updateMarketRelayer(marketAddress, RelayerEscrow(payable(address(failing))));
+
+        vm.prank(owner);
+        factory.setRelayerCommitsPaused(true);
+    }
+
+    function testSetRelayerCommitsPausedBatchPausesActiveRelayer() external {
+        vm.prank(owner);
+        factory.createMarket(_params(block.timestamp + 1 days));
+
+        vm.prank(owner);
+        factory.setRelayerCommitsPausedBatch(true, 0, 1);
+        assertTrue(relayer.commitsPaused(), "active relayer paused");
+    }
+
+    function testSetRelayerCommitsPausedBatchRangeGuards() external {
+        uint256 maxBatch = factory.MAX_RELAYER_PAUSE_BATCH();
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.InvalidPauseRange.selector);
+        factory.setRelayerCommitsPausedBatch(true, 0, 0);
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.PauseBatchTooLarge.selector);
+        factory.setRelayerCommitsPausedBatch(true, 0, maxBatch + 1);
+
+        vm.prank(owner);
+        factory.createMarket(_params(block.timestamp + 1 days));
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.InvalidPauseRange.selector);
+        factory.setRelayerCommitsPausedBatch(true, 1, 1);
+
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.InvalidPauseRange.selector);
+        factory.setRelayerCommitsPausedBatch(true, 0, 2);
+    }
+
+    function testSetRelayerCommitsPausedChunksLargeActiveSets() external {
+        uint256 totalRelayers = factory.MAX_RELAYER_PAUSE_BATCH() + 1;
+        for (uint256 i = 0; i < totalRelayers; ++i) {
+            RelayerEscrow nextRelayer = new RelayerEscrow(owner, IERC20(address(token)));
+            vm.prank(owner);
+            nextRelayer.setMarketFactory(address(factory));
+            vm.prank(owner);
+            factory.setRelayerEscrow(nextRelayer);
+            vm.prank(owner);
+            factory.createMarket(_params(block.timestamp + 2 days + i));
+        }
+
+        vm.prank(owner);
+        factory.setRelayerCommitsPaused(true);
+
+        address first = factory.activeRelayers(0);
+        address last = factory.activeRelayers(totalRelayers - 1);
+        assertTrue(RelayerEscrow(payable(first)).commitsPaused(), "first active relayer paused");
+        assertTrue(RelayerEscrow(payable(last)).commitsPaused(), "last active relayer paused");
+    }
+
+    function testUpdateMarketRelayerSkipsFailedUnregister() external {
+        vm.prank(owner);
+        address marketAddress = factory.createMarket(_params(block.timestamp + 1 days));
+
+        RevertingRelayerStub failing = new RevertingRelayerStub(IERC20(address(token)), address(factory));
+        vm.prank(owner);
+        factory.updateMarketRelayer(marketAddress, RelayerEscrow(payable(address(failing))));
+
+        RelayerEscrow nextRelayer = new RelayerEscrow(owner, IERC20(address(token)));
+        vm.prank(owner);
+        nextRelayer.setMarketFactory(address(factory));
+
+        vm.prank(owner);
+        factory.updateMarketRelayer(marketAddress, nextRelayer);
+        assertEq(RevealMarket(payable(marketAddress)).relayerEscrow(), address(nextRelayer));
+    }
+
+    function testUpdateMarketRelayerSelfRotationDoesNotStrandOldRelayer() external {
+        vm.prank(owner);
+        address marketAddress = factory.createMarket(_params(block.timestamp + 1 days));
+
+        vm.prank(owner);
+        factory.updateMarketRelayer(marketAddress, relayer);
+
+        RelayerEscrow nextRelayer = new RelayerEscrow(owner, IERC20(address(token)));
+        vm.prank(owner);
+        nextRelayer.setMarketFactory(address(factory));
+        vm.prank(owner);
+        factory.updateMarketRelayer(marketAddress, nextRelayer);
+
+        assertEq(factory.activeRelayers(0), address(nextRelayer));
+        vm.expectRevert();
+        factory.activeRelayers(1);
+    }
+
     function _params(uint256 deadline) private view returns (MarketFactory.CreateMarketParams memory) {
         return MarketFactory.CreateMarketParams({
             oracle: oracle,
@@ -122,5 +277,25 @@ contract MarketFactoryGuardsTest is Test {
             authorizationSigner: signer,
             protocolLiabilityCap: 1 ether
         });
+    }
+}
+
+contract RevertingRelayerStub {
+    IERC20 public immutable COLLATERAL_TOKEN;
+    address public immutable marketFactory;
+
+    constructor(IERC20 token, address factory) {
+        COLLATERAL_TOKEN = token;
+        marketFactory = factory;
+    }
+
+    function registerMarket(address) external pure {}
+
+    function unregisterMarket(address) external pure {
+        revert("stale relayer");
+    }
+
+    function setCommitsPaused(bool) external pure {
+        revert("stale relayer");
     }
 }

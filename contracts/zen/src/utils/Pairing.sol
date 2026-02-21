@@ -7,6 +7,8 @@ pragma solidity ^0.8.33;
 library Pairing {
     // BN254 base field prime (q) used for curve coordinates and pairing checks.
     uint256 internal constant PRIME_Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+    uint256 private constant G1_GENERATOR_X = 1;
+    uint256 private constant G1_GENERATOR_Y = 2;
 
     struct G1Point {
         uint256 X;
@@ -104,5 +106,42 @@ library Pairing {
         p2[2] = c2;
         p2[3] = d2;
         return pairing(p1, p2);
+    }
+
+    /// @notice Validates that a G1 point is accepted by the precompile.
+    function isValidG1Point(G1Point memory p) internal view returns (bool) {
+        if (p.X == 0 && p.Y == 0) {
+            return true;
+        }
+        uint256[3] memory input;
+        input[0] = p.X;
+        input[1] = p.Y;
+        input[2] = 1;
+        uint256[2] memory out;
+        bool success;
+        assembly ("memory-safe") {
+            success := staticcall(gas(), 0x07, input, 0x60, out, 0x40)
+        }
+        return success;
+    }
+
+    /// @notice Validates that a G2 point is accepted by the pairing precompile.
+    function isValidG2Point(G2Point memory p) internal view returns (bool) {
+        if (p.X[0] == 0 && p.X[1] == 0 && p.Y[0] == 0 && p.Y[1] == 0) {
+            return true;
+        }
+        uint256[6] memory input;
+        input[0] = G1_GENERATOR_X;
+        input[1] = G1_GENERATOR_Y;
+        input[2] = p.X[0];
+        input[3] = p.X[1];
+        input[4] = p.Y[0];
+        input[5] = p.Y[1];
+        uint256[1] memory out;
+        bool success;
+        assembly ("memory-safe") {
+            success := staticcall(gas(), 0x08, input, 0xc0, out, 0x20)
+        }
+        return success;
     }
 }

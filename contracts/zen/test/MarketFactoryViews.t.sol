@@ -29,6 +29,7 @@ contract MarketFactoryViewsTest is Test {
         relayerEscrow = new RelayerEscrow(owner, IERC20(address(token)));
         protocolPool = new ProtocolPool(owner, IERC20(address(token)));
         verifier = new MockVerifier(circuitHash);
+        verifier.transferOwnership(owner);
         implementation = new RevealMarket();
         factory = new MarketFactory(address(implementation), protocolPool, relayerEscrow, address(token), owner);
 
@@ -36,6 +37,8 @@ contract MarketFactoryViewsTest is Test {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(owner);
         relayerEscrow.setMarketFactory(address(factory));
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier), true);
 
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
             oracle: oracle,
@@ -81,9 +84,14 @@ contract MarketFactoryViewsTest is Test {
     }
 
     function testCreateMarketEmitsMarketCreated() external {
+        MockVerifier verifier2 = new MockVerifier(circuitHash);
+        verifier2.transferOwnership(owner);
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier2), true);
+
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
             oracle: oracle,
-            verifier: address(verifier),
+            verifier: address(verifier2),
             circuitHash: circuitHash,
             commitDeadline: block.timestamp + 2 days,
             fixedTicketSize: 0.1 ether,

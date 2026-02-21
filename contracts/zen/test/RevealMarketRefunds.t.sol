@@ -23,11 +23,13 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayerOwner = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayerOwner = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
     address private user = makeAddr("user");
+    address private stranger = makeAddr("stranger");
     bytes32 private circuitHash = keccak256("settlement");
     uint256 private ticketSize = 1 ether;
     uint256 private protocolCap = 3 ether;
@@ -47,6 +49,7 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
@@ -61,63 +64,72 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 1_000 ether);
+        token.approve(address(protocolPool), 1_000 ether);
+        protocolPool.deposit(1_000 ether);
     }
 
     function testEnableRefundsRequiresCommitDeadline() external {
-        vm.prank(relayerOwner);
         vm.expectRevert(RevealMarket.RefundsUnavailable.selector);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
     }
 
-    function testEnableRefundsAllowsEarlyCancelWhenPaused() external {
+    function testEnableRefundsStillRequiresDeadlineWhenPaused() external {
         factory.setMarketCommitsPaused(address(market), true);
-        vm.prank(relayerOwner);
-        market.enableRefunds();
-        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
-        assertTrue(market.commitsPaused(), "commits paused");
-        assertTrue(market.claimsPaused(), "claims paused");
+        vm.expectRevert(RevealMarket.RefundsUnavailable.selector);
+        factory.enableMarketRefunds(address(market));
     }
 
     function testRefundFlowAfterEnable() external {
-        bytes32 salt = keccak256("refund-salt");
+        bytes32 salt = _salt("refund-salt");
         bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
-        vm.prank(relayerOwner);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
         assertTrue(market.commitsPaused(), "commits paused");
         assertTrue(market.claimsPaused(), "claims paused");
 
-        uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
-        vm.prank(relayerOwner);
+        uint256 fullTicket = ticketSize;
         market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
-        assertEq(token.balanceOf(user), netTicket, "refund credited");
+        assertEq(token.balanceOf(user), fullTicket, "refund credited");
 
-        vm.prank(relayerOwner);
         vm.expectRevert(RevealMarket.TicketAlreadyClaimed.selector);
         market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
-    function testRefundRequiresEnable() external {
-        bytes32 salt = keccak256("refund-disabled");
+    function testRefundAllowsRelayerOwnerAssistance() external {
+        bytes32 salt = _salt("refund-assisted");
         bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
+        vm.warp(commitDeadline + 1);
+        factory.enableMarketRefunds(address(market));
+
         vm.prank(relayerOwner);
+        market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
+        assertEq(token.balanceOf(user), ticketSize, "relayer-assisted refund credited");
+    }
+
+    function testRefundRequiresEnable() external {
+        bytes32 salt = _salt("refund-disabled");
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
+        _depositAndCommit(leaf, 1);
+
         vm.expectRevert(RevealMarket.RefundsNotEnabled.selector);
         market.refund(user, 0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
     function testRefundUnauthorized() external {
-        bytes32 salt = keccak256("refund-unauth");
+        bytes32 salt = _salt("refund-unauth");
         bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.NotAuthorized.selector);
@@ -125,32 +137,88 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
     }
 
     function testRefundSelfAfterEnable() external {
-        bytes32 salt = keccak256("refund-self");
+        bytes32 salt = _salt("refund-self");
         bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.warp(commitDeadline + 1);
-        vm.prank(relayerOwner);
-        market.enableRefunds();
+        factory.enableMarketRefunds(address(market));
 
-        uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
+        uint256 fullTicket = ticketSize;
         vm.prank(user);
         market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
-        assertEq(token.balanceOf(user), netTicket, "self refund credited");
+        assertEq(token.balanceOf(user), fullTicket, "self refund credited");
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.TicketAlreadyClaimed.selector);
         market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
     }
 
+    function testRefundTicketAllowsPermissionlessExecution() external {
+        bytes32 salt = _salt("refund-ticket");
+        bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
+        _depositAndCommit(leaf, 91);
+
+        vm.warp(commitDeadline + 1);
+        factory.enableMarketRefunds(address(market));
+
+        vm.prank(stranger);
+        market.refundTicket(0);
+        assertEq(token.balanceOf(user), ticketSize, "ticket owner refunded");
+    }
+
+    function testRefundIgnoresMerkleProofAfterLockedTimeoutCancel() external {
+        bytes32 salt = _salt("refund-fallback");
+        bytes32 leaf = _leaf(0, 0, ticketSize, ticketSize, salt, user);
+        _depositAndCommit(leaf, 92);
+
+        vm.warp(commitDeadline + 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = bytes32(uint256(123)); // intentionally invalid for stored commitment
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, relayerSig);
+
+        vm.warp(block.timestamp + market.SETTLEMENT_TIMEOUT_SECONDS());
+        factory.enableMarketRefunds(address(market));
+
+        vm.prank(user);
+        market.refundSelf(0, 0, ticketSize, ticketSize, salt, new bytes32[](0));
+        assertEq(token.balanceOf(user), ticketSize, "refund fallback succeeds");
+    }
+
     function testRefundSelfRequiresEnable() external {
-        bytes32 salt = keccak256("refund-self-disabled");
+        bytes32 salt = _salt("refund-self-disabled");
         bytes32 leaf = _leaf(0, 1, ticketSize, ticketSize, salt, user);
         _depositAndCommit(leaf, 1);
 
         vm.prank(user);
         vm.expectRevert(RevealMarket.RefundsNotEnabled.selector);
         market.refundSelf(0, 1, ticketSize, ticketSize, salt, new bytes32[](0));
+    }
+
+    function testEnableRefundsRequiresLockedTimeoutBeforeResult() external {
+        bytes32 salt = _salt("locked-timeout");
+        bytes32 leaf = _leaf(0, 0, ticketSize, ticketSize, salt, user);
+        _depositAndCommit(leaf, 1);
+
+        vm.warp(commitDeadline + 1);
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = _buildBatchRoot(_wrapLeaf(leaf), 1);
+        uint16[] memory counts = new uint16[](1);
+        counts[0] = 1;
+        bytes memory relayerSig = _signRelayer(roots, counts);
+        vm.prank(oracle);
+        market.lockBatches(roots, counts, relayerSig);
+
+        vm.expectRevert(RevealMarket.RefundsUnavailable.selector);
+        factory.enableMarketRefunds(address(market));
+
+        vm.warp(block.timestamp + market.SETTLEMENT_TIMEOUT_SECONDS());
+        factory.enableMarketRefunds(address(market));
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
     }
 
     function _depositAndCommit(bytes32 commitment, uint256 nonce) internal {
@@ -162,12 +230,15 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
 
         IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
             commitment: commitment,
+            ticketId: market.nextTicketId(),
             user: user,
             nonce: nonce,
             expiry: block.timestamp + 12 hours,
             ticketValue: ticketSize
         });
         bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }
@@ -178,6 +249,7 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -191,11 +263,24 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
         return abi.encodePacked(r, s, v);
     }
 
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
     function _leaf(uint256 ticketId, uint256 outcomeId, uint256 amount, uint256 payout, bytes32 salt, address leafUser)
         internal
         pure
         returns (bytes32)
     {
         return _poseidonLeaf(ticketId, outcomeId, amount, payout, salt, leafUser);
+    }
+
+    function _wrapLeaf(bytes32 leaf) private pure returns (bytes32[] memory leaves) {
+        leaves = new bytes32[](1);
+        leaves[0] = leaf;
     }
 }

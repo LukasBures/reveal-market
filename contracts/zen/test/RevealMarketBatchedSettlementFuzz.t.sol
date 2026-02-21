@@ -23,7 +23,8 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
     MockERC20 private token;
     RevealMarket private market;
 
-    address private relayerOwner = makeAddr("relayer");
+    uint256 private relayerKey = 0xBEEF;
+    address private relayerOwner = vm.addr(relayerKey);
     address private oracle = makeAddr("oracle");
     uint256 private authKey = 0xA11CE;
     address private authSigner = vm.addr(authKey);
@@ -45,6 +46,7 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
         protocolPool.setMarketFactory(address(factory));
         vm.prank(relayerOwner);
         relayerEscrow.setMarketFactory(address(factory));
+        factory.setVerifierApproval(address(verifier), true);
 
         commitDeadline = block.timestamp + 1 days;
         MarketFactory.CreateMarketParams memory params = MarketFactory.CreateMarketParams({
@@ -59,6 +61,10 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
         });
 
         market = RevealMarket(payable(factory.createMarket(params)));
+
+        token.mint(address(this), 2_000 ether);
+        token.approve(address(protocolPool), 2_000 ether);
+        protocolPool.deposit(2_000 ether);
     }
 
     function testFuzzBatchedSettlementTotals(uint8 batchCountRaw, uint8 lastBatchSizeRaw) external {
@@ -83,12 +89,15 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
                 batchLeaves[batchIndex][i] = leaf;
                 IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
                     commitment: leaf,
+                    ticketId: ticketId,
                     user: user,
                     nonce: ticketId + 1,
                     expiry: block.timestamp + 12 hours,
                     ticketValue: ticketSize
                 });
                 bytes memory sig = _signAuth(auth, authKey);
+                vm.prank(user);
+                relayerEscrow.approveCommitAuthorization(address(market), auth);
                 vm.prank(relayerOwner);
                 relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
                 ticketId++;
@@ -102,9 +111,10 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
             roots[i] = _buildBatchRoot(batchLeaves[i], batchLeaves[i].length);
             counts[i] = _toUint16(batchLeaves[i].length);
         }
+        bytes memory relayerSig = _signRelayer(roots, counts);
 
         vm.prank(oracle);
-        market.lockBatches(roots, counts, "");
+        market.lockBatches(roots, counts, relayerSig);
         vm.prank(oracle);
         market.postResult(0);
 
@@ -156,6 +166,7 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
                 abi.encodePacked(
                     address(market),
                     market.marketId(),
+                    auth.ticketId,
                     auth.commitment,
                     auth.user,
                     auth.nonce,
@@ -166,6 +177,14 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signRelayer(bytes32[] memory roots, uint16[] memory counts) private view returns (bytes memory) {
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(address(market), address(factory), market.marketId(), roots, counts, block.chainid))
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(relayerKey, digest);
         return abi.encodePacked(r, s, v);
     }
 }

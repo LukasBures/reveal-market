@@ -12,15 +12,16 @@ contract RelayerEscrowEventsTest is Test {
     MockERC20 private token;
     address private owner = makeAddr("relayer");
     address private user = makeAddr("user");
-    address private market = makeAddr("market");
+    RelayerEscrowEventMarket private market;
 
     function setUp() external {
         token = new MockERC20();
         escrow = new RelayerEscrow(owner, IERC20(address(token)));
         vm.prank(owner);
         escrow.setMarketFactory(address(this));
+        market = new RelayerEscrowEventMarket(address(this), address(escrow), address(token));
         vm.prank(address(this));
-        escrow.registerMarket(market);
+        escrow.registerMarket(address(market));
     }
 
     function testDepositWithdrawEvents() external {
@@ -39,9 +40,24 @@ contract RelayerEscrowEventsTest is Test {
     }
 
     function testCreditEvent() external {
+        token.mint(address(market), 0.2 ether);
+        vm.prank(address(market));
+        token.approve(address(escrow), 0.2 ether);
         vm.expectEmit(true, true, false, true);
-        emit RelayerEscrow.CreditReceived(market, user, 0.2 ether);
-        vm.prank(market);
+        emit RelayerEscrow.CreditReceived(address(market), user, 0.2 ether);
+        vm.prank(address(market));
         escrow.creditFromMarket(user, 0.2 ether);
+    }
+}
+
+contract RelayerEscrowEventMarket {
+    address public factory;
+    address public relayerEscrow;
+    address public collateralToken;
+
+    constructor(address factory_, address relayerEscrow_, address collateralToken_) {
+        factory = factory_;
+        relayerEscrow = relayerEscrow_;
+        collateralToken = collateralToken_;
     }
 }

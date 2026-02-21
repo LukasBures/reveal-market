@@ -6,9 +6,11 @@ import {PoseidonT3} from "../../src/crypto/PoseidonT3.sol";
 abstract contract PoseidonTestUtils {
     uint256 internal constant BATCH_SIZE = 256;
     uint256 internal constant MERKLE_DEPTH = 8;
+    uint256 internal constant SNARK_SCALAR_FIELD =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
     function _salt(string memory value) internal pure returns (bytes32) {
-        return bytes32(keccak256(abi.encodePacked(value)));
+        return bytes32(uint256(keccak256(abi.encodePacked(value))) % SNARK_SCALAR_FIELD);
     }
 
     function _poseidonLeaf(
