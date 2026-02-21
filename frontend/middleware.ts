@@ -9,7 +9,6 @@ const PUBLIC_PATHS = [
   "/apple-touch-icon.png",
   "/safari-pinned-tab.svg",
 ];
-const APP_PATHS = ["/dashboard", "/proofs"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -30,17 +29,6 @@ export function middleware(request: NextRequest) {
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (isPublicPath) {
     requestHeaders.set("x-rm-public-path", "1");
-  }
-
-  const isAppRoute = APP_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  if (isAppRoute) {
-    const walletSession = request.cookies.get("wallet_session")?.value;
-    if (!walletSession) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/";
-      redirectUrl.searchParams.set("connect", "1");
-      return NextResponse.redirect(redirectUrl);
-    }
   }
 
   return NextResponse.next({ request: { headers: requestHeaders } });

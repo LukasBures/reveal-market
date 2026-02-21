@@ -234,6 +234,7 @@ export function ConnectWalletButton() {
     if (typeof document === "undefined") {
       return;
     }
+    // UI hint only. Server-side route access control must not rely on this cookie.
     const maxAge = isConnected ? 60 * 60 * 24 * 7 : 0;
     const parts = [`wallet_session=${isConnected ? "1" : ""}`, "Path=/", `Max-Age=${maxAge}`, "SameSite=Lax"];
     if (window.location.protocol === "https:") {
