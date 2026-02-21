@@ -167,12 +167,12 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/api/v1/proofs/warmup", a.warmupHandler)
 	mux.HandleFunc("/metrics", promMetricsHandler)
 	if a.cfg.EnableDebug {
-		mux.Handle("/metrics/expvar", expvar.Handler())
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		mux.Handle("/metrics/expvar", a.requireSecretHandler(expvar.Handler()))
+		mux.HandleFunc("/debug/pprof/", a.requireSecret(pprof.Index))
+		mux.HandleFunc("/debug/pprof/cmdline", a.requireSecret(pprof.Cmdline))
+		mux.HandleFunc("/debug/pprof/profile", a.requireSecret(pprof.Profile))
+		mux.HandleFunc("/debug/pprof/symbol", a.requireSecret(pprof.Symbol))
+		mux.HandleFunc("/debug/pprof/trace", a.requireSecret(pprof.Trace))
 	}
 	return mux
 }
@@ -367,6 +367,7 @@ func equalHex(left, right string) (bool, error) {
 func requireArtifactsOrExit(cfg shared.Config) shared.ArtifactReport {
 	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
 		WitnessScriptPath:   cfg.WitnessScriptPath,
+		WitnessBinaryPath:   cfg.WitnessBinaryPath,
 		WasmPath:            cfg.WasmPath,
 		ZKeyPath:            cfg.ZKeyPath,
 		VerificationKeyPath: cfg.VerificationKeyPath,
@@ -419,6 +420,7 @@ func (a *app) verifyArtifacts() (bool, []string, []string, string) {
 
 	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
 		WitnessScriptPath:   a.cfg.WitnessScriptPath,
+		WitnessBinaryPath:   a.cfg.WitnessBinaryPath,
 		WasmPath:            a.cfg.WasmPath,
 		ZKeyPath:            a.cfg.ZKeyPath,
 		VerificationKeyPath: a.cfg.VerificationKeyPath,
@@ -428,9 +430,29 @@ func (a *app) verifyArtifacts() (bool, []string, []string, string) {
 	if err != nil {
 		errMsg = err.Error()
 	}
-	ok := err == nil && len(report.Missing) == 0 && len(report.HashMismatches) == 0
 	missing := append([]string(nil), report.Missing...)
 	mismatches := append([]string(nil), report.HashMismatches...)
+	if err == nil {
+		reportCircuit := strings.TrimSpace(report.Hashes.CircuitHash)
+		runtimeCircuit := strings.TrimSpace(a.circuitHash)
+		if reportCircuit == "" {
+			mismatches = append(mismatches, "circuit hash missing from settlement_hashes.json")
+		} else {
+			match, cmpErr := equalHex(reportCircuit, runtimeCircuit)
+			if cmpErr != nil {
+				mismatches = append(mismatches, fmt.Sprintf("circuit_hash_compare_failed:%v", cmpErr))
+			} else if !match {
+				mismatches = append(
+					mismatches,
+					fmt.Sprintf("circuit_hash_drift expected=%s actual=%s", runtimeCircuit, reportCircuit),
+				)
+			}
+		}
+	}
+	ok := err == nil && len(missing) == 0 && len(mismatches) == 0
+	if !ok && errMsg == "" {
+		errMsg = "artifact verification mismatch"
+	}
 	a.artifactCheck = artifactCheck{
 		ok:         ok,
 		missing:    missing,
@@ -455,6 +477,46 @@ func (a *app) readyForProof() (bool, []string, []string, string) {
 	return true, nil, nil, ""
 }
 
+func (a *app) requireSecret(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.authorizeSharedSecret(w, r) {
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (a *app) requireSecretHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.authorizeSharedSecret(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *app) authorizeSharedSecret(w http.ResponseWriter, r *http.Request) bool {
+	secret := strings.TrimSpace(a.cfg.SharedSecret)
+	if secret == "" {
+		logLine("error", "prover.request.secret_missing", map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
+		writeError(w, http.StatusInternalServerError, "prover_secret_not_configured", "prover secret not configured", nil)
+		return false
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Prover-Secret"))
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+		logLine("warn", "prover.request.unauthorized", map[string]any{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid prover secret", nil)
+		return false
+	}
+	return true
+}
+
 func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		logLine("warn", "prover.request.invalid_method", map[string]any{
@@ -464,22 +526,7 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
-	secret := strings.TrimSpace(a.cfg.SharedSecret)
-	if secret == "" {
-		logLine("error", "prover.request.secret_missing", map[string]any{
-			"path":   r.URL.Path,
-			"method": r.Method,
-		})
-		writeError(w, http.StatusInternalServerError, "prover_secret_not_configured", "prover secret not configured", nil)
-		return
-	}
-	provided := strings.TrimSpace(r.Header.Get("X-Prover-Secret"))
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
-		logLine("warn", "prover.request.unauthorized", map[string]any{
-			"path":   r.URL.Path,
-			"method": r.Method,
-		})
-		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid prover secret", nil)
+	if !a.authorizeSharedSecret(w, r) {
 		return
 	}
 	ready, missing, mismatches, artifactErr := a.readyForProof()
@@ -744,6 +791,10 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 		recordProofFailure()
 		return settlementProofResponse{}, newInternalError(fmt.Errorf("unexpected public signal count: got %d, expected 10", len(result.PublicSignals)))
 	}
+	if err := validatePublicSignalsAgainstRequest(req, result.PublicSignals); err != nil {
+		recordProofFailure()
+		return settlementProofResponse{}, newInternalError(err)
+	}
 	now := time.Now().UTC()
 	a.lastProofAt.Store(now)
 
@@ -776,6 +827,56 @@ func (a *app) generateProofResponse(ctx context.Context, req settlementProofRequ
 	}
 	a.cache.set(cacheKey, resp)
 	return resp, nil
+}
+
+func validatePublicSignalsAgainstRequest(req settlementProofRequest, signals []string) error {
+	if len(signals) != 10 {
+		return fmt.Errorf("unexpected public signal count: got %d, expected 10", len(signals))
+	}
+	inputs, err := buildWitnessInput(req)
+	if err != nil {
+		return fmt.Errorf("failed to derive expected public signals: %w", err)
+	}
+	expectedKeys := []string{
+		"merkleRoot",
+		"marketId",
+		"winningOutcomeId",
+		"totalEscrow",
+		"totalLiability",
+		"rakeBps",
+		"poolTotalYes",
+		"poolTotalNo",
+		"circuitHash",
+		"padding",
+	}
+	for idx, key := range expectedKeys {
+		raw, ok := inputs[key]
+		if !ok {
+			return fmt.Errorf("missing derived signal %q", key)
+		}
+		expectedValue, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("derived signal %q has unexpected type", key)
+		}
+		expectedNum, err := parseFlexibleNumber(expectedValue, fmt.Sprintf("expected_%s", key))
+		if err != nil {
+			return fmt.Errorf("invalid derived signal %q: %w", key, err)
+		}
+		actualNum, err := parseFlexibleNumber(signals[idx], fmt.Sprintf("public_signal_%d", idx))
+		if err != nil {
+			return fmt.Errorf("invalid public signal %d: %w", idx, err)
+		}
+		if fieldElement(actualNum).Cmp(fieldElement(expectedNum)) != 0 {
+			return fmt.Errorf(
+				"public signal mismatch at index %d (%s): expected %s got %s",
+				idx,
+				key,
+				fieldElement(expectedNum).String(),
+				fieldElement(actualNum).String(),
+			)
+		}
+	}
+	return nil
 }
 
 func (a *app) nextRequestID() string {
@@ -1031,6 +1132,9 @@ func (a *app) preflightHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
+	if !a.authorizeSharedSecret(w, r) {
+		return
+	}
 	payload := map[string]any{
 		"status":       "ok",
 		"circuit_hash": a.circuitHash,
@@ -1044,8 +1148,16 @@ func (a *app) warmupHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 		return
 	}
-	if !a.prover.Ready() {
+	if !a.authorizeSharedSecret(w, r) {
+		return
+	}
+	ready, _, _, _ := a.readyForProof()
+	if !ready {
 		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
+		return
+	}
+	if a.prover.IsBusy() {
+		writeError(w, http.StatusTooManyRequests, "busy", "prover at capacity", nil)
 		return
 	}
 	req, err := loadWarmupRequest(a.cfg)

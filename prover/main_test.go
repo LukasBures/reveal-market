@@ -6,9 +6,44 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func expectedSignalsForRequest(t *testing.T, req settlementProofRequest) []string {
+	t.Helper()
+	inputs, err := buildWitnessInput(req)
+	if err != nil {
+		t.Fatalf("failed to build witness input: %v", err)
+	}
+	keys := []string{
+		"merkleRoot",
+		"marketId",
+		"winningOutcomeId",
+		"totalEscrow",
+		"totalLiability",
+		"rakeBps",
+		"poolTotalYes",
+		"poolTotalNo",
+		"circuitHash",
+		"padding",
+	}
+	signals := make([]string, 0, len(keys))
+	for _, key := range keys {
+		raw, ok := inputs[key]
+		if !ok {
+			t.Fatalf("missing witness key: %s", key)
+		}
+		value, ok := raw.(string)
+		if !ok {
+			t.Fatalf("witness key %s has unexpected type", key)
+		}
+		signals = append(signals, value)
+	}
+	return signals
+}
 
 func TestValidateRequest(t *testing.T) {
 	valid := buildTestRequest()
@@ -161,20 +196,20 @@ func TestBuildWitnessInputErrors(t *testing.T) {
 }
 
 func TestProofHandlerSuccess(t *testing.T) {
+	payload := buildTestRequest()
 	stub := &stubProver{
 		backend:     "stub-backend",
 		circuitHash: "0x1",
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
-			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			PublicSignals: expectedSignalsForRequest(t, payload),
 			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
 			Warnings:      []string{"warn"},
 		},
 	}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -220,20 +255,20 @@ func TestProofHandlerRequiresSecret(t *testing.T) {
 }
 
 func TestProofHandlerAcceptsSecret(t *testing.T) {
+	payload := buildTestRequest()
 	stub := &stubProver{
 		backend:     "stub-backend",
 		circuitHash: "0x1",
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
-			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			PublicSignals: expectedSignalsForRequest(t, payload),
 			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
 		},
 	}
 	cfg := newTestConfig(t)
 	cfg.SharedSecret = "secret"
 	app := newApp(cfg, stub)
-	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
@@ -248,19 +283,19 @@ func TestProofHandlerAcceptsSecret(t *testing.T) {
 }
 
 func TestProofHandlerStream(t *testing.T) {
+	payload := buildTestRequest()
 	stub := &stubProver{
 		backend:     "stub-backend",
 		circuitHash: "0x1",
 		ready:       true,
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
-			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			PublicSignals: expectedSignalsForRequest(t, payload),
 			ProofCalldata: [][]string{{"0x1"}, {"0x2"}},
 		},
 	}
 	cfg := newTestConfig(t)
 	app := newApp(cfg, stub)
-	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement?stream=1", bytes.NewReader(body))
@@ -316,6 +351,22 @@ func TestProofHandlerProverError(t *testing.T) {
 func TestProofHandlerCircuitHashMismatch(t *testing.T) {
 	stub := &stubProver{ready: true, circuitHash: "0x2"}
 	cfg := newTestConfig(t)
+	rawHashes, err := os.ReadFile(cfg.HashesPath)
+	if err != nil {
+		t.Fatalf("failed to read hashes file: %v", err)
+	}
+	var hashes map[string]any
+	if err := json.Unmarshal(rawHashes, &hashes); err != nil {
+		t.Fatalf("failed to decode hashes file: %v", err)
+	}
+	hashes["circuitHash"] = "0x2"
+	updatedHashes, err := json.Marshal(hashes)
+	if err != nil {
+		t.Fatalf("failed to marshal hashes file: %v", err)
+	}
+	if err := os.WriteFile(cfg.HashesPath, updatedHashes, 0o644); err != nil {
+		t.Fatalf("failed to update hashes file: %v", err)
+	}
 	app := newApp(cfg, stub)
 	payload := buildTestRequest()
 	body, _ := json.Marshal(payload)
@@ -368,18 +419,18 @@ func TestProofHandlerBusy(t *testing.T) {
 }
 
 func TestProofHandlerStrictValidation(t *testing.T) {
+	payload := buildTestRequest()
 	stub := &stubProver{
 		ready:       true,
 		circuitHash: "0x1",
 		result: &proofResult{
 			Proof:         `{"pi_a":["1","2"]}`,
-			PublicSignals: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+			PublicSignals: expectedSignalsForRequest(t, payload),
 		},
 	}
 	cfg := newTestConfig(t)
 	cfg.StrictValidation = true
 	app := newApp(cfg, stub)
-	payload := buildTestRequest()
 	payload.TotalLiability = "9"
 	payload.RakeBps = "50"
 	body, _ := json.Marshal(payload)
@@ -392,6 +443,146 @@ func TestProofHandlerStrictValidation(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatalf("expected prover to be skipped when strict validation fails")
+	}
+}
+
+func TestProofHandlerRejectsMismatchedPublicSignals(t *testing.T) {
+	payload := buildTestRequest()
+	signals := expectedSignalsForRequest(t, payload)
+	signals[1] = "999"
+	stub := &stubProver{
+		ready:       true,
+		circuitHash: "0x1",
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: signals,
+		},
+	}
+	cfg := newTestConfig(t)
+	app := newApp(cfg, stub)
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
+
+	app.proofHandler(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected prover call, got %d", stub.calls)
+	}
+}
+
+func TestPreflightHandlerRequiresSecret(t *testing.T) {
+	cfg := newTestConfig(t)
+	app := newApp(cfg, &stubProver{ready: true, circuitHash: "0x1"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/proofs/preflight", nil)
+
+	app.preflightHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestWarmupHandlerRequiresSecret(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.CircuitDir = t.TempDir()
+	payload := buildTestRequest()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("failed to marshal warmup request: %v", err)
+	}
+	warmupPath := filepath.Join(cfg.CircuitDir, warmupFileName)
+	if err := os.WriteFile(warmupPath, raw, 0o644); err != nil {
+		t.Fatalf("failed to write warmup payload: %v", err)
+	}
+	stub := &stubProver{
+		ready:       true,
+		circuitHash: "0x1",
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: expectedSignalsForRequest(t, payload),
+		},
+	}
+	app := newApp(cfg, stub)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/warmup", nil)
+
+	app.warmupHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected prover to be skipped on unauthorized warmup")
+	}
+}
+
+func TestDebugRoutesRequireSecret(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.EnableDebug = true
+	app := newApp(cfg, &stubProver{ready: true, circuitHash: "0x1"})
+	router := app.routes()
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", unauthorized.Code)
+	}
+
+	authorized := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
+	router.ServeHTTP(authorized, req)
+	if authorized.Code == http.StatusUnauthorized {
+		t.Fatalf("expected debug endpoint to accept authorized requests")
+	}
+}
+
+func TestVerifyArtifactsDetectsCircuitHashDrift(t *testing.T) {
+	cfg := newTestConfig(t)
+	app := newApp(cfg, &stubProver{ready: true, circuitHash: "0x1"})
+
+	raw, err := os.ReadFile(cfg.HashesPath)
+	if err != nil {
+		t.Fatalf("failed to read hashes file: %v", err)
+	}
+	var hashes map[string]any
+	if err := json.Unmarshal(raw, &hashes); err != nil {
+		t.Fatalf("failed to decode hashes file: %v", err)
+	}
+	hashes["circuitHash"] = "0x2"
+	updated, err := json.Marshal(hashes)
+	if err != nil {
+		t.Fatalf("failed to marshal updated hashes file: %v", err)
+	}
+	if err := os.WriteFile(cfg.HashesPath, updated, 0o644); err != nil {
+		t.Fatalf("failed to write updated hashes file: %v", err)
+	}
+
+	ok, missing, mismatches, _ := app.verifyArtifacts()
+	if ok {
+		t.Fatalf("expected artifact verification to fail on circuit hash drift")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing artifacts, got %v", missing)
+	}
+	if len(mismatches) == 0 {
+		t.Fatalf("expected circuit hash drift mismatch")
+	}
+	foundDrift := false
+	for _, mismatch := range mismatches {
+		if strings.Contains(mismatch, "circuit_hash_drift") {
+			foundDrift = true
+			break
+		}
+	}
+	if !foundDrift {
+		t.Fatalf("expected circuit hash drift mismatch, got %v", mismatches)
 	}
 }
 

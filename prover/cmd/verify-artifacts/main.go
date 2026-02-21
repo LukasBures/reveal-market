@@ -15,6 +15,7 @@ func main() {
 	cfg := shared.LoadConfig()
 	report, err := shared.VerifyArtifacts(shared.ArtifactPaths{
 		WitnessScriptPath:   cfg.WitnessScriptPath,
+		WitnessBinaryPath:   cfg.WitnessBinaryPath,
 		WasmPath:            cfg.WasmPath,
 		ZKeyPath:            cfg.ZKeyPath,
 		VerificationKeyPath: cfg.VerificationKeyPath,

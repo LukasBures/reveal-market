@@ -13,6 +13,7 @@ import (
 
 type ArtifactPaths struct {
 	WitnessScriptPath   string
+	WitnessBinaryPath   string
 	WasmPath            string
 	ZKeyPath            string
 	VerificationKeyPath string
@@ -22,6 +23,9 @@ type ArtifactPaths struct {
 type CircuitHashes struct {
 	ProvingKeyHash      string `json:"provingKeyHash"`
 	VerificationKeyHash string `json:"verificationKeyHash"`
+	WitnessScriptHash   string `json:"witnessScriptHash"`
+	WasmHash            string `json:"wasmHash"`
+	WitnessBinaryHash   string `json:"witnessBinaryHash,omitempty"`
 	CircuitHash         string `json:"circuitHash"`
 	CircuitName         string `json:"circuitName"`
 	CircuitVersion      string `json:"circuitVersion"`
@@ -65,6 +69,9 @@ func VerifyArtifacts(paths ArtifactPaths) (ArtifactReport, error) {
 		paths.VerificationKeyPath,
 		paths.HashesPath,
 	}
+	if strings.TrimSpace(paths.WitnessBinaryPath) != "" {
+		required = append(required, paths.WitnessBinaryPath)
+	}
 	ok, missing := CheckArtifacts(required)
 	report := ArtifactReport{Missing: missing}
 	if !ok {
@@ -83,10 +90,27 @@ func VerifyArtifacts(paths ArtifactPaths) (ArtifactReport, error) {
 	if strings.TrimSpace(hashes.VerificationKeyHash) == "" {
 		return report, fmt.Errorf("verificationKeyHash missing from %s", paths.HashesPath)
 	}
+	if strings.TrimSpace(hashes.WitnessScriptHash) == "" {
+		return report, fmt.Errorf("witnessScriptHash missing from %s", paths.HashesPath)
+	}
+	if strings.TrimSpace(hashes.WasmHash) == "" {
+		return report, fmt.Errorf("wasmHash missing from %s", paths.HashesPath)
+	}
+	if strings.TrimSpace(paths.WitnessBinaryPath) != "" && strings.TrimSpace(hashes.WitnessBinaryHash) == "" {
+		return report, fmt.Errorf("witnessBinaryHash missing from %s", paths.HashesPath)
+	}
 	if strings.TrimSpace(hashes.CircuitHash) == "" {
 		return report, fmt.Errorf("circuitHash missing from %s", paths.HashesPath)
 	}
 
+	witnessScriptHash, err := hashFileKeccak(paths.WitnessScriptPath)
+	if err != nil {
+		return report, err
+	}
+	wasmHash, err := hashFileKeccak(paths.WasmPath)
+	if err != nil {
+		return report, err
+	}
 	provingKeyHash, err := hashFileKeccak(paths.ZKeyPath)
 	if err != nil {
 		return report, err
@@ -95,12 +119,34 @@ func VerifyArtifacts(paths ArtifactPaths) (ArtifactReport, error) {
 	if err != nil {
 		return report, err
 	}
+	witnessBinaryHash := ""
+	if strings.TrimSpace(paths.WitnessBinaryPath) != "" {
+		witnessBinaryHash, err = hashFileKeccak(paths.WitnessBinaryPath)
+		if err != nil {
+			return report, err
+		}
+	}
 
+	if !strings.EqualFold(normalizeHex(hashes.WitnessScriptHash), witnessScriptHash) {
+		report.HashMismatches = append(
+			report.HashMismatches,
+			fmt.Sprintf("witnessScriptHash mismatch: expected %s got %s", hashes.WitnessScriptHash, witnessScriptHash),
+		)
+	}
+	if !strings.EqualFold(normalizeHex(hashes.WasmHash), wasmHash) {
+		report.HashMismatches = append(report.HashMismatches, fmt.Sprintf("wasmHash mismatch: expected %s got %s", hashes.WasmHash, wasmHash))
+	}
 	if !strings.EqualFold(normalizeHex(hashes.ProvingKeyHash), provingKeyHash) {
 		report.HashMismatches = append(report.HashMismatches, fmt.Sprintf("provingKeyHash mismatch: expected %s got %s", hashes.ProvingKeyHash, provingKeyHash))
 	}
 	if !strings.EqualFold(normalizeHex(hashes.VerificationKeyHash), verificationKeyHash) {
 		report.HashMismatches = append(report.HashMismatches, fmt.Sprintf("verificationKeyHash mismatch: expected %s got %s", hashes.VerificationKeyHash, verificationKeyHash))
+	}
+	if witnessBinaryHash != "" && !strings.EqualFold(normalizeHex(hashes.WitnessBinaryHash), witnessBinaryHash) {
+		report.HashMismatches = append(
+			report.HashMismatches,
+			fmt.Sprintf("witnessBinaryHash mismatch: expected %s got %s", hashes.WitnessBinaryHash, witnessBinaryHash),
+		)
 	}
 
 	return report, nil

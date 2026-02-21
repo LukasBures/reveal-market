@@ -30,6 +30,8 @@ func newTestConfig(t *testing.T) shared.Config {
 	hashPayload := shared.CircuitHashes{
 		ProvingKeyHash:      hashFileKeccak(t, zkey),
 		VerificationKeyHash: hashFileKeccak(t, vk),
+		WitnessScriptHash:   hashFileKeccak(t, witness),
+		WasmHash:            hashFileKeccak(t, wasm),
 		CircuitHash:         "0x1",
 		CircuitName:         "test",
 		CircuitVersion:      "0",

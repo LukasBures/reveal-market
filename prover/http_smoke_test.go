@@ -15,10 +15,26 @@ func (s httpStubProver) Backend() string     { return "groth16-rapidsnark" }
 func (s httpStubProver) CircuitHash() string { return "0x1" }
 func (s httpStubProver) Ready() bool         { return true }
 func (s httpStubProver) IsBusy() bool        { return false }
-func (s httpStubProver) Generate(_ context.Context, _ settlementProofRequest) (*proofResult, error) {
+func (s httpStubProver) Generate(_ context.Context, req settlementProofRequest) (*proofResult, error) {
+	inputs, err := buildWitnessInput(req)
+	if err != nil {
+		return nil, err
+	}
+	signals := []string{
+		inputs["merkleRoot"].(string),
+		inputs["marketId"].(string),
+		inputs["winningOutcomeId"].(string),
+		inputs["totalEscrow"].(string),
+		inputs["totalLiability"].(string),
+		inputs["rakeBps"].(string),
+		inputs["poolTotalYes"].(string),
+		inputs["poolTotalNo"].(string),
+		inputs["circuitHash"].(string),
+		inputs["padding"].(string),
+	}
 	return &proofResult{
 		Proof:         "{}",
-		PublicSignals: []string{"1", "2", "1", "10", "9", "50", "10", "0", "1", "0"},
+		PublicSignals: signals,
 		ProofCalldata: [][]string{{"a"}, {"b"}},
 	}, nil
 }
