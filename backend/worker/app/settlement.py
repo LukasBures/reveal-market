@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from eth_account import Account
-from eth_typing import ChecksumAddress
+from eth_typing import ChecksumAddress, HexStr
 from redis.asyncio import Redis
 from shared import models as shared_models
 from shared import repository_async as shared_repository
@@ -34,6 +34,83 @@ from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER
 from .retry import clear_failure, failure_key, record_failure, should_attempt
 
 logger = runtime.logger  # type: ignore[has-type]
+
+_SETTLEMENT_LOCK_RELEASE_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+async def _resolve_awaitable(value: Awaitable[Any] | Any) -> Any:
+    if asyncio.iscoroutine(value):
+        return await value
+    return value
+
+
+async def _acquire_settlement_submission_lock(
+    redis_client: Redis | None,
+    market_id: int,
+) -> tuple[str | None, str | None]:
+    if redis_client is None:
+        return None, None
+    key_prefix = str(runtime.settings.settlement_submission_lock_key_prefix).strip() or "settlement_submit_lock"
+    lock_key = f"{key_prefix}:{market_id}"
+    lock_token = secrets.token_hex(16)
+    ttl_seconds = max(int(runtime.settings.settlement_submission_lock_ttl_seconds), 30)
+    try:
+        acquired = await _resolve_awaitable(redis_client.set(lock_key, lock_token, nx=True, ex=ttl_seconds))
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.lock_acquire_failed",
+            message="failed to acquire settlement submission lock",
+            market_id=market_id,
+            lock_key=lock_key,
+            error=str(exc),
+        )
+        return None, None
+    if not acquired:
+        return None, lock_key
+    return lock_token, lock_key
+
+
+async def _release_settlement_submission_lock(
+    redis_client: Redis | None,
+    *,
+    lock_key: str | None,
+    lock_token: str | None,
+) -> None:
+    if redis_client is None or not lock_key or not lock_token:
+        return
+    try:
+        if hasattr(redis_client, "eval"):
+            await _resolve_awaitable(redis_client.eval(_SETTLEMENT_LOCK_RELEASE_LUA, 1, lock_key, lock_token))
+            return
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.lock_release_eval_failed",
+            message="failed to release lock via lua; falling back to get/delete",
+            lock_key=lock_key,
+            error=str(exc),
+        )
+    try:
+        current = await _resolve_awaitable(redis_client.get(lock_key))
+        if current == lock_token:
+            await _resolve_awaitable(redis_client.delete(lock_key))
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.lock_release_failed",
+            message="failed to release settlement submission lock",
+            lock_key=lock_key,
+            error=str(exc),
+        )
 
 
 def _normalize_bytes32(value: Any) -> str | None:
@@ -542,6 +619,8 @@ async def _submit_verify_and_settle(
     market_address: str,
     proof: str,
     public_signals: Sequence[Any],
+    *,
+    wait_for_receipt: bool = True,
 ) -> tuple[str, int | None]:
     contract = _build_market_contract(web3, market_address)
     signals = _hydrate_public_signals(public_signals)
@@ -561,9 +640,12 @@ async def _submit_verify_and_settle(
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
+    tx_hash_hex = web3.to_hex(tx_hash)
+    if not wait_for_receipt:
+        return tx_hash_hex, None
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
     _ensure_tx_success(receipt, tx_hash, action="verify_and_settle")
-    return tx_hash.hex(), getattr(receipt, "blockNumber", None)
+    return tx_hash_hex, getattr(receipt, "blockNumber", None)
 
 
 async def _submit_verify_and_settle_batched(
@@ -573,6 +655,8 @@ async def _submit_verify_and_settle_batched(
     proofs: Sequence[str],
     public_signals: Sequence[Sequence[Any]],
     batch_indexes: Sequence[int],
+    *,
+    wait_for_receipt: bool = True,
 ) -> tuple[str, int | None]:
     contract = _build_market_contract(web3, market_address)
     hydrated_signals = [_hydrate_public_signals(signals) for signals in public_signals]
@@ -594,9 +678,19 @@ async def _submit_verify_and_settle_batched(
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)
     tx_hash = await web3.eth.send_raw_transaction(_raw_tx_bytes(signed))
+    tx_hash_hex = web3.to_hex(tx_hash)
+    if not wait_for_receipt:
+        return tx_hash_hex, None
     receipt = await web3.eth.wait_for_transaction_receipt(tx_hash)
     _ensure_tx_success(receipt, tx_hash, action="verify_and_settle_batched")
-    return tx_hash.hex(), getattr(receipt, "blockNumber", None)
+    return tx_hash_hex, getattr(receipt, "blockNumber", None)
+
+
+async def _wait_for_submission_receipt(web3: AsyncWeb3, tx_hash: str, *, action: str) -> int | None:
+    tx_hash_hex = tx_hash if str(tx_hash).startswith("0x") else f"0x{tx_hash}"
+    receipt = await web3.eth.wait_for_transaction_receipt(cast(HexStr, tx_hash_hex))
+    _ensure_tx_success(receipt, tx_hash_hex, action=action)
+    return getattr(receipt, "blockNumber", None)
 
 
 async def _resolve_winning_outcome(session: AsyncSession, market: shared_models.Market) -> int | None:
@@ -1213,7 +1307,7 @@ async def _enqueue_relayer_claims(
     return enqueued
 
 
-async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
+async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: str | None = None) -> int:
     """Submit settlement proofs on-chain for markets with generated proofs and no tx hash."""
 
     relayer_enabled = bool(runtime.settings.relayer_queue_enabled and runtime.settings.relayer_base_url)
@@ -1245,11 +1339,28 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
     submitted = 0
     dirty_events: set[str] = set()
     dirty_conditions: set[str] = set()
+    retry_prefix = "reveal_market_worker:settlement_submit:fail"
+    processing_stale_seconds = max(int(runtime.settings.settlement_submission_processing_stale_seconds), 0)
     async with session_scope() as session:
-        pending = await shared_repository.list_settlements_pending_tx(session)
+        pending = await shared_repository.list_settlements_pending_tx(
+            session,
+            market_event_id=market_id,
+            include_failed=True,
+            processing_stale_seconds=processing_stale_seconds,
+        )
         for settlement, market in pending:
             event_id = getattr(market, "event_id", None)
             condition_value = getattr(market, "condition_id", None)
+            retry_key = failure_key(retry_prefix, market.id)
+            if not await should_attempt(
+                redis_client,
+                retry_key,
+                max_age_seconds=runtime.settings.settlement_submission_failure_max_age_seconds,
+                logger=logger,
+                event="worker.settlement.retry_expired",
+                message="settlement retry window exceeded; skipping submission",
+            ):
+                continue
 
             def _mark_dirty(eid: str | None = event_id, cond_val: str | None = condition_value) -> None:
                 if eid:
@@ -1260,31 +1371,55 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                     dirty_conditions.add(normalized)
                     summary.changed_conditions.add(normalized)
 
-            if not market.market_address:
+            async def _mark_failure(
+                reason: str,
+                settlement_entry: shared_models.Settlement = settlement,
+                retry_key_value: str = retry_key,
+            ) -> None:
+                settlement_entry.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                settlement_entry.submission_error = reason
+                _mark_dirty()
+                session.add(settlement_entry)
+                await record_failure(
+                    redis_client,
+                    retry_key_value,
+                    base_seconds=runtime.settings.settlement_submission_failure_base_seconds,
+                    max_seconds=runtime.settings.settlement_submission_failure_max_seconds,
+                    max_attempts=runtime.settings.settlement_submission_failure_max_attempts,
+                    logger=logger,
+                    event="worker.settlement.retry_scheduled",
+                    message="settlement submission retry scheduled after failure",
+                    reason=reason,
+                )
+
+            lock_token, lock_key = await _acquire_settlement_submission_lock(redis_client, market.id)
+            if redis_client is not None and lock_token is None:
                 continue
-            winning_outcome_id = settlement.winning_outcome_id
-            if winning_outcome_id is None:
-                winning_outcome_id = await _resolve_winning_outcome(session, market)
-            if winning_outcome_id is None:
-                continue
-            if account is not None and web3 is not None:
-                try:
-                    oracle_addr = await _build_market_contract(web3, market.market_address).functions.oracle().call()
-                except Exception as exc:  # pragma: no cover - defensive
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        event="worker.settlement.oracle_check_failed",
-                        message="failed to check oracle address",
-                        market_id=getattr(market, "event_id", None),
-                        error=str(exc),
-                    )
-                    oracle_addr = None
+            try:
+                if not market.market_address:
+                    continue
+                winning_outcome_id = settlement.winning_outcome_id
+                if winning_outcome_id is None:
+                    winning_outcome_id = await _resolve_winning_outcome(session, market)
+                if winning_outcome_id is None:
+                    continue
+                oracle_addr = None
+                if account is not None and web3 is not None:
+                    try:
+                        oracle_addr = (
+                            await _build_market_contract(web3, market.market_address).functions.oracle().call()
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            event="worker.settlement.oracle_check_failed",
+                            message="failed to check oracle address",
+                            market_id=getattr(market, "event_id", None),
+                            error=str(exc),
+                        )
+                        oracle_addr = None
                 if oracle_addr and account.address.lower() != str(oracle_addr).lower():
-                    settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
-                    settlement.submission_error = "oracle_mismatch"
-                    _mark_dirty()
-                    session.add(settlement)
                     log_event(
                         logger,
                         logging.WARNING,
@@ -1294,128 +1429,167 @@ async def run_settlement_jobs(summary, redis_client: Redis | None) -> int:
                         oracle=oracle_addr,
                         signer=account.address,
                     )
+                    await _mark_failure("oracle_mismatch")
                     continue
-            batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not batch_roots and _is_empty_hex(settlement.merkle_root):
-                # hydrate from chain if possible
-                settlement = await _upsert_settlement_from_chain(session, market) or settlement
                 batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
-            if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
-                batch_roots = [settlement.merkle_root]
-            if web3 is None or account is None:
-                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
-                settlement.submission_error = "settlement_tx_unavailable"
+                if not batch_roots and _is_empty_hex(settlement.merkle_root):
+                    # hydrate from chain if possible
+                    settlement = await _upsert_settlement_from_chain(session, market) or settlement
+                    batch_roots = _parse_json_list(getattr(settlement, "batch_roots", None))
+                if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
+                    batch_roots = [settlement.merkle_root]
+                if web3 is None or account is None:
+                    await _mark_failure("settlement_tx_unavailable")
+                    continue
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.PROCESSING.value
+                settlement.submission_error = None
                 _mark_dirty()
                 session.add(settlement)
-                continue
-            settlement.submission_status = shared_models.SettlementSubmissionStatus.PROCESSING.value
-            settlement.submission_error = None
-            _mark_dirty()
-            session.add(settlement)
-            await session.commit()
-            if not batch_roots:
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    event="worker.settlement.missing_roots",
-                    message="skipping settlement submission due to missing batch roots",
-                    market_id=getattr(market, "event_id", None),
-                )
-                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
-                settlement.submission_error = "missing_batch_roots"
-                _mark_dirty()
-                continue
-
-            receipts = list(
-                (
-                    await session.execute(
-                        select(shared_models.SettlementReceipt).where(
-                            shared_models.SettlementReceipt.market_id == settlement.market_id
-                        )
+                await session.commit()
+                if not batch_roots:
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.settlement.missing_roots",
+                        message="skipping settlement submission due to missing batch roots",
+                        market_id=getattr(market, "event_id", None),
                     )
-                ).scalars()
-            )
-            receipt_by_root: dict[str, shared_models.SettlementReceipt] = {}
-            for receipt in receipts:
-                if not receipt.proof or not receipt.public_signals:
+                    await _mark_failure("missing_batch_roots")
                     continue
-                signals = receipt.public_signals
-                if isinstance(signals, (list, tuple)) and signals:
-                    root_signal = str(signals[0])
-                    receipt_by_root.setdefault(root_signal, receipt)
 
-            proofs: list[str] = []
-            public_signals_list: list[Sequence[Any]] = []
-            batch_indexes: list[int] = []
-            for index, root in enumerate(batch_roots):
-                root_signal = _root_to_signal(root)
-                batch_receipt = receipt_by_root.get(root_signal or "")
-                if batch_receipt is None or not batch_receipt.proof or not batch_receipt.public_signals:
+                receipts = list(
+                    (
+                        await session.execute(
+                            select(shared_models.SettlementReceipt).where(
+                                shared_models.SettlementReceipt.market_id == settlement.market_id
+                            )
+                        )
+                    ).scalars()
+                )
+                receipt_by_root: dict[str, shared_models.SettlementReceipt] = {}
+                for receipt in receipts:
+                    if not receipt.proof or not receipt.public_signals:
+                        continue
+                    signals = receipt.public_signals
+                    if isinstance(signals, (list, tuple)) and signals:
+                        root_signal = str(signals[0])
+                        receipt_by_root.setdefault(root_signal, receipt)
+
+                proofs: list[str] = []
+                public_signals_list: list[Sequence[Any]] = []
+                batch_indexes: list[int] = []
+                for index, root in enumerate(batch_roots):
+                    root_signal = _root_to_signal(root)
+                    batch_receipt = receipt_by_root.get(root_signal or "")
+                    if batch_receipt is None or not batch_receipt.proof or not batch_receipt.public_signals:
+                        continue
+                    proofs.append(str(batch_receipt.proof))
+                    public_signals_list.append(cast(Sequence[Any], batch_receipt.public_signals))
+                    batch_indexes.append(index)
+
+                if len(proofs) != len(batch_roots):
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        event="worker.settlement.missing_proof",
+                        message="skipping settlement submission due to missing batch proofs",
+                        market_id=getattr(market, "event_id", None),
+                    )
+                    await _mark_failure("missing_proof_receipt")
                     continue
-                proofs.append(str(batch_receipt.proof))
-                public_signals_list.append(cast(Sequence[Any], batch_receipt.public_signals))
-                batch_indexes.append(index)
+                try:
+                    await _maybe_post_result(
+                        web3,
+                        account,
+                        _build_market_contract(web3, market.market_address),
+                        winning_outcome_id,
+                    )
+                    tx_hash, _ = await _submit_verify_and_settle_batched(
+                        web3,
+                        account,
+                        market.market_address,
+                        proofs,
+                        public_signals_list,
+                        batch_indexes,
+                        wait_for_receipt=False,
+                    )
+                except Exception as exc:  # pragma: no cover - on-chain errors
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.tx_failed",
+                        message="failed to submit settlement tx",
+                        market_id=getattr(market, "event_id", None),
+                        error=str(exc),
+                    )
+                    await _mark_failure(str(exc))
+                    continue
 
-            if len(proofs) != len(batch_roots):
+                settlement.settlement_tx_hash = tx_hash
+                settlement.settlement_block_number = None
+                settlement.settlement_submitted_at = datetime.now(tz=UTC)
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.SUBMITTED.value
+                settlement.submission_error = None
+                _mark_dirty()
+                session.add(settlement)
+                # Persist tx hash before waiting on receipt so restarts don't replay PROCESSING rows.
+                await session.commit()
                 log_event(
                     logger,
-                    logging.DEBUG,
-                    event="worker.settlement.missing_proof",
-                    message="skipping settlement submission due to missing batch proofs",
+                    logging.INFO,
+                    event="worker.settlement.tx_checkpointed",
+                    message="checkpointed settlement tx before receipt wait",
                     market_id=getattr(market, "event_id", None),
+                    tx_hash=tx_hash,
                 )
-                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
-                settlement.submission_error = "missing_proof_receipt"
+                try:
+                    block_number = await _wait_for_submission_receipt(
+                        web3,
+                        tx_hash,
+                        action="verify_and_settle_batched",
+                    )
+                except Exception as exc:
+                    settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
+                    settlement.submission_error = f"receipt_wait_failed:{exc}"
+                    _mark_dirty()
+                    session.add(settlement)
+                    await session.commit()
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.receipt_wait_failed",
+                        message="receipt wait failed after settlement broadcast",
+                        market_id=getattr(market, "event_id", None),
+                        tx_hash=tx_hash,
+                        error=str(exc),
+                    )
+                    continue
+
+                settlement.settlement_block_number = block_number
+                settlement.submission_error = None
                 _mark_dirty()
-                continue
-            try:
-                await _maybe_post_result(
-                    web3,
-                    account,
-                    _build_market_contract(web3, market.market_address),
-                    winning_outcome_id,
-                )
-                tx_hash, block_number = await _submit_verify_and_settle_batched(
-                    web3,
-                    account,
-                    market.market_address,
-                    proofs,
-                    public_signals_list,
-                    batch_indexes,
-                )
-            except Exception as exc:  # pragma: no cover - on-chain errors
+                session.add(settlement)
+                await session.commit()
+                await clear_failure(redis_client, retry_key)
+                submitted += 1
                 log_event(
                     logger,
-                    logging.WARNING,
-                    event="worker.settlement.tx_failed",
-                    message="failed to submit settlement tx",
+                    logging.INFO,
+                    event="worker.settlement.tx_submitted",
+                    message="submitted verifyAndSettleBatched",
                     market_id=getattr(market, "event_id", None),
-                    error=str(exc),
+                    tx_hash=tx_hash,
+                    block_number=block_number,
                 )
-                settlement.submission_status = shared_models.SettlementSubmissionStatus.FAILED.value
-                settlement.submission_error = str(exc)
-                _mark_dirty()
-                continue
-
-            settlement.settlement_tx_hash = tx_hash
-            settlement.settlement_block_number = block_number
-            settlement.settlement_submitted_at = datetime.now(tz=UTC)
-            settlement.submission_status = shared_models.SettlementSubmissionStatus.SUBMITTED.value
-            _mark_dirty()
-            session.add(settlement)
-            submitted += 1
-            log_event(
-                logger,
-                logging.INFO,
-                event="worker.settlement.tx_submitted",
-                message="submitted verifyAndSettleBatched",
-                market_id=getattr(market, "event_id", None),
-                tx_hash=tx_hash,
-                block_number=block_number,
-            )
-            if relayer_enabled:
-                enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
-                submitted += enqueued
+                if relayer_enabled:
+                    enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
+                    submitted += enqueued
+            finally:
+                await _release_settlement_submission_lock(
+                    redis_client,
+                    lock_key=lock_key,
+                    lock_token=lock_token,
+                )
         await session.flush()
     if dirty_events or dirty_conditions:
         await invalidate_cache_tags(redis_client, summary)

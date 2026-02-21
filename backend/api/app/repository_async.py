@@ -39,6 +39,10 @@ async def get_market_by_event_id(session: AsyncSession, event_id: str) -> shared
     return await shared_repository_async.get_market_by_event_id(session, event_id)
 
 
+async def get_market_by_market_address(session: AsyncSession, market_address: str) -> shared_models.Market | None:
+    return await shared_repository_async.get_market_by_market_address(session, market_address)
+
+
 async def create_quote(session: AsyncSession, data: Mapping[str, Any]) -> shared_models.Quote:
     return await shared_repository_async.create_quote(session, data)
 

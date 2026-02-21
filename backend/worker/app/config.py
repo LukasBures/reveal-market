@@ -353,6 +353,12 @@ class Settings(BaseSettings):
         description="Max wall-clock seconds to keep retrying a proof before giving up",
     )
     settlement_queue_key: str = Field(default="reveal_market_worker:settlement_queue")
+    settlement_queue_dedupe_key: str = Field(default="reveal_market_worker:settlement_queue_dedupe")
+    settlement_queue_dedupe_ttl_seconds: int = Field(
+        default=86400,
+        ge=60,
+        description="TTL (seconds) for settlement queue dedupe entries",
+    )
     settlement_queue_dead_letter_key: str = Field(default="reveal_market_worker:settlement_queue_dead_letter")
     settlement_recovery_min_interval_seconds: int = Field(
         default=120,
@@ -398,6 +404,40 @@ class Settings(BaseSettings):
     db_latency_pace_sleep_seconds: float = Field(default=1.0, ge=0)
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
+    settlement_submission_lock_key_prefix: str = Field(
+        default="reveal_market_worker:settlement_submit_lock",
+        description="Redis key prefix for per-market settlement submission locks",
+    )
+    settlement_submission_lock_ttl_seconds: int = Field(
+        default=600,
+        ge=30,
+        description="TTL for per-market settlement submission lock ownership",
+    )
+    settlement_submission_processing_stale_seconds: int = Field(
+        default=900,
+        ge=30,
+        description="Age threshold to retry stale PROCESSING settlement submissions",
+    )
+    settlement_submission_failure_base_seconds: int = Field(
+        default=120,
+        ge=30,
+        description="Base backoff for settlement submission failures (seconds)",
+    )
+    settlement_submission_failure_max_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description="Max backoff for settlement submission failures (seconds)",
+    )
+    settlement_submission_failure_max_attempts: int = Field(
+        default=6,
+        ge=1,
+        description="Max consecutive settlement submission failures before extended cooldown",
+    )
+    settlement_submission_failure_max_age_seconds: int = Field(
+        default=86400,
+        ge=3600,
+        description="Max wall-clock seconds to keep retrying a settlement submission",
+    )
     lock_batches_use_relayer: bool = Field(
         default=False,
         description="Route lockBatches submissions through the relayer API instead of direct RPC",
@@ -406,6 +446,17 @@ class Settings(BaseSettings):
         default=60.0,
         ge=0,
         description="How often to run lock-batches in the background loop (0 disables)",
+    )
+    lock_batches_lease_key: str = Field(default="reveal_market_worker:lock_batches_lease")
+    lock_batches_lease_ttl_seconds: int = Field(
+        default=90,
+        ge=5,
+        description="Distributed lease TTL for lock-batches loop ownership",
+    )
+    lock_batches_lease_jitter_seconds: float = Field(
+        default=2.0,
+        ge=0,
+        description="Optional jitter added to lock-batches lease TTL",
     )
     lock_batches_max_per_tick: int = Field(default=3, ge=1)
     lock_batches_relayer_poll_seconds: float = Field(default=2.0, ge=0.5)

@@ -488,6 +488,7 @@ class CommitmentTicket(BaseModel):
 class CommitmentsSyncRequest(BaseModel):
     market_id: str | None = None
     event_id: str | None = None
+    market_address: str | None = None
     tickets: list[CommitmentTicket]
 
 
@@ -498,6 +499,7 @@ class CommitmentsSyncResponse(BaseModel):
 class SettlementIngestRequest(BaseModel):
     market_id: str | None = None
     event_id: str | None = None
+    market_address: str | None = None
     merkle_root: str | None = Field(default=None, alias="merkleRoot")
     commitments_count: int | None = Field(default=None, alias="commitmentsCount")
     batch_roots: list[str] | None = Field(default=None, alias="batchRoots")
@@ -512,6 +514,7 @@ class SettlementIngestRequest(BaseModel):
     proof_request_id: str | None = Field(default=None, alias="proofRequestId")
     proof_hash: str | None = Field(default=None, alias="proofHash")
     circuit_hash: str | None = Field(default=None, alias="circuitHash")
+    tx_hash: str | None = Field(default=None, alias="txHash")
 
 
 class SettlementIngestResponse(BaseModel):

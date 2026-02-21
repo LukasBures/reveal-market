@@ -71,6 +71,7 @@ def test_database(monkeypatch, tmp_path):
     )
     # Mirror required signer envs to satisfy pricing/quote initialization in tests.
     monkeypatch.setenv("RM_PRICING_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
+    monkeypatch.setenv("RM_INTERNAL_API_SECRET", "test-internal-secret")
 
     from app import models, runtime
     from app.config import get_settings
@@ -176,6 +177,7 @@ def client(test_database, monkeypatch):
 
     try:
         with TestClient(app) as test_client:
+            test_client.headers.update({"X-Internal-Secret": "test-internal-secret"})
             yield test_client
     finally:
         if original_cache is not None:

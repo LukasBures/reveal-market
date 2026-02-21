@@ -102,6 +102,7 @@ class SyncSummary:
     failed_markets: int = 0
     cache_invalidations: int = 0
     settlement_txs: int = 0
+    polymarket_sync_attempted: bool = False
     timing_match_ms: float = 0.0
     timing_upsert_ms: float = 0.0
     timing_normalized_ms: float = 0.0

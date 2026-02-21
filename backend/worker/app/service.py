@@ -7,6 +7,7 @@ import gc
 import json
 import logging
 import random
+import secrets
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -68,6 +69,16 @@ class _WorkerTimestamps:
 
 _WORKER_TIMESTAMPS = _WorkerTimestamps()
 _WORKER_TIMESTAMPS_LOCK = asyncio.Lock()
+_LOCAL_SYNC_LEASE = asyncio.Lock()
+_LOCAL_MAINTENANCE_LEASE = asyncio.Lock()
+_LOCAL_LOCK_BATCHES_LEASE = asyncio.Lock()
+_LOCAL_LEASE_MARKER = "local-lease"
+_LEASE_RELEASE_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 
 
 @dataclass
@@ -566,32 +577,40 @@ def _empty_sync_stats(latency_ms: float = 0.0) -> dict[str, float | int | str | 
     }
 
 
-async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
+async def _acquire_sync_lease(redis_client: Redis | None) -> str | None:
     """Best-effort lease so only one worker paginates Gamma at a time."""
 
     cooldown = max(runtime.settings.polymarket_sync_lease_failure_cooldown_seconds, 0)
     cooldown_jitter = max(runtime.settings.polymarket_sync_lease_failure_jitter_seconds, 0)
     now = time.monotonic()
+
+    async def _acquire_local_lease() -> str | None:
+        if _LOCAL_SYNC_LEASE.locked():
+            if cooldown > 0:
+                async with _WORKER_TIMESTAMPS_LOCK:
+                    _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
+            wait_for = cooldown + (random.uniform(0, cooldown_jitter) if cooldown_jitter else 0)  # noqa: S311
+            if wait_for > 0:
+                await asyncio.sleep(wait_for)
+            return None
+        await _LOCAL_SYNC_LEASE.acquire()
+        return _LOCAL_LEASE_MARKER
+
     if cooldown > 0:
         async with _WORKER_TIMESTAMPS_LOCK:
             last_failure_ts = _WORKER_TIMESTAMPS.last_sync_lease_failure_ts
         if last_failure_ts is not None and (now - last_failure_ts) < cooldown:
-            return False
+            return None
     if redis_client is None:
-        if cooldown > 0:
-            async with _WORKER_TIMESTAMPS_LOCK:
-                _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
-        wait_for = cooldown + (random.uniform(0, cooldown_jitter) if cooldown_jitter else 0)  # noqa: S311
-        if wait_for > 0:
-            await asyncio.sleep(wait_for)
-        return False
+        return await _acquire_local_lease()
     lease_jitter = max(runtime.settings.polymarket_sync_lease_jitter_seconds, 0)
     ttl = max(runtime.settings.polymarket_sync_lease_ttl_seconds, 5)
     ttl_with_jitter = ttl + (random.uniform(0, lease_jitter) if lease_jitter else 0)  # noqa: S311
+    token = secrets.token_hex(16)
     try:
         acquired = await redis_client.set(
             runtime.settings.polymarket_sync_lease_key,
-            str(time.time()),
+            token,
             nx=True,
             ex=int(ttl_with_jitter),
         )
@@ -601,7 +620,9 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
         else:
             async with _WORKER_TIMESTAMPS_LOCK:
                 _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
-        return bool(acquired)
+        if acquired:
+            return token
+        return None
     except Exception as exc:  # pragma: no cover - defensive
         async with _WORKER_TIMESTAMPS_LOCK:
             _WORKER_TIMESTAMPS.last_sync_lease_failure_ts = now
@@ -612,14 +633,24 @@ async def _acquire_sync_lease(redis_client: Redis | None) -> bool:
             message="failed to acquire polymarket sync lease",
             error=str(exc),
         )
-        return False
+        return await _acquire_local_lease()
 
 
-async def _release_sync_lease(redis_client: Redis | None) -> None:
-    if redis_client is None:
+async def _release_sync_lease(redis_client: Redis | None, lock_token: str | None) -> None:
+    if lock_token == _LOCAL_LEASE_MARKER:
+        if _LOCAL_SYNC_LEASE.locked():
+            _LOCAL_SYNC_LEASE.release()
+        return
+    if redis_client is None or not lock_token:
         return
     try:
-        await redis_client.delete(runtime.settings.polymarket_sync_lease_key)
+        lease_key = runtime.settings.polymarket_sync_lease_key
+        if hasattr(redis_client, "eval"):
+            await _resolve_awaitable(redis_client.eval(_LEASE_RELEASE_LUA, 1, lease_key, lock_token))
+            return
+        current = await redis_client.get(lease_key)
+        if current == lock_token:
+            await redis_client.delete(lease_key)
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -630,20 +661,26 @@ async def _release_sync_lease(redis_client: Redis | None) -> None:
         )
 
 
-async def _acquire_maintenance_lease(redis_client: Redis | None) -> bool:
+async def _acquire_maintenance_lease(redis_client: Redis | None) -> str | None:
     """Best-effort lease so only one worker runs maintenance at a time."""
 
     if redis_client is None:
-        return False
+        if _LOCAL_MAINTENANCE_LEASE.locked():
+            return None
+        await _LOCAL_MAINTENANCE_LEASE.acquire()
+        return _LOCAL_LEASE_MARKER
     ttl = max(int(runtime.settings.maintenance_poll_seconds), 5)
+    token = secrets.token_hex(16)
     try:
         acquired = await redis_client.set(
             runtime.settings.maintenance_lease_key,
-            str(time.time()),
+            token,
             nx=True,
             ex=ttl,
         )
-        return bool(acquired)
+        if acquired:
+            return token
+        return None
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -652,20 +689,91 @@ async def _acquire_maintenance_lease(redis_client: Redis | None) -> bool:
             message="failed to acquire maintenance lease",
             error=str(exc),
         )
-        return False
+        return None
 
 
-async def _release_maintenance_lease(redis_client: Redis | None) -> None:
-    if redis_client is None:
+async def _release_maintenance_lease(redis_client: Redis | None, lock_token: str | None) -> None:
+    if lock_token == _LOCAL_LEASE_MARKER:
+        if _LOCAL_MAINTENANCE_LEASE.locked():
+            _LOCAL_MAINTENANCE_LEASE.release()
+        return
+    if redis_client is None or not lock_token:
         return
     try:
-        await redis_client.delete(runtime.settings.maintenance_lease_key)
+        lease_key = runtime.settings.maintenance_lease_key
+        if hasattr(redis_client, "eval"):
+            await _resolve_awaitable(redis_client.eval(_LEASE_RELEASE_LUA, 1, lease_key, lock_token))
+            return
+        current = await redis_client.get(lease_key)
+        if current == lock_token:
+            await redis_client.delete(lease_key)
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
             logging.WARNING,
             event="worker.maintenance.lease_release_failed",
             message="failed to release maintenance lease",
+            error=str(exc),
+        )
+
+
+async def _acquire_lock_batches_lease(redis_client: Redis | None) -> str | None:
+    """Best-effort lease so only one worker runs lock-batches per tick."""
+
+    if redis_client is None:
+        if _LOCAL_LOCK_BATCHES_LEASE.locked():
+            return None
+        await _LOCAL_LOCK_BATCHES_LEASE.acquire()
+        return _LOCAL_LEASE_MARKER
+    ttl = max(runtime.settings.lock_batches_lease_ttl_seconds, 5)
+    lease_jitter = max(runtime.settings.lock_batches_lease_jitter_seconds, 0)
+    ttl_with_jitter = ttl + (random.uniform(0, lease_jitter) if lease_jitter else 0)  # noqa: S311
+    token = secrets.token_hex(16)
+    try:
+        acquired = await redis_client.set(
+            runtime.settings.lock_batches_lease_key,
+            token,
+            nx=True,
+            ex=int(ttl_with_jitter),
+        )
+        if acquired:
+            return token
+        return None
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.lock_batches.lease_error",
+            message="failed to acquire lock-batches lease",
+            error=str(exc),
+        )
+        if _LOCAL_LOCK_BATCHES_LEASE.locked():
+            return None
+        await _LOCAL_LOCK_BATCHES_LEASE.acquire()
+        return _LOCAL_LEASE_MARKER
+
+
+async def _release_lock_batches_lease(redis_client: Redis | None, lock_token: str | None) -> None:
+    if lock_token == _LOCAL_LEASE_MARKER:
+        if _LOCAL_LOCK_BATCHES_LEASE.locked():
+            _LOCAL_LOCK_BATCHES_LEASE.release()
+        return
+    if redis_client is None or not lock_token:
+        return
+    try:
+        lease_key = runtime.settings.lock_batches_lease_key
+        if hasattr(redis_client, "eval"):
+            await _resolve_awaitable(redis_client.eval(_LEASE_RELEASE_LUA, 1, lease_key, lock_token))
+            return
+        current = await redis_client.get(lease_key)
+        if current == lock_token:
+            await redis_client.delete(lease_key)
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.lock_batches.lease_release_failed",
+            message="failed to release lock-batches lease",
             error=str(exc),
         )
 
@@ -1064,8 +1172,8 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
     summary = SyncSummary()
     gap_count = 0
     total_fetched = 0
-    lease_acquired = await _acquire_sync_lease(redis_client)
-    if not lease_acquired:
+    sync_lease_token = await _acquire_sync_lease(redis_client)
+    if not sync_lease_token:
         LEASE_SKIP_COUNTER.labels(outcome="skipped").inc()
         log_event(
             logger,
@@ -1096,6 +1204,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
             last_exc = None
             page_no = 0
             summary = SyncSummary()
+            summary.polymarket_sync_attempted = True
             total_fetched = 0
             gap_count = 0
             stop_reason: str | None = None
@@ -1418,7 +1527,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         latency_ms = (time.perf_counter() - start) * 1000
         return summary, total_fetched, gap_count, latency_ms
     finally:
-        await _release_sync_lease(redis_client)
+        await _release_sync_lease(redis_client, sync_lease_token)
 
 
 async def process_once(
@@ -1547,7 +1656,7 @@ async def process_once(
     summary.cache_invalidations += cache_report.total
     stats = summary.to_stats(total_fetched, latency_ms, summary.cache_invalidations)
     stats["resolution_gaps"] = gap_count
-    stats["polymarket_ok"] = True
+    stats["polymarket_ok"] = bool(getattr(summary, "polymarket_sync_attempted", False))
 
     log_event(
         logger,
@@ -1796,8 +1905,8 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
     try:
         while True:
             loop_start = time.monotonic()
-            lease_acquired = await _acquire_maintenance_lease(redis_client)
-            if not lease_acquired:
+            maintenance_lease_token = await _acquire_maintenance_lease(redis_client)
+            if not maintenance_lease_token:
                 log_event(
                     logger,
                     logging.INFO,
@@ -1912,7 +2021,7 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
                         error=str(exc),
                     )
                 finally:
-                    await _release_maintenance_lease(redis_client)
+                    await _release_maintenance_lease(redis_client, maintenance_lease_token)
             if redis_client is not None:
                 try:
                     recovered = await _recover_settlement_state(redis_client)
@@ -1963,32 +2072,44 @@ async def run_lock_batches_loop(redis_client: Redis | None) -> None:
         while True:
             loop_start = time.monotonic()
             summary = SyncSummary()
-            try:
-                lock_batches_start = time.perf_counter()
-                submitted = await run_lock_batches_jobs(summary, redis_client)
-                lock_batches_duration_ms = round((time.perf_counter() - lock_batches_start) * 1000, 2)
-                cache_invalidations = 0
-                if submitted and redis_client is not None:
-                    cache_report = await invalidate_cache_tags(redis_client, summary)
-                    cache_invalidations = cache_report.total
-                if submitted:
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        event="worker.lock_batches.loop_complete",
-                        message="lock-batches loop processed candidates",
-                        submitted=submitted,
-                        cache_invalidations=cache_invalidations,
-                        duration_ms=lock_batches_duration_ms,
-                    )
-            except Exception as exc:  # pragma: no cover - defensive
+            lease_token = await _acquire_lock_batches_lease(redis_client)
+            if not lease_token:
                 log_event(
                     logger,
-                    logging.WARNING,
-                    event="worker.lock_batches.loop_failed",
-                    message="lock-batches loop failed",
-                    error=str(exc),
+                    logging.DEBUG,
+                    event="worker.lock_batches.skipped_lease",
+                    message="skipping lock-batches tick because another worker holds the lease",
+                    lease_key=runtime.settings.lock_batches_lease_key,
                 )
+            else:
+                try:
+                    lock_batches_start = time.perf_counter()
+                    submitted = await run_lock_batches_jobs(summary, redis_client)
+                    lock_batches_duration_ms = round((time.perf_counter() - lock_batches_start) * 1000, 2)
+                    cache_invalidations = 0
+                    if submitted and redis_client is not None:
+                        cache_report = await invalidate_cache_tags(redis_client, summary)
+                        cache_invalidations = cache_report.total
+                    if submitted:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.lock_batches.loop_complete",
+                            message="lock-batches loop processed candidates",
+                            submitted=submitted,
+                            cache_invalidations=cache_invalidations,
+                            duration_ms=lock_batches_duration_ms,
+                        )
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.lock_batches.loop_failed",
+                        message="lock-batches loop failed",
+                        error=str(exc),
+                    )
+                finally:
+                    await _release_lock_batches_lease(redis_client, lease_token)
             elapsed = time.monotonic() - loop_start
             sleep_for = max(interval - elapsed, 0)
             await asyncio.sleep(sleep_for)

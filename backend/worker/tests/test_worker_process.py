@@ -132,6 +132,12 @@ class DummyRedis:
             return -1
         return ttl
 
+    async def expire(self, key: str, ttl_seconds: int):
+        if key not in self.store:
+            return 0
+        self._ttls[key] = int(ttl_seconds)
+        return 1
+
     async def lpush(self, key: str, value: Any):
         queue = self.store.setdefault(key, [])
         if not isinstance(queue, list):
@@ -177,20 +183,40 @@ class DummyRedis:
             return None
 
     async def eval(self, script: str, numkeys: int, *args):
-        if numkeys != 2:
-            raise RuntimeError("unsupported numkeys")
-        queue_key, dedupe_key = args[0], args[1]
-        max_depth = int(args[2])
-        job_id = args[3]
-        payload = args[4]
-        depth = await self.llen(queue_key)
-        if depth >= max_depth:
+        if numkeys == 2:
+            queue_key, dedupe_key = args[0], args[1]
+            # Proof queue script enforces max depth before enqueueing.
+            if "LLEN" in script:
+                max_depth = int(args[2])
+                job_id = args[3]
+                payload = args[4]
+                depth = await self.llen(queue_key)
+                if depth >= max_depth:
+                    return 0
+                added = await self.sadd(dedupe_key, job_id)
+                if added == 0:
+                    return -1
+                await self.rpush(queue_key, payload)
+                return 1
+            # Settlement queue script atomically SADD+RPUSH+EXPIRE.
+            job_id = args[2]
+            payload = args[3]
+            ttl_seconds = int(args[4])
+            added = await self.sadd(dedupe_key, job_id)
+            if added == 0:
+                return 0
+            await self.rpush(queue_key, payload)
+            await self.expire(dedupe_key, ttl_seconds)
+            return 1
+        if numkeys == 1:
+            lock_key = args[0]
+            expected_value = args[1]
+            current_value = await self.get(lock_key)
+            if current_value == expected_value:
+                await self.delete(lock_key)
+                return 1
             return 0
-        added = await self.sadd(dedupe_key, job_id)
-        if added == 0:
-            return -1
-        await self.rpush(queue_key, payload)
-        return 1
+        raise RuntimeError("unsupported numkeys")
 
     async def clear(self):
         self.store.clear()
@@ -1251,12 +1277,39 @@ async def test_enqueue_proof_jobs_dedupes(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_settlement_job_uses_atomic_eval(monkeypatch):
+    redis_client = DummyRedis()
+    monkeypatch.setattr(proofs, "SETTLEMENT_QUEUE_DEPTH_GAUGE", DummyGauge())
+    monkeypatch.setattr(runtime_module.settings, "settlement_queue_dedupe_ttl_seconds", 120, raising=False)
+
+    first = await proofs.enqueue_settlement_job(redis_client, market_id="evt-settle")
+    second = await proofs.enqueue_settlement_job(redis_client, market_id="evt-settle")
+
+    assert first == 1
+    assert second == 0
+    queue_key = runtime_module.settings.settlement_queue_key
+    dedupe_key = runtime_module.settings.settlement_queue_dedupe_key
+    assert await redis_client.llen(queue_key) == 1
+    assert "settle:evt-settle" in await redis_client.smembers(dedupe_key)
+    assert await redis_client.ttl(dedupe_key) == 120
+
+
+@pytest.mark.asyncio
 async def test_acquire_sync_lease_respects_existing(monkeypatch):
     redis_client = DummyRedis()
     # Simulate existing lease so NX fails
     await redis_client.set(runtime_module.settings.polymarket_sync_lease_key, "holder")
     acquired = await worker_service._acquire_sync_lease(redis_client)
-    assert acquired is False
+    assert acquired is None
+
+
+@pytest.mark.asyncio
+async def test_acquire_lock_batches_lease_respects_existing(monkeypatch):
+    redis_client = DummyRedis()
+    monkeypatch.setattr(runtime_module.settings, "lock_batches_lease_key", "worker:lock-batches:lease", raising=False)
+    await redis_client.set(runtime_module.settings.lock_batches_lease_key, "holder")
+    acquired = await worker_service._acquire_lock_batches_lease(redis_client)
+    assert acquired is None
 
 
 @pytest.mark.asyncio
@@ -1345,7 +1398,7 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
         called["maybe_generate"] += 1
         return True
 
-    async def fake_settlements(summary, redis_client=None):
+    async def fake_settlements(summary, redis_client=None, market_id=None):
         called["settlements"] += 1
         return 0
 
@@ -1534,7 +1587,7 @@ async def test_proof_queue_worker_processes_jobs(monkeypatch):
     monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
 
     # Avoid on-chain settlement calls in this path
-    async def fake_settlements(summary, redis_client=None):
+    async def fake_settlements(summary, redis_client=None, market_id=None):
         return 0
 
     monkeypatch.setattr(proofs, "run_settlement_jobs", fake_settlements)

@@ -354,3 +354,94 @@ def test_pricing_quote_rejects_missing_price(client, monkeypatch):
     resp = client.post("/pricing/quote", json=quote_payload)
     assert resp.status_code == 503
     assert resp.json()["detail"]["error"] == "pricing_unavailable"
+
+
+def test_public_pricing_quote_requires_nonce_and_timestamp(client, monkeypatch):
+    import app.runtime as runtime
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "pricing_quote_signature_required", True, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
+
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": "0x1111111111111111111111111111111111111111",
+        "outcome_id": 1,
+        "market_id": "mkt-public-nonce",
+        "user_id": "user-public",
+    }
+    signature = Account.sign_message(
+        encode_defunct(text=f"quote:{payload['market_id']}:{user.address.lower()}:1:{int(Decimal('1e17'))}:abc:1"),
+        user._private_key,
+    ).signature.hex()
+    resp = client.post(
+        "/pricing/quote",
+        json=payload,
+        headers={
+            "X-Internal-Secret": "",
+            "X-Wallet-Signature": signature,
+        },
+    )
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "wallet_signature_nonce_required"
+
+
+def test_public_pricing_quote_rejects_replayed_signature(client, monkeypatch):
+    import app.runtime as runtime
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    signer = Account.create()
+    user = Account.create()
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "pricing_quote_signature_required", True, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
+    monkeypatch.setattr(settings, "quote_signature_nonce_ttl_seconds", 600, raising=False)
+    monkeypatch.setattr(settings, "quote_signature_max_age_seconds", 600, raising=False)
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("10"), stale=False, received_at=None)
+
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_quote)
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": "0x1111111111111111111111111111111111111111",
+        "outcome_id": 1,
+        "market_id": "mkt-public-replay",
+        "user_id": "user-public-replay",
+    }
+    timestamp = int(datetime.now(tz=UTC).timestamp())
+    nonce = "nonce-replay"
+    challenge = f"quote:{payload['market_id']}:{user.address.lower()}:1:{int(Decimal('1e17'))}:{nonce}:{timestamp}"
+    signature = Account.sign_message(encode_defunct(text=challenge), user._private_key).signature.hex()
+    headers = {
+        "X-Internal-Secret": "",
+        "X-Wallet-Signature": signature,
+        "X-Wallet-Signature-Nonce": nonce,
+        "X-Wallet-Signature-Timestamp": str(timestamp),
+    }
+
+    first = client.post("/pricing/quote", json=payload, headers=headers)
+    assert first.status_code == 200, first.json()
+
+    second = client.post("/pricing/quote", json=payload, headers=headers)
+    assert second.status_code == 409
+    assert second.json()["detail"] == "wallet_signature_replayed"

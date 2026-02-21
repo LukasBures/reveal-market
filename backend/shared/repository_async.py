@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy import and_, delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from . import models
 
@@ -643,24 +644,40 @@ async def get_settlement_receipt_by_request_id(
     return (await session.scalars(stmt)).first()
 
 
-async def list_settlements_pending_tx(session: AsyncSession) -> list[tuple[models.Settlement, models.Market]]:
+async def list_settlements_pending_tx(
+    session: AsyncSession,
+    *,
+    market_event_id: str | None = None,
+    include_failed: bool = True,
+    processing_stale_seconds: int = 0,
+) -> list[tuple[models.Settlement, models.Market]]:
     """Return settlements with generated proofs that have not been submitted on-chain."""
 
+    statuses = [
+        models.SettlementSubmissionStatus.NONE.value,
+        models.SettlementSubmissionStatus.QUEUED.value,
+    ]
+    if include_failed:
+        statuses.append(models.SettlementSubmissionStatus.FAILED.value)
+    status_filters: list[ColumnElement[bool]] = [models.Settlement.submission_status.in_(statuses)]
+    if processing_stale_seconds > 0:
+        stale_cutoff = datetime.now(tz=UTC) - timedelta(seconds=int(processing_stale_seconds))
+        status_filters.append(
+            and_(
+                models.Settlement.submission_status == models.SettlementSubmissionStatus.PROCESSING.value,
+                models.Settlement.updated_at <= stale_cutoff,
+            )
+        )
     stmt = (
         select(models.Settlement, models.Market)
         .join(models.Market, models.Market.id == models.Settlement.market_id)
         .where(
             models.Settlement.proof_status == models.SettlementProofStatus.GENERATED.value,
-            models.Settlement.submission_status.in_(
-                [
-                    models.SettlementSubmissionStatus.NONE.value,
-                    models.SettlementSubmissionStatus.QUEUED.value,
-                    models.SettlementSubmissionStatus.PROCESSING.value,
-                    models.SettlementSubmissionStatus.FAILED.value,
-                ]
-            ),
+            or_(*status_filters),
             models.Settlement.settlement_tx_hash.is_(None),
         )
     )
+    if market_event_id:
+        stmt = stmt.where(models.Market.event_id == market_event_id)
     rows = await session.execute(stmt)
     return [(settlement, market) for settlement, market in rows.all()]

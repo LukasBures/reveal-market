@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, cast
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from py_clob_client.client import ClobClient
 from shared.cache_async import add_tag, add_tags, get_json, get_schema_tag, set_json
@@ -39,6 +39,16 @@ router = APIRouter()
 CLOB_HISTORY_DEFAULT_HOST = "https://clob.polymarket.com"
 CLOB_HISTORY_MAX_RANGE_SECONDS = 30 * 24 * 60 * 60
 HistoryInterval = Literal["1m", "1h", "6h", "1d", "1w", "max"]
+
+
+def _verify_internal_secret(secret_header: str | None) -> None:
+    if not settings.internal_api_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="internal_secret_not_configured",
+        )
+    if secret_header != settings.internal_api_secret.get_secret_value():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
 def _history_cache_ttl_seconds(interval: str | None) -> int:
@@ -1332,10 +1342,13 @@ async def clob_order_book(token_id: str) -> schemas.ClobOrderBookResponse:
     include_in_schema=False,
 )
 async def upsert_market(
-    market_in: schemas.MarketCreate, session: AsyncSession = Depends(get_session)
+    market_in: schemas.MarketCreate,
+    session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
 ) -> schemas.MarketResponse:
     """Create or update a market record and invalidate relevant caches."""
 
+    _verify_internal_secret(internal_secret)
     start = time.perf_counter()
     log_event(
         logger,
@@ -1379,10 +1392,14 @@ async def upsert_market(
     include_in_schema=False,
 )
 async def update_market(
-    event_id: str, update: schemas.MarketUpdate, session: AsyncSession = Depends(get_session)
+    event_id: str,
+    update: schemas.MarketUpdate,
+    session: AsyncSession = Depends(get_session),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
 ) -> schemas.MarketResponse:
     """Partial patch for a market record with cache invalidation."""
 
+    _verify_internal_secret(internal_secret)
     market = await crud.get_market_by_event_id(session, event_id)
     if not market:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")

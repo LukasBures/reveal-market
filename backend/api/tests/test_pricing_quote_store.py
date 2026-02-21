@@ -5,6 +5,8 @@ from decimal import Decimal
 from app import models
 from app.config import get_settings
 from app.schemas import FxQuoteResponse
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from pydantic import SecretStr
 
 
@@ -51,11 +53,12 @@ def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     runtime.settings.max_stake_zen = settings.max_stake_zen
     runtime.settings.ticket_size_wei = settings.ticket_size_wei
 
+    user = Account.create()
     payload = {
         "stake_zen": 0.1,
         "market_id": "evt-quote-test",
         "user_id": "user-123",
-        "wallet_address": "0x00000000000000000000000000000000000000aa",
+        "wallet_address": user.address,
         "market_address": "0x00000000000000000000000000000000000000bb",
         "outcome_id": 0,
     }
@@ -71,11 +74,33 @@ def test_pricing_quote_persists_and_consumes(client, db_session, monkeypatch):
     assert float(record.stake_zen) == payload["stake_zen"]
 
     submit_payload = {"quote": quote}
-    submit_response = client.post("/pricing/submit", json=submit_payload)
+    unauthorized_submit = client.post("/pricing/submit", json=submit_payload, headers={"X-Internal-Secret": ""})
+    assert unauthorized_submit.status_code == 401
+    submit_signature = Account.sign_message(
+        encode_defunct(text=f"quote-submit:{quote_id}:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    submit_response = client.post(
+        "/pricing/submit",
+        json=submit_payload,
+        headers={"X-Internal-Secret": "", "X-Wallet-Signature": submit_signature},
+    )
     assert submit_response.status_code == 200
 
     db_session.refresh(record)
     assert record.status == models.QuoteStatusEnum.CONSUMED.value
+
+    unauth_state = client.get(f"/pricing/quotes/{quote_id}", headers={"X-Internal-Secret": ""})
+    assert unauth_state.status_code == 400
+    state_signature = Account.sign_message(
+        encode_defunct(text=f"quote-state:{quote_id}:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    wallet_state = client.get(
+        f"/pricing/quotes/{quote_id}?wallet={user.address}",
+        headers={"X-Internal-Secret": "", "X-Wallet-Signature": state_signature},
+    )
+    assert wallet_state.status_code == 200
 
     admin_response = client.get(f"/pricing/quotes/{quote_id}")
     assert admin_response.status_code == 200

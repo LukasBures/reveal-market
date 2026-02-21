@@ -88,7 +88,7 @@ def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch)
     assert resp.json()["detail"] == "market_not_final"
 
 
-def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
+def test_pricing_quote_rejects_missing_address(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()
     market = _seed_market(db_session, event_id="auto-mkt", address=None)
@@ -106,13 +106,6 @@ def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
 
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
     monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
-    deployed_address = "0x2222222222222222222222222222222222222222"
-
-    async def _ensure_market(_session, _market_id, _expected):
-        return market.id, deployed_address, 1
-
-    monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market)
-
     payload = {
         "stake_zen": 0.1,
         "wallet_address": user.address,
@@ -122,11 +115,8 @@ def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
         "user_id": user.address,
     }
     resp = client.post("/pricing/quote", json=payload)
-    assert resp.status_code == 200
-    quote = resp.json()
-    assert quote["market_address"] == deployed_address
-    assert quote["quote_id"]
-    assert quote["signature"]
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_not_deployed"
 
 
 def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
@@ -207,7 +197,14 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     assert commit_body["tx_hash"] == tx_hash
     assert commit_body["escrow_balance_wei"] == 4242
 
-    positions_resp = client.get(f"/positions?wallet={user.address}")
+    positions_signature = Account.sign_message(
+        encode_defunct(text=f"positions:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    positions_resp = client.get(
+        f"/positions?wallet={user.address}",
+        headers={"X-Wallet-Signature": positions_signature},
+    )
     assert positions_resp.status_code == 200
     data = positions_resp.json()
     assert isinstance(data, dict)
@@ -453,7 +450,11 @@ def test_positions_marks_claimed(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get(f"/positions?wallet={user.address}")
+    signature = Account.sign_message(
+        encode_defunct(text=f"positions:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/positions?wallet={user.address}", headers={"X-Wallet-Signature": signature})
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["positions"]) == 1
@@ -492,13 +493,23 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get(f"/positions?wallet={user.address}")
+    signature = Account.sign_message(
+        encode_defunct(text=f"positions:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/positions?wallet={user.address}", headers={"X-Wallet-Signature": signature})
     assert resp.status_code == 200
     pos = resp.json()["positions"][0]
     assert pos["status"] == "settled"
     assert pos["claimable"] is False
     assert pos["payout_wei"] == 0
     assert pos["payout_zen"] == 0
+
+
+def test_positions_requires_wallet_signature(client):
+    resp = client.get("/positions?wallet=0x1111111111111111111111111111111111111111")
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "wallet_signature_required"
 
 
 def test_sync_commitments_endpoint(client, db_session, monkeypatch):
@@ -533,6 +544,21 @@ def test_sync_commitments_endpoint(client, db_session, monkeypatch):
     assert resp.json()["recorded"] == 1
 
 
+def test_sync_commitments_rejects_market_address_mismatch(client, db_session, monkeypatch):
+    market = _seed_market(
+        db_session, event_id="sync-mkt-mismatch", address="0x5555555555555555555555555555555555555555"
+    )
+    monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
+    payload = {
+        "event_id": market.event_id,
+        "market_address": "0x6666666666666666666666666666666666666666",
+        "tickets": [],
+    }
+    resp = client.post("/internal/commitments/sync", json=payload, headers={"X-Internal-Secret": "secret"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_address_mismatch"
+
+
 def test_ingest_settlement_endpoint(client, db_session, monkeypatch):
     market = _seed_market(db_session, event_id="settle-mkt", address="0x6666666666666666666666666666666666666666")
     monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
@@ -551,6 +577,20 @@ def test_ingest_settlement_endpoint(client, db_session, monkeypatch):
     refreshed = db_session.get(models.Settlement, 1)
     assert refreshed is not None
     assert refreshed.winning_outcome_id == 0
+
+
+def test_ingest_settlement_rejects_market_identifier_mismatch(client, db_session, monkeypatch):
+    first = _seed_market(db_session, event_id="settle-mkt-a", address="0x6666666666666666666666666666666666666666")
+    _seed_market(db_session, event_id="settle-mkt-b", address="0x7777777777777777777777777777777777777777")
+    monkeypatch.setattr("app.routes.trade.settings.internal_api_secret", SecretStr("secret"), raising=False)
+    payload = {
+        "event_id": "settle-mkt-b",
+        "market_address": first.market_address,
+        "winningOutcomeId": 0,
+    }
+    resp = client.post("/internal/settlements/ingest", json=payload, headers={"X-Internal-Secret": "secret"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_identifier_mismatch"
 
 
 def test_trade_status_reads_queue_result(client, monkeypatch):

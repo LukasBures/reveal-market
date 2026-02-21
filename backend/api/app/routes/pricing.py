@@ -12,7 +12,7 @@ from typing import TypedDict, Unpack, cast
 import httpx
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import SecretStr
 from shared import models as shared_models
 from shared.logging import get_request_id, log_event
@@ -26,12 +26,14 @@ from app.database import get_session
 from app.metrics_registry import PRICING_COUNTER
 from app.pricing import PricingEngine, _coerce_price, build_quote_audit_payload, fetch_fx_quote
 from app.runtime import logger, settings
-from app.services.cache_client import get_http_client
+from app.services.cache_client import get_cache_client, get_http_client
 
 router = APIRouter()
 
 _STREAMER_TIMEOUT_SECONDS = 3.0
 _PRESET_CFG: dict[str, object] | None = None
+_QUOTE_NONCE_FALLBACK: dict[str, datetime] = {}
+_QUOTE_NONCE_FALLBACK_LOCK = asyncio.Lock()
 
 
 class _PricingUnavailableFields(TypedDict, total=False):
@@ -247,6 +249,91 @@ def build_quote_digest(
     )
 
 
+def _is_internal_caller(internal_secret: str | None) -> bool:
+    if not internal_secret:
+        return False
+    if not settings.internal_api_secret:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_secret_not_configured")
+    if internal_secret != settings.internal_api_secret.get_secret_value():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
+    return True
+
+
+def _verify_scoped_signature(wallet: str, challenge: str, signature: str) -> None:
+    try:
+        recovered = Account.recover_message(encode_defunct(text=challenge), signature=signature)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid_signature:{exc}") from exc
+    if recovered.lower() != wallet.lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
+
+
+async def _consume_quote_nonce(wallet: str, nonce: str, issued_at: int) -> None:
+    ttl_seconds = max(int(getattr(settings, "quote_signature_nonce_ttl_seconds", 300)), 30)
+    key = f"pricing:quote:nonce:{wallet.lower()}:{nonce}"
+    cache_client = await get_cache_client()
+    if cache_client is not None:
+        try:
+            consumed = await cache_client.set(key, str(issued_at), ex=ttl_seconds, nx=True)
+        except Exception as exc:  # pragma: no cover - cache fallback
+            log_event(
+                logger,
+                logging.WARNING,
+                event="pricing.quote.nonce_cache_failed",
+                message="failed to persist quote nonce in redis; using local fallback",
+                error=str(exc),
+            )
+        else:
+            if consumed:
+                return
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="wallet_signature_replayed")
+
+    now = datetime.now(tz=UTC)
+    async with _QUOTE_NONCE_FALLBACK_LOCK:
+        expired_keys = [k for k, expires_at in _QUOTE_NONCE_FALLBACK.items() if expires_at <= now]
+        for stale_key in expired_keys:
+            _QUOTE_NONCE_FALLBACK.pop(stale_key, None)
+        if key in _QUOTE_NONCE_FALLBACK:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="wallet_signature_replayed")
+        _QUOTE_NONCE_FALLBACK[key] = now + timedelta(seconds=ttl_seconds)
+
+
+async def _verify_quote_signature(
+    wallet: str,
+    market_id: str,
+    outcome_id: int,
+    stake_wei: int,
+    signature: str,
+    *,
+    nonce: str | None,
+    issued_at: int | None,
+) -> None:
+    nonce_value = (nonce or "").strip()
+    if not nonce_value:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_nonce_required")
+    if len(nonce_value) > 128:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_signature_nonce_invalid")
+    if issued_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_timestamp_required")
+    now_ts = int(datetime.now(tz=UTC).timestamp())
+    max_age_seconds = max(int(getattr(settings, "quote_signature_max_age_seconds", 300)), 30)
+    if abs(now_ts - int(issued_at)) > max_age_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_stale")
+    challenge = f"quote:{market_id}:{wallet.lower()}:{int(outcome_id)}:{int(stake_wei)}:{nonce_value}:{int(issued_at)}"
+    _verify_scoped_signature(wallet, challenge, signature)
+    await _consume_quote_nonce(wallet, nonce_value, int(issued_at))
+
+
+def _verify_submit_signature(wallet: str, quote_id: str, signature: str) -> None:
+    challenge = f"quote-submit:{quote_id}:{wallet.lower()}"
+    _verify_scoped_signature(wallet, challenge, signature)
+
+
+def _verify_quote_state_signature(wallet: str, quote_id: str, signature: str) -> None:
+    challenge = f"quote-state:{quote_id}:{wallet.lower()}"
+    _verify_scoped_signature(wallet, challenge, signature)
+
+
 async def _enforce_caps(
     session: AsyncSession,
     *,
@@ -327,13 +414,17 @@ async def _enforce_caps(
 @router.post("/pricing/quote", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
 async def pricing_quote(
     payload: schemas.PricingQuoteRequest,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    wallet_signature_nonce: str | None = Header(default=None, alias="X-Wallet-Signature-Nonce"),
+    wallet_signature_timestamp: int | None = Header(default=None, alias="X-Wallet-Signature-Timestamp"),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
     session: AsyncSession = Depends(get_session),
 ) -> schemas.PricingQuoteResponse:
     """Generate a signed quote bound to stake, FX, outcome, and expiry."""
 
     request_id = get_request_id()
     now = datetime.now(tz=UTC)
-    user_id = payload.user_id or payload.wallet_address
+    user_id = payload.wallet_address
     quote_id_for_audit: str | None = None
     try:
         if payload.stake_zen > settings.max_stake_zen:
@@ -352,30 +443,47 @@ async def pricing_quote(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"stake_mismatch_expected_{ticket_size_wei}",
             )
-        if payload.market_id:
-            market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
-            if market_record and (
-                market_record.status
-                in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
-                or market_record.resolved_at is not None
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Market is settled; new quotes are disabled",
-                )
-            if market_record:
-                _assert_commits_allowed(market_record, now, session)
-        # Auto-deploy on first quote if a market address is missing.
+        internal_caller = _is_internal_caller(internal_secret)
+        if settings.pricing_quote_signature_required and not internal_caller:
+            if not wallet_signature:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+            await _verify_quote_signature(
+                payload.wallet_address,
+                payload.market_id,
+                int(payload.outcome_id),
+                int(stake_wei),
+                wallet_signature,
+                nonce=wallet_signature_nonce,
+                issued_at=wallet_signature_timestamp,
+            )
+        market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+        if market_record and (
+            market_record.status
+            in {shared_models.MarketStatusEnum.SETTLED.value, shared_models.MarketStatusEnum.CANCELLED.value}
+            or market_record.resolved_at is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Market is settled; new quotes are disabled",
+            )
+        if market_record:
+            _assert_commits_allowed(market_record, now, session)
+        # Public quote issuance never auto-creates markets.
         ensured_market_address: str | None = (payload.market_address or "") or None
-        if payload.market_id and not ensured_market_address:
-            market_record = await repository_async.get_market_by_event_id(session, payload.market_id)
+        if not ensured_market_address and market_record is not None:
             ensured_market_address = getattr(market_record, "market_address", None)
         if payload.market_id and not ensured_market_address:
-            from app.routes.trade import _ensure_market_or_create
+            if settings.public_market_auto_create_enabled and internal_caller:
+                from app.routes.trade import _ensure_market_or_create
 
-            _, ensured_market_address, _ = await _ensure_market_or_create(
-                session, payload.market_id, payload.market_address
-            )
+                _, ensured_market_address, _ = await _ensure_market_or_create(
+                    session,
+                    payload.market_id,
+                    payload.market_address,
+                    allow_create=True,
+                )
+            else:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_deployed")
         try:
             fx_quote = await fetch_fx_quote(settings)
             if fx_quote.stale:
@@ -694,6 +802,8 @@ async def pricing_quote_preview(
 @router.post("/pricing/submit", response_model=schemas.PricingSubmitResponse, tags=["pricing"])
 async def pricing_submit(
     payload: schemas.PricingSubmitRequest,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
     session: AsyncSession = Depends(get_session),
 ) -> schemas.PricingSubmitResponse:
     """Validate and mark a quote as consumed, re-checking FX drift if requested."""
@@ -710,6 +820,10 @@ async def pricing_submit(
             if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
                 return dt.replace(tzinfo=UTC)
             return dt
+
+        internal_caller = _is_internal_caller(internal_secret)
+        if not internal_caller and not wallet_signature:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
 
         if settings.pricing_chain_id is None:
             raise _pricing_unavailable("pricing_chain_missing", request_id=request_id)
@@ -738,6 +852,11 @@ async def pricing_submit(
         if db_quote is None:
             PRICING_COUNTER.labels(event="submit", result="missing").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote not found or expired")
+        wallet_for_auth = (db_quote.wallet_address or quote.wallet_address or "").strip()
+        if not internal_caller:
+            if not wallet_for_auth:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quote_wallet_missing")
+            _verify_submit_signature(wallet_for_auth, quote_id, cast(str, wallet_signature))
         if db_quote.status == models.QuoteStatusEnum.CONSUMED.value:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote already consumed")
         db_expires_at = _as_aware(cast(datetime | None, getattr(db_quote, "expires_at", None)))
@@ -935,10 +1054,27 @@ async def pricing_submit(
 
 
 @router.get("/pricing/quotes/{quote_id}", response_model=schemas.QuoteRecord, tags=["pricing"])
-async def pricing_quote_state(quote_id: str, session: AsyncSession = Depends(get_session)) -> schemas.QuoteRecord:
+async def pricing_quote_state(
+    quote_id: str,
+    wallet: str | None = None,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+    session: AsyncSession = Depends(get_session),
+) -> schemas.QuoteRecord:
     record = await repository_async.get_quote(session, quote_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="quote_not_found")
+    internal_caller = _is_internal_caller(internal_secret)
+    if not internal_caller:
+        wallet_address = (record.wallet_address or "").strip()
+        requested_wallet = (wallet or "").strip()
+        if not requested_wallet:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+        if not wallet_signature:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+        if not wallet_address or wallet_address.lower() != requested_wallet.lower():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="wallet_quote_forbidden")
+        _verify_quote_state_signature(requested_wallet, quote_id, wallet_signature)
     return schemas.QuoteRecord.model_validate(record)
 
 

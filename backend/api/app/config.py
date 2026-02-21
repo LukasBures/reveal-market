@@ -209,6 +209,22 @@ class Settings(BaseSettings):
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
     pricing_quote_ttl_seconds: int = Field(default=120, ge=15, le=600)
+    pricing_quote_signature_required: bool = Field(
+        default=True,
+        description="Require wallet signature proof-of-possession on /pricing/quote unless an internal secret is used",
+    )
+    quote_signature_nonce_ttl_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="Replay cache TTL for wallet quote signatures (seconds)",
+    )
+    quote_signature_max_age_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="Maximum age/skew allowed for wallet quote signature timestamps (seconds)",
+    )
     authorization_signer_private_key: SecretStr | None = Field(
         default=None, description="Private key for the on-chain authorization signer (CommitAuth signatures)"
     )
@@ -310,6 +326,22 @@ class Settings(BaseSettings):
         default=172800,
         ge=60,
         description="Seconds after commit deadline to set reveal deadline when auto-creating markets",
+    )
+    public_market_auto_create_enabled: bool = Field(
+        default=False,
+        description="Allow public quote/commit routes to auto-create on-chain markets when no address exists",
+    )
+    claim_request_lock_ttl_seconds: int = Field(
+        default=45,
+        ge=5,
+        le=600,
+        description="Idempotency lock TTL for /trade/claim per market/wallet/ticket",
+    )
+    claim_request_rate_limit_per_minute: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description="Per-wallet claim dispatch limit per minute",
     )
 
     @field_validator("max_page_size")

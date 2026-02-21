@@ -4577,6 +4577,22 @@
               "title": "Wallet",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
           }
         ],
         "responses": {
@@ -4674,6 +4690,72 @@
       "post": {
         "description": "Generate a signed quote bound to stake, FX, outcome, and expiry.",
         "operationId": "pricing_quote_pricing_quote_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature-Nonce",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature-Nonce"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature-Timestamp",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature-Timestamp"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Secret"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4724,6 +4806,54 @@
               "title": "Quote Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "wallet",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Wallet"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Secret"
+            }
           }
         ],
         "responses": {
@@ -4758,6 +4888,40 @@
       "post": {
         "description": "Validate and mark a quote as consumed, re-checking FX drift if requested.",
         "operationId": "pricing_submit_pricing_submit_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Secret"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4865,6 +5029,40 @@
       "post": {
         "description": "Initiate a claim via the relayer for a settled winning ticket.",
         "operationId": "trade_claim_trade_claim_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Wallet-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Wallet-Signature"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Secret"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

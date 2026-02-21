@@ -996,6 +996,76 @@ async def _record_commit_nonce(nonce: int) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="nonce_already_used")
 
 
+async def _claim_rate_and_lock(market_id: str, wallet: str, ticket_id: int) -> str | None:
+    cache = await get_cache_client()
+    if cache is None:
+        return None
+    wallet_key = wallet.lower()
+    per_minute_limit = max(1, int(getattr(settings, "claim_request_rate_limit_per_minute", 20) or 20))
+    rate_key = f"claim:rate:{wallet_key}"
+    try:
+        incr = getattr(cache, "incr", None)
+        expire = getattr(cache, "expire", None)
+        if callable(incr):
+            count_raw = await _resolve_awaitable(incr(rate_key))
+            count = int(count_raw)
+            if count == 1 and callable(expire):
+                await _resolve_awaitable(expire(rate_key, 60))
+            if count > per_minute_limit:
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="claim_rate_limited")
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - best effort guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.claim.rate_guard_failed",
+            message="failed to apply claim rate guard",
+            wallet=wallet_key,
+            market_id=market_id,
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+    lock_ttl = max(5, int(getattr(settings, "claim_request_lock_ttl_seconds", 45) or 45))
+    lock_key = f"claim:lock:{market_id}:{wallet_key}:{ticket_id}"
+    try:
+        acquired = await _resolve_awaitable(cache.set(lock_key, "1", ex=lock_ttl, nx=True))
+    except Exception as exc:  # pragma: no cover - best effort guard
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.claim.lock_guard_failed",
+            message="failed to acquire claim idempotency lock",
+            wallet=wallet_key,
+            market_id=market_id,
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return None
+    if not acquired:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="claim_in_progress")
+    return lock_key
+
+
+async def _release_claim_lock(lock_key: str | None) -> None:
+    if not lock_key:
+        return
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    try:
+        await _resolve_awaitable(cache.delete(lock_key))
+    except Exception as exc:  # pragma: no cover - best effort cleanup
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="trade.claim.lock_release_failed",
+            message="failed to release claim idempotency lock",
+            lock_key=lock_key,
+            error=str(exc),
+        )
+
+
 async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tuple[str, int]:
     """Create a market via the factory when no address is stored."""
 
@@ -1368,7 +1438,11 @@ async def _ensure_market(
 
 
 async def _ensure_market_or_create(
-    session: AsyncSession, market_id: str, expected_address: str | None
+    session: AsyncSession,
+    market_id: str,
+    expected_address: str | None,
+    *,
+    allow_create: bool = False,
 ) -> tuple[int, str, int | None]:
     market = await repository_async.get_market_by_event_id(session, market_id)
     if market is None:
@@ -1398,6 +1472,11 @@ async def _ensure_market_or_create(
     elif market.market_address:
         resolved_address = market.market_address
     else:
+        if not allow_create:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "market_not_deployed", "message": "Market address is missing"},
+            )
         now = datetime.now(tz=UTC)
         deploy_ttl_seconds = 180
         cache = await get_cache_client()
@@ -1580,32 +1659,42 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
     return result
 
 
-def _verify_wallet_signature(wallet: str, signature: str) -> None:
-    """Verify that the signature was produced by the wallet for the claim-bundles scope."""
+def _verify_scoped_signature(wallet: str, challenge: str, signature: str) -> None:
+    """Verify that `signature` matches the wallet for a scoped challenge string."""
 
     try:
         recovered = Account.recover_message(
-            encode_defunct(text=f"claim-bundles:{wallet.lower()}"),
+            encode_defunct(text=challenge),
             signature=signature,
         )
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid_signature:{exc}") from exc
     if recovered.lower() != wallet.lower():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
+
+
+def _verify_wallet_signature(wallet: str, signature: str) -> None:
+    """Verify signature ownership for claim bundle/status lookups."""
+
+    _verify_scoped_signature(wallet, f"claim-bundles:{wallet.lower()}", signature)
 
 
 def _verify_commit_signature(wallet: str, quote_id: str, signature: str) -> None:
     """Verify that the signature was produced by the wallet for the commit scope."""
 
-    try:
-        recovered = Account.recover_message(
-            encode_defunct(text=f"commit:{quote_id}:{wallet.lower()}"),
-            signature=signature,
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid_signature:{exc}") from exc
-    if recovered.lower() != wallet.lower():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
+    _verify_scoped_signature(wallet, f"commit:{quote_id}:{wallet.lower()}", signature)
+
+
+def _verify_claim_signature(wallet: str, market_id: str, ticket_id: int, signature: str) -> None:
+    """Verify that the signature was produced by the wallet for the claim scope."""
+
+    _verify_scoped_signature(wallet, f"claim:{market_id}:{wallet.lower()}:{int(ticket_id)}", signature)
+
+
+def _verify_positions_signature(wallet: str, signature: str) -> None:
+    """Verify that the signature was produced by the wallet for positions lookups."""
+
+    _verify_scoped_signature(wallet, f"positions:{wallet.lower()}", signature)
 
 
 @router.post("/trade/commit", response_model=schemas.TradeCommitResponse, tags=["trade"])
@@ -1639,8 +1728,10 @@ async def trade_commit(
         )
     # Check relayer escrow balance if available.
     escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
-    market_db_id, market_address, market_onchain_id = await _ensure_market_or_create(
-        session, quote.market_id or "", quote.market_address
+    market_db_id, market_address, market_onchain_id = await _ensure_market(
+        session,
+        quote.market_id or "",
+        quote.market_address,
     )
     if not market_address:
         raise HTTPException(
@@ -1674,8 +1765,10 @@ async def trade_commit(
     )
 
     # Validate and consume the quote using the existing submit logic (signature + drift checks).
+    internal_secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else None
     await pricing_routes.pricing_submit(
         schemas.PricingSubmitRequest(quote=quote, max_fx_diff_percent=payload.max_fx_diff_percent),
+        internal_secret=internal_secret,
         session=session,
     )
     stake_zen = float(quote.stake_zen)
@@ -1834,11 +1927,18 @@ async def trade_commit(
 
 
 @router.get("/positions", response_model=schemas.PositionsResponse, tags=["trade"])
-async def list_positions(wallet: str, session: AsyncSession = Depends(get_session)) -> schemas.PositionsResponse:
+async def list_positions(
+    wallet: str,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    session: AsyncSession = Depends(get_session),
+) -> schemas.PositionsResponse:
     """Return committed positions for a wallet along with escrow balance."""
 
     if not wallet:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+    if not wallet_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+    _verify_positions_signature(wallet, wallet_signature)
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     await _sync_claimed_commitments(session, rows)
     claim_deadline_candidates: set[str] = set()
@@ -1874,14 +1974,14 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
         payout_zen: float | None = base_payout_wei / 1e18
         claimed = commitment.claimed_at is not None
         claimable = False
-        status = "committed"
+        position_status = "committed"
         # Surface market status transitions for UI (committed/locked/settled/cancelled/pending).
         if getattr(market, "status", None) == models.MarketStatusEnum.LOCKED.value:
-            status = "locked"
+            position_status = "locked"
         if getattr(market, "status", None) == models.MarketStatusEnum.CANCELLED.value:
-            status = "cancelled"
+            position_status = "cancelled"
         if settlement and settlement.winning_outcome_id is not None:
-            status = "settled"
+            position_status = "settled"
             if settlement.winning_outcome_id == commitment.outcome_id:
                 claimable = True
             else:
@@ -1895,14 +1995,14 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
             if claim_deadline and now_ts > int(claim_deadline):
                 claimable = False
         if market.resolved_at:
-            status = "settled"
+            position_status = "settled"
         if (
             getattr(market, "resolution_status", None)
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
         ):
-            status = "pending_resolution"
+            position_status = "pending_resolution"
         if claimed:
-            status = "claimed"
+            position_status = "claimed"
             claimable = False
         outcomes_rel = getattr(market, "outcomes_rel", []) or []
         outcome_labels = [outcome.label for outcome in outcomes_rel]
@@ -1923,7 +2023,7 @@ async def list_positions(wallet: str, session: AsyncSession = Depends(get_sessio
                 payout_zen=payout_zen,
                 tx_hash=tx_hash_value,
                 quote_id=None,
-                status=status,
+                status=position_status,
                 ticket_id=commitment.leaf_index,
                 created_at=getattr(commitment, "created_at", None),
                 claimed_at=getattr(commitment, "claimed_at", None),
@@ -2145,9 +2245,22 @@ async def claim_status(
 
 
 @router.post("/trade/claim", response_model=schemas.TradeClaimResponse, tags=["trade"])
-async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession = Depends(get_session)):
+async def trade_claim(
+    payload: schemas.TradeClaimRequest,
+    wallet_signature: str | None = Header(default=None, alias="X-Wallet-Signature"),
+    internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+    session: AsyncSession = Depends(get_session),
+):
     """Initiate a claim via the relayer for a settled winning ticket."""
 
+    internal_request = False
+    if internal_secret:
+        _verify_internal_secret(internal_secret)
+        internal_request = True
+    if not internal_request and not wallet_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+    if not internal_request and payload.ticket_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ticket_id_required")
     market_identifier = payload.event_id or payload.market_id
     if not market_identifier:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
@@ -2181,6 +2294,16 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
     if commitment.leaf_index is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_index_missing")
     ticket_id = commitment.leaf_index
+    if not internal_request:
+        _verify_claim_signature(payload.wallet_address, market.event_id, ticket_id, cast(str, wallet_signature))
+    if commitment.claimed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
+    claimed_map = await _fetch_claimed_tickets(market.market_address, [ticket_id])
+    if claimed_map.get(int(ticket_id)):
+        commitment.claimed_at = datetime.now(tz=UTC)
+        session.add(commitment)
+        await session.flush()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
     merkle_proof = [row.sibling_hash for row in path_rows] if path_rows else []
     if not merkle_proof:
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
@@ -2191,6 +2314,7 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         batch_counts = [settlement.commitments_count]
     if not settings.relayer_base_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
+    claim_lock_key = await _claim_rate_and_lock(market.event_id, payload.wallet_address, ticket_id)
     relayer_payload = {
         "user": payload.wallet_address,
         "market": market.market_address,
@@ -2211,32 +2335,32 @@ async def trade_claim(payload: schemas.TradeClaimRequest, session: AsyncSession 
         "rake_bps": settlement.rake_bps,
         "proof_request_id": settlement.proof_request_id,
     }
-    headers = {}
-    if settings.relayer_bearer_token:
-        headers["Authorization"] = f"Bearer {settings.relayer_bearer_token}"
     relayer_job = None
     try:
-        claim_url = _relayer_url("claim")
-        result = await call_relayer(claim_url, relayer_payload)
-    except HTTPException as exc:
-        if settings.relayer_queue_enabled:
-            relayer_job = await _enqueue_relayer_job("claim", claim_url, relayer_payload)
-            result = {}
-        else:
-            raise exc
-    except Exception as exc:  # pragma: no cover - network errors
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        try:
+            claim_url = _relayer_url("claim")
+            result = await call_relayer(claim_url, relayer_payload)
+        except HTTPException as exc:
+            if settings.relayer_queue_enabled:
+                relayer_job = await _enqueue_relayer_job("claim", claim_url, relayer_payload)
+                result = {}
+            else:
+                raise exc
+        except Exception as exc:  # pragma: no cover - network errors
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    tx_hash = _extract_tx_hash(result) or _extract_job_id(result) or relayer_job or ""
-    return schemas.TradeClaimResponse(
-        tx_hash=str(tx_hash),
-        market_id=market.event_id,
-        ticket_id=ticket_id,
-        outcome_id=winning_outcome,
-        amount_wei=int(commitment.amount_wei),
-        payout_wei=int(commitment.payout_wei),
-        status="claimed",
-    )
+        tx_hash = _extract_tx_hash(result) or _extract_job_id(result) or relayer_job or ""
+        return schemas.TradeClaimResponse(
+            tx_hash=str(tx_hash),
+            market_id=market.event_id,
+            ticket_id=ticket_id,
+            outcome_id=winning_outcome,
+            amount_wei=int(commitment.amount_wei),
+            payout_wei=int(commitment.payout_wei),
+            status="claimed",
+        )
+    finally:
+        await _release_claim_lock(claim_lock_key)
 
 
 @router.post(
@@ -2254,11 +2378,21 @@ async def sync_commitments(
 
     _verify_internal_secret(internal_secret)
     market_identifier = payload.event_id or payload.market_id
-    if not market_identifier:
+    market_address = (payload.market_address or "").strip()
+    if not market_identifier and not market_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
-    market = await repository_async.get_market_by_event_id(session, market_identifier)
+    market = None
+    if market_address:
+        market = await repository_async.get_market_by_market_address(session, market_address)
+    if market_identifier:
+        identified_market = await repository_async.get_market_by_event_id(session, market_identifier)
+        if market is not None and identified_market is not None and identified_market.id != market.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_identifier_mismatch")
+        market = market or identified_market
     if market is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
+    if market_address and market.market_address and market.market_address.lower() != market_address.lower():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_address_mismatch")
     tickets = []
     for ticket in payload.tickets:
         tx_hash = getattr(ticket, "tx_hash", None)
@@ -2373,11 +2507,21 @@ async def ingest_settlement(
 
     _verify_internal_secret(internal_secret)
     market_identifier = payload.event_id or payload.market_id
-    if not market_identifier:
+    market_address = (payload.market_address or "").strip()
+    if not market_identifier and not market_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="market_id_required")
-    market = await repository_async.get_market_by_event_id(session, market_identifier)
+    market = None
+    if market_address:
+        market = await repository_async.get_market_by_market_address(session, market_address)
+    if market_identifier:
+        identified_market = await repository_async.get_market_by_event_id(session, market_identifier)
+        if market is not None and identified_market is not None and identified_market.id != market.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_identifier_mismatch")
+        market = market or identified_market
     if market is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="market_not_found")
+    if market_address and market.market_address and market.market_address.lower() != market_address.lower():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_address_mismatch")
     settlement_data = {
         "merkle_root": payload.merkle_root,
         "commitments_count": payload.commitments_count,
@@ -2394,15 +2538,20 @@ async def ingest_settlement(
         "proof_hash": payload.proof_hash,
         "circuit_hash": payload.circuit_hash,
     }
-    await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
+    settlement_data = {key: value for key, value in settlement_data.items() if value is not None}
+    updated = False
+    if settlement_data:
+        await repository_async.upsert_settlement_snapshot(session, market.id, settlement_data)
+        updated = True
     if payload.winning_outcome_id is not None:
         if not market.resolved_at:
             market.resolved_at = datetime.now(tz=UTC)
         market.status = models.MarketStatusEnum.SETTLED.value
         market.resolution_status = models.ResolutionStatusEnum.FINAL.value
         session.add(market)
+        updated = True
     await session.flush()
-    return schemas.SettlementIngestResponse(market_id=market.event_id, updated=True)
+    return schemas.SettlementIngestResponse(market_id=market.event_id, updated=updated)
 
 
 def _verify_internal_secret(secret_header: str | None) -> None:
