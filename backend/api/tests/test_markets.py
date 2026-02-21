@@ -235,6 +235,82 @@ def test_market_detail_includes_grouping_and_siblings(client, db_session):
     assert markets[1]["group_position"] == 2000000
 
 
+def test_events_list_prefers_group_slug_over_generic_event_key(client, db_session):
+    db_session.add_all(
+        [
+            _make_market(
+                "evt-ufc-fn-strickland",
+                "UFC Fight Night: Sean Strickland vs. Anthony Hernandez",
+                category="sports",
+                oracle="0xufc",
+                status="commit",
+                event_key="ufc",
+                group_slug="ufc-fight-night-strickland-vs-hernandez",
+            ),
+            _make_market(
+                "evt-ufc-326-main",
+                "UFC 326: Charles Oliveira vs. Max Holloway",
+                category="sports",
+                oracle="0xufc",
+                status="commit",
+                event_key="ufc",
+                group_slug="ufc-326-oliveira-vs-holloway",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events", params={"status": "commit", "limit": 20})
+    assert response.status_code == 200
+    payload = response.json()
+    assert {item["event_id"] for item in payload} == {
+        "ufc-fight-night-strickland-vs-hernandez",
+        "ufc-326-oliveira-vs-holloway",
+    }
+    assert all(item["event_id"] != "ufc" for item in payload)
+
+
+def test_event_by_key_prefers_event_id_before_broad_event_key(client, db_session):
+    primary = _make_market(
+        "ufc",
+        "UFC Fight Night: Ryan Spann vs. Rizvan Kuniev",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc-fight-night-spann-vs-kuniev",
+    )
+    sibling = _make_market(
+        "ufc-fn-spann-kuniev-undercard",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc-fight-night-spann-vs-kuniev",
+    )
+    unrelated = _make_market(
+        "ufc-326-main-event",
+        "UFC 326: Charles Oliveira vs. Max Holloway",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc-326-oliveira-vs-holloway",
+    )
+    db_session.add_all([primary, sibling, unrelated])
+    db_session.commit()
+
+    response = client.get("/events/by-key/ufc")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["group_slug"] == "ufc-fight-night-spann-vs-kuniev"
+    assert {market["event_id"] for market in payload["markets"]} == {
+        primary.event_id,
+        sibling.event_id,
+    }
+
+
 def test_market_group_siblings_deduplicates_duplicate_records(client, db_session):
     group_slug = "dota2-liquid-vs-navi-dup"
     close_time = datetime.now(tz=UTC) + timedelta(hours=4)

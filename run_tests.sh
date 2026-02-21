@@ -28,6 +28,7 @@ if [[ -t 1 ]]; then
 else
   GREEN="" ; RED="" ; RESET=""
 fi
+STATUS_LINE_WIDTH=79
 
 usage() {
   cat <<EOF
@@ -56,18 +57,17 @@ run_section() {
   fi
 
   # Compact status line similar to pre-commit output.
-  local width=68
   local result
   if (cd "$(dirname "${script_path}")" && env TERM=dumb NO_COLOR=1 PYTEST_ADDOPTS="--color=no ${PYTEST_ADDOPTS}" "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}") >"${log_file}" 2>&1; then
     result="Passed"
-    local dots=$((width - ${#name} - ${#result}))
+    local dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
     ((dots < 2)) && dots=2
     printf '%s' "${name}"
     printf '.%.0s' $(seq 1 "${dots}")
     printf '%s%s%s\n' "${GREEN}" "${result}" "${RESET}"
   else
     result="Failed"
-    local dots=$((width - ${#name} - ${#result}))
+    local dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
     ((dots < 2)) && dots=2
     printf '%s' "${name}"
     printf '.%.0s' $(seq 1 "${dots}")
@@ -87,10 +87,9 @@ run_section "contracts/zen" "${ROOT_DIR}/contracts/zen/run_tests.sh"
 run_section "prover" "${ROOT_DIR}/prover/run_tests.sh"
 
 # Final summary line
-final_width=68
 final_label="All test suites"
 final_result="Passed"
-final_dots=$((final_width - ${#final_label} - ${#final_result}))
+final_dots=$((STATUS_LINE_WIDTH - ${#final_label} - ${#final_result}))
 ((final_dots < 2)) && final_dots=2
 printf '%s' "${final_label}"
 printf '.%.0s' $(seq 1 "${final_dots}")

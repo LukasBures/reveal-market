@@ -229,8 +229,8 @@ async def list_markets(
             collected.append(schemas.MarketResponse.model_validate(item))
             key = (
                 (
-                    getattr(item, "event_key", None)
-                    or getattr(item, "group_slug", None)
+                    getattr(item, "group_slug", None)
+                    or getattr(item, "event_key", None)
                     or getattr(item, "event_id", None)
                     or "unknown"
                 )
@@ -574,20 +574,25 @@ async def get_event_by_key(
             return market_svc.build_event_responses([model])[0]
     markets = []
     if normalized_key:
-        markets = await crud.get_markets_by_event_key(session, normalized_key)
+        markets = await crud.get_markets_by_group_slug(session, normalized_key)
     if not markets:
         market = await crud.get_market_by_event_id(session, event_key)
         if market is None:
             market = await crud.get_market_by_event_id(session, normalized_key)
         if market is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
-        key = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
-        if key:
-            markets = await crud.get_markets_by_event_key(session, str(key))
-            if not markets and getattr(market, "group_slug", None):
-                markets = await crud.get_markets_by_group_slug(session, str(market.group_slug))
-        if not markets:
-            markets = [market]
+            if normalized_key:
+                markets = await crud.get_markets_by_event_key(session, normalized_key)
+            if not markets:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
+        else:
+            group_slug = getattr(market, "group_slug", None)
+            event_group_key = getattr(market, "event_key", None)
+            if group_slug:
+                markets = await crud.get_markets_by_group_slug(session, str(group_slug))
+            if not markets and event_group_key:
+                markets = await crud.get_markets_by_event_key(session, str(event_group_key))
+            if not markets:
+                markets = [market]
     market_models = await market_svc.enrich_market_models(
         session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
     )
@@ -602,6 +607,8 @@ async def get_event_by_key(
                 await add_tag(cache, f"market:{market_model.event_id}", cache_key)
                 if getattr(market_model, "condition_id", None):
                     await add_tag(cache, f"resolution:{str(market_model.condition_id).lower()}", cache_key)
+                if getattr(market_model, "group_slug", None):
+                    await add_tag(cache, f"group:{str(market_model.group_slug)}", cache_key)
                 if getattr(market_model, "event_key", None):
                     await add_tag(cache, f"group:{str(market_model.event_key)}", cache_key)
     events = market_svc.build_event_responses(market_models)

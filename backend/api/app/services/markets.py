@@ -50,12 +50,12 @@ MARKET_DETAIL_PREFIX = "v1:markets:detail"
 def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
     """Return the group key and optional display title for event grouping."""
 
-    event_key = (getattr(market, "event_key", None) or "").strip().lower()
-    if event_key:
-        return event_key, None
     slug = (getattr(market, "group_slug", None) or "").strip().lower()
     if slug:
         return slug, None
+    event_key = (getattr(market, "event_key", None) or "").strip().lower()
+    if event_key:
+        return event_key, None
     event_id = (getattr(market, "event_id", None) or "").strip()
     if event_id:
         return event_id.lower(), None
@@ -327,7 +327,7 @@ def build_event_responses(
         for market in markets:
             event_id = (getattr(market, "event_id", None) or "unknown").strip()
             group_slug = (
-                getattr(market, "event_key", None) or getattr(market, "group_slug", None) or ""
+                getattr(market, "group_slug", None) or getattr(market, "event_key", None) or ""
             ).strip().lower() or event_id
             events.append(
                 schemas.EventResponse(
@@ -486,7 +486,7 @@ async def _fetch_market_stats(cache: Redis | None, event_ids: list[str]) -> dict
 
 
 def _group_slug_expression():
-    return func.coalesce(models.Market.event_key, models.Market.group_slug, models.MarketGammaMetadata.group_slug)
+    return func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_key)
 
 
 def _total_volume_expression():
@@ -633,8 +633,13 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
                 error=str(exc),
             )
 
-    result = await session.execute(select(models.Market).where(models.Market.event_key == normalized))
-    markets = result.scalars().all()
+    group_expr = func.coalesce(models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_key)
+    result = await session.execute(
+        select(models.Market)
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+        .where(func.lower(group_expr) == normalized)
+    )
+    markets = result.unique().scalars().all()
     if not markets:
         return []
     ids = [m.id for m in markets if m.id is not None]
@@ -845,7 +850,7 @@ def coalesce_grouped_markets(
         return cand_event < inc_event
 
     for market in markets:
-        slug = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
+        slug = getattr(market, "group_slug", None) or getattr(market, "event_key", None)
         if not slug:
             standalone.append(market)
             continue
@@ -862,7 +867,7 @@ async def attach_group_fields(
 
     slug_map: dict[str, list[schemas.MarketResponse]] = {}
     for market in markets:
-        slug = getattr(market, "event_key", None) or getattr(market, "group_slug", None)
+        slug = getattr(market, "group_slug", None) or getattr(market, "event_key", None)
         if not slug:
             continue
         slug_map.setdefault(slug, []).append(market)

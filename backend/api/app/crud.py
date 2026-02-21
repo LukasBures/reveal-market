@@ -127,6 +127,9 @@ async def get_market_by_condition_id(session: AsyncSession, condition_id: str) -
 
 
 async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> list[models.Market]:
+    normalized_slug = (group_slug or "").strip().lower()
+    if not normalized_slug:
+        return []
     stmt = (
         select(models.Market)
         .options(
@@ -134,7 +137,13 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> l
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
         )
-        .where(models.Market.group_slug == group_slug)
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+        .where(
+            or_(
+                func.lower(models.Market.group_slug) == literal(normalized_slug),
+                func.lower(models.MarketGammaMetadata.group_slug) == literal(normalized_slug),
+            )
+        )
         .order_by(models.Market.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -143,6 +152,9 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> l
 
 
 async def get_markets_by_event_key(session: AsyncSession, event_key: str) -> list[models.Market]:
+    normalized_key = (event_key or "").strip().lower()
+    if not normalized_key:
+        return []
     stmt = (
         select(models.Market)
         .options(
@@ -150,7 +162,7 @@ async def get_markets_by_event_key(session: AsyncSession, event_key: str) -> lis
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
         )
-        .where(models.Market.event_key == event_key)
+        .where(func.lower(models.Market.event_key) == literal(normalized_key))
         .order_by(models.Market.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -214,7 +226,10 @@ def _apply_common_filters(stmt, *, status: str | None, category: str | None, ora
 
 def _volume_group_expression():
     return func.coalesce(
-        models.Market.event_key, models.Market.group_slug, models.MarketGammaMetadata.group_slug, models.Market.event_id
+        models.Market.group_slug,
+        models.MarketGammaMetadata.group_slug,
+        models.Market.event_key,
+        models.Market.event_id,
     )
 
 
@@ -288,8 +303,8 @@ async def _get_markets_by_total_volume(
 
     def _group_key(market: models.Market) -> str | None:
         return (
-            getattr(market, "event_key", None)
-            or getattr(market, "group_slug", None)
+            getattr(market, "group_slug", None)
+            or getattr(market, "event_key", None)
             or getattr(market, "event_id", None)
         )
 
