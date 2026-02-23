@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func expectedSignalsForRequest(t *testing.T, req settlementProofRequest) []string {
@@ -415,6 +416,35 @@ func TestProofHandlerBusy(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatalf("expected prover to be skipped when busy")
+	}
+}
+
+func TestProofHandlerBusyWithQueueAllowsRequest(t *testing.T) {
+	payload := buildTestRequest()
+	stub := &stubProver{
+		ready:       true,
+		busy:        true,
+		circuitHash: "0x1",
+		result: &proofResult{
+			Proof:         `{"pi_a":["1","2"]}`,
+			PublicSignals: expectedSignalsForRequest(t, payload),
+		},
+	}
+	cfg := newTestConfig(t)
+	cfg.AsyncQueueEnabled = true
+	cfg.QueueMaxDepth = 1
+	cfg.QueueAcquireTimeout = 1 * time.Second
+	app := newApp(cfg, stub)
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
+	req.Header.Set("X-Prover-Secret", cfg.SharedSecret)
+	app.proofHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected prover to be called when queue enabled")
 	}
 }
 

@@ -545,7 +545,7 @@ func (a *app) proofHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
 		return
 	}
-	if a.prover.IsBusy() {
+	if a.proofQueue == nil && a.prover.IsBusy() {
 		writeError(w, http.StatusTooManyRequests, "busy", "prover at capacity", nil)
 		return
 	}
@@ -1156,7 +1156,7 @@ func (a *app) warmupHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "prover_unavailable", "prover not ready", nil)
 		return
 	}
-	if a.prover.IsBusy() {
+	if a.proofQueue == nil && a.prover.IsBusy() {
 		writeError(w, http.StatusTooManyRequests, "busy", "prover at capacity", nil)
 		return
 	}
