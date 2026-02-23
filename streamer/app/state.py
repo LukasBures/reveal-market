@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import AnyHttpUrl
@@ -223,14 +224,32 @@ class StreamState:
     async def refresh_fx(self, *, label: str = "binance_rest") -> FxQuote:
         async with self._fx_lock:
             try:
-                # Avoid recursive self-calls if misconfigured to hit our own /fx endpoint.
-                if str(self.settings.fx_primary_rest_url).startswith(
-                    f"http://{self.settings.api_host}:{self.settings.api_port}"
-                ):
-                    raise ValueError("FX feed URL points to streamer itself; skipping")
-                quote = await self._fetch_fx_from_url(self.settings.fx_primary_rest_url, label or "binance_rest")
+                quote: FxQuote | None = None
+                primary_url = self.settings.fx_primary_rest_url
+                if self._is_self_fx_url(primary_url):
+                    logger.warning(
+                        "FX feed URL points to streamer itself; skipping",
+                        extra={
+                            "event": "fx.refresh.self_url",
+                            "source": label or "binance_rest",
+                            "url": self._redact_url(primary_url),
+                        },
+                    )
+                else:
+                    quote = await self._fetch_fx_from_url(primary_url, label or "binance_rest")
                 if not quote and self.settings.fx_secondary_rest_url:
-                    quote = await self._fetch_fx_from_url(self.settings.fx_secondary_rest_url, "cryptocompare_rest")
+                    secondary_url = self.settings.fx_secondary_rest_url
+                    if self._is_self_fx_url(secondary_url):
+                        logger.warning(
+                            "FX feed URL points to streamer itself; skipping",
+                            extra={
+                                "event": "fx.refresh.self_url",
+                                "source": "cryptocompare_rest",
+                                "url": self._redact_url(secondary_url),
+                            },
+                        )
+                    else:
+                        quote = await self._fetch_fx_from_url(secondary_url, "cryptocompare_rest")
                 if quote:
                     return quote
                 # If the REST payload was ignored due to priority/filters, keep the existing quote without
@@ -342,7 +361,98 @@ class StreamState:
         if self.metrics:
             # Reset staleness gauge to fresh on publish.
             self.metrics.market_staleness.labels(market_id=market_id).set(0)
-        # History is no longer stored in Redis; charts pull from CLOB /prices-history instead.
+        await self._store_history(market_id, outcome, payload, now)
+
+    def _should_store_history(self, market_id: str) -> bool:
+        if market_id in self.subscriptions.assets:
+            return True
+        tokens = self.market_tokens.get(market_id) or []
+        return any(token in self.subscriptions.assets for token in tokens)
+
+    async def _store_history(self, market_id: str, outcome: str, payload: dict, now: datetime) -> None:
+        if not self.redis:
+            return
+        if not outcome.isdigit():
+            return
+        if payload.get("type") != "price":
+            return
+        if self.settings.history_limit <= 0:
+            return
+        if not self._should_store_history(market_id):
+            return
+        history_key = f"{self.settings.history_prefix}:{market_id}:{outcome}"
+        debounce_seconds = float(self.settings.history_debounce_seconds or 0)
+        if debounce_seconds > 0:
+            last_ts = self._history_last_ts.get(history_key)
+            if last_ts and (now - last_ts).total_seconds() < debounce_seconds:
+                return
+        try:
+            serialized = json.dumps(payload, default=str)
+            await self.redis.lpush(history_key, serialized)
+            await self.redis.ltrim(history_key, 0, max(self.settings.history_limit - 1, 0))
+            if self.settings.history_ttl_seconds > 0:
+                await self.redis.expire(history_key, self.settings.history_ttl_seconds)
+            self._history_last_ts[history_key] = now
+        except Exception as exc:
+            logger.debug(
+                "history write failed",
+                extra={
+                    "event": "history.write.failed",
+                    "market_id": market_id,
+                    "outcome": outcome,
+                    "error": str(exc),
+                },
+            )
+            return
+
+    @staticmethod
+    def _redact_url(url: AnyHttpUrl) -> str:
+        parsed = urlparse(str(url))
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
+        return "<redacted>"
+
+    def _is_self_fx_url(self, url: AnyHttpUrl) -> bool:
+        parsed = urlparse(str(url))
+        if not parsed.hostname:
+            return False
+        parsed_host = parsed.hostname.lower()
+
+        def _effective_port(port: int | None, scheme: str | None) -> int | None:
+            if port is not None:
+                return port
+            if scheme == "https":
+                return 443
+            if scheme == "http":
+                return 80
+            return None
+
+        parsed_port = _effective_port(parsed.port, parsed.scheme)
+        candidates: list[tuple[str, int | None, str | None]] = []
+        api_host = (self.settings.api_host or "").lower()
+        if api_host:
+            candidates.append((api_host, self.settings.api_port, "http"))
+            if api_host == "0.0.0.0":  # noqa: S104 - intentional comparison for local bindings  # nosec B104
+                candidates.extend(
+                    [
+                        ("127.0.0.1", self.settings.api_port, "http"),
+                        ("localhost", self.settings.api_port, "http"),
+                    ]
+                )
+        for base_url in (self.settings.internal_base_url, self.settings.public_base_url):
+            if not base_url:
+                continue
+            base_parsed = urlparse(str(base_url))
+            if base_parsed.hostname:
+                candidates.append((base_parsed.hostname.lower(), base_parsed.port, base_parsed.scheme))
+
+        for host, port, scheme in candidates:
+            if parsed_host != host:
+                continue
+            cand_port = _effective_port(port, scheme)
+            if parsed_port == cand_port:
+                return True
+        return False
 
     async def subscribe(self, market_id: str):
         if not self.redis:

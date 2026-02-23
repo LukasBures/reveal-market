@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -124,6 +125,51 @@ async def test_cache_tick_signs_payload():
     await state.cache_tick("m1", "0", {"price": "0.5"})
     stored = dummy.data["ps:test:m1:0"]
     assert "sig" in stored
+
+
+@pytest.mark.asyncio
+async def test_cache_tick_trims_history():
+    settings = Settings(history_limit=10, history_ttl_seconds=60, history_debounce_seconds=0.0)
+    state = StreamState(settings)
+    dummy = DummyRedis()
+    state.redis = dummy  # type: ignore[assignment]
+    state.subscriptions.add_assets(["m1"])
+
+    for idx in range(11):
+        await state.cache_tick(
+            "m1",
+            "0",
+            {"price": f"{0.4 + idx / 10:.1f}", "type": "price", "timestamp": f"t{idx + 1}"},
+        )
+
+    history_key = f"{settings.history_prefix}:m1:0"
+    assert history_key in dummy.history
+    assert len(dummy.history[history_key]) == 10
+    assert dummy.expires[history_key] == 60
+
+    parsed = [json.loads(entry) for entry in dummy.history[history_key]]
+    assert parsed[0]["timestamp"] == "t11"
+    assert parsed[-1]["timestamp"] == "t2"
+
+
+@pytest.mark.asyncio
+async def test_refresh_fx_skips_self_url_and_uses_secondary(monkeypatch):
+    settings = Settings(
+        fx_primary_rest_url="http://streamer:8100/fx/zen-usd",
+        fx_secondary_rest_url="https://example.com/fx",
+    )
+    state = StreamState(settings)
+    calls: list[tuple[str, str]] = []
+
+    async def fake_fetch(url, label):
+        calls.append((str(url), label))
+        return state.register_fx(Decimal("5"), source=label, allow_jump=True)
+
+    monkeypatch.setattr(state, "_fetch_fx_from_url", fake_fetch)
+    quote = await state.refresh_fx()
+
+    assert quote is not None
+    assert calls == [("https://example.com/fx", "cryptocompare_rest")]
 
 
 def test_stale_markets_detection():

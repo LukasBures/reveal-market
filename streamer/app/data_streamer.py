@@ -641,7 +641,7 @@ class DataStreamer:
         token_ids_raw = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
         token_ids = self._coerce_array(token_ids_raw) or token_ids_from_tokens
         coerced_token_ids = [str(token) for token in token_ids if str(token).strip()]
-        if coerced_token_ids:
+        if market_id and coerced_token_ids:
             self.state.register_clob_tokens(str(market_id), coerced_token_ids)
             midpoints = await self._fetch_midpoints(coerced_token_ids)
             if midpoints and len(midpoints) == len(coerced_token_ids):

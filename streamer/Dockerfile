@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml uv.lock /app/
 RUN pip install --no-cache-dir uv==0.1.47
-RUN uv sync --frozen --no-install-project --extra dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 COPY app /app/app
 

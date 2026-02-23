@@ -161,9 +161,9 @@ class Settings(BaseSettings):
         default=86400, ge=0, description="Optional TTL for per-outcome history keys (0 disables expiration)"
     )
     history_debounce_seconds: float = Field(
-        default=0.0, ge=0.0, description="Minimum seconds between history entries for the same market/outcome"
+        default=0.25, ge=0.0, description="Minimum seconds between history entries for the same market/outcome"
     )
-    api_host: str = Field(default="0.0.0.0", description="Host binding for FastAPI app")  # noqa: S104 - intentional
+    api_host: str = Field(default="0.0.0.0", description="Host binding for FastAPI app")  # noqa: S104 - intentional  # nosec B104
     api_port: int = Field(default=8100, description="Port for FastAPI app")
     signing_secret: str | None = Field(default=None, description="Optional HMAC secret to sign payloads")
     control_token: str | None = Field(

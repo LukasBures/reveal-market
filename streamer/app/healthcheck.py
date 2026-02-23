@@ -6,7 +6,7 @@ import urllib.request
 
 def main() -> int:
     try:
-        with urllib.request.urlopen("http://localhost:8100/healthz", timeout=5) as resp:
+        with urllib.request.urlopen("http://localhost:8100/healthz", timeout=5) as resp:  # nosec B310
             if resp.status != 200:
                 print(f"[healthcheck] unexpected status: {resp.status}", file=sys.stderr)
                 return 1

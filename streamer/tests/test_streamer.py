@@ -356,6 +356,16 @@ async def test_normalize_registers_clob_tokens():
 
 
 @pytest.mark.asyncio
+async def test_normalize_skips_tokens_when_market_missing():
+    state = StubState()
+    streamer = DataStreamer(state, state.settings)
+    streamer.clob_client = None  # avoid network midpoint fetches
+    data = {"outcomePrices": [0.2, 0.8], "clobTokenIds": ["tok1", "tok2"]}
+    await streamer._normalize_and_publish(data, source="rest")
+    assert state.market_tokens == {}
+
+
+@pytest.mark.asyncio
 async def test_normalize_handles_camel_best_bid():
     state = StubState()
     streamer = DataStreamer(state, state.settings)
