@@ -13,6 +13,7 @@ contract ProtocolPoolGuardsTest is Test {
     address private owner = makeAddr("owner");
     address private factory = makeAddr("factory");
     address private market = makeAddr("market");
+    address private market2 = makeAddr("market2");
     address private stranger = makeAddr("stranger");
 
     function setUp() external {
@@ -71,6 +72,21 @@ contract ProtocolPoolGuardsTest is Test {
         vm.prank(market);
         vm.expectRevert(ProtocolPool.InsufficientPool.selector);
         pool.draw(market, 2 ether);
+    }
+
+    function testDrawCannotSpendReservedLiquidity() external {
+        _fundPool(10 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 10 ether);
+        vm.prank(factory);
+        pool.registerMarket(market2, 10 ether);
+
+        vm.prank(market);
+        pool.reserveLiability(market, 6 ether);
+
+        vm.prank(market2);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.draw(market2, 5 ether);
     }
 
     function testDrawRespectsCapacity() external {
@@ -187,6 +203,31 @@ contract ProtocolPoolGuardsTest is Test {
         vm.prank(stranger);
         vm.expectRevert(ProtocolPool.InsufficientPool.selector);
         pool.reserveLiability(stranger, 1 wei);
+    }
+
+    function testReserveLiabilityRespectsCap() external {
+        _fundPool(3 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 2 ether);
+
+        vm.prank(market);
+        vm.expectRevert(ProtocolPool.CapExceeded.selector);
+        pool.reserveLiability(market, 3 ether);
+    }
+
+    function testUpdateLiabilityCapCannotDipBelowReservedOrConsumed() external {
+        _fundPool(5 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 5 ether);
+
+        vm.prank(market);
+        pool.reserveLiability(market, 2 ether);
+        vm.prank(market);
+        pool.draw(market, 1 ether);
+
+        vm.prank(factory);
+        vm.expectRevert(ProtocolPool.CapExceeded.selector);
+        pool.updateLiabilityCap(market, 1 ether);
     }
 
     function testUpdateLiabilityCapOnlyFactory() external {

@@ -81,6 +81,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
 
     /// @notice Factory hook to update the liability cap for an existing market.
     function updateLiabilityCap(address market, uint256 newCap) external onlyFactory {
+        if (newCap < consumedLiability[market] + reservedLiability[market]) revert CapExceeded();
         uint256 old = liabilityCap[market];
         liabilityCap[market] = newCap;
         emit CapUpdated(market, old, newCap);
@@ -92,12 +93,12 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         if (amount == 0) {
             return;
         }
+        if (consumedLiability[market] + reservedLiability[market] + amount > liabilityCap[market]) revert CapExceeded();
+        uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
+        if (balance < reservedTotal || amount > balance - reservedTotal) revert InsufficientPool();
         if (capacityEnabled) {
             if (amount > capacity) revert CapacityExceeded();
             capacity -= amount;
-        } else {
-            uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
-            if (balance < reservedTotal || amount > balance - reservedTotal) revert InsufficientPool();
         }
         reservedLiability[market] += amount;
         reservedTotal += amount;
@@ -125,6 +126,8 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     /// @notice Called by markets to draw protocol coverage up to their configured cap.
     function draw(address market, uint256 amount) external nonReentrant {
         if (!allowedMarket[msg.sender] || msg.sender != market) revert Unauthorized();
+        uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
+        if (balance < reservedTotal) revert InsufficientPool();
         uint256 reserved = reservedLiability[market];
         if (reserved == 0 && (drawsPaused || marketDrawPaused[market])) revert DrawsPaused();
         uint256 newConsumed = consumedLiability[market] + amount;
@@ -133,11 +136,13 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
             if (amount > reserved) revert ReservationExceeded();
             reservedLiability[market] = reserved - amount;
             reservedTotal -= amount;
-        } else if (capacityEnabled) {
-            if (amount > capacity) revert CapacityExceeded();
-            capacity -= amount;
+        } else {
+            if (amount > balance - reservedTotal) revert InsufficientPool();
+            if (capacityEnabled) {
+                if (amount > capacity) revert CapacityExceeded();
+                capacity -= amount;
+            }
         }
-        uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
 
         uint256 marketBalanceBefore = COLLATERAL_TOKEN.balanceOf(market);
