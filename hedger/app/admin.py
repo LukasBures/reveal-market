@@ -36,7 +36,10 @@ def require_internal_secret(
 
 
 @router.get("/exposures")
-async def exposures(service: HedgerService = Depends(get_service)):
+async def exposures(
+    service: HedgerService = Depends(get_service),
+    _secret: None = Depends(require_internal_secret),
+):
     return {"exposures": await service.exposures()}
 
 
@@ -51,7 +54,10 @@ async def ingest_commit(
 
 
 @router.get("/risk")
-async def risk(service: HedgerService = Depends(get_service)):
+async def risk(
+    service: HedgerService = Depends(get_service),
+    _secret: None = Depends(require_internal_secret),
+):
     snapshots = await service.exposures()
     total_abs = sum([abs(s.net_usd) for s in snapshots], start=Decimal("0"))
     breaches = []
@@ -70,7 +76,10 @@ async def risk(service: HedgerService = Depends(get_service)):
 
 
 @router.get("/positions")
-async def positions(service: HedgerService = Depends(get_service)):
+async def positions(
+    service: HedgerService = Depends(get_service),
+    _secret: None = Depends(require_internal_secret),
+):
     exposure_list = await service.exposures()
     return {"exposures": exposure_list}
 
@@ -104,5 +113,5 @@ async def bridge_liquidity(
 
 
 @router.get("/metrics")
-def metrics() -> Response:
+def metrics(_secret: None = Depends(require_internal_secret)) -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

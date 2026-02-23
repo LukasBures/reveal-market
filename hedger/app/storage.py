@@ -378,11 +378,18 @@ class HedgerRepository:
             result = await session.execute(
                 select(
                     HedgeActionRecord.market_id,
+                    HedgeActionRecord.is_unwind,
                     func.sum(HedgeActionRecord.size_usd),
-                ).group_by(HedgeActionRecord.market_id)
+                ).group_by(HedgeActionRecord.market_id, HedgeActionRecord.is_unwind)
             )
             rows = result.all()
-        return {market_id: total or Decimal("0") for market_id, total in rows}
+        totals: dict[str, Decimal] = {}
+        for market_id, is_unwind, total in rows:
+            net = totals.get(market_id, Decimal("0"))
+            amount = total or Decimal("0")
+            net = net - amount if is_unwind else net + amount
+            totals[market_id] = net
+        return totals
 
     async def hedge_breakdown(self, market_id: str) -> dict[str, Decimal]:
         """Return borrow vs unwind totals for a market."""

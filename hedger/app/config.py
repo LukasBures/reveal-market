@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .storage import ensure_async_db_url
@@ -19,11 +19,24 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 - service must bind for docker/compose
     api_port: int = Field(default=8090)
 
+    allowed_hosts: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Trusted hostnames for inbound requests (CSV or list).",
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Allowed CORS origins (CSV or list).",
+    )
+    cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = Field(default=True)
+
     database_url: str = Field(
         default="postgresql+asyncpg://market_admin:<REDACTED>@postgres:5432/reveal_market",
         validation_alias=AliasChoices("RM_DATABASE_URL", "HEDGER_DATABASE_URL"),
     )
     redis_url: str = Field(default="redis://redis:6379/0")
+    redis_required: bool = Field(default=False, description="If true, hedging is read-only when Redis is down.")
 
     polymarket_timeout_seconds: int = Field(default=10)
     polymarket_retry_attempts: int = Field(default=3)
@@ -99,6 +112,31 @@ class Settings(BaseSettings):
     prover_timeout_seconds: int = Field(default=30)
     prover_shared_secret: str | None = Field(default=None)
     bridge_endpoint: str = Field(default="https://bridge.revealmarket.xyz/submit")
+
+    @field_validator(
+        "allowed_hosts",
+        "cors_allow_origins",
+        "cors_allow_methods",
+        "cors_allow_headers",
+        mode="before",
+    )
+    @classmethod
+    def _parse_csv_list(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned.startswith("[") and cleaned.endswith("]"):
+                import json
+
+                try:
+                    parsed = json.loads(cleaned)
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
+            items = [item.strip() for item in value.split(",") if item.strip()]
+            return items
+        return value
 
     @property
     def total_monetisation(self) -> Decimal:

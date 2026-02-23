@@ -22,7 +22,10 @@ FastAPI service for exposure tracking and treasury snapshots.
 - `hedger/app/config.py`.
   - `HEDGER_ADMIN_READ_ONLY=true` to freeze writes during incidents.
   - `HEDGER_ADMIN_RATE_LIMIT_REQUESTS` / `HEDGER_ADMIN_RATE_LIMIT_WINDOW_SECONDS` for admin throttling.
-  - `HEDGER_ADMIN_INTERNAL_SECRET` to require `X-Internal-Secret` for `/admin/commits`.
+  - `HEDGER_ADMIN_INTERNAL_SECRET` to require `X-Internal-Secret` for `/admin/*`.
+  - `HEDGER_ALLOWED_HOSTS` (CSV or JSON list) for TrustedHost in non-local environments.
+  - `HEDGER_CORS_ALLOW_ORIGINS` (CSV or JSON list) for CORS in non-local environments.
+  - `HEDGER_REDIS_REQUIRED=true` to force read-only mode when Redis is unavailable.
   - `HEDGER_RISK_CATEGORY_LIMITS` for category exposure limits (JSON map, e.g. `{"crypto":50000}`).
   - CLOB + wallet:
     - `HEDGER_POLYGON_RPC_URL` (default `https://polygon-rpc.com`)

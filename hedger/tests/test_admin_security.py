@@ -62,6 +62,33 @@ def test_state_changing_admin_routes_require_internal_secret():
     assert bridge.json()["detail"] == "invalid_internal_secret"
 
 
+def test_admin_read_routes_require_internal_secret():
+    app = _build_admin_app(secret="top-secret")  # noqa: S106 - test fixture
+    client = TestClient(app)
+
+    exposures = client.get("/admin/exposures")
+    assert exposures.status_code == 401
+    assert exposures.json()["detail"] == "invalid_internal_secret"
+
+    risk = client.get("/admin/risk")
+    assert risk.status_code == 401
+    assert risk.json()["detail"] == "invalid_internal_secret"
+
+    positions = client.get("/admin/positions")
+    assert positions.status_code == 401
+    assert positions.json()["detail"] == "invalid_internal_secret"
+
+    metrics = client.get("/admin/metrics")
+    assert metrics.status_code == 401
+    assert metrics.json()["detail"] == "invalid_internal_secret"
+
+    headers = {"X-Internal-Secret": "top-secret"}
+    assert client.get("/admin/exposures", headers=headers).status_code == 200
+    assert client.get("/admin/risk", headers=headers).status_code == 200
+    assert client.get("/admin/positions", headers=headers).status_code == 200
+    assert client.get("/admin/metrics", headers=headers).status_code == 200
+
+
 def test_admin_commits_fail_closed_when_secret_missing():
     app = _build_admin_app(secret=None)
     client = TestClient(app)

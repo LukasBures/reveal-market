@@ -38,6 +38,17 @@ async def test_repository_aggregates_roundtrip(tmp_path):
         target_coverage=0.9,
     )
     await repo.record_hedge_instruction(instruction, response_payload={"ok": True})
+    unwind_instruction = HedgeInstruction(
+        market_id="m1",
+        hedge_outcome=OutcomeSide.YES,
+        action=HedgeAction.SELL,
+        size_usd=Decimal("0.50"),
+        slippage_bps=15,
+        reason="unit_test_unwind",
+        target_coverage=0.9,
+        is_unwind=True,
+    )
+    await repo.record_hedge_instruction(unwind_instruction, response_payload={"ok": True})
 
     aggregates = await repo.load_commit_aggregates()
     totals = await repo.load_hedge_totals()
@@ -48,7 +59,7 @@ async def test_repository_aggregates_roundtrip(tmp_path):
     assert agg["no_zen"] == Decimal("4")
     assert agg["yes_usd"] == Decimal("2.5")
     assert agg["no_usd"] == Decimal("1.0")
-    assert totals["m1"] == Decimal("1.25")
+    assert totals["m1"] == Decimal("0.75")
     assert agg["last_update"] is not None
 
 

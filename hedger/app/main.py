@@ -24,12 +24,17 @@ def create_app() -> FastAPI:
     env = (settings.environment or "").strip().lower()
     if env not in {"local", "dev", "development", "test"} and not settings.admin_internal_secret:
         raise RuntimeError("HEDGER_ADMIN_INTERNAL_SECRET is required when environment is not local/test")
+    if env not in {"local", "dev", "development", "test"}:
+        if "*" in settings.allowed_hosts:
+            raise RuntimeError("HEDGER_ALLOWED_HOSTS must be set for non-local environments")
+        if "*" in settings.cors_allow_origins:
+            raise RuntimeError("HEDGER_CORS_ALLOW_ORIGINS must be set for non-local environments")
     setup_logging("reveal_market.hedger")
     logger = logging.getLogger("reveal_market.hedger")
     sanitized_config = {
         k: v
         for k, v in settings.model_dump().items()
-        if not any(secret in k for secret in ["key", "private", "secret", "password"])
+        if not any(secret in k for secret in ["key", "private", "secret", "password", "passphrase"])
     }
     log_event(logger, logging.INFO, event="service.config", message="hedger configuration", config=sanitized_config)
 
@@ -66,13 +71,13 @@ def create_app() -> FastAPI:
                     await service.redis.aclose()
 
     middleware = [
-        Middleware(TrustedHostMiddleware, allowed_hosts=["*"]),
+        Middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts),
         Middleware(
             CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_origins=settings.cors_allow_origins,
+            allow_credentials=settings.cors_allow_credentials,
+            allow_methods=settings.cors_allow_methods,
+            allow_headers=settings.cors_allow_headers,
         ),
     ]
     app = FastAPI(title="Reveal Hedger", version="0.1.0", lifespan=lifespan, middleware=middleware)
@@ -90,7 +95,11 @@ def create_app() -> FastAPI:
         token = set_request_id(request_id)
         try:
             if admin_rate_limiter and request.url.path.startswith("/admin"):
-                client_ip = request.client.host if request.client else "unknown"
+                forwarded = request.headers.get("x-forwarded-for")
+                if forwarded:
+                    client_ip = forwarded.split(",")[0].strip()
+                else:
+                    client_ip = request.client.host if request.client else "unknown"
                 key = f"{client_ip}:{request.url.path}"
                 if not admin_rate_limiter.allow(key):
                     raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate_limited")

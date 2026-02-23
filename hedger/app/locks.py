@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
+from typing import cast
 
 try:
     from redis.asyncio import Redis
@@ -21,11 +23,14 @@ class RedisLockManager:
         self.idempotency_ttl_seconds = idempotency_ttl_seconds
         self._fallback_locks: dict[str, asyncio.Lock] = {}
         self._idempotency_cache: dict[str, float] = {}
+        self._release_script = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+        )
 
     @asynccontextmanager
     async def lock(self, key: str) -> AsyncIterator[None]:
         if self.redis:
-            token = str(time.time())
+            token = uuid.uuid4().hex
             try:
                 acquired = await self.redis.set(f"lock:{key}", token, nx=True, ex=self.lock_ttl_seconds)
                 if not acquired:
@@ -37,7 +42,15 @@ class RedisLockManager:
                 try:
                     yield
                 finally:
-                    await self.redis.delete(f"lock:{key}")
+                    try:
+                        result = self.redis.eval(self._release_script, 1, f"lock:{key}", token)
+                        await cast(Awaitable[object], result)
+                    except Exception as exc:
+                        logger = logging.getLogger("reveal_market.hedger.locks")
+                        logger.warning(
+                            "redis lock release failed",
+                            extra={"error": str(exc), "key": key},
+                        )
                 return
             except Exception as exc:
                 # Fall back to process-local lock if Redis is unavailable.

@@ -139,6 +139,7 @@ class HedgerService:
         self._noop_lock = self._noop_async_lock()
         self._health_snapshot: dict[str, Any] | None = None
         self._health_snapshot_ts: datetime | None = None
+        self._redis_available: bool | None = None
 
     async def startup(self) -> None:
         if self.settings.run_migrations_on_startup:
@@ -148,16 +149,29 @@ class HedgerService:
             self.lock_manager = RedisLockManager(
                 self.redis, self.settings.redis_lock_ttl_seconds, self.settings.redis_idempotency_ttl_seconds
             )
+            self._redis_available = True
         except Exception as exc:
             log_event(
                 logger,
                 logging.WARNING,
                 event="hedger.redis.unavailable",
-                message="redis unavailable; continuing without locks",
+                message="redis unavailable; using in-memory locks only",
                 error=str(exc),
             )
+            if self.settings.redis_required:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="hedger.redis.required",
+                    message="redis required but unavailable; switching to read-only mode",
+                    error=str(exc),
+                )
+                self.settings = self.settings.model_copy(update={"admin_read_only": True}, deep=True)
             self.redis = None
-            self.lock_manager = None
+            self.lock_manager = RedisLockManager(
+                None, self.settings.redis_lock_ttl_seconds, self.settings.redis_idempotency_ttl_seconds
+            )
+            self._redis_available = False
         try:
             await self.fx_oracle.refresh()
         except Exception as exc:
@@ -349,13 +363,16 @@ class HedgerService:
             if hedge_result.get("status") == "rejected":
                 response["status"] = "rejected"
                 response["reason"] = hedge_result.get("reason")
-                return response
+                if not hedge_result.get("reconciled_fill"):
+                    return response
+                response["status"] = "partial_fill"
 
         try:
             async with _commit_lock():
                 snapshot, _, _ = await self.exposure_ledger.record_commit(
                     commit, idempotency_key=idemp_key, stake_usd=pricing.hedge_usdc, persist=True
                 )
+                response["snapshot"] = snapshot
         except Exception as exc:
             log_event(
                 logger,
@@ -750,6 +767,8 @@ class HedgerService:
         status = "ok"
         if balance is None or not self.wallet:
             status = "degraded"
+        redis_available = self._redis_available if self._redis_available is not None else self.redis is not None
+        lock_mode = "redis" if redis_available else "memory"
         return {
             "status": status,
             "service": "hedger",
@@ -758,6 +777,8 @@ class HedgerService:
             "read_only": self.settings.admin_read_only,
             "wallet_unavailable": self.wallet is None,
             "hot_wallet_balance_usdc": str(balance) if balance is not None else None,
+            "redis_available": redis_available,
+            "lock_mode": lock_mode,
         }
 
     @staticmethod

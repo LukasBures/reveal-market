@@ -214,3 +214,64 @@ async def test_ingest_commit_uses_fresh_lock_contexts_for_preview_and_persist():
     assert result.get("status") != "rejected"
     assert len(lock_manager.contexts) == 2
     assert all(lock.enter_count == 1 for lock in lock_manager.contexts)
+
+
+@pytest.mark.asyncio
+async def test_ingest_commit_persists_after_partial_fill_rejection():
+    settings = Settings(
+        hedger_private_key="0x" + "11" * 32,
+        polymarket_api_key="key",
+        polymarket_api_secret="secret",  # noqa: S106 - test fixture
+        polymarket_api_passphrase="passphrase",  # noqa: S106 - test fixture
+    )
+    service = HedgerService(settings)
+    service.wallet = StubWallet()
+    service.clob = None
+    service.fx_oracle._quote = FxQuote(zen_usd=Decimal("1.0"), fetched_at=datetime.now(UTC))
+    service.fx_oracle._stale_override = False
+
+    lock_manager = RecordingLockManager()
+    service.lock_manager = lock_manager
+
+    async def _commit_exists(_idempotency_key: str) -> bool:
+        return False
+
+    instruction = HedgeInstruction(
+        market_id="m1",
+        hedge_outcome=OutcomeSide.YES,
+        action=HedgeAction.BUY,
+        size_usd=Decimal("1"),
+        slippage_bps=30,
+        reason="test",
+        target_coverage=0.9,
+        clob_token_id="token-yes",  # noqa: S106 - test fixture, not a secret
+    )
+
+    async def _preview_commit(*_args, **_kwargs):
+        return {"market_id": "m1"}, instruction, []
+
+    recorded: dict[str, bool] = {"commit": False}
+
+    async def _record_commit(*_args, **_kwargs):
+        recorded["commit"] = True
+        return {"market_id": "m1"}, None, []
+
+    async def _execute_hedge(*_args, **_kwargs):
+        return {"status": "rejected", "reason": "fill_below_threshold", "reconciled_fill": True}
+
+    service.repository.commit_exists = _commit_exists  # type: ignore[assignment]
+    service.exposure_ledger.preview_commit = _preview_commit  # type: ignore[assignment]
+    service.exposure_ledger.record_commit = _record_commit  # type: ignore[assignment]
+    service._execute_hedge = _execute_hedge  # type: ignore[assignment]
+
+    commit = CommitEvent(
+        market_id="m1",
+        stake_zen=Decimal("1"),
+        direction=OutcomeSide.YES,
+        clob_token_id="token-yes",  # noqa: S106 - test fixture, not a secret
+    )
+
+    result = await service.ingest_commit(commit)
+    assert recorded["commit"] is True
+    assert result.get("status") == "partial_fill"
+    assert result.get("reason") == "fill_below_threshold"
