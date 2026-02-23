@@ -282,6 +282,7 @@ contract MarketFactoryGuardsTest is Test {
 
 contract RevertingRelayerStub {
     IERC20 public immutable COLLATERAL_TOKEN;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address public immutable marketFactory;
 
     constructor(IERC20 token, address factory) {

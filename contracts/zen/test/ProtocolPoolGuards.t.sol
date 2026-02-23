@@ -207,14 +207,14 @@ contract ProtocolPoolGuardsTest is Test {
 }
 
 contract ProtocolPoolFactorySpoof {
-    address private immutable spoofedOwner;
+    address private immutable SPOOFED_OWNER;
 
     constructor(address owner_) {
-        spoofedOwner = owner_;
+        SPOOFED_OWNER = owner_;
     }
 
     function owner() external view returns (address) {
-        return spoofedOwner;
+        return SPOOFED_OWNER;
     }
 
     function attack(ProtocolPool pool, address attackerFactory) external {

@@ -168,7 +168,7 @@ contract MarketFactory is Ownable2Step {
     }
 
     /// @notice Syncs this factory into the relayer + protocol pool hooks.
-    function syncFactoryHooks() external onlyOwner {
+    function syncFactoryHooks() external view onlyOwner {
         if (protocolPool.marketFactory() != address(this)) revert DependencyNotHooked();
         if (relayerEscrow.marketFactory() != address(this)) revert DependencyNotHooked();
     }

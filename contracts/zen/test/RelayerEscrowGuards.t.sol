@@ -267,14 +267,14 @@ contract DummyMarketGuard is IRevealMarket {
 }
 
     contract EscrowFactorySpoof {
-        address private immutable spoofedOwner;
+        address private immutable SPOOFED_OWNER;
 
         constructor(address owner_) {
-            spoofedOwner = owner_;
+            SPOOFED_OWNER = owner_;
         }
 
         function owner() external view returns (address) {
-            return spoofedOwner;
+            return SPOOFED_OWNER;
         }
 
         function attack(RelayerEscrow escrow, address attackerFactory) external {

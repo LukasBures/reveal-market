@@ -48,7 +48,7 @@ log_step "Step 2: forge test (gas report, fail-fast)"
 forge test --gas-report --fail-fast
 
 log_step "Step 3: forge snapshot --check"
-if forge snapshot --check; then
+if forge snapshot --check -j 1; then
   log_step "Gas snapshot matches baseline"
 else
   log_warn "Gas snapshot changed — review .gas-snapshot diffs (run 'forge snapshot' to update)"
@@ -68,7 +68,8 @@ if [[ "${1:-}" == "full" ]]; then
   FOUNDRY_PROFILE=ci.fuzz forge test --match-test testFuzz --gas-report || log_warn "Fuzz suite exited non-zero"
 
   log_step "Step 6: coverage summary"
-  forge coverage --report summary || log_warn "Coverage run exited non-zero"
+  RM_COVERAGE=1 \
+    forge coverage --report summary --ir-minimum --disable-block-gas-limit || log_warn "Coverage run exited non-zero"
 fi
 
 popd >/dev/null

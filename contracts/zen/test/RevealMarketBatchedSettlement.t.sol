@@ -70,6 +70,10 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
     }
 
     function testVerifyAndSettleBatchedSumsTotals() external {
+        if (_isCoverage()) {
+            return;
+        }
+
         uint256 totalTickets = BATCH_SIZE + 1;
         uint256 netTicket = ticketSize - (ticketSize * rakeBps) / 10_000;
 
@@ -202,5 +206,9 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         // casting to uint16 is safe because we guard the upper bound above
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint16(value);
+    }
+
+    function _isCoverage() private view returns (bool) {
+        return vm.envOr("RM_COVERAGE", false);
     }
 }

@@ -230,6 +230,10 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
     }
 
     function testRefreshAfterPartialBatchedSettlementCannotResetProgress() external {
+        if (_isCoverage()) {
+            return;
+        }
+
         (bytes32[] memory roots, uint16[] memory counts, uint256 netTicket, uint256 batchSize) =
             _lockTwoBatchesAndPostResult();
 
@@ -256,11 +260,15 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         assertTrue(market.batchProofVerified(0), "batch 0 remains verified");
         assertFalse(market.batchProofVerified(1), "batch 1 not verified");
 
-        assertEq(counts[0], uint16(batchSize), "batch size unchanged");
+        assertEq(counts[0], _toUint16(batchSize), "batch size unchanged");
         assertEq(roots.length, 2, "batch roots unchanged");
     }
 
     function testEnableRefundsAfterPartialBatchedSettlementTimeout() external {
+        if (_isCoverage()) {
+            return;
+        }
+
         (bytes32[] memory roots,, uint256 netTicket, uint256 batchSize) = _lockTwoBatchesAndPostResult();
         _verifySingleBatch(roots[0], 0, netTicket * batchSize, netTicket * batchSize);
         assertEq(market.settledBatchCount(), 1, "partial progress");
@@ -287,7 +295,7 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
         roots[0] = _buildBatchRoot(batch0Leaves, batchSize);
         roots[1] = _buildBatchRoot(batch1Leaves, 1);
         counts = new uint16[](2);
-        counts[0] = uint16(batchSize);
+        counts[0] = _toUint16(batchSize);
         counts[1] = 1;
         bytes memory relayerSig = _signRelayer(roots, counts);
 
@@ -430,5 +438,16 @@ contract RevealMarketBatchedSettlementGuardsTest is Test, PoseidonTestUtils {
     function _wrapLeaf(bytes32 leaf) private pure returns (bytes32[] memory leaves) {
         leaves = new bytes32[](1);
         leaves[0] = leaf;
+    }
+
+    function _toUint16(uint256 value) private pure returns (uint16) {
+        require(value <= type(uint16).max, "uint16 overflow");
+        // casting to uint16 is safe because we guard the upper bound above
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint16(value);
+    }
+
+    function _isCoverage() private view returns (bool) {
+        return vm.envOr("RM_COVERAGE", false);
     }
 }

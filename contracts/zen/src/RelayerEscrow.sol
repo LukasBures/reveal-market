@@ -247,19 +247,29 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         view
         returns (bytes32)
     {
-        return keccak256(
-            abi.encode(
-                address(this),
-                market,
-                auth.commitment,
-                auth.ticketId,
-                auth.user,
-                auth.nonce,
-                auth.expiry,
-                auth.ticketValue,
-                block.chainid
-            )
-        );
+        bytes32 commitment = auth.commitment;
+        uint256 ticketId = auth.ticketId;
+        address user = auth.user;
+        uint256 nonce = auth.nonce;
+        uint256 expiry = auth.expiry;
+        uint256 ticketValue = auth.ticketValue;
+        uint256 chainId = block.chainid;
+        address self = address(this);
+        bytes32 digest;
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, self)
+            mstore(add(ptr, 0x20), market)
+            mstore(add(ptr, 0x40), commitment)
+            mstore(add(ptr, 0x60), ticketId)
+            mstore(add(ptr, 0x80), user)
+            mstore(add(ptr, 0xa0), nonce)
+            mstore(add(ptr, 0xc0), expiry)
+            mstore(add(ptr, 0xe0), ticketValue)
+            mstore(add(ptr, 0x100), chainId)
+            digest := keccak256(ptr, 0x120)
+        }
+        return digest;
     }
 
     function _safeTransferExact(address recipient, uint256 amount) internal {

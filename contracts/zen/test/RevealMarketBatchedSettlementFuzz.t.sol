@@ -68,6 +68,10 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
     }
 
     function testFuzzBatchedSettlementTotals(uint8 batchCountRaw, uint8 lastBatchSizeRaw) external {
+        if (_isCoverage()) {
+            return;
+        }
+
         uint256 batchCount = bound(uint256(batchCountRaw), 1, 2);
         uint256 lastBatchSize = bound(uint256(lastBatchSizeRaw), 1, 10);
         uint256 totalTickets = (batchCount - 1) * BATCH_SIZE + lastBatchSize;
@@ -82,9 +86,9 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
         bytes32[][] memory batchLeaves = new bytes32[][](batchCount);
         uint256 ticketId = 0;
         for (uint256 batchIndex = 0; batchIndex < batchCount; batchIndex++) {
-            uint256 batchSize = batchIndex == batchCount - 1 ? lastBatchSize : BATCH_SIZE;
-            batchLeaves[batchIndex] = new bytes32[](batchSize);
-            for (uint256 i = 0; i < batchSize; i++) {
+            uint256 batchLength = batchIndex == batchCount - 1 ? lastBatchSize : BATCH_SIZE;
+            batchLeaves[batchIndex] = new bytes32[](batchLength);
+            for (uint256 i = 0; i < batchLength; i++) {
                 bytes32 leaf = _poseidonLeaf(ticketId, 0, netTicket, netTicket, bytes32(ticketId + 1), user);
                 batchLeaves[batchIndex][i] = leaf;
                 IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
@@ -158,6 +162,10 @@ contract RevealMarketBatchedSettlementFuzzTest is Test, PoseidonTestUtils {
         // casting to uint16 is safe because we guard the upper bound above
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint16(value);
+    }
+
+    function _isCoverage() private view returns (bool) {
+        return vm.envOr("RM_COVERAGE", false);
     }
 
     function _signAuth(IRevealMarket.CommitAuth memory auth, uint256 privKey) private view returns (bytes memory) {
