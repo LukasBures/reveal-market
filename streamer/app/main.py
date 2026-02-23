@@ -296,7 +296,7 @@ def create_app() -> FastAPI:
     def _validate_heartbeat(heartbeat: int) -> int:
         if heartbeat < 1 or heartbeat > settings.max_client_heartbeat_seconds:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"heartbeat must be between 1 and {settings.max_client_heartbeat_seconds}",
             )
         return heartbeat
@@ -307,14 +307,14 @@ def create_app() -> FastAPI:
         raw_symbols = [sym.strip() for sym in symbols.split(",") if sym.strip()]
         if len(raw_symbols) > settings.max_symbols_per_request:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
             )
         parsed = state.sanitize_rtds_symbols(raw_symbols, max_items=settings.max_symbols_per_request)
         invalid = [symbol for symbol in raw_symbols if state._normalize_rtds_symbol(symbol) is None]
         if invalid:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"invalid symbols: {', '.join(invalid)}",
             )
         return parsed
@@ -555,7 +555,7 @@ def create_app() -> FastAPI:
     ):
         assets = [item.strip() for item in asset_ids.split(",") if item.strip()]
         if not assets:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_ids required")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="asset_ids required")
         trades = await _subgraph_query(
             subgraph_client.fetch_trades,
             request=request,
@@ -1236,13 +1236,13 @@ def create_app() -> FastAPI:
         _rate_limit("control")
         if len(symbols) > settings.max_symbols_per_request:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
             )
         invalid_symbols = [symbol for symbol in symbols if state._normalize_rtds_symbol(symbol) is None]
         if invalid_symbols:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"invalid symbols: {', '.join(invalid_symbols)}",
             )
         added_assets = state.acquire_assets(assets_ids or [])
@@ -1273,13 +1273,13 @@ def create_app() -> FastAPI:
         _rate_limit("control")
         if len(symbols) > settings.max_symbols_per_request:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"symbols count exceeds max {settings.max_symbols_per_request}",
             )
         invalid_symbols = [symbol for symbol in symbols if state._normalize_rtds_symbol(symbol) is None]
         if invalid_symbols:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"invalid symbols: {', '.join(invalid_symbols)}",
             )
         if assets_ids:
