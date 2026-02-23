@@ -85,6 +85,13 @@ class FailingIngestService(IngestService):
         raise IngestDeliveryError("settlement_ingest_http_500")
 
 
+class ValidatingIngestService(FakeService):
+    api_base_url = "http://api"
+
+    def validate_commit_ingest_payload(self, _payload):
+        raise IngestDeliveryError("commit_fields_missing:event_id")
+
+
 @pytest.fixture
 def client():
     service = FakeService()
@@ -369,6 +376,26 @@ def test_commit_route_returns_502_when_ingest_fails():
     resp = client.post("/commit", json=payload)
     assert resp.status_code == 502
     assert resp.json()["detail"] == "commit_ingest_failed"
+
+
+def test_commit_route_rejects_missing_ingest_fields_when_api_enabled():
+    service = ValidatingIngestService()
+    app = create_app(service, 1, "http://localhost")
+    client = TestClient(app)
+
+    payload = CommitRequest(
+        user="0x0000000000000000000000000000000000000001",
+        market="0x0000000000000000000000000000000000000002",
+        commitment="0x" + "0" * 64,
+        nonce=1,
+        expiry=123,
+        chain_id=1,
+        ticket_value_wei=1,
+        signature="0x" + "1" * 130,
+    ).model_dump()
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid_payload"
 
 
 def test_claim_route_returns_502_when_ingest_fails():

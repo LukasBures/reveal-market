@@ -803,11 +803,7 @@ class RelayerService:
         HEALTH_CHECKS.labels(status=status).inc()
         return payload
 
-    async def push_commit_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
-        """Push commitment metadata to the API ingest endpoint."""
-
-        if not self.api_base_url:
-            return
+    def _build_commit_ingest_body(self, payload: Mapping[str, Any], *, tx_hash: str | None) -> dict[str, Any]:
         event_id = payload.get("event_id") or payload.get("market_id")
         if payload.get("event_id") and payload.get("market_id") and payload.get("event_id") != payload.get("market_id"):
             raise IngestDeliveryError("event_market_id_mismatch")
@@ -858,12 +854,22 @@ class RelayerService:
             "merklePath": payload.get("merkle_path") or [],
             "txHash": tx_hash,
         }
-        body = {
+        return {
             "event_id": event_id,
             "market_id": event_id,
             "market_address": market_address,
             "tickets": [ticket],
         }
+
+    def validate_commit_ingest_payload(self, payload: Mapping[str, Any]) -> None:
+        self._build_commit_ingest_body(payload, tx_hash=None)
+
+    async def push_commit_ingest(self, payload: Mapping[str, Any], *, tx_hash: str | None = None) -> None:
+        """Push commitment metadata to the API ingest endpoint."""
+
+        if not self.api_base_url:
+            return
+        body = self._build_commit_ingest_body(payload, tx_hash=tx_hash)
         headers = {}
         if self.api_bearer_token:
             headers["Authorization"] = f"Bearer {self.api_bearer_token}"
@@ -879,7 +885,7 @@ class RelayerService:
         logger.info(
             "relayer.ingest.commit",
             status=resp.status_code,
-            event_id=event_id,
+            event_id=body.get("event_id"),
             market=payload.get("market"),
             tx_hash=tx_hash,
         )
@@ -907,9 +913,22 @@ class RelayerService:
             "event_id": market_id,
             "market_id": market_id,
             "market_address": market_address,
+            "merkleRoot": payload.get("merkle_root"),
+            "commitmentsCount": payload.get("commitments_count"),
+            "batchRoots": payload.get("batch_roots"),
+            "batchCounts": payload.get("batch_counts"),
+            "poolTotalYes": payload.get("pool_total_yes"),
+            "poolTotalNo": payload.get("pool_total_no"),
+            "totalEscrow": payload.get("total_escrow"),
+            "totalLiability": payload.get("total_liability"),
+            "rakeBps": payload.get("rake_bps"),
             "winningOutcomeId": winning_outcome_id,
+            "proofRequestId": payload.get("proof_request_id"),
+            "proofHash": payload.get("proof_hash"),
+            "circuitHash": payload.get("circuit_hash"),
             "txHash": tx_hash,
         }
+        body = {key: value for key, value in body.items() if value is not None}
         headers = {}
         if self.api_bearer_token:
             headers["Authorization"] = f"Bearer {self.api_bearer_token}"

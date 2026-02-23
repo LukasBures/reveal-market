@@ -189,6 +189,12 @@ def create_app(
             payload["user"] = Web3.to_checksum_address(payload["user"])
             payload["market"] = Web3.to_checksum_address(payload["market"])
             svc.validate_commit_payload(payload)
+            if getattr(svc, "api_base_url", None) and hasattr(svc, "validate_commit_ingest_payload"):
+                try:
+                    svc.validate_commit_ingest_payload(payload)
+                except IngestDeliveryError as err:
+                    logger.warning("commit_ingest_invalid_payload", error=str(err))
+                    raise HTTPException(status_code=400, detail="invalid_payload") from err
             if tx_queue:
                 job_id = await tx_queue.enqueue("commit", payload)
                 logger.info("commit_enqueued", job_id=job_id, market=payload["market"], user=payload["user"])
@@ -214,7 +220,7 @@ def create_app(
         except ValueError as err:
             if str(err) == "payload_too_large":
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="payload_too_large",
                 ) from err
             logger.warning("commit_invalid_address", error=str(err))
@@ -259,7 +265,7 @@ def create_app(
         except ValueError as err:
             if str(err) == "payload_too_large":
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="payload_too_large",
                 ) from err
             logger.warning("claim_invalid_address", error=str(err))
@@ -303,7 +309,7 @@ def create_app(
         except ValueError as err:
             if str(err) == "payload_too_large":
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="payload_too_large",
                 ) from err
             logger.warning("lock_batches_invalid_address", error=str(err))

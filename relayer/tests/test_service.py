@@ -409,6 +409,18 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
     payload = {
         "event_id": "evt-2",
         "market": "0x0000000000000000000000000000000000000002",
+        "merkle_root": "0x" + "2" * 64,
+        "commitments_count": 3,
+        "batch_roots": ["0x" + "3" * 64],
+        "batch_counts": [3],
+        "pool_total_yes": 10,
+        "pool_total_no": 20,
+        "total_escrow": 30,
+        "total_liability": 10,
+        "rake_bps": 200,
+        "proof_request_id": "req-1",
+        "proof_hash": "0x" + "4" * 64,
+        "circuit_hash": "0x" + "5" * 64,
         "outcome_id": 1,
     }
     await service.push_settlement_ingest(payload, tx_hash="0xdef")
@@ -422,6 +434,18 @@ async def test_push_settlement_ingest_uses_api_aliases(monkeypatch):
     body = request["json"]
     assert body["event_id"] == payload["event_id"]
     assert body["market_address"] == payload["market"]
+    assert body["merkleRoot"] == payload["merkle_root"]
+    assert body["commitmentsCount"] == payload["commitments_count"]
+    assert body["batchRoots"] == payload["batch_roots"]
+    assert body["batchCounts"] == payload["batch_counts"]
+    assert body["poolTotalYes"] == payload["pool_total_yes"]
+    assert body["poolTotalNo"] == payload["pool_total_no"]
+    assert body["totalEscrow"] == payload["total_escrow"]
+    assert body["totalLiability"] == payload["total_liability"]
+    assert body["rakeBps"] == payload["rake_bps"]
+    assert body["proofRequestId"] == payload["proof_request_id"]
+    assert body["proofHash"] == payload["proof_hash"]
+    assert body["circuitHash"] == payload["circuit_hash"]
     assert body["winningOutcomeId"] == payload["outcome_id"]
     assert body["txHash"] == "0xdef"
 
