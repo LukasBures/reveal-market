@@ -1621,6 +1621,55 @@ async def test_proof_queue_worker_processes_jobs(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proof_queue_worker_enqueues_settlement_when_proof_exists(monkeypatch):
+    redis_client = DummyRedis()
+    gauge = DummyGauge()
+    monkeypatch.setattr(proofs, "PROOF_QUEUE_DEPTH_GAUGE", gauge)
+
+    called = {"settlement": 0}
+
+    async def fake_generate(redis_client=None, market_snapshot=None, market_payload=None, condition_id=None):
+        return False
+
+    async def fake_pending(event_id):
+        return True
+
+    async def fake_enqueue(redis_client=None, market_id=None):
+        called["settlement"] += 1
+        return 1
+
+    monkeypatch.setattr(proofs, "maybe_generate_settlement_proof", fake_generate)
+    monkeypatch.setattr(proofs, "_has_pending_settlement_for_event", fake_pending)
+    monkeypatch.setattr(proofs, "enqueue_settlement_job", fake_enqueue)
+
+    queue_key = runtime_module.settings.proof_queue_key
+    job = {
+        "job_id": "job-existing-proof",
+        "market_snapshot": {"id": 2, "event_id": "evt-existing-proof"},
+        "market_payload": MarketPayload(
+            event_id="evt-existing-proof",
+            title="Existing Proof",
+            slug="existing-proof",
+            category="news",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="commit",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.5, 0.5],
+        ).model_dump(),
+        "condition_id": "0xdef",
+    }
+    await redis_client.rpush(queue_key, json.dumps(job))
+    worker_task = asyncio.create_task(proofs.run_proof_queue_worker(redis_client))
+    await asyncio.sleep(0.1)
+    await _cancel_task(worker_task)
+
+    assert called["settlement"] == 1
+    assert await redis_client.llen(queue_key) == 0
+    assert gauge.last_value() == 0
+
+
+@pytest.mark.asyncio
 async def test_proof_queue_worker_drops_invalid_payload(monkeypatch):
     redis_client = DummyRedis()
     gauge = DummyGauge()

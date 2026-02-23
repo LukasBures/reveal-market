@@ -919,9 +919,13 @@ async def _process_proof_job(redis_client: Redis, job: dict[str, Any]) -> None:
             market_payload=market_payload,
             condition_id=condition,
         )
-        if proof_generated:
-            # Enqueue settlement only when proof generation succeeds.
-            await enqueue_settlement_job(redis_client, market_id=market_payload.event_id)
+        event_id = market_payload.event_id or snapshot.get("event_id")
+        should_enqueue = proof_generated
+        if not should_enqueue:
+            # If proofs already exist, still enqueue settlements so submissions can proceed.
+            should_enqueue = await _has_pending_settlement_for_event(event_id)
+        if should_enqueue:
+            await enqueue_settlement_job(redis_client, market_id=event_id)
     except Exception as exc:  # pragma: no cover - defensive processing
         log_event(
             logger,
@@ -1047,6 +1051,30 @@ async def enqueue_settlement_job(redis_client: Redis | None, market_id: str | No
             job_id=job_id,
         )
         return 0
+
+
+async def _has_pending_settlement_for_event(event_id: str | None) -> bool:
+    if not event_id:
+        return False
+    try:
+        async with session_scope() as session:
+            pending = await shared_repository.list_settlements_pending_tx(
+                session,
+                market_event_id=event_id,
+                include_failed=True,
+                processing_stale_seconds=max(int(runtime.settings.settlement_submission_processing_stale_seconds), 0),
+            )
+            return bool(pending)
+    except Exception as exc:  # pragma: no cover - best effort
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.pending_check_failed",
+            message="failed to check pending settlements for proof job",
+            event_id=event_id,
+            error=str(exc),
+        )
+        return False
 
 
 async def _update_settlement_depth(redis_client: Redis | None) -> None:
