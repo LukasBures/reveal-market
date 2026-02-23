@@ -226,17 +226,9 @@ async def list_markets(
         if not batch:
             break
         for item in batch:
-            collected.append(schemas.MarketResponse.model_validate(item))
-            key = (
-                (
-                    getattr(item, "group_slug", None)
-                    or getattr(item, "event_key", None)
-                    or getattr(item, "event_id", None)
-                    or "unknown"
-                )
-                .strip()
-                .lower()
-            )
+            model = schemas.MarketResponse.model_validate(item)
+            collected.append(model)
+            key = market_svc.derive_group_key(model)[0]
             seen_groups.add(key)
         if len(seen_groups) >= target_events:
             break
@@ -563,6 +555,24 @@ async def get_event_by_key(
 
     normalized_key = (event_key or "").strip().lower()
     request_key = normalized_key or event_key
+    requested_market_event_id: str | None = None
+
+    async def _load_inferred_group_models(group_key: str) -> list[schemas.MarketResponse]:
+        if "-" not in group_key:
+            return []
+        prefix = group_key.split("-", 1)[0].strip().lower()
+        if not prefix or prefix == group_key:
+            return []
+        candidates = await crud.get_markets_by_group_slug(session, prefix)
+        if not candidates:
+            candidates = await crud.get_markets_by_event_key(session, prefix)
+        if not candidates:
+            return []
+        candidate_models = await market_svc.enrich_market_models(
+            session, [schemas.MarketResponse.model_validate(item) for item in candidates], include_siblings=True
+        )
+        return [item for item in candidate_models if market_svc.derive_group_key(item)[0] == group_key]
+
     cache = await get_cache_client()
     if cache is not None:
         cached = await get_json(cache, market_svc.market_detail_cache_key(request_key))
@@ -573,6 +583,7 @@ async def get_event_by_key(
             await market_svc.enrich_market_models(session, [model], include_siblings=True)
             return market_svc.build_event_responses([model])[0]
     markets = []
+    market_models: list[schemas.MarketResponse] | None = None
     if normalized_key:
         markets = await crud.get_markets_by_group_slug(session, normalized_key)
     if not markets:
@@ -582,9 +593,14 @@ async def get_event_by_key(
         if market is None:
             if normalized_key:
                 markets = await crud.get_markets_by_event_key(session, normalized_key)
-            if not markets:
+            if not markets and normalized_key:
+                market_models = await _load_inferred_group_models(normalized_key)
+                if market_models:
+                    markets = []
+            if not markets and not market_models:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
         else:
+            requested_market_event_id = market.event_id
             group_slug = getattr(market, "group_slug", None)
             event_group_key = getattr(market, "event_key", None)
             if group_slug:
@@ -593,9 +609,59 @@ async def get_event_by_key(
                 markets = await crud.get_markets_by_event_key(session, str(event_group_key))
             if not markets:
                 markets = [market]
-    market_models = await market_svc.enrich_market_models(
-        session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
-    )
+    if market_models is None:
+        market_models = await market_svc.enrich_market_models(
+            session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
+        )
+    if requested_market_event_id:
+        selected_market = next(
+            (item for item in market_models if str(getattr(item, "event_id", "")) == requested_market_event_id), None
+        )
+        if selected_market is not None:
+            selected_group_key, _ = market_svc.derive_group_key(selected_market)
+            if selected_group_key and selected_group_key != "unknown":
+                matching_group_models = [
+                    item for item in market_models if market_svc.derive_group_key(item)[0] == selected_group_key
+                ]
+                if matching_group_models:
+                    market_models = matching_group_models
+            else:
+                market_models = [selected_market]
+    if normalized_key:
+        matching_models = [item for item in market_models if market_svc.derive_group_key(item)[0] == normalized_key]
+        if matching_models:
+            market_models = matching_models
+        elif normalized_key in market_svc.GENERIC_GROUP_SLUGS:
+            inferred_groups: dict[str, list[schemas.MarketResponse]] = {}
+            for item in market_models:
+                inferred_key = market_svc.derive_group_key(item)[0]
+                if not inferred_key or inferred_key == "unknown" or inferred_key == normalized_key:
+                    continue
+                inferred_groups.setdefault(inferred_key, []).append(item)
+            if inferred_groups:
+                now = datetime.now(UTC)
+
+                def _rank_bucket(entry: tuple[str, list[schemas.MarketResponse]]) -> tuple[int, float]:
+                    _slug, items = entry
+                    active_closes = [
+                        closes_at
+                        for closes_at in (getattr(item, "closes_at", None) for item in items)
+                        if isinstance(closes_at, datetime) and closes_at >= now
+                    ]
+                    next_close = min(active_closes).timestamp() if active_closes else float("inf")
+                    return (len(items), -next_close)
+
+                best_slug, best_items = max(inferred_groups.items(), key=_rank_bucket)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="markets.event.disambiguated_generic_key",
+                    message="resolved generic event key to inferred event group",
+                    requested_key=normalized_key,
+                    selected_group=best_slug,
+                    candidates=len(inferred_groups),
+                )
+                market_models = best_items
     if market_models:
         cache = await get_cache_client()
         for market_model in market_models:

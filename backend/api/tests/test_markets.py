@@ -270,6 +270,74 @@ def test_events_list_prefers_group_slug_over_generic_event_key(client, db_sessio
     assert all(item["event_id"] != "ufc" for item in payload)
 
 
+def test_events_list_infers_card_group_from_description_when_slug_is_generic(client, db_session):
+    first = _make_market(
+        "evt-ufc-card-1-main",
+        "UFC Fight Night: Sean Strickland vs. Anthony Hernandez (Middleweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    second = _make_market(
+        "evt-ufc-card-1-prelim",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa (Featherweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    third = _make_market(
+        "evt-ufc-326-main",
+        "UFC 326: Charles Oliveira vs. Max Holloway (Lightweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    db_session.add_all([first, second, third])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=first.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=second.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=third.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC 326, scheduled for September 13, 2026."
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events", params={"status": "commit", "limit": 20})
+    assert response.status_code == 200
+    payload = response.json()
+    assert {item["event_id"] for item in payload} == {
+        "ufc-fight-night-strickland-vs-hernandez",
+        "ufc-326",
+    }
+
+
 def test_event_by_key_prefers_event_id_before_broad_event_key(client, db_session):
     primary = _make_market(
         "ufc",
@@ -307,6 +375,213 @@ def test_event_by_key_prefers_event_id_before_broad_event_key(client, db_session
     assert payload["group_slug"] == "ufc-fight-night-spann-vs-kuniev"
     assert {market["event_id"] for market in payload["markets"]} == {
         primary.event_id,
+        sibling.event_id,
+    }
+
+
+def test_event_by_key_supports_inferred_group_key(client, db_session):
+    first = _make_market(
+        "evt-ufc-card-1-main",
+        "UFC Fight Night: Sean Strickland vs. Anthony Hernandez (Middleweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    second = _make_market(
+        "evt-ufc-card-1-prelim",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa (Featherweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    other = _make_market(
+        "evt-ufc-326-main",
+        "UFC 326: Charles Oliveira vs. Max Holloway (Lightweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    db_session.add_all([first, second, other])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=first.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=second.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=other.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC 326, scheduled for September 13, 2026."
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events/by-key/ufc-fight-night-strickland-vs-hernandez")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_id"] == "ufc-fight-night-strickland-vs-hernandez"
+    assert {item["event_id"] for item in payload["markets"]} == {
+        first.event_id,
+        second.event_id,
+    }
+
+
+def test_event_by_key_disambiguates_generic_sport_key(client, db_session):
+    card_primary = _make_market(
+        "evt-ufc-card-1-main",
+        "UFC Fight Night: Sean Strickland vs. Anthony Hernandez (Middleweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    card_secondary = _make_market(
+        "evt-ufc-card-1-prelim",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa (Featherweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    other_card = _make_market(
+        "evt-ufc-326-main",
+        "UFC 326: Charles Oliveira vs. Max Holloway (Lightweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    db_session.add_all([card_primary, card_secondary, other_card])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=card_primary.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=card_secondary.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=other_card.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC 326, scheduled for September 13, 2026."
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events/by-key/ufc")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_id"] == "ufc-fight-night-strickland-vs-hernandez"
+    assert {item["event_id"] for item in payload["markets"]} == {
+        card_primary.event_id,
+        card_secondary.event_id,
+    }
+
+
+def test_event_by_key_event_id_resolves_its_own_inferred_group(client, db_session):
+    target = _make_market(
+        "1310506",
+        "UFC Fight Night: Sean Strickland vs. Anthony Hernandez (Middleweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    sibling = _make_market(
+        "1310517",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa (Featherweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    unrelated = _make_market(
+        "1378736",
+        "UFC 326: Charles Oliveira vs. Max Holloway (Lightweight, Main Card)",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    db_session.add_all([target, sibling, unrelated])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=target.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=sibling.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=unrelated.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC 326, scheduled for September 13, 2026."
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events/by-key/1310506")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_id"] == "ufc-fight-night-strickland-vs-hernandez"
+    assert {item["event_id"] for item in payload["markets"]} == {
+        target.event_id,
         sibling.event_id,
     }
 

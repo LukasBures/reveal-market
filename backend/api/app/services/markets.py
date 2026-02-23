@@ -45,17 +45,64 @@ from app.services import cache_client as cache_client_service
 
 MARKETS_STATS_KEY = "v1:markets:stats"
 MARKET_DETAIL_PREFIX = "v1:markets:detail"
+GENERIC_GROUP_SLUGS = {
+    "ufc",
+    "mma",
+    "mlb",
+    "nfl",
+    "nba",
+    "wnba",
+    "nhl",
+    "epl",
+    "soccer",
+    "sports",
+    "crypto",
+    "politics",
+    "news",
+}
+_EVENT_CONTEXT_RE = re.compile(r"\bat\s+([^,]+),\s*scheduled\b", flags=re.IGNORECASE)
+
+
+def _infer_group_slug_from_description(description: str | None) -> str | None:
+    if not isinstance(description, str):
+        return None
+    match = _EVENT_CONTEXT_RE.search(description)
+    if not match:
+        return None
+    inferred = slugify_value(match.group(1))
+    return inferred or None
+
+
+def _choose_group_slug(
+    *,
+    group_slug: str | None,
+    event_key: str | None,
+    description: str | None,
+) -> str | None:
+    explicit_group = (group_slug or "").strip().lower()
+    explicit_event_key = (event_key or "").strip().lower()
+    inferred = _infer_group_slug_from_description(description)
+    if explicit_group and (explicit_group not in GENERIC_GROUP_SLUGS or inferred is None):
+        return explicit_group
+    if inferred:
+        return inferred
+    if explicit_group:
+        return explicit_group
+    if explicit_event_key:
+        return explicit_event_key
+    return None
 
 
 def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
     """Return the group key and optional display title for event grouping."""
 
-    slug = (getattr(market, "group_slug", None) or "").strip().lower()
+    slug = _choose_group_slug(
+        group_slug=getattr(market, "group_slug", None),
+        event_key=getattr(market, "event_key", None),
+        description=getattr(market, "description", None),
+    )
     if slug:
         return slug, None
-    event_key = (getattr(market, "event_key", None) or "").strip().lower()
-    if event_key:
-        return event_key, None
     event_id = (getattr(market, "event_id", None) or "").strip()
     if event_id:
         return event_id.lower(), None
@@ -326,9 +373,8 @@ def build_event_responses(
         events: list[schemas.EventResponse] = []
         for market in markets:
             event_id = (getattr(market, "event_id", None) or "unknown").strip()
-            group_slug = (
-                getattr(market, "group_slug", None) or getattr(market, "event_key", None) or ""
-            ).strip().lower() or event_id
+            group_key, _ = derive_group_key(market)
+            group_slug = group_key if group_key and group_key != "unknown" else event_id
             events.append(
                 schemas.EventResponse(
                     event_id=event_id,
@@ -850,8 +896,8 @@ def coalesce_grouped_markets(
         return cand_event < inc_event
 
     for market in markets:
-        slug = getattr(market, "group_slug", None) or getattr(market, "event_key", None)
-        if not slug:
+        slug = derive_group_key(market)[0]
+        if not slug or slug == "unknown":
             standalone.append(market)
             continue
         existing = grouped.get(slug)
@@ -867,8 +913,8 @@ async def attach_group_fields(
 
     slug_map: dict[str, list[schemas.MarketResponse]] = {}
     for market in markets:
-        slug = getattr(market, "group_slug", None) or getattr(market, "event_key", None)
-        if not slug:
+        slug = derive_group_key(market)[0]
+        if not slug or slug == "unknown":
             continue
         slug_map.setdefault(slug, []).append(market)
     if not slug_map:
