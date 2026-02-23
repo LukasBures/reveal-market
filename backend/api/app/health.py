@@ -53,6 +53,7 @@ async def build_shallow_health_response() -> schemas.HealthResponse:
 
     components: ComponentMap = {}
     component_states: list[str] = []
+    redis_client = None
     try:
         redis_client = get_redis_client()
         cache_key = f"health:shallow:{'redis' if redis_client is not None else 'no_redis'}"

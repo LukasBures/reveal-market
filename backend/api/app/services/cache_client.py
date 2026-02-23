@@ -7,6 +7,7 @@ reconnecting on every request.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 
 import httpx
@@ -40,6 +41,7 @@ async def _connect_cache_with_retry() -> Redis | None:
                 attempt=attempt,
                 error=str(exc),
             )
+            await _close_cache_client_instance(client)
             if attempt < attempts and delay:
                 await asyncio.sleep(delay)
             continue
@@ -61,6 +63,33 @@ async def _connect_cache_with_retry() -> Redis | None:
     return None
 
 
+async def _close_cache_client_instance(client: Redis) -> None:
+    try:
+        close_result = client.close()
+        if inspect.isawaitable(close_result):
+            await close_result
+    except Exception as exc:  # pragma: no cover - defensive cleanup
+        log_event(
+            runtime.logger,
+            logging.DEBUG,
+            event="cache.close.failed",
+            message="failed to close redis client",
+            error=str(exc),
+        )
+    try:
+        disconnect_result = client.connection_pool.disconnect()
+        if inspect.isawaitable(disconnect_result):
+            await disconnect_result
+    except Exception as exc:  # pragma: no cover - defensive cleanup
+        log_event(
+            runtime.logger,
+            logging.DEBUG,
+            event="cache.pool.disconnect_failed",
+            message="failed to disconnect redis connection pool",
+            error=str(exc),
+        )
+
+
 async def get_cache_client() -> Redis | None:
     """Return the shared Redis client, populating it on first call."""
 
@@ -68,6 +97,7 @@ async def get_cache_client() -> Redis | None:
         try:
             await runtime.cache_client.ping()
         except RedisError:
+            await _close_cache_client_instance(runtime.cache_client)
             runtime.cache_client = None
         else:
             return runtime.cache_client
@@ -88,6 +118,16 @@ async def get_cache_client() -> Redis | None:
                         error=str(exc),
                     )
     return runtime.cache_client
+
+
+async def close_cache_client() -> None:
+    """Close the shared Redis client if present."""
+
+    async with runtime.cache_lock:
+        client = runtime.cache_client
+        runtime.cache_client = None
+    if client is not None:
+        await _close_cache_client_instance(client)
 
 
 def _build_http_timeout(timeout_seconds: float | None) -> httpx.Timeout:
@@ -126,3 +166,22 @@ async def get_http_client(timeout_seconds: float | None = None) -> httpx.AsyncCl
             client = httpx.AsyncClient(timeout=timeout, limits=limits)
             runtime.shared_http_clients[timeout_key] = client
         return client
+
+
+async def close_http_clients() -> None:
+    """Close all shared outbound HTTP clients."""
+
+    async with runtime.shared_http_lock:
+        clients = list(runtime.shared_http_clients.values())
+        runtime.shared_http_clients.clear()
+    for client in clients:
+        try:
+            await client.aclose()
+        except Exception as exc:  # pragma: no cover - defensive cleanup
+            log_event(
+                runtime.logger,
+                logging.DEBUG,
+                event="http_client.close_failed",
+                message="failed to close shared http client",
+                error=str(exc),
+            )

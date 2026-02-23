@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
+import logging
+
 from redis.asyncio import Redis
+from shared.logging import log_event
 
 from .config import get_settings
 
 _redis_client: Redis | None = None
+logger = logging.getLogger("reveal_market.api.cache")
 
 
 def get_redis_client() -> Redis | None:
@@ -17,3 +22,37 @@ def get_redis_client() -> Redis | None:
         settings = get_settings()
         _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
     return _redis_client
+
+
+async def close_redis_client() -> None:
+    """Close the cached Redis client used for health checks."""
+
+    global _redis_client
+    client = _redis_client
+    _redis_client = None
+    if client is None:
+        return
+    try:
+        close_result = client.close()
+        if inspect.isawaitable(close_result):
+            await close_result
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="cache.health.close_failed",
+            message="failed to close health redis client",
+            error=str(exc),
+        )
+    try:
+        disconnect_result = client.connection_pool.disconnect()
+        if inspect.isawaitable(disconnect_result):
+            await disconnect_result
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="cache.health.disconnect_failed",
+            message="failed to disconnect health redis connection pool",
+            error=str(exc),
+        )

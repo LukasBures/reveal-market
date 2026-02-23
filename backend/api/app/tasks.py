@@ -660,6 +660,38 @@ async def stop_background_tasks() -> None:
     runtime.quote_sweeper_task = None
     runtime.relayer_queue_task = None
     runtime.hedger_queue_task = None
+    try:
+        from app.cache import close_redis_client
+        from app.pricing import close_fx_client
+        from app.services.alerting import close_alert_client
+        from app.services.cache_client import close_cache_client, close_http_clients
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="service.background.cleanup_import_failed",
+            message="failed to import cleanup helpers",
+            error=str(exc),
+        )
+    else:
+        for cleanup in (
+            close_fx_client,
+            close_alert_client,
+            close_http_clients,
+            close_cache_client,
+            close_redis_client,
+        ):
+            try:
+                await cleanup()
+            except Exception as exc:  # pragma: no cover - defensive
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="service.background.cleanup_failed",
+                    message="cleanup task failed",
+                    cleanup=getattr(cleanup, "__name__", str(cleanup)),
+                    error=str(exc),
+                )
     log_event(
         logger,
         logging.DEBUG,

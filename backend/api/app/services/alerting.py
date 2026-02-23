@@ -27,6 +27,19 @@ async def _get_client() -> httpx.AsyncClient:
         return _ALERT_HTTP_CLIENT
 
 
+async def close_alert_client() -> None:
+    """Close the shared alerting HTTP client if it exists."""
+
+    global _ALERT_HTTP_CLIENT, _ALERT_CLIENT_LOCK
+    if _ALERT_CLIENT_LOCK is None:
+        _ALERT_CLIENT_LOCK = asyncio.Lock()
+    async with _ALERT_CLIENT_LOCK:
+        client = _ALERT_HTTP_CLIENT
+        _ALERT_HTTP_CLIENT = None
+    if client is not None and not getattr(client, "is_closed", False):
+        await client.aclose()
+
+
 async def alert_background_failure(task: str, exc: Exception, context: dict[str, Any] | None = None) -> None:
     """Emit a structured alert for background failures when configured."""
 

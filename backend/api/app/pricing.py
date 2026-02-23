@@ -79,6 +79,19 @@ async def _get_fx_client(timeout_seconds: float, settings: Settings) -> httpx.As
         return state.client or async_client_cls(timeout=timeout_seconds)
 
 
+async def close_fx_client() -> None:
+    """Close the shared FX HTTP client."""
+
+    async with _FX_CLIENT_LOCK:
+        state = _FX_CLIENT_STATE
+        client = state.client
+        state.client = None
+        state.timeout = None
+        state.client_cls = httpx.AsyncClient
+    if client is not None and not getattr(client, "is_closed", False):
+        await client.aclose()
+
+
 class PricingEngine:
     """Pure math helper for ZEN stake pricing."""
 
