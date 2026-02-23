@@ -14,7 +14,7 @@ import time
 from collections.abc import Awaitable
 from collections.abc import Awaitable as AwaitableABC
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from redis.exceptions import RedisError
 from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -34,10 +34,11 @@ from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
 
 _RNG = random.SystemRandom()
+T = TypeVar("T")
 settings: Any = runtime_settings
 
 
-async def _maybe_await[T](value: Awaitable[T] | T) -> T:
+async def _maybe_await(value: Awaitable[T] | T) -> T:  # noqa: UP047 - keep 3.11-compatible typing
     if isinstance(value, AwaitableABC):
         return await value
     return value
